@@ -36,4 +36,3 @@ def list_files(image_path, offset):
         print(f"Error executing fls: {e}")
         return []
 
-
