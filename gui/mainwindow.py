@@ -1,12 +1,13 @@
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
                                QStatusBar, QTreeWidget, QTabWidget, QVBoxLayout, QWidget, QLabel, QListWidget,
-                               QStackedWidget, QTreeWidgetItem, QFileDialog, QMessageBox, QInputDialog)
+                               QStackedWidget, QTableWidget, QTreeWidgetItem, QFileDialog, QMessageBox, QInputDialog)
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 
 import subprocess
 import os
 import re
+
 
 class MountThread(QThread):
     mountCompleted = Signal(bool, str)  # Signal to indicate completion
@@ -33,7 +34,10 @@ class DetailedAutopsyGUI(QMainWindow):
         # [Your GUI initialization code here]
         self.setWindowTitle('Detailed Autopsy GUI')
         self.setGeometry(100, 100, 1200, 800)
+        # set icon for the application
+        # self.setWindowIcon(QIcon('gui/icons/Screenshot.png'))
 
+        # Create a menu bar
         menu_bar = QMenuBar(self)
         file_menu = QMenu('File', self)
 
@@ -53,7 +57,6 @@ class DetailedAutopsyGUI(QMainWindow):
         exit_action = file_menu.addAction('Exit')
         exit_action.triggered.connect(self.close)
 
-
         edit_menu = QMenu('Edit', self)
         view_menu = QMenu('View', self)
         tools_menu = QMenu('Tools', self)
@@ -71,16 +74,12 @@ class DetailedAutopsyGUI(QMainWindow):
         main_toolbar = QToolBar('Main Toolbar', self)
         self.addToolBar(Qt.TopToolBarArea, main_toolbar)
 
-        data_sources = QListWidget(self)
-        left_dock = QDockWidget('Data Source', self)
-        left_dock.setWidget(data_sources)
-        self.addDockWidget(Qt.LeftDockWidgetArea, left_dock)
         self.tree_viewer = QTreeWidget(self)
-        self.tree_viewer.setHeaderLabel('Tree Viewer')
+        self.tree_viewer.setHeaderHidden(True)
         tree_dock = QDockWidget('Tree Viewer', self)
         tree_dock.setWidget(self.tree_viewer)
+        self.tree_viewer.itemExpanded.connect(self.on_item_expanded)   #####
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
-
 
         result_viewer = QTabWidget(self)
         result_viewer.addTab(QTextEdit(self), 'Extracted Content')
@@ -88,33 +87,46 @@ class DetailedAutopsyGUI(QMainWindow):
         result_viewer.addTab(QTextEdit(self), 'Deleted Files')
         self.setCentralWidget(result_viewer)
 
-        self.viewer = QStackedWidget(self)
-        self.viewer.addWidget(QTextEdit(self))
-        self.viewer.addWidget(QLabel('Image Viewer'))
-        self.viewer.addWidget(QLabel('Video Viewer'))
-        viewer_dock = QDockWidget('Viewer', self)
-        viewer_dock.setWidget(self.viewer)
-        self.addDockWidget(Qt.BottomDockWidgetArea, viewer_dock)
+        self.viewer_tab = QTabWidget(self)
 
+        # Create Hex viewer
+        self.hex_viewer = QTextEdit()
+        self.viewer_tab.addTab(self.hex_viewer, 'Hex')
+
+        # Create Text viewer
+        self.text_viewer = QTextEdit()
+        self.viewer_tab.addTab(self.text_viewer, 'Text')
+
+        # Create Application viewer
+        self.application_viewer = QTextEdit()
+        self.viewer_tab.addTab(self.application_viewer, 'Application')
+
+        # Create File Metadata viewer
+        self.metadata_viewer = QTextEdit()
+        self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
+
+        # Create a dock widget for the viewer and set the QTabWidget as its widget
+        viewer_dock = QDockWidget('Viewer', self)
+        viewer_dock.setWidget(self.viewer_tab)
+        self.addDockWidget(Qt.BottomDockWidgetArea, viewer_dock)
 
         details_area = QTextEdit(self)
         details_dock = QDockWidget('Details Area', self)
         details_dock.setWidget(details_area)
         self.addDockWidget(Qt.RightDockWidgetArea, details_dock)
-
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
-        # Load the E01 image structure into the tree viewer
-        self.load_image_structure_into_tree(".\\2020JimmyWilson.E01")
 
-
+        self.current_offset = None
+        self.current_image_path = None
+        #self.tree_viewer.itemClicked.connect(self.display_hex)
 
     def load_image_structure_into_tree(self, image_path):
         """Load the E01 image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
         root_item.setIcon(0, QIcon('gui/icons/media-optical.png'))  # Set an icon for the disk
-
+        self.current_image_path = image_path
         partitions = get_partitions(image_path)
 
         for partition in partitions:
@@ -123,16 +135,21 @@ class DetailedAutopsyGUI(QMainWindow):
             size_in_mb = partition["size"]
             size_in_mb_rounded = int(round(size_in_mb))  # Round to the nearest integer
             partition_item = QTreeWidgetItem(root_item)
+            partition_item.setData(0, Qt.UserRole, {"offset": offset})
+
             partition_item.setText(0,
                                    f"{partition['description']} - {size_in_mb_rounded} MB [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
-
             partition_item.setIcon(0, QIcon('gui/icons/volume.png'))  # Set an icon for the partition
 
             self.populate_tree_with_files(partition_item, image_path, offset)
 
-    def populate_tree_with_files(self, parent_item, image_path, offset):
+    def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
         """Recursively populate the tree with files and directories."""
         # Define a dictionary to map file extensions to icon paths
+        print(f"Populating tree for offset {offset}")  # Debugging line
+        self.current_offset = offset
+        print(f"Current offset: {self.current_offset}")  # Debugging line
+
         icon_dict = {
             'txt': 'gui/icons/text-x-generic.png',
             'pdf': 'gui/icons/application-pdf.png',
@@ -167,31 +184,34 @@ class DetailedAutopsyGUI(QMainWindow):
         }
 
         folder_icon_dict = {
-        'Desktop': 'gui/icons/folder_types/user-desktop.png',
-        'Documents': 'gui/icons/folder_types/folder-documents.png',
-        'Downloads': 'gui/icons/folder_types/folder-downloads.png',
-        'Music': 'gui/icons/folder_types/folder-music.png',
-        'Pictures': 'gui/icons/folder_types/folder-pictures.png',
-        'Videos': 'gui/icons/folder_types/folder-videos.png',
-        'Templates': 'gui/icons/folder_types/folder-templates.png',
-        'Public': 'gui/icons/folder_types/folder-public-share.png'}
+            'Desktop': 'gui/icons/folder_types/user-desktop.png',
+            'Documents': 'gui/icons/folder_types/folder-documents.png',
+            'Downloads': 'gui/icons/folder_types/folder-downloads.png',
+            'Music': 'gui/icons/folder_types/folder-music.png',
+            'Pictures': 'gui/icons/folder_types/folder-pictures.png',
+            'Videos': 'gui/icons/folder_types/folder-videos.png',
+            'Templates': 'gui/icons/folder_types/folder-templates.png',
+            'Public': 'gui/icons/folder_types/folder-public-share.png'}
 
-
-        entries = list_files(image_path, offset)
+        entries = list_files(image_path, offset, inode_number)
         for entry in entries:
             entry_type, entry_name = entry.split()[0], entry.split()[-1]
             child_item = QTreeWidgetItem(parent_item)
             child_item.setText(0, entry_name)
 
             if 'd' in entry_type:  # It's a directory
+                # Extract inode number
+                inode_number = entry.split()[1].split('-')[0]
+                print(f"Extracted inode number: {inode_number}")  # Debugging line
+
                 # Check if the folder name matches any special folder types
                 icon_path = folder_icon_dict.get(entry_name, 'gui/icons/folder.png')
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
-                identifier = entry.split()[2]
-                if identifier.replace('-', '').isdigit():  # Check if it's a number or something that can be converted
-                    new_offset = int(identifier.split('-')[0])  # Extract the first part before '-'
-                    self.populate_tree_with_files(child_item, image_path, new_offset)
+
+                #child_item.setData(0, Qt.UserRole, inode_number)  # Store the inode number in the item for later use
+                child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
+                child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)  # Show expand arrow
             else:  # It's a file
                 # Extract the file extension and set the appropriate icon
                 file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
@@ -200,30 +220,46 @@ class DetailedAutopsyGUI(QMainWindow):
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
 
+    def on_item_expanded(self, item):
+        data = item.data(0, Qt.UserRole)
+        offset = data.get("offset", self.current_offset) if data else self.current_offset
+        inode_number = data.get("inode_number") if data else None
+
+        if inode_number or offset:
+            self.populate_tree_with_files(item, self.current_image_path, offset, inode_number)
+        print(f"Item expanded: {item.text(0)}")
+
+    # def display_hex(self):
+    #     try:
+    #         inode = self.tree_viewer.currentItem().text(
+    #             0)  # Assuming the inode or filename is the text of the current item
+    #         cmd = ["icat", "-o", str(self.current_offset), self.current_image_path, str(inode)]
+    #         print(f"Running command: {' '.join(cmd)}")
+    #         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    #         hex_data = result.stdout
+    #         self.hex_viewer.setPlainText(hex_data)
+    #     except subprocess.CalledProcessError as e:
+    #         print(f"An error occurred: {e}")
+
     def open_image(self):
         """Open an image."""
-        # Open a file dialog to select the EWF image
-        ewf_path, _ = QFileDialog.getOpenFileName(self, "Select EWF Image", "", "EWF Files (*.E01);;All Files (*)")
+        # Open a file dialog to select the image
+        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
 
-        # Normalize the path
-        ewf_path = os.path.normpath(ewf_path)
+        # Check if a file was selected
+        if image_path:
+            # Normalize the path
+            image_path = os.path.normpath(image_path)
 
-        # Ask the user to enter the offset
-        offset, ok = QInputDialog.getInt(self, "Enter Offset", "Enter the offset in sectors:", 0, 0, 1000000000, 1)
-        if ok:
-            # Load the E01 image structure into the tree viewer
-            self.load_image_structure_into_tree(ewf_path)
-
+            # Load the image structure into the tree viewer
+            self.load_image_structure_into_tree(image_path)
 
     def image_mount(self):
         # Open a file dialog to select the EWF image
         ewf_path, _ = QFileDialog.getOpenFileName(self, "Select EWF Image", "", "EWF Files (*.E01);;All Files (*)")
-
         # Normalize the path
         ewf_path = os.path.normpath(ewf_path)
-
         cmd = ['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly', '--filename=' + ewf_path]
-
         self.mountThread = MountThread(cmd)
         self.mountThread.mountCompleted.connect(self.on_mount_completed)
         self.mountThread.start()
@@ -233,19 +269,27 @@ class DetailedAutopsyGUI(QMainWindow):
 
     def image_unmount(self):
         cmd = ['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount']
-
         self.unmountThread = MountThread(cmd)
         self.unmountThread.mountCompleted.connect(self.on_mount_completed)
         self.unmountThread.start()
 
+
 def get_partitions(image_path):
     """Return the partitions of the image."""
     result = subprocess.run(
-        ["mmls","-M", image_path],
+        ["mmls", "-M", image_path],
         capture_output=True, text=True
     )
     lines = result.stdout.splitlines()
     partitions = []
+    sector_size = 512  # Default sector size
+
+    # Detect sector size from mmls output
+    for line in lines:
+        if "Units are in" in line:
+            sector_size = int(line.split("Units are in")[1].split("-byte")[0].strip())
+            break
+
     for line in lines:
         parts = line.split()
         # Check if the line starts with a number (partition entry)
@@ -253,20 +297,27 @@ def get_partitions(image_path):
             start_sector = int(parts[2])
             end_sector = int(parts[3])
             size_in_sectors = end_sector - start_sector + 1
-            size_in_mb = (size_in_sectors * 512) / (1024 * 1024)  # Convert size to MB
+            size_in_mb = (size_in_sectors * sector_size) / (1024 * 1024)  # Convert size to MB using detected sector size
             partitions.append({
-                "start": start_sector, # Start sector
-                "end": end_sector, # End sector
+                "start": start_sector,  # Start sector
+                "end": end_sector,  # End sector
                 "size": size_in_mb,  # Size in MB
                 "description": " ".join(parts[5:])  # Description of the partition
             })
-    return partitions
+    return partitions  # Return both the partitions and the detected sector size
 
-def list_files(image_path, offset):
+def list_files(image_path, offset, inode_number=None):
     """List files in a directory using fls."""
     try:
+        cmd = ["fls", "-o", str(offset)]
+        if inode_number:
+            cmd.append(image_path)
+            cmd.append(str(inode_number))
+            print(f"Running command: {' '.join(cmd)}")
+        else:
+            cmd.append(image_path)
         result = subprocess.run(
-            ["fls", "-o", str(offset), "-r", "-p", image_path],
+            cmd,
             capture_output=True,
             text=True,
             check=True
@@ -276,4 +327,3 @@ def list_files(image_path, offset):
     except subprocess.CalledProcessError as e:
         print(f"Error executing fls: {e}")
         return []
-
