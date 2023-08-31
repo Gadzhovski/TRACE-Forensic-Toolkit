@@ -1,12 +1,11 @@
-from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
-                               QStatusBar, QTreeWidget, QTabWidget, QVBoxLayout, QWidget, QLabel, QListWidget,
-                               QStackedWidget, QTableWidget, QTreeWidgetItem, QFileDialog, QMessageBox, QInputDialog)
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QIcon
-
-import subprocess
 import os
 import re
+import subprocess
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
+                               QStatusBar, QTreeWidget, QTabWidget, QTreeWidgetItem, QFileDialog)
 
 
 class MountThread(QThread):
@@ -78,7 +77,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.tree_viewer.setHeaderHidden(True)
         tree_dock = QDockWidget('Tree Viewer', self)
         tree_dock.setWidget(self.tree_viewer)
-        self.tree_viewer.itemExpanded.connect(self.on_item_expanded)   #####
+        self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
         result_viewer = QTabWidget(self)
@@ -116,10 +115,8 @@ class DetailedAutopsyGUI(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, details_dock)
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
-
         self.current_offset = None
         self.current_image_path = None
-        #self.tree_viewer.itemClicked.connect(self.display_hex)
 
     def load_image_structure_into_tree(self, image_path):
         """Load the E01 image structure into the tree viewer."""
@@ -204,14 +201,16 @@ class DetailedAutopsyGUI(QMainWindow):
                 inode_number = entry.split()[1].split('-')[0]
                 print(f"Extracted inode number: {inode_number}")  # Debugging line
 
+                # Check if the folder is empty
+                is_empty = not bool(list_files(image_path, offset, inode_number))
                 # Check if the folder name matches any special folder types
                 icon_path = folder_icon_dict.get(entry_name, 'gui/icons/folder.png')
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
-
-                #child_item.setData(0, Qt.UserRole, inode_number)  # Store the inode number in the item for later use
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
-                child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)  # Show expand arrow
+                if not is_empty:
+                    child_item.setChildIndicatorPolicy(
+                        QTreeWidgetItem.ShowIndicator)  # Show expand arrow only if directory is not empty
             else:  # It's a file
                 # Extract the file extension and set the appropriate icon
                 file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
@@ -229,28 +228,14 @@ class DetailedAutopsyGUI(QMainWindow):
             self.populate_tree_with_files(item, self.current_image_path, offset, inode_number)
         print(f"Item expanded: {item.text(0)}")
 
-    # def display_hex(self):
-    #     try:
-    #         inode = self.tree_viewer.currentItem().text(
-    #             0)  # Assuming the inode or filename is the text of the current item
-    #         cmd = ["icat", "-o", str(self.current_offset), self.current_image_path, str(inode)]
-    #         print(f"Running command: {' '.join(cmd)}")
-    #         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    #         hex_data = result.stdout
-    #         self.hex_viewer.setPlainText(hex_data)
-    #     except subprocess.CalledProcessError as e:
-    #         print(f"An error occurred: {e}")
-
     def open_image(self):
         """Open an image."""
         # Open a file dialog to select the image
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
-
         # Check if a file was selected
         if image_path:
             # Normalize the path
             image_path = os.path.normpath(image_path)
-
             # Load the image structure into the tree viewer
             self.load_image_structure_into_tree(image_path)
 
@@ -297,7 +282,7 @@ def get_partitions(image_path):
             start_sector = int(parts[2])
             end_sector = int(parts[3])
             size_in_sectors = end_sector - start_sector + 1
-            size_in_mb = (size_in_sectors * sector_size) / (1024 * 1024)  # Convert size to MB using detected sector size
+            size_in_mb = (size_in_sectors * sector_size) / (1024 * 1024)
             partitions.append({
                 "start": start_sector,  # Start sector
                 "end": end_sector,  # End sector
@@ -306,6 +291,7 @@ def get_partitions(image_path):
             })
     return partitions  # Return both the partitions and the detected sector size
 
+
 def list_files(image_path, offset, inode_number=None):
     """List files in a directory using fls."""
     try:
@@ -313,7 +299,6 @@ def list_files(image_path, offset, inode_number=None):
         if inode_number:
             cmd.append(image_path)
             cmd.append(str(inode_number))
-            print(f"Running command: {' '.join(cmd)}")
         else:
             cmd.append(image_path)
         result = subprocess.run(
