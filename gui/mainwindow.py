@@ -2,10 +2,11 @@ import os
 import re
 import subprocess
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QIcon
+
+from PySide6.QtCore import Qt, QThread, Signal, QByteArray
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
-                               QStatusBar, QTreeWidget, QTabWidget, QTreeWidgetItem, QFileDialog)
+                               QStatusBar, QTreeWidget, QLabel, QWidget, QVBoxLayout, QTabWidget, QTreeWidgetItem, QFileDialog)
 
 
 class MountThread(QThread):
@@ -79,6 +80,7 @@ class DetailedAutopsyGUI(QMainWindow):
         tree_dock.setWidget(self.tree_viewer)
         self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
+        self.tree_viewer.itemClicked.connect(self.on_item_clicked)
 
         result_viewer = QTabWidget(self)
         result_viewer.addTab(QTextEdit(self), 'Extracted Content')
@@ -97,7 +99,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.text_viewer, 'Text')
 
         # Create Application viewer
-        self.application_viewer = QTextEdit()
+        self.application_viewer = QLabel()
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
         # Create File Metadata viewer
@@ -117,6 +119,61 @@ class DetailedAutopsyGUI(QMainWindow):
         self.setStatusBar(status_bar)
         self.current_offset = None
         self.current_image_path = None
+
+    def display_image_from_hex(self, hex_data):
+        # Convert hex data to bytes
+        byte_data = bytes.fromhex(hex_data)
+
+        # Create a QPixmap from the byte data
+        image = QPixmap()
+        image.loadFromData(QByteArray(byte_data))
+
+        self.application_viewer.setPixmap(image)
+
+    def on_item_clicked(self, item):
+        data = item.data(0, Qt.UserRole)
+        inode_number = data.get("inode_number") if data else None
+        offset = data.get("offset", self.current_offset) if data else self.current_offset
+
+        if inode_number:  # It's a file
+            try:
+                cmd = ["icat", "-o", str(offset), self.current_image_path, str(inode_number)]
+                result = subprocess.run(cmd, capture_output=True, text=False, check=True)
+                file_content = result.stdout
+
+                # Display hex content in formatted manner
+                hex_content = result.stdout.hex()
+                formatted_hex_content = ''
+                for i in range(0, len(hex_content), 32):
+                    line = hex_content[i:i + 32]
+                    ascii_repr = ''.join(
+                        [chr(int(line[j:j + 2], 16)) if 32 <= int(line[j:j + 2], 16) <= 126 else '.' for j in
+                         range(0, len(line), 2)])
+                    hex_part = ' '.join([line[j:j + 2].upper() for j in range(0, len(line), 2)])
+                    padding = ' ' * (48 - len(hex_part))  # Add padding to align text
+                    formatted_line = f'0x{i // 2:08x}: {hex_part}{padding}  {ascii_repr}'
+                    formatted_hex_content += formatted_line + '\n'
+                self.hex_viewer.setPlainText(formatted_hex_content)
+
+                # Display text content
+                try:
+                    text_content = file_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    text_content = "Non-text file"
+                self.text_viewer.setPlainText(text_content)
+
+                # Check if it's an image file by magic number
+                magic_number = file_content[:4]
+                if magic_number == b'\xFF\xD8\xFF\xE0' or magic_number == b'\x89\x50\x4E\x47':
+                    hex_data = result.stdout.hex()
+                    self.display_image_from_hex(hex_data)
+                    print(f"Image file: {inode_number}")  # Debugging line
+                else:
+                    # Optionally, you can clear the image in the 'Application' tab
+                    self.application_viewer.clear()
+
+            except subprocess.CalledProcessError as e:
+                print(f"Error executing icat: {e}")
 
     def load_image_structure_into_tree(self, image_path):
         """Load the E01 image structure into the tree viewer."""
@@ -218,6 +275,9 @@ class DetailedAutopsyGUI(QMainWindow):
                                           'gui/icons/unknown.png')  # Default to 'unknown' icon if the extension is not in the dictionary
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
+                # Extract inode number for the file
+                inode_number = entry.split()[1].split('-')[0]
+                child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
 
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
@@ -299,6 +359,7 @@ def list_files(image_path, offset, inode_number=None):
         if inode_number:
             cmd.append(image_path)
             cmd.append(str(inode_number))
+            print(f"Executing command: {' '.join(cmd)}")  # Debugging line
         else:
             cmd.append(image_path)
         result = subprocess.run(
