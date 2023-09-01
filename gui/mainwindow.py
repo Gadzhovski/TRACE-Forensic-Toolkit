@@ -1,12 +1,13 @@
 import os
 import re
+import sqlite3
 import subprocess
-
 
 from PySide6.QtCore import Qt, QThread, Signal, QByteArray
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
-                               QStatusBar, QTreeWidget, QLabel, QWidget, QVBoxLayout, QTabWidget, QTreeWidgetItem, QFileDialog)
+                               QStatusBar, QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
+                               QFileDialog)
 
 
 class MountThread(QThread):
@@ -120,6 +121,26 @@ class DetailedAutopsyGUI(QMainWindow):
         self.current_offset = None
         self.current_image_path = None
 
+    def get_icon_path(self, type, name):
+        conn = sqlite3.connect('icon_mappings.db')
+        c = conn.cursor()
+        try:
+            c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, name))
+            result = c.fetchone()
+
+            if result:
+                return result[0]
+            else:
+                # Fallback to default icons
+                if type == 'folder':
+                    c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, 'Default_Folder'))
+                    result = c.fetchone()
+                    return result[0] if result else 'gui/icons/unknown.png'
+                else:
+                    return 'gui/icons/unknown.png'
+        finally:
+            conn.close()
+
     def display_image_from_hex(self, hex_data):
         # Convert hex data to bytes
         byte_data = bytes.fromhex(hex_data)
@@ -190,62 +211,14 @@ class DetailedAutopsyGUI(QMainWindow):
             size_in_mb_rounded = int(round(size_in_mb))  # Round to the nearest integer
             partition_item = QTreeWidgetItem(root_item)
             partition_item.setData(0, Qt.UserRole, {"offset": offset})
-
             partition_item.setText(0,
                                    f"{partition['description']} - {size_in_mb_rounded} MB [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
             partition_item.setIcon(0, QIcon('gui/icons/volume.png'))  # Set an icon for the partition
-
             self.populate_tree_with_files(partition_item, image_path, offset)
 
     def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
         """Recursively populate the tree with files and directories."""
-        # Define a dictionary to map file extensions to icon paths
-        print(f"Populating tree for offset {offset}")  # Debugging line
         self.current_offset = offset
-        print(f"Current offset: {self.current_offset}")  # Debugging line
-
-        icon_dict = {
-            'txt': 'gui/icons/text-x-generic.png',
-            'pdf': 'gui/icons/application-pdf.png',
-            'jpg': 'gui/icons/application-image-jpg.png',
-            'png': 'gui/icons/application-image-png.png',
-            'cd': 'application-x-cd-image.png',
-            'iso': 'application-x-cd-image.png',
-            'xml': 'gui/icons/application-xml.png',
-            'zip': 'file-roller.png',
-            'rar': 'file-roller.png',
-            'gz': 'file-roller.png',
-            'tar': 'file-roller.png',
-            'mp4': 'gui/icons/video-x-generic.png',
-            'mov': 'gui/icons/video-x-generic.png',
-            'avi': 'gui/icons/video-x-generic.png',
-            'wmv': 'gui/icons/video-x-generic.png',
-            'mp3': 'gui/icons/audio-x-generic.png',
-            'wav': 'gui/icons/audio-x-generic.png',
-            'xls': 'gui/icons/libreoffice-oasis-spreadsheet.png',
-            'xlsx': 'gui/icons/libreoffice-oasis-spreadsheet.png',
-            'doc': 'gui/icons/libreoffice-oasis-text.png',
-            'docx': 'gui/icons/libreoffice-oasis-text.png',
-            'ppt': 'gui/icons/libreoffice-oasis-presentation.png',
-            'pptx': 'gui/icons/libreoffice-oasis-presentation.png',
-            'eml': 'gui/icons/emblem-mail.png',
-            'msg': 'gui/icons/emblem-mail.png',
-            'exe': 'gui/icons/application-x-executable.png',
-            'html': 'gui/icons/text-html.png',
-            'htm': 'gui/icons/text-html.png',
-
-            # Add more mappings here
-        }
-
-        folder_icon_dict = {
-            'Desktop': 'gui/icons/folder_types/user-desktop.png',
-            'Documents': 'gui/icons/folder_types/folder-documents.png',
-            'Downloads': 'gui/icons/folder_types/folder-downloads.png',
-            'Music': 'gui/icons/folder_types/folder-music.png',
-            'Pictures': 'gui/icons/folder_types/folder-pictures.png',
-            'Videos': 'gui/icons/folder_types/folder-videos.png',
-            'Templates': 'gui/icons/folder_types/folder-templates.png',
-            'Public': 'gui/icons/folder_types/folder-public-share.png'}
 
         entries = list_files(image_path, offset, inode_number)
         for entry in entries:
@@ -256,25 +229,35 @@ class DetailedAutopsyGUI(QMainWindow):
             if 'd' in entry_type:  # It's a directory
                 # Extract inode number
                 inode_number = entry.split()[1].split('-')[0]
-                print(f"Extracted inode number: {inode_number}")  # Debugging line
 
                 # Check if the folder is empty
                 is_empty = not bool(list_files(image_path, offset, inode_number))
-                # Check if the folder name matches any special folder types
-                icon_path = folder_icon_dict.get(entry_name, 'gui/icons/folder.png')
+
+                # Fetch the icon path from the database
+                icon_path = self.get_icon_path('folder', entry_name)
+                if not icon_path:
+                    icon_path = self.get_icon_path('folder', 'Default_Folder')  # Fallback to default folder icon
+
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
+
                 if not is_empty:
                     child_item.setChildIndicatorPolicy(
                         QTreeWidgetItem.ShowIndicator)  # Show expand arrow only if directory is not empty
+
             else:  # It's a file
                 # Extract the file extension and set the appropriate icon
                 file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
-                icon_path = icon_dict.get(file_extension,
-                                          'gui/icons/unknown.png')  # Default to 'unknown' icon if the extension is not in the dictionary
+
+                # Fetch the icon path from the database
+                icon_path = self.get_icon_path('file', file_extension)
+                if not icon_path:
+                    icon_path = self.get_icon_path('file', 'default_file')  # Fallback to default file icon
+
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
+
                 # Extract inode number for the file
                 inode_number = entry.split()[1].split('-')[0]
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
