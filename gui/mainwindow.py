@@ -200,7 +200,7 @@ class DetailedAutopsyGUI(QMainWindow):
         """Load the E01 image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
-        root_item.setIcon(0, QIcon('gui/icons/media-optical.png'))  # Set an icon for the disk
+        root_item.setIcon(0, QIcon(self.get_icon_path('special', 'Image')))  # Set an icon for the disk
         self.current_image_path = image_path
         partitions = get_partitions(image_path)
 
@@ -213,7 +213,8 @@ class DetailedAutopsyGUI(QMainWindow):
             partition_item.setData(0, Qt.UserRole, {"offset": offset})
             partition_item.setText(0,
                                    f"{partition['description']} - {size_in_mb_rounded} MB [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
-            partition_item.setIcon(0, QIcon('gui/icons/volume.png'))  # Set an icon for the partition
+            partition_item.setIcon(0,
+                                   QIcon(self.get_icon_path('special', 'Partition')))  # Set an icon for the partition
             self.populate_tree_with_files(partition_item, image_path, offset)
 
     def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
