@@ -1,19 +1,15 @@
 import hashlib
-import mimetypes
-import magic
 import os
 import re
 import sqlite3
 import subprocess
 
+import magic
 from PySide6.QtCore import Qt, QThread, Signal, QByteArray
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
                                QStatusBar, QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
                                QFileDialog)
-
-# Set the MAGIC environment variable to point to your libmagic file
-os.environ['MAGIC'] = 'C:\\Users\\Radi\\Desktop\\Final_year_project\\libmagicwin64\\magic.mgc'
 
 
 class MountThread(QThread):
@@ -157,73 +153,6 @@ class DetailedAutopsyGUI(QMainWindow):
 
         self.application_viewer.setPixmap(image)
 
-    # def on_item_clicked(self, item):
-    #     data = item.data(0, Qt.UserRole)
-    #     inode_number = data.get("inode_number") if data else None
-    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
-    #
-    #     # Construct the full path of the file by traversing the tree upwards
-    #     full_file_path = item.text(0)
-    #     parent_item = item.parent()
-    #     while parent_item is not None:
-    #         full_file_path = f"{parent_item.text(0)}/{full_file_path}"
-    #         parent_item = parent_item.parent()
-    #
-    #     if inode_number:  # It's a file
-    #         try:
-    #             cmd = ["icat", "-o", str(offset), self.current_image_path, str(inode_number)]
-    #             result = subprocess.run(cmd, capture_output=True, text=False, check=True)
-    #             file_content = result.stdout
-    #
-    #             # Display hex content in formatted manner
-    #             hex_content = result.stdout.hex()
-    #             formatted_hex_content = ''
-    #             for i in range(0, len(hex_content), 32):
-    #                 line = hex_content[i:i + 32]
-    #                 ascii_repr = ''.join(
-    #                     [chr(int(line[j:j + 2], 16)) if 32 <= int(line[j:j + 2], 16) <= 126 else '.' for j in
-    #                      range(0, len(line), 2)])
-    #                 hex_part = ' '.join([line[j:j + 2].upper() for j in range(0, len(line), 2)])
-    #                 padding = ' ' * (48 - len(hex_part))  # Add padding to align text
-    #                 formatted_line = f'0x{i // 2:08x}: {hex_part}{padding}  {ascii_repr}'
-    #                 formatted_hex_content += formatted_line + '\n'
-    #             self.hex_viewer.setPlainText(formatted_hex_content)
-    #
-    #             # Display text content
-    #             try:
-    #                 text_content = file_content.decode('utf-8')
-    #             except UnicodeDecodeError:
-    #                 text_content = "Non-text file"
-    #             self.text_viewer.setPlainText(text_content)
-    #
-    #             # Fetch metadata using istat
-    #             cmd = ["istat", "-o", str(offset), self.current_image_path, str(inode_number)]
-    #             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    #             metadata_content = result.stdout
-    #
-    #             # Calculate MD5 and SHA-256 hash
-    #             md5_hash = hashlib.md5(file_content).hexdigest()
-    #             sha256_hash = hashlib.sha256(file_content).hexdigest()
-    #
-    #             # Identify MIME type
-    #             mime_type = mimetypes.guess_type(item.text(0))[0] or 'application/octet-stream'
-    #
-    #             # Combine all metadata
-    #             extended_metadata = f"<b>Metadata:</b><br>"
-    #             extended_metadata += f"Name: {item.text(0)}<br>"
-    #             extended_metadata += f"Type: File<br>"
-    #             extended_metadata += f"MIME Type: {mime_type}<br>"
-    #             extended_metadata += f"Size: {len(file_content)}<br>"
-    #             extended_metadata += f"MD5: {md5_hash}<br>"
-    #             extended_metadata += f"SHA-256: {sha256_hash}<br><br>"
-    #             extended_metadata += f"<b>From The Sleuth Kit istat Tool:</b><pre>{metadata_content}</pre>"
-    #
-    #             self.metadata_viewer.setHtml(extended_metadata)
-    #
-    #
-    #
-    #         except subprocess.CalledProcessError as e:
-    #             print(f"Error executing icat: {e}")
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
         inode_number = data.get("inode_number") if data else None
@@ -247,9 +176,9 @@ class DetailedAutopsyGUI(QMainWindow):
                 formatted_hex_content = ''
                 for i in range(0, len(hex_content), 32):
                     line = hex_content[i:i + 32]
-                    ascii_repr = ''.join(
-                        [chr(int(line[j:j + 2], 16)) if 32 <= int(line[j:j + 2], 16) <= 126 else '.' for j in
-                         range(0, len(line), 2)])
+                    ascii_repr = ''.join([
+                        chr(int(line[j:j + 2], 16)) if 32 <= int(line[j:j + 2], 16) <= 126 else '.' for j in
+                        range(0, len(line), 2)])
                     hex_part = ' '.join([line[j:j + 2].upper() for j in range(0, len(line), 2)])
                     padding = ' ' * (48 - len(hex_part))  # Add padding to align text
                     formatted_line = f'0x{i // 2:08x}: {hex_part}{padding}  {ascii_repr}'
@@ -267,36 +196,46 @@ class DetailedAutopsyGUI(QMainWindow):
                 md5_hash = hashlib.md5(file_content).hexdigest()
                 sha256_hash = hashlib.sha256(file_content).hexdigest()
 
-                # Assuming your 'libmagicwin64' folder is in the same directory as your script
-                magic_file_path = os.path.join(os.path.dirname(__file__),
-                                               r'C:\Users\Radi\Desktop\Final_year_project\libmagicwin64', 'magic.mgc')
-
-                # Initialize the magic module with the path to your magic.mgc file
-                mime_type = magic.Magic(magic_file=magic_file_path).from_buffer(file_content[:1024])
-
                 ## Determine MIME type
-                #mime_type = magic.Magic().from_buffer(file_content)
+                mime_type = magic.Magic().from_buffer(file_content)
 
                 # Fetch metadata using istat
                 metadata_cmd = ["istat", "-o", str(offset), self.current_image_path, str(inode_number)]
                 metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
                 metadata_content = metadata_result.stdout
 
-                # Combine all metadata
-                extended_metadata = f"<b>Metadata:</b><br>"
-                extended_metadata += f"Name: {item.text(0)}<br>"
-                extended_metadata += f"Path: {full_file_path}<br>"  # Add this line
-                extended_metadata += f"Type: File<br>"
-                extended_metadata += f"MIME Type: {mime_type}<br>"
-                extended_metadata += f"Size: {len(file_content)}<br>"
-                extended_metadata += f"MD5: {md5_hash}<br>"
-                extended_metadata += f"SHA-256: {sha256_hash}<br><br>"
-                extended_metadata += f"<b>From The Sleuth Kit istat Tool:</b><pre>{metadata_content}</pre>"
 
+                # Extract times using regular expressions
+                created_time = re.search(r"Created:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                         metadata_content)
+                modified_time = re.search(r"File Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                          metadata_content)
+                accessed_time = re.search(r"Accessed:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                          metadata_content)
+                changed_time = re.search(r"MFT Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                         metadata_content)
+
+                # Combine all metadata in a table
+                extended_metadata = f"<b>Metadata:</b><br><table border='1'>"
+                extended_metadata += f"<tr><td>Name</td><td>{item.text(0)}</td></tr>"
+                extended_metadata += f"<tr><td>Path</td><td>{full_file_path}</td></tr>"
+                extended_metadata += f"<tr><td>Type</td><td>File</td></tr>"
+                extended_metadata += f"<tr><td>MIME Type</td><td>{mime_type}</td></tr>"
+                extended_metadata += f"<tr><td>Size</td><td>{len(file_content)}</td></tr>"
+                extended_metadata += f"<tr><td>Modified</b></td><td>{modified_time.group(1) if modified_time else 'N/A'}</td></tr>"
+                extended_metadata += f"<tr><td>Accessed</b></td><td>{accessed_time.group(1) if accessed_time else 'N/A'}</td></tr>"
+                extended_metadata += f"<tr><td>Created</b></td><td>{created_time.group(1) if created_time else 'N/A'}</td></tr>"
+                extended_metadata += f"<tr><td>Changed</b></td><td>{changed_time.group(1) if changed_time else 'N/A'}</td></tr>"
+                extended_metadata += f"<tr><td>MD5</td><td>{md5_hash}</td></tr>"
+                extended_metadata += f"<tr><td>SHA-256</td><td>{sha256_hash}</td></tr>"
+                extended_metadata += f"</table>"
+                extended_metadata += f"<br>"
+                extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
                 self.metadata_viewer.setHtml(extended_metadata)
 
             except subprocess.CalledProcessError as e:
                 print(f"Error executing icat: {e}")
+
 
     def load_image_structure_into_tree(self, image_path):
         """Load the E01 image structure into the tree viewer."""
@@ -312,12 +251,13 @@ class DetailedAutopsyGUI(QMainWindow):
             size_in_mb = partition["size"]
             size_in_mb_rounded = int(round(size_in_mb))  # Round to the nearest integer
             partition_item = QTreeWidgetItem(root_item)
-            partition_item.setData(0, Qt.UserRole, {"offset": offset, "expanded": True})  # Set the "expanded" flag here
             partition_item.setText(0,
                                    f"{partition['description']} - {size_in_mb_rounded} MB [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
             partition_item.setIcon(0,
                                    QIcon(self.get_icon_path('special', 'Partition')))  # Set an icon for the partition
+
             self.populate_tree_with_files(partition_item, image_path, offset)
+
 
     def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
         """Recursively populate the tree with files and directories."""
@@ -365,15 +305,6 @@ class DetailedAutopsyGUI(QMainWindow):
                 inode_number = entry.split()[1].split('-')[0]
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
 
-
-    # def on_item_expanded(self, item):
-    #     data = item.data(0, Qt.UserRole)
-    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
-    #     inode_number = data.get("inode_number") if data else None
-    #
-    #     if inode_number or offset:
-    #         self.populate_tree_with_files(item, self.current_image_path, offset, inode_number)
-    #     print(f"Item expanded: {item.text(0)}")
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
         offset = data.get("offset", self.current_offset) if data else self.current_offset
@@ -427,7 +358,6 @@ class DetailedAutopsyGUI(QMainWindow):
 
 
 def get_partitions(image_path):
-    """Return the partitions of the image."""
     result = subprocess.run(
         ["mmls", "-M", image_path],
         capture_output=True, text=True
@@ -450,13 +380,30 @@ def get_partitions(image_path):
             end_sector = int(parts[3])
             size_in_sectors = end_sector - start_sector + 1
             size_in_mb = (size_in_sectors * sector_size) / (1024 * 1024)
+            description = " ".join(parts[5:])  # Description of the partition
+
+            # Run fsstat to get the file system type
+            fsstat_cmd = ["fsstat", "-o", str(start_sector), image_path]
+            fs_type = ""
+            try:
+                fsstat_result = subprocess.run(fsstat_cmd, capture_output=True, text=True, check=True)
+                fsstat_lines = fsstat_result.stdout.splitlines()
+                for fs_line in fsstat_lines:
+                    if "File System Type:" in fs_line:
+                        fs_type = fs_line.split(":")[1].strip()
+                        fs_type = f"[{fs_type}]"
+                        break
+            except subprocess.CalledProcessError:
+                fs_type = ""
+
             partitions.append({
-                "start": start_sector,  # Start sector
-                "end": end_sector,  # End sector
-                "size": size_in_mb,  # Size in MB
-                "description": " ".join(parts[5:])  # Description of the partition
+                "start": start_sector,
+                "end": end_sector,
+                "size": size_in_mb,
+                "description": f"{description} {fs_type}"
             })
-    return partitions  # Return both the partitions and the detected sector size
+
+    return partitions
 
 
 def list_files(image_path, offset, inode_number=None):
