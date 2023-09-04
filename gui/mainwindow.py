@@ -3,8 +3,8 @@ import os
 import re
 import sqlite3
 import subprocess
-
 import magic
+
 from PySide6.QtCore import Qt, QThread, Signal, QByteArray
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
@@ -30,15 +30,39 @@ class MountThread(QThread):
             self.mountCompleted.emit(False, f"Error executing Arsenal Image Mounter: {e}\n{e.stdout}")
 
 
+class DatabaseManager:
+    def __init__(self, db_path):
+        self.db_conn = sqlite3.connect(db_path)
+
+    def get_icon_path(self, type, name):
+        c = self.db_conn.cursor()
+        try:
+            c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, name))
+            result = c.fetchone()
+
+            if result:
+                return result[0]
+            else:
+                # Fallback to default icons
+                if type == 'folder':
+                    c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, 'Default_Folder'))
+                    result = c.fetchone()
+                    return result[0] if result else 'gui/icons/unknown.png'
+                else:
+                    return 'gui/icons/unknown.png'
+        finally:
+            c.close()
+
+
 class DetailedAutopsyGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self, db_manager):
         super().__init__()
+
+        self.db_manager = db_manager  # Store the DatabaseManager instance
 
         # [Your GUI initialization code here]
         self.setWindowTitle('Detailed Autopsy GUI')
         self.setGeometry(100, 100, 1200, 800)
-        # set icon for the application
-        # self.setWindowIcon(QIcon('gui/icons/Screenshot.png'))
 
         # Create a menu bar
         menu_bar = QMenuBar(self)
@@ -124,24 +148,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.current_image_path = None
 
     def get_icon_path(self, type, name):
-        conn = sqlite3.connect('icon_mappings.db')
-        c = conn.cursor()
-        try:
-            c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, name))
-            result = c.fetchone()
-
-            if result:
-                return result[0]
-            else:
-                # Fallback to default icons
-                if type == 'folder':
-                    c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, 'Default_Folder'))
-                    result = c.fetchone()
-                    return result[0] if result else 'gui/icons/unknown.png'
-                else:
-                    return 'gui/icons/unknown.png'
-        finally:
-            conn.close()
+        return self.db_manager.get_icon_path(type, name)
 
     def display_image_from_hex(self, hex_data):
         # Convert hex data to bytes
@@ -152,6 +159,18 @@ class DetailedAutopsyGUI(QMainWindow):
         image.loadFromData(QByteArray(byte_data))
 
         self.application_viewer.setPixmap(image)
+
+    def optimized_hex_formatting(self, hex_content):
+        lines = []
+        for i in range(0, len(hex_content), 32):
+            hex_part = [hex_content[j:j + 2].upper() for j in range(i, i + 32, 2) if hex_content[j:j + 2]]
+            ascii_repr = [chr(int(chunk, 16)) if 32 <= int(chunk, 16) <= 126 else '.' for chunk in hex_part]
+            hex_line = ' '.join(hex_part)
+            padding = ' ' * (48 - len(hex_line))
+            ascii_line = ''.join(ascii_repr)
+            line = f'0x{i // 2:08x}: {hex_line}{padding}  {ascii_line}'
+            lines.append(line)
+        return '\n'.join(lines)
 
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
@@ -173,16 +192,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 # Display hex content in formatted manner
                 hex_content = result.stdout.hex()
-                formatted_hex_content = ''
-                for i in range(0, len(hex_content), 32):
-                    line = hex_content[i:i + 32]
-                    ascii_repr = ''.join([
-                        chr(int(line[j:j + 2], 16)) if 32 <= int(line[j:j + 2], 16) <= 126 else '.' for j in
-                        range(0, len(line), 2)])
-                    hex_part = ' '.join([line[j:j + 2].upper() for j in range(0, len(line), 2)])
-                    padding = ' ' * (48 - len(hex_part))  # Add padding to align text
-                    formatted_line = f'0x{i // 2:08x}: {hex_part}{padding}  {ascii_repr}'
-                    formatted_hex_content += formatted_line + '\n'
+                formatted_hex_content = self.optimized_hex_formatting(hex_content)
                 self.hex_viewer.setPlainText(formatted_hex_content)
 
                 # Display text content
@@ -196,14 +206,14 @@ class DetailedAutopsyGUI(QMainWindow):
                 md5_hash = hashlib.md5(file_content).hexdigest()
                 sha256_hash = hashlib.sha256(file_content).hexdigest()
 
-                ## Determine MIME type
+                # Determine MIME type
                 mime_type = magic.Magic().from_buffer(file_content)
 
                 # Fetch metadata using istat
                 metadata_cmd = ["istat", "-o", str(offset), self.current_image_path, str(inode_number)]
+                print(metadata_cmd)
                 metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
                 metadata_content = metadata_result.stdout
-
 
                 # Extract times using regular expressions
                 created_time = re.search(r"Created:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
@@ -236,7 +246,6 @@ class DetailedAutopsyGUI(QMainWindow):
             except subprocess.CalledProcessError as e:
                 print(f"Error executing icat: {e}")
 
-
     def load_image_structure_into_tree(self, image_path):
         """Load the E01 image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
@@ -257,7 +266,6 @@ class DetailedAutopsyGUI(QMainWindow):
                                    QIcon(self.get_icon_path('special', 'Partition')))  # Set an icon for the partition
 
             self.populate_tree_with_files(partition_item, image_path, offset)
-
 
     def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
         """Recursively populate the tree with files and directories."""
