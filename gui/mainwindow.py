@@ -3,36 +3,50 @@ import os
 import re
 import sqlite3
 import subprocess
-import magic
 
+import magic
 from PySide6.QtCore import Qt, QThread, Signal, QByteArray
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
                                QStatusBar, QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
-                               QFileDialog)
+                               QFileDialog, QMessageBox)
 
 
-class MountThread(QThread):
-    mountCompleted = Signal(bool, str)  # Signal to indicate completion
 
-    def __init__(self, cmd):
+class ImageMounter(QThread):
+    imageMounted = Signal(bool, str)  # Signal to indicate mounting completion
+
+    def __init__(self, image_path):
         super().__init__()
-        self.cmd = cmd
+        self.image_path = os.path.normpath(image_path)
+        self.file_name = os.path.basename(self.image_path)
 
     def run(self):
         try:
-            result = subprocess.run(self.cmd, capture_output=True, text=True, check=True)
-            if "successfully added" in result.stdout.lower():
-                self.mountCompleted.emit(True, f"Successfully mounted {self.cmd[-1]}.")
-            else:
-                self.mountCompleted.emit(False, f"Failed to mount {self.cmd[-1]}.\n{result.stdout}")
-        except subprocess.CalledProcessError as e:
-            self.mountCompleted.emit(False, f"Error executing Arsenal Image Mounter: {e}\n{e.stdout}")
+            subprocess.Popen(['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly', '--filename=' + self.image_path])
+
+            self.imageMounted.emit(True, f"Image {self.file_name} mounted successfully.")
+        except Exception as e:
+            self.imageMounted.emit(False, f"Failed to mount the image. Error: {e}")
+
+
+class ImageDismounter(QThread):
+    imageDismounted = Signal(bool, str)  # Signal to indicate dismounting completion
+
+    def run(self):
+        try:
+            subprocess.run(['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount'], check=True)
+            self.imageDismounted.emit(True, f"Image was dismounted successfully.")
+        except subprocess.CalledProcessError:
+            self.imageDismounted.emit(False, "Failed to dismount the image.")
 
 
 class DatabaseManager:
     def __init__(self, db_path):
         self.db_conn = sqlite3.connect(db_path)
+
+    def __del__(self):
+        self.db_conn.close()
 
     def get_icon_path(self, type, name):
         c = self.db_conn.cursor()
@@ -54,11 +68,64 @@ class DatabaseManager:
             c.close()
 
 
+class HexFormattingThread(QThread):
+    hexFormattingCompleted = Signal(str)  # Signal to emit formatted hex string
+
+    def __init__(self, hex_content):
+        super().__init__()
+        self.hex_content = hex_content
+
+    def format_hex_chunk(self, start, hex_content):
+        hex_part = []
+        ascii_repr = []
+        for j in range(start, start + 32, 2):
+            chunk = hex_content[j:j + 2]
+            if not chunk:
+                break
+            chunk_int = int(chunk, 16)
+            hex_part.append(chunk.upper())
+            ascii_repr.append(chr(chunk_int) if 32 <= chunk_int <= 126 else '.')
+
+        hex_line = ' '.join(hex_part)
+        padding = ' ' * (48 - len(hex_line))
+        ascii_line = ''.join(ascii_repr)
+        line = f'0x{start // 2:08x}: {hex_line}{padding}  {ascii_line}'
+        return line
+
+    def run(self):
+        lines = []
+        chunk_starts = range(0, len(self.hex_content), 32)
+
+        for start in chunk_starts:
+            lines.append(self.format_hex_chunk(start, self.hex_content))
+
+        formatted_hex = '\n'.join(lines)
+        self.hexFormattingCompleted.emit(formatted_hex)
+
+
+class ImageLoader(QThread):
+    imageLoaded = Signal(bool, str)  # Signal to indicate completion
+
+    def __init__(self, gui):
+        super().__init__()
+        self.gui = gui
+
+    def run(self):
+        self.gui.load_image_structure_into_tree()
+
+
 class DetailedAutopsyGUI(QMainWindow):
     def __init__(self, db_manager):
         super().__init__()
 
+        self.initialize_ui()
+        self.image_mounted = False
+        self.current_offset = None
+        self.current_image_path = None
+        self.hexFormattingThread = None
         self.db_manager = db_manager  # Store the DatabaseManager instance
+
+    def initialize_ui(self):
 
         # [Your GUI initialization code here]
         self.setWindowTitle('Detailed Autopsy GUI')
@@ -70,15 +137,15 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # Add the "Add Evidence File" action to the File menu
         add_evidence_file_action = file_menu.addAction('Add Evidence File')
-        add_evidence_file_action.triggered.connect(self.open_image)
+        add_evidence_file_action.triggered.connect(self.open_image_evidence)
 
         # Add "Image Mounting" submenu to the File menu
         image_mounting_menu = file_menu.addAction('Image Mounting')
-        image_mounting_menu.triggered.connect(self.image_mount)
+        image_mounting_menu.triggered.connect(self.mount_image)
 
         # Add the "Image Unmounting" action to the File menu
         image_unmounting_menu = file_menu.addAction('Image Unmounting')
-        image_unmounting_menu.triggered.connect(self.image_unmount)
+        image_unmounting_menu.triggered.connect(self.dismount_image)
 
         # Add the "Exit" action to the File menu
         exit_action = file_menu.addAction('Exit')
@@ -87,6 +154,11 @@ class DetailedAutopsyGUI(QMainWindow):
         edit_menu = QMenu('Edit', self)
         view_menu = QMenu('View', self)
         tools_menu = QMenu('Tools', self)
+
+
+        # Add "Dual-Tool Verification" action to the Tools menu
+        dual_tool_verification_action = tools_menu.addAction('Dual-Tool Verification')
+
         help_menu = QMenu('Help', self)
         user_guide_action = help_menu.addAction('User Guide')
         about_action = help_menu.addAction('About')
@@ -110,7 +182,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
 
         result_viewer = QTabWidget(self)
-        result_viewer.addTab(QTextEdit(self), 'Extracted Content')
+        result_viewer.addTab(QTextEdit(self), 'Listing')
         result_viewer.addTab(QTextEdit(self), 'Results')
         result_viewer.addTab(QTextEdit(self), 'Deleted Files')
         self.setCentralWidget(result_viewer)
@@ -144,8 +216,57 @@ class DetailedAutopsyGUI(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, details_dock)
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
-        self.current_offset = None
-        self.current_image_path = None
+
+
+    def closeEvent(self, event):
+        reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.image_mounted:
+                dismount_reply = QMessageBox.question(self, 'Dismount Image', 'Do you want to dismount the mounted image before exiting?',
+                                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
+
+                if dismount_reply == QMessageBox.StandardButton.Yes:
+                    # Assuming you have a method to dismount the image
+                    self.dismount_image()
+
+            event.accept()
+        else:
+            event.ignore()
+
+    def mount_image(self):
+        supported_formats = "EWF Files (*.E01);;Raw Files (*.dd);;AFF4 Files (*.aff4);;VHD Files (*.vhd);;VDI Files (*.vdi);;XVA Files (*.xva);;VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow *.qcow2);;All Files (*)"
+        image_path, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", supported_formats)
+        if image_path:  # Check if a file was selected
+            image_path = os.path.normpath(image_path)  # Normalize the path
+            self.imageMounter = ImageMounter(image_path)
+            self.imageMounter.imageMounted.connect(self.on_image_mounted)
+            self.imageMounter.start()
+        else:
+            print("No file selected.")
+
+    def on_image_mounted(self, success, message):
+        if success:
+            self.image_mounted = True
+            QMessageBox.information(self, "Image Mounting", message)
+        else:
+            QMessageBox.critical(self, "Image Mounting", message)
+
+    def dismount_image(self):
+        if not self.image_mounted:  # Check if an image is mounted
+            QMessageBox.warning(self, "Image Dismounting", "There is no mounted image.")
+            return
+        self.imageDismounter = ImageDismounter()
+        self.imageDismounter.imageDismounted.connect(self.on_image_dismounted)
+        self.imageDismounter.start()
+
+    def on_image_dismounted(self, success, message):
+        if success:
+            self.image_mounted = False
+            QMessageBox.information(self, "Image Dismounting", message)
+        else:
+            QMessageBox.critical(self, "Image Dismounting", message)
 
     def get_icon_path(self, type, name):
         return self.db_manager.get_icon_path(type, name)
@@ -153,24 +274,11 @@ class DetailedAutopsyGUI(QMainWindow):
     def display_image_from_hex(self, hex_data):
         # Convert hex data to bytes
         byte_data = bytes.fromhex(hex_data)
-
         # Create a QPixmap from the byte data
         image = QPixmap()
         image.loadFromData(QByteArray(byte_data))
 
         self.application_viewer.setPixmap(image)
-
-    def optimized_hex_formatting(self, hex_content):
-        lines = []
-        for i in range(0, len(hex_content), 32):
-            hex_part = [hex_content[j:j + 2].upper() for j in range(i, i + 32, 2) if hex_content[j:j + 2]]
-            ascii_repr = [chr(int(chunk, 16)) if 32 <= int(chunk, 16) <= 126 else '.' for chunk in hex_part]
-            hex_line = ' '.join(hex_part)
-            padding = ' ' * (48 - len(hex_line))
-            ascii_line = ''.join(ascii_repr)
-            line = f'0x{i // 2:08x}: {hex_line}{padding}  {ascii_line}'
-            lines.append(line)
-        return '\n'.join(lines)
 
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
@@ -190,10 +298,11 @@ class DetailedAutopsyGUI(QMainWindow):
                 result = subprocess.run(cmd, capture_output=True, text=False, check=True)
                 file_content = result.stdout
 
-                # Display hex content in formatted manner
+                # # Display hex content in formatted manner
                 hex_content = result.stdout.hex()
-                formatted_hex_content = self.optimized_hex_formatting(hex_content)
-                self.hex_viewer.setPlainText(formatted_hex_content)
+                self.hexFormattingThread = HexFormattingThread(hex_content)
+                self.hexFormattingThread.hexFormattingCompleted.connect(self.on_hex_formatting_completed)
+                self.hexFormattingThread.start()
 
                 # Display text content
                 try:
@@ -201,6 +310,16 @@ class DetailedAutopsyGUI(QMainWindow):
                 except UnicodeDecodeError:
                     text_content = "Non-text file"
                 self.text_viewer.setPlainText(text_content)
+
+                # Check if it's an image file by magic number
+                magic_number = file_content[:4]
+                if magic_number == b'\xFF\xD8\xFF\xE0' or magic_number == b'\x89\x50\x4E\x47':
+                    hex_data = result.stdout.hex()
+                    self.display_image_from_hex(hex_data)
+                    print(f"Image file: {inode_number}")  # Debugging line
+                else:
+                    # Optionally, you can clear the image in the 'Application' tab
+                    self.application_viewer.clear()
 
                 # Calculate MD5 and SHA-256 hashes
                 md5_hash = hashlib.md5(file_content).hexdigest()
@@ -211,7 +330,6 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 # Fetch metadata using istat
                 metadata_cmd = ["istat", "-o", str(offset), self.current_image_path, str(inode_number)]
-                print(metadata_cmd)
                 metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
                 metadata_content = metadata_result.stdout
 
@@ -246,8 +364,11 @@ class DetailedAutopsyGUI(QMainWindow):
             except subprocess.CalledProcessError as e:
                 print(f"Error executing icat: {e}")
 
+    def on_hex_formatting_completed(self, formatted_hex):
+        self.hex_viewer.setPlainText(formatted_hex)
+
     def load_image_structure_into_tree(self, image_path):
-        """Load the E01 image structure into the tree viewer."""
+        """Load the image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
         root_item.setIcon(0, QIcon(self.get_icon_path('special', 'Image')))  # Set an icon for the disk
@@ -257,15 +378,29 @@ class DetailedAutopsyGUI(QMainWindow):
         for partition in partitions:
             offset = partition["start"]
             end_sector = partition["end"]
-            size_in_mb = partition["size"]
-            size_in_mb_rounded = int(round(size_in_mb))  # Round to the nearest integer
+            formatted_size = self.format_size(partition["size"])
             partition_item = QTreeWidgetItem(root_item)
             partition_item.setText(0,
-                                   f"{partition['description']} - {size_in_mb_rounded} MB [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
+                                   f"{partition['description']} - {formatted_size} [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
             partition_item.setIcon(0,
                                    QIcon(self.get_icon_path('special', 'Partition')))  # Set an icon for the partition
 
             self.populate_tree_with_files(partition_item, image_path, offset)
+
+    def format_size(self, size_str):
+        """Formats a size string by removing leading zeros and expanding the unit."""
+        unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
+        number = int(size_str[:-1])  # Remove the unit and convert to integer
+
+        # Expand the unit abbreviation
+        unit_expanded = {
+            'K': 'KB',
+            'M': 'MB',
+            'G': 'GB',
+            'T': 'TB'
+        }.get(unit, unit)
+
+        return f"{number} {unit_expanded}"
 
     def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
         """Recursively populate the tree with files and directories."""
@@ -313,6 +448,7 @@ class DetailedAutopsyGUI(QMainWindow):
                 inode_number = entry.split()[1].split('-')[0]
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
 
+
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
         offset = data.get("offset", self.current_offset) if data else self.current_offset
@@ -331,10 +467,9 @@ class DetailedAutopsyGUI(QMainWindow):
             data = {}
         data["expanded"] = True
         item.setData(0, Qt.UserRole, data)
-
         print(f"Item expanded: {item.text(0)}")
 
-    def open_image(self):
+    def open_image_evidence(self):
         """Open an image."""
         # Open a file dialog to select the image
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
@@ -342,43 +477,19 @@ class DetailedAutopsyGUI(QMainWindow):
         if image_path:
             # Normalize the path
             image_path = os.path.normpath(image_path)
+
             # Load the image structure into the tree viewer
             self.load_image_structure_into_tree(image_path)
 
-    def image_mount(self):
-        # Open a file dialog to select the EWF image
-        ewf_path, _ = QFileDialog.getOpenFileName(self, "Select EWF Image", "", "EWF Files (*.E01);;All Files (*)")
-        # Normalize the path
-        ewf_path = os.path.normpath(ewf_path)
-        cmd = ['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly', '--filename=' + ewf_path]
-        self.mountThread = MountThread(cmd)
-        self.mountThread.mountCompleted.connect(self.on_mount_completed)
-        self.mountThread.start()
-
-    def on_mount_completed(self, success, message):
-        print(message)
-
-    def image_unmount(self):
-        cmd = ['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount']
-        self.unmountThread = MountThread(cmd)
-        self.unmountThread.mountCompleted.connect(self.on_mount_completed)
-        self.unmountThread.start()
-
 
 def get_partitions(image_path):
+    """Get partitions from an image using mmls."""
     result = subprocess.run(
-        ["mmls", "-M", image_path],
+        ["mmls", "-M", "-B", image_path],
         capture_output=True, text=True
     )
     lines = result.stdout.splitlines()
     partitions = []
-    sector_size = 512  # Default sector size
-
-    # Detect sector size from mmls output
-    for line in lines:
-        if "Units are in" in line:
-            sector_size = int(line.split("Units are in")[1].split("-byte")[0].strip())
-            break
 
     for line in lines:
         parts = line.split()
@@ -386,28 +497,22 @@ def get_partitions(image_path):
         if parts and re.match(r"^\d{3}:", parts[0]):
             start_sector = int(parts[2])
             end_sector = int(parts[3])
-            size_in_sectors = end_sector - start_sector + 1
-            size_in_mb = (size_in_sectors * sector_size) / (1024 * 1024)
-            description = " ".join(parts[5:])  # Description of the partition
+            size_str = parts[5]  # Assuming that the size is now directly in the 5th column
+            description = " ".join(parts[6:])  # Description of the partition
 
             # Run fsstat to get the file system type
-            fsstat_cmd = ["fsstat", "-o", str(start_sector), image_path]
-            fs_type = ""
+            fsstat_cmd = ["fsstat", "-o", str(start_sector), "-t", image_path]
             try:
                 fsstat_result = subprocess.run(fsstat_cmd, capture_output=True, text=True, check=True)
-                fsstat_lines = fsstat_result.stdout.splitlines()
-                for fs_line in fsstat_lines:
-                    if "File System Type:" in fs_line:
-                        fs_type = fs_line.split(":")[1].strip()
-                        fs_type = f"[{fs_type}]"
-                        break
+                fs_type = fsstat_result.stdout.strip().upper()
+                fs_type = f"[{fs_type}]"
             except subprocess.CalledProcessError:
                 fs_type = ""
 
             partitions.append({
                 "start": start_sector,
                 "end": end_sector,
-                "size": size_in_mb,
+                "size": size_str,
                 "description": f"{description} {fs_type}"
             })
 
@@ -421,7 +526,7 @@ def list_files(image_path, offset, inode_number=None):
         if inode_number:
             cmd.append(image_path)
             cmd.append(str(inode_number))
-            print(f"Executing command: {' '.join(cmd)}")  # Debugging line
+            #print(f"Executing command: {' '.join(cmd)}")  # Debugging line
         else:
             cmd.append(image_path)
         result = subprocess.run(
@@ -433,5 +538,5 @@ def list_files(image_path, offset, inode_number=None):
         lines = result.stdout.splitlines()
         return lines
     except subprocess.CalledProcessError as e:
-        print(f"Error executing fls: {e}")
+        #print(f"Error executing fls: {e}")
         return []
