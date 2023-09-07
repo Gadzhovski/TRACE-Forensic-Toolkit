@@ -1,16 +1,66 @@
 import hashlib
+import io
 import os
 import re
 import sqlite3
 import subprocess
 
+import fitz
 import magic
+from PIL import Image
+from PIL.ExifTags import TAGS
 from PySide6.QtCore import Qt, QThread, Signal, QByteArray
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon, QPixmap, QImage
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
                                QStatusBar, QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
-                               QFileDialog, QMessageBox)
+                               QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem, QHBoxLayout, QPushButton,
+                               QVBoxLayout, QWidget)
 
+
+class PDFViewer(QWidget):
+    def __init__(self, pdf_content):
+        super().__init__()
+        self.pdf = fitz.open(stream=pdf_content, filetype="pdf")
+        self.current_page = 0
+
+        self.layout = QVBoxLayout()
+        self.layout.setAlignment(Qt.AlignCenter)
+        self.page_label = QLabel(self)
+        self.layout.addWidget(self.page_label)
+
+        self.nav_layout = QHBoxLayout()
+        self.prev_button = QPushButton("Previous", self)
+        self.prev_button.clicked.connect(self.show_previous_page)
+        self.nav_layout.addWidget(self.prev_button)
+        self.next_button = QPushButton("Next", self)
+        self.next_button.clicked.connect(self.show_next_page)
+        self.nav_layout.addWidget(self.next_button)
+
+        self.layout.addLayout(self.nav_layout)
+        self.setLayout(self.layout)
+
+        self.show_page(self.current_page)
+
+    def show_previous_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.show_page(self.current_page)
+
+    def show_next_page(self):
+        if self.current_page < len(self.pdf) - 1:
+            self.current_page += 1
+            self.show_page(self.current_page)
+
+    def show_page(self, page_num):
+        page = self.pdf[page_num]
+        image = page.get_pixmap()
+        qt_image = QImage(image.samples, image.width, image.height, image.stride, QImage.Format_RGB888)
+        print(qt_image.size())
+        pixmap = QPixmap.fromImage(qt_image)
+        self.page_label.setPixmap(pixmap)
+
+    def closeEvent(self, event):
+        self.pdf.close()  # Make sure to close the PDF when the viewer is closed
 
 
 class ImageMounter(QThread):
@@ -23,7 +73,8 @@ class ImageMounter(QThread):
 
     def run(self):
         try:
-            subprocess.Popen(['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly', '--filename=' + self.image_path])
+            subprocess.Popen(['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly',
+                              '--filename=' + self.image_path])
 
             self.imageMounted.emit(True, f"Image {self.file_name} mounted successfully.")
         except Exception as e:
@@ -118,12 +169,16 @@ class DetailedAutopsyGUI(QMainWindow):
     def __init__(self, db_manager):
         super().__init__()
 
-        self.initialize_ui()
+        # Initialize instance attributes
+        self.imageDismounter = None
+        self.imageMounter = None
         self.image_mounted = False
         self.current_offset = None
         self.current_image_path = None
         self.hexFormattingThread = None
         self.db_manager = db_manager  # Store the DatabaseManager instance
+
+        self.initialize_ui()
 
     def initialize_ui(self):
 
@@ -138,6 +193,10 @@ class DetailedAutopsyGUI(QMainWindow):
         # Add the "Add Evidence File" action to the File menu
         add_evidence_file_action = file_menu.addAction('Add Evidence File')
         add_evidence_file_action.triggered.connect(self.open_image_evidence)
+
+        # Remove evidence file action
+        remove_evidence_file_action = file_menu.addAction('Remove Evidence File')
+        remove_evidence_file_action.triggered.connect(self.remove_image_evidence)
 
         # Add "Image Mounting" submenu to the File menu
         image_mounting_menu = file_menu.addAction('Image Mounting')
@@ -154,7 +213,6 @@ class DetailedAutopsyGUI(QMainWindow):
         edit_menu = QMenu('Edit', self)
         view_menu = QMenu('View', self)
         tools_menu = QMenu('Tools', self)
-
 
         # Add "Dual-Tool Verification" action to the Tools menu
         dual_tool_verification_action = tools_menu.addAction('Dual-Tool Verification')
@@ -182,10 +240,17 @@ class DetailedAutopsyGUI(QMainWindow):
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
 
         result_viewer = QTabWidget(self)
-        result_viewer.addTab(QTextEdit(self), 'Listing')
+        self.setCentralWidget(result_viewer)
+        # self.listing_tab = result_viewer.widget(0)
+        # Create a QTableWidget for the Listing
+        self.listing_table = QTableWidget()
+        self.listing_table.setColumnCount(5)  # Assuming 3 columns: Name, Inode, and Description
+        self.listing_table.setHorizontalHeaderLabels(['Name', 'Inode', 'Description', 'Size', 'Modified Date'])
+
+        # Add the QTableWidget to your result_viewer QTabWidget
+        result_viewer.addTab(self.listing_table, 'Listing')
         result_viewer.addTab(QTextEdit(self), 'Results')
         result_viewer.addTab(QTextEdit(self), 'Deleted Files')
-        self.setCentralWidget(result_viewer)
 
         self.viewer_tab = QTabWidget(self)
 
@@ -201,9 +266,14 @@ class DetailedAutopsyGUI(QMainWindow):
         self.application_viewer = QLabel()
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
+
         # Create File Metadata viewer
         self.metadata_viewer = QTextEdit()
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
+
+        # Create exif data viewer
+        self.exif_viewer = QTextEdit()
+        self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
 
         # Create a dock widget for the viewer and set the QTabWidget as its widget
         viewer_dock = QDockWidget('Viewer', self)
@@ -217,15 +287,56 @@ class DetailedAutopsyGUI(QMainWindow):
         status_bar = QStatusBar(self)
         self.setStatusBar(status_bar)
 
+    def remove_image_evidence(self):
+        # Check if an image is currently loaded
+        if self.current_image_path is None:
+            QMessageBox.warning(self, "Remove Evidence", "No evidence is currently loaded.")
+            return
+
+        # Check if an image is currently mounted
+        if self.image_mounted:
+            # Prompt the user to confirm if they want to dismount the mounted image
+            dismount_reply = QMessageBox.question(self, 'Dismount Image',
+                                                  'Do you want to dismount the mounted image before removing it?',
+                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                                  QMessageBox.StandardButton.Yes)
+            if dismount_reply == QMessageBox.StandardButton.Yes:
+                self.dismount_image()
+
+        # Remove the image from the tree viewer
+        # Assuming self.tree_viewer is your QTreeWidget instance
+        root = self.tree_viewer.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            if item.text(0) == self.current_image_path:
+                root.removeChild(item)
+                break
+
+        # Clear other UI components, e.g., listing_table, hex_viewer, etc.
+        self.listing_table.clearContents()
+        self.hex_viewer.clear()
+        self.text_viewer.clear()
+        self.application_viewer.clear()
+        self.metadata_viewer.clear()
+
+        # Reset internal state
+        self.current_image_path = None
+        self.current_offset = None
+        self.image_mounted = False
+
+        QMessageBox.information(self, "Remove Evidence", "Evidence has been removed.")
 
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
             if self.image_mounted:
-                dismount_reply = QMessageBox.question(self, 'Dismount Image', 'Do you want to dismount the mounted image before exiting?',
-                                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
+                dismount_reply = QMessageBox.question(self, 'Dismount Image',
+                                                      'Do you want to dismount the mounted image before exiting?',
+                                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                                      QMessageBox.StandardButton.Yes)
 
                 if dismount_reply == QMessageBox.StandardButton.Yes:
                     # Assuming you have a method to dismount the image
@@ -236,7 +347,9 @@ class DetailedAutopsyGUI(QMainWindow):
             event.ignore()
 
     def mount_image(self):
-        supported_formats = "EWF Files (*.E01);;Raw Files (*.dd);;AFF4 Files (*.aff4);;VHD Files (*.vhd);;VDI Files (*.vdi);;XVA Files (*.xva);;VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow *.qcow2);;All Files (*)"
+        supported_formats = "EWF Files (*.E01);;Raw Files (*.dd);;AFF4 Files (*.aff4);;VHD Files (*.vhd);;VDI Files (" \
+                            "*.vdi);;XVA Files (*.xva);;VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow " \
+                            "*.qcow2);;All Files (*)"
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", supported_formats)
         if image_path:  # Check if a file was selected
             image_path = os.path.normpath(image_path)  # Normalize the path
@@ -285,6 +398,50 @@ class DetailedAutopsyGUI(QMainWindow):
         inode_number = data.get("inode_number") if data else None
         offset = data.get("offset", self.current_offset) if data else self.current_offset
 
+
+        index = self.viewer_tab.indexOf(self.application_viewer)
+        if isinstance(self.application_viewer, PDFViewer) and index != -1:
+            self.viewer_tab.removeTab(index)
+            self.application_viewer = QLabel(self.viewer_tab)
+            desired_index = self.viewer_tab.indexOf(self.text_viewer) + 1  # One index after Text tab
+            self.viewer_tab.insertTab(desired_index, self.application_viewer, 'Application')
+
+        if data is None:  # Check if data is None before proceeding
+            return
+
+        # If it's a directory or a partition
+        if 'd' in data.get("type", "") or inode_number is None:
+            entries = list_files(self.current_image_path, offset, inode_number)
+
+            # Clear existing rows in the table
+            self.listing_table.setRowCount(0)
+
+            for entry in entries:
+                entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], \
+                    entry.split()[-1]
+                description = "Directory" if 'd' in entry_type else "File"
+
+                # Determine the icon path based on the file extension or folder name
+                icon_path = self.get_icon_path('folder' if 'd' in entry_type else 'file', entry_name)
+                icon = QIcon(icon_path)
+
+                # Add new row to the table
+                row_position = self.listing_table.rowCount()
+                self.listing_table.insertRow(row_position)
+
+                name_item = QTableWidgetItem(entry_name)
+                name_item.setIcon(icon)  # Set the icon
+
+                self.listing_table.setItem(row_position, 0, name_item)
+                self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
+                self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
+
+        # For other types (e.g., QLabel or QTextEdit), clear their content
+        if isinstance(self.application_viewer, QLabel):
+            self.application_viewer.clear()
+        elif isinstance(self.application_viewer, QTextEdit):
+            self.application_viewer.clear()
+
         # Construct the full path of the file by traversing the tree upwards
         full_file_path = item.text(0)
         parent_item = item.parent()
@@ -320,6 +477,29 @@ class DetailedAutopsyGUI(QMainWindow):
                 else:
                     # Optionally, you can clear the image in the 'Application' tab
                     self.application_viewer.clear()
+
+                try:
+                    exif_data = self.extract_exif_data(file_content)
+
+                    # Convert EXIF data into an HTML table
+                    exif_table = "<table border='1'>"
+                    for key, value in exif_data:
+                        exif_table += f"<tr><td><b>{key}</b></td><td>{value}</td></tr>"
+                    exif_table += "</table>"
+
+                    self.exif_viewer.setHtml(exif_table)
+                except Exception as e:
+                    print(f"Error extracting EXIF data: {e}")
+                    self.exif_viewer.setPlainText("Error extracting EXIF data.")
+
+                # Check if it's a PDF by magic number
+                magic_number = file_content[:4]
+                if magic_number == b'%PDF':
+                    self.display_pdf_in_application_tab(file_content)
+
+                # if isinstance(self.application_viewer, PDFViewer):
+                #     self.application_viewer.setFixedSize(300, 300)  # Or whatever size you prefer
+                #     self.application_viewer.updateGeometry()  # This updates the geometry of the widget.
 
                 # Calculate MD5 and SHA-256 hashes
                 md5_hash = hashlib.md5(file_content).hexdigest()
@@ -363,6 +543,30 @@ class DetailedAutopsyGUI(QMainWindow):
 
             except subprocess.CalledProcessError as e:
                 print(f"Error executing icat: {e}")
+
+        # Set the current tab to Hex after processing the file
+        hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
+        self.viewer_tab.setCurrentIndex(hex_tab_index)
+
+
+    def display_pdf_in_application_tab(self, pdf_content):
+        # Create an instance of PDFViewer with the PDF content
+        pdf_viewer_widget = PDFViewer(pdf_content)
+
+        # Get the index of the Application tab
+        index = self.viewer_tab.indexOf(self.application_viewer)
+
+        if index != -1:  # If the Application tab already exists
+            self.viewer_tab.removeTab(index)  # Remove the existing tab
+
+        # Insert the Application tab at its desired position
+        desired_index = self.viewer_tab.indexOf(self.text_viewer) + 1  # One index after Text tab
+        self.viewer_tab.insertTab(desired_index, pdf_viewer_widget, 'Application')
+        self.viewer_tab.setCurrentWidget(pdf_viewer_widget)  # Set focus to the Application tab
+
+        # Update the self.application_viewer to the new PDFViewer instance
+        self.application_viewer = pdf_viewer_widget
+        print(pdf_viewer_widget.size())
 
     def on_hex_formatting_completed(self, formatted_hex):
         self.hex_viewer.setPlainText(formatted_hex)
@@ -426,7 +630,9 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
-                child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
+                # child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
+                child_item.setData(0, Qt.UserRole,
+                                   {"inode_number": inode_number, "offset": offset, "type": "directory"})
 
                 if not is_empty:
                     child_item.setChildIndicatorPolicy(
@@ -446,7 +652,8 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 # Extract inode number for the file
                 inode_number = entry.split()[1].split('-')[0]
-                child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
+                # child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
+                child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
 
 
     def on_item_expanded(self, item):
@@ -480,6 +687,28 @@ class DetailedAutopsyGUI(QMainWindow):
 
             # Load the image structure into the tree viewer
             self.load_image_structure_into_tree(image_path)
+
+
+    def extract_exif_data(self, image_content):
+        image = Image.open(io.BytesIO(image_content))
+
+        # Check if the image format supports EXIF
+        if image.format != 'JPEG':
+            return []
+
+        exif_data = image._getexif()
+        structured_data = []
+        if exif_data is not None:
+            for key in exif_data.keys():
+                if key in TAGS and isinstance(exif_data[key], (str, bytes)):
+                    try:
+                        tag_name = TAGS[key]
+                        tag_value = exif_data[key]
+                        structured_data.append((tag_name, tag_value))
+                    except Exception as e:
+                        print(f"Error processing key {key}: {e}")
+            return structured_data
+        return []
 
 
 def get_partitions(image_path):
@@ -526,7 +755,7 @@ def list_files(image_path, offset, inode_number=None):
         if inode_number:
             cmd.append(image_path)
             cmd.append(str(inode_number))
-            #print(f"Executing command: {' '.join(cmd)}")  # Debugging line
+            # print(f"Executing command: {' '.join(cmd)}")  # Debugging line
         else:
             cmd.append(image_path)
         result = subprocess.run(
@@ -538,5 +767,5 @@ def list_files(image_path, offset, inode_number=None):
         lines = result.stdout.splitlines()
         return lines
     except subprocess.CalledProcessError as e:
-        #print(f"Error executing fls: {e}")
+        # print(f"Error executing fls: {e}")
         return []
