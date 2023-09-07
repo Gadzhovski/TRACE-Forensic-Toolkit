@@ -1,7 +1,7 @@
 import sqlite3
 
 def create_icon_db():
-    conn = sqlite3.connect('icon_mappings.db')
+    conn = sqlite3.connect('../icon_mappings.db')
     c = conn.cursor()
 
     # Create table with UNIQUE constraint

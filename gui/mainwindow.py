@@ -73,7 +73,7 @@ class ImageMounter(QThread):
 
     def run(self):
         try:
-            subprocess.Popen(['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly',
+            subprocess.Popen(['tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly',
                               '--filename=' + self.image_path])
 
             self.imageMounted.emit(True, f"Image {self.file_name} mounted successfully.")
@@ -86,7 +86,7 @@ class ImageDismounter(QThread):
 
     def run(self):
         try:
-            subprocess.run(['Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount'], check=True)
+            subprocess.run(['tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount'], check=True)
             self.imageDismounted.emit(True, f"Image was dismounted successfully.")
         except subprocess.CalledProcessError:
             self.imageDismounted.emit(False, "Failed to dismount the image.")
