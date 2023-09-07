@@ -1,0 +1,14 @@
+---------------
+2023-09-06 14:42:21
+Starting up: Application 'C:\Users\Radi\Desktop\Final_year_project\Arsenal-Image-Mounter-v3.10.257\ArsenalImageMounter.dll' version 3.10.257. OS = 'Microsoft Windows 10.0.19045 X64'. Framework = .NET 6.0.14 X64
+---------------
+2023-09-06 14:42:21
+Licensed mode = False
+---------------
+2023-09-06 14:42:48
+Image file 'C:\Users\Radi\Desktop\2020JimmyWilson.E01', detected GuidPartitionTable, 2 partitions.
+0x10080 - 0x1A807F (Windows Basic Data), detected 'Microsoft NTFS' (healthy).
+
+---------------
+2023-09-06 14:43:36
+Exit: Application 'C:\Users\Radi\Desktop\Final_year_project\Arsenal-Image-Mounter-v3.10.257\ArsenalImageMounter.dll' version 3.10.257. OS = 'Microsoft Windows 10.0.19045 X64'. Framework = .NET 6.0.14 X64
