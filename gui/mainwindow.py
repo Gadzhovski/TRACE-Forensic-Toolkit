@@ -5,62 +5,17 @@ import re
 import sqlite3
 import subprocess
 
-import fitz
 import magic
 from PIL import Image
 from PIL.ExifTags import TAGS
-from PySide6.QtCore import Qt, QThread, Signal, QByteArray
-from PySide6.QtGui import QIcon, QPixmap, QImage
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
-                               QStatusBar, QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
-                               QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem, QHBoxLayout, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
+                               QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem)
 
-
-class PDFViewer(QWidget):
-    def __init__(self, pdf_content):
-        super().__init__()
-        self.pdf = fitz.open(stream=pdf_content, filetype="pdf")
-        self.current_page = 0
-
-        self.layout = QVBoxLayout()
-        self.layout.setAlignment(Qt.AlignCenter)
-        self.page_label = QLabel(self)
-        self.layout.addWidget(self.page_label)
-
-        self.nav_layout = QHBoxLayout()
-        self.prev_button = QPushButton("Previous", self)
-        self.prev_button.clicked.connect(self.show_previous_page)
-        self.nav_layout.addWidget(self.prev_button)
-        self.next_button = QPushButton("Next", self)
-        self.next_button.clicked.connect(self.show_next_page)
-        self.nav_layout.addWidget(self.next_button)
-
-        self.layout.addLayout(self.nav_layout)
-        self.setLayout(self.layout)
-
-        self.show_page(self.current_page)
-
-    def show_previous_page(self):
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.show_page(self.current_page)
-
-    def show_next_page(self):
-        if self.current_page < len(self.pdf) - 1:
-            self.current_page += 1
-            self.show_page(self.current_page)
-
-    def show_page(self, page_num):
-        page = self.pdf[page_num]
-        image = page.get_pixmap()
-        qt_image = QImage(image.samples, image.width, image.height, image.stride, QImage.Format_RGB888)
-        print(qt_image.size())
-        pixmap = QPixmap.fromImage(qt_image)
-        self.page_label.setPixmap(pixmap)
-
-    def closeEvent(self, event):
-        self.pdf.close()  # Make sure to close the PDF when the viewer is closed
+from gui.widgets.pdf_viewer import PDFViewer
+from managers.unified_viewer import UnifiedViewer
 
 
 class ImageMounter(QThread):
@@ -99,18 +54,18 @@ class DatabaseManager:
     def __del__(self):
         self.db_conn.close()
 
-    def get_icon_path(self, type, name):
+    def get_icon_path(self, icon_type, name):
         c = self.db_conn.cursor()
         try:
-            c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, name))
+            c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (icon_type, name))
             result = c.fetchone()
 
             if result:
                 return result[0]
             else:
                 # Fallback to default icons
-                if type == 'folder':
-                    c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (type, 'Default_Folder'))
+                if icon_type == 'folder':
+                    c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (icon_type, 'Default_Folder'))
                     result = c.fetchone()
                     return result[0] if result else 'gui/icons/unknown.png'
                 else:
@@ -241,7 +196,6 @@ class DetailedAutopsyGUI(QMainWindow):
 
         result_viewer = QTabWidget(self)
         self.setCentralWidget(result_viewer)
-        # self.listing_tab = result_viewer.widget(0)
         # Create a QTableWidget for the Listing
         self.listing_table = QTableWidget()
         self.listing_table.setColumnCount(5)  # Assuming 3 columns: Name, Inode, and Description
@@ -263,7 +217,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.text_viewer, 'Text')
 
         # Create Application viewer
-        self.application_viewer = QLabel()
+        self.application_viewer = UnifiedViewer(self)
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
 
@@ -275,17 +229,29 @@ class DetailedAutopsyGUI(QMainWindow):
         self.exif_viewer = QTextEdit()
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
 
-        # Create a dock widget for the viewer and set the QTabWidget as its widget
-        viewer_dock = QDockWidget('Viewer', self)
-        viewer_dock.setWidget(self.viewer_tab)
-        self.addDockWidget(Qt.BottomDockWidgetArea, viewer_dock)
+        self.viewer_dock = QDockWidget('Viewer', self)
+        self.viewer_dock.setWidget(self.viewer_tab)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
+
+        # Set initial size constraints for the dock widget
+        self.viewer_dock.setMinimumSize(1200, 222)
+        self.viewer_dock.setMaximumSize(1200, 222)
+
+        # Connect the visibilityChanged signal to a custom slot
+        self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
 
         details_area = QTextEdit(self)
         details_dock = QDockWidget('Details Area', self)
         details_dock.setWidget(details_area)
         self.addDockWidget(Qt.RightDockWidgetArea, details_dock)
-        status_bar = QStatusBar(self)
-        self.setStatusBar(status_bar)
+
+    def on_viewer_dock_focus(self, visible):
+        if visible:  # If the QDockWidget is focused/visible
+            self.viewer_dock.setMaximumSize(16777215, 16777215)  # Remove size constraints
+        else:  # If the QDockWidget loses focus
+            current_height = self.viewer_dock.size().height()  # Get the current height
+            self.viewer_dock.setMinimumSize(1200, current_height)
+            self.viewer_dock.setMaximumSize(1200, current_height)
 
     def remove_image_evidence(self):
         # Check if an image is currently loaded
@@ -381,23 +347,13 @@ class DetailedAutopsyGUI(QMainWindow):
         else:
             QMessageBox.critical(self, "Image Dismounting", message)
 
-    def get_icon_path(self, type, name):
-        return self.db_manager.get_icon_path(type, name)
-
-    def display_image_from_hex(self, hex_data):
-        # Convert hex data to bytes
-        byte_data = bytes.fromhex(hex_data)
-        # Create a QPixmap from the byte data
-        image = QPixmap()
-        image.loadFromData(QByteArray(byte_data))
-
-        self.application_viewer.setPixmap(image)
+    def get_icon_path(self, icon_type, name):
+        return self.db_manager.get_icon_path(icon_type, name)
 
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
         inode_number = data.get("inode_number") if data else None
         offset = data.get("offset", self.current_offset) if data else self.current_offset
-
 
         index = self.viewer_tab.indexOf(self.application_viewer)
         if isinstance(self.application_viewer, PDFViewer) and index != -1:
@@ -412,10 +368,7 @@ class DetailedAutopsyGUI(QMainWindow):
         # If it's a directory or a partition
         if 'd' in data.get("type", "") or inode_number is None:
             entries = list_files(self.current_image_path, offset, inode_number)
-
-            # Clear existing rows in the table
             self.listing_table.setRowCount(0)
-
             for entry in entries:
                 entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], \
                     entry.split()[-1]
@@ -437,9 +390,7 @@ class DetailedAutopsyGUI(QMainWindow):
                 self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
 
         # For other types (e.g., QLabel or QTextEdit), clear their content
-        if isinstance(self.application_viewer, QLabel):
-            self.application_viewer.clear()
-        elif isinstance(self.application_viewer, QTextEdit):
+        if isinstance(self.application_viewer, QLabel) or isinstance(self.application_viewer, QTextEdit):
             self.application_viewer.clear()
 
         # Construct the full path of the file by traversing the tree upwards
@@ -451,7 +402,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
         if inode_number:  # It's a file
             try:
-                cmd = ["icat", "-o", str(offset), self.current_image_path, str(inode_number)]
+                cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe", "-o", str(offset), self.current_image_path, str(inode_number)]
                 result = subprocess.run(cmd, capture_output=True, text=False, check=True)
                 file_content = result.stdout
 
@@ -468,15 +419,7 @@ class DetailedAutopsyGUI(QMainWindow):
                     text_content = "Non-text file"
                 self.text_viewer.setPlainText(text_content)
 
-                # Check if it's an image file by magic number
-                magic_number = file_content[:4]
-                if magic_number == b'\xFF\xD8\xFF\xE0' or magic_number == b'\x89\x50\x4E\x47':
-                    hex_data = result.stdout.hex()
-                    self.display_image_from_hex(hex_data)
-                    print(f"Image file: {inode_number}")  # Debugging line
-                else:
-                    # Optionally, you can clear the image in the 'Application' tab
-                    self.application_viewer.clear()
+                self.application_viewer.display(file_content)
 
                 try:
                     exif_data = self.extract_exif_data(file_content)
@@ -492,15 +435,6 @@ class DetailedAutopsyGUI(QMainWindow):
                     print(f"Error extracting EXIF data: {e}")
                     self.exif_viewer.setPlainText("Error extracting EXIF data.")
 
-                # Check if it's a PDF by magic number
-                magic_number = file_content[:4]
-                if magic_number == b'%PDF':
-                    self.display_pdf_in_application_tab(file_content)
-
-                # if isinstance(self.application_viewer, PDFViewer):
-                #     self.application_viewer.setFixedSize(300, 300)  # Or whatever size you prefer
-                #     self.application_viewer.updateGeometry()  # This updates the geometry of the widget.
-
                 # Calculate MD5 and SHA-256 hashes
                 md5_hash = hashlib.md5(file_content).hexdigest()
                 sha256_hash = hashlib.sha256(file_content).hexdigest()
@@ -509,7 +443,7 @@ class DetailedAutopsyGUI(QMainWindow):
                 mime_type = magic.Magic().from_buffer(file_content)
 
                 # Fetch metadata using istat
-                metadata_cmd = ["istat", "-o", str(offset), self.current_image_path, str(inode_number)]
+                metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe", "-o", str(offset), self.current_image_path, str(inode_number)]
                 metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
                 metadata_content = metadata_result.stdout
 
@@ -547,26 +481,6 @@ class DetailedAutopsyGUI(QMainWindow):
         # Set the current tab to Hex after processing the file
         hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
         self.viewer_tab.setCurrentIndex(hex_tab_index)
-
-
-    def display_pdf_in_application_tab(self, pdf_content):
-        # Create an instance of PDFViewer with the PDF content
-        pdf_viewer_widget = PDFViewer(pdf_content)
-
-        # Get the index of the Application tab
-        index = self.viewer_tab.indexOf(self.application_viewer)
-
-        if index != -1:  # If the Application tab already exists
-            self.viewer_tab.removeTab(index)  # Remove the existing tab
-
-        # Insert the Application tab at its desired position
-        desired_index = self.viewer_tab.indexOf(self.text_viewer) + 1  # One index after Text tab
-        self.viewer_tab.insertTab(desired_index, pdf_viewer_widget, 'Application')
-        self.viewer_tab.setCurrentWidget(pdf_viewer_widget)  # Set focus to the Application tab
-
-        # Update the self.application_viewer to the new PDFViewer instance
-        self.application_viewer = pdf_viewer_widget
-        print(pdf_viewer_widget.size())
 
     def on_hex_formatting_completed(self, formatted_hex):
         self.hex_viewer.setPlainText(formatted_hex)
@@ -630,7 +544,6 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
-                # child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
                 child_item.setData(0, Qt.UserRole,
                                    {"inode_number": inode_number, "offset": offset, "type": "directory"})
 
@@ -652,9 +565,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 # Extract inode number for the file
                 inode_number = entry.split()[1].split('-')[0]
-                # child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset})
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
-
 
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
@@ -688,12 +599,11 @@ class DetailedAutopsyGUI(QMainWindow):
             # Load the image structure into the tree viewer
             self.load_image_structure_into_tree(image_path)
 
-
     def extract_exif_data(self, image_content):
         image = Image.open(io.BytesIO(image_content))
 
         # Check if the image format supports EXIF
-        if image.format != 'JPEG':
+        if image.format != "JPEG":
             return []
 
         exif_data = image._getexif()
@@ -714,7 +624,7 @@ class DetailedAutopsyGUI(QMainWindow):
 def get_partitions(image_path):
     """Get partitions from an image using mmls."""
     result = subprocess.run(
-        ["mmls", "-M", "-B", image_path],
+        ["tools/sleuthkit-4.12.0-win32/bin/mmls.exe", "-M", "-B", image_path],
         capture_output=True, text=True
     )
     lines = result.stdout.splitlines()
@@ -730,7 +640,7 @@ def get_partitions(image_path):
             description = " ".join(parts[6:])  # Description of the partition
 
             # Run fsstat to get the file system type
-            fsstat_cmd = ["fsstat", "-o", str(start_sector), "-t", image_path]
+            fsstat_cmd = ["tools/sleuthkit-4.12.0-win32/bin/fsstat.exe", "-o", str(start_sector), "-t", image_path]
             try:
                 fsstat_result = subprocess.run(fsstat_cmd, capture_output=True, text=True, check=True)
                 fs_type = fsstat_result.stdout.strip().upper()
@@ -751,7 +661,7 @@ def get_partitions(image_path):
 def list_files(image_path, offset, inode_number=None):
     """List files in a directory using fls."""
     try:
-        cmd = ["fls", "-o", str(offset)]
+        cmd = ["tools/sleuthkit-4.12.0-win32/bin/fls.exe", "-o", str(offset)]
         if inode_number:
             cmd.append(image_path)
             cmd.append(str(inode_number))
