@@ -34,7 +34,7 @@ class PictureViewer(QWidget):
         rotate_left_icon = QIcon("gui/icons/object-rotate-left.png")
         rotate_right_icon = QIcon("gui/icons/object-rotate-right.png")
         reset_icon = QIcon("gui/icons/document-revert.png")
-        export_icon = QIcon("gui/icons/folder-download.png")  # Assuming you have an export icon named "emblem-downloads.png"
+        export_icon = QIcon("gui/icons/folder-download.png")
 
         zoom_in_action = QAction(zoom_in_icon, 'Zoom In', self)
         zoom_out_action = QAction(zoom_out_icon, 'Zoom Out', self)
@@ -64,13 +64,13 @@ class PictureViewer(QWidget):
         container_layout.addWidget(self.toolbar)
 
         self.image_label = QLabel(self)
-        self.image_label.setContentsMargins(0, 0, 0, 0)
+        #self.image_label.setContentsMargins(0, 0, 0, 0)
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
+        #self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
 
         self.scroll_area = QScrollArea(self)
-        self.scroll_area.setContentsMargins(0, 0, 0, 0)
-        self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
+        #self.scroll_area.setContentsMargins(0, 0, 0, 0)
+        #self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
         self.scroll_area.setWidget(self.image_label)
         self.scroll_area.setWidgetResizable(True)
 

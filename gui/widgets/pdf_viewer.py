@@ -2,8 +2,7 @@ import fitz
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QFileDialog,
-                               QDockWidget, QListWidget, QListWidgetItem)
+from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QVBoxLayout, QWidget, QScrollArea, QLineEdit, QFileDialog)
 
 
 class PDFViewer(QWidget):
@@ -216,6 +215,7 @@ class PDFViewer(QWidget):
         self.current_page = 0
         self.show_page(self.current_page)
         self.update_navigation_states()  # Add this line
+
 
     def clear(self):
         if self.pdf:

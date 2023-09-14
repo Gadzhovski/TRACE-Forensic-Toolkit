@@ -352,6 +352,60 @@ class DetailedAutopsyGUI(QMainWindow):
     def get_icon_path(self, icon_type, name):
         return self.db_manager.get_icon_path(icon_type, name)
 
+    def handle_directory(self, data, item):
+        inode_number = data.get("inode_number")
+        offset = data.get("offset", self.current_offset)
+
+        entries = list_files(self.current_image_path, offset, inode_number)
+        self.listing_table.setRowCount(0)
+        for entry in entries:
+            entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
+            description = "Directory" if 'd' in entry_type else "File"
+
+            # Determine the icon path based on the file extension or folder name
+            icon_path = self.get_icon_path('folder' if 'd' in entry_type else 'file', entry_name)
+            icon = QIcon(icon_path)
+
+            # Add new row to the table
+            row_position = self.listing_table.rowCount()
+            self.listing_table.insertRow(row_position)
+
+            name_item = QTableWidgetItem(entry_name)
+            name_item.setIcon(icon)  # Set the icon
+
+            self.listing_table.setItem(row_position, 0, name_item)
+            self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
+            self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
+
+    def display_file_content(self, inode_number, offset, item):
+        try:
+            cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe", "-o", str(offset), self.current_image_path,
+                   str(inode_number)]
+            result = subprocess.run(cmd, capture_output=True, text=False, check=True)
+            file_content = result.stdout
+
+            # Display hex content in formatted manner
+            hex_content = file_content.hex()
+            self.hexFormattingThread = HexFormattingThread(hex_content)
+            self.hexFormattingThread.hexFormattingCompleted.connect(self.on_hex_formatting_completed)
+            self.hexFormattingThread.start()
+
+            # Display text content
+            try:
+                text_content = file_content.decode('utf-8')
+            except UnicodeDecodeError:
+                text_content = "Non-text file"
+            self.text_viewer.setPlainText(text_content)
+
+            self.application_viewer.display(file_content)
+
+            return file_content  # Return file_content for further processing
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error executing icat: {e}")
+            return None
+
+
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
         inode_number = data.get("inode_number") if data else None
@@ -369,27 +423,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # If it's a directory or a partition
         if 'd' in data.get("type", "") or inode_number is None:
-            entries = list_files(self.current_image_path, offset, inode_number)
-            self.listing_table.setRowCount(0)
-            for entry in entries:
-                entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], \
-                    entry.split()[-1]
-                description = "Directory" if 'd' in entry_type else "File"
-
-                # Determine the icon path based on the file extension or folder name
-                icon_path = self.get_icon_path('folder' if 'd' in entry_type else 'file', entry_name)
-                icon = QIcon(icon_path)
-
-                # Add new row to the table
-                row_position = self.listing_table.rowCount()
-                self.listing_table.insertRow(row_position)
-
-                name_item = QTableWidgetItem(entry_name)
-                name_item.setIcon(icon)  # Set the icon
-
-                self.listing_table.setItem(row_position, 0, name_item)
-                self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
-                self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
+            self.handle_directory(data, item)
 
         # For other types (e.g., QLabel or QTextEdit), clear their content
         if isinstance(self.application_viewer, QLabel) or isinstance(self.application_viewer, QTextEdit):
@@ -403,86 +437,66 @@ class DetailedAutopsyGUI(QMainWindow):
             parent_item = parent_item.parent()
 
         if inode_number:  # It's a file
-            try:
-                cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe", "-o", str(offset), self.current_image_path, str(inode_number)]
-                result = subprocess.run(cmd, capture_output=True, text=False, check=True)
-                file_content = result.stdout
-
-                # # Display hex content in formatted manner
-                hex_content = result.stdout.hex()
-                self.hexFormattingThread = HexFormattingThread(hex_content)
-                self.hexFormattingThread.hexFormattingCompleted.connect(self.on_hex_formatting_completed)
-                self.hexFormattingThread.start()
-
-                # Display text content
-                try:
-                    text_content = file_content.decode('utf-8')
-                except UnicodeDecodeError:
-                    text_content = "Non-text file"
-                self.text_viewer.setPlainText(text_content)
-
-                self.application_viewer.display(file_content)
-
+            file_content = self.display_file_content(inode_number, offset, item)
+            if file_content:  # If successfully fetched file content
+                self.display_metadata(file_content, item, full_file_path, offset, inode_number)
+                # EXIF data and other details can also be moved to another function for clarity, if desired.
                 try:
                     exif_data = self.extract_exif_data(file_content)
-
-                    # Convert EXIF data into an HTML table
-                    exif_table = "<table border='1'>"
-                    for key, value in exif_data:
-                        exif_table += f"<tr><td><b>{key}</b></td><td>{value}</td></tr>"
-                    exif_table += "</table>"
-
-                    self.exif_viewer.setHtml(exif_table)
+                    # ... rest of the EXIF data extraction code ...
                 except Exception as e:
                     print(f"Error extracting EXIF data: {e}")
                     self.exif_viewer.setPlainText("Error extracting EXIF data.")
 
-                # Calculate MD5 and SHA-256 hashes
-                md5_hash = hashlib.md5(file_content).hexdigest()
-                sha256_hash = hashlib.sha256(file_content).hexdigest()
-
-                # Determine MIME type
-                mime_type = magic.Magic().from_buffer(file_content)
-
-                # Fetch metadata using istat
-                metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe", "-o", str(offset), self.current_image_path, str(inode_number)]
-                metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
-                metadata_content = metadata_result.stdout
-
-                # Extract times using regular expressions
-                created_time = re.search(r"Created:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                         metadata_content)
-                modified_time = re.search(r"File Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                          metadata_content)
-                accessed_time = re.search(r"Accessed:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                          metadata_content)
-                changed_time = re.search(r"MFT Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                         metadata_content)
-
-                # Combine all metadata in a table
-                extended_metadata = f"<b>Metadata:</b><br><table border='1'>"
-                extended_metadata += f"<tr><td>Name</td><td>{item.text(0)}</td></tr>"
-                extended_metadata += f"<tr><td>Path</td><td>{full_file_path}</td></tr>"
-                extended_metadata += f"<tr><td>Type</td><td>File</td></tr>"
-                extended_metadata += f"<tr><td>MIME Type</td><td>{mime_type}</td></tr>"
-                extended_metadata += f"<tr><td>Size</td><td>{len(file_content)}</td></tr>"
-                extended_metadata += f"<tr><td>Modified</b></td><td>{modified_time.group(1) if modified_time else 'N/A'}</td></tr>"
-                extended_metadata += f"<tr><td>Accessed</b></td><td>{accessed_time.group(1) if accessed_time else 'N/A'}</td></tr>"
-                extended_metadata += f"<tr><td>Created</b></td><td>{created_time.group(1) if created_time else 'N/A'}</td></tr>"
-                extended_metadata += f"<tr><td>Changed</b></td><td>{changed_time.group(1) if changed_time else 'N/A'}</td></tr>"
-                extended_metadata += f"<tr><td>MD5</td><td>{md5_hash}</td></tr>"
-                extended_metadata += f"<tr><td>SHA-256</td><td>{sha256_hash}</td></tr>"
-                extended_metadata += f"</table>"
-                extended_metadata += f"<br>"
-                extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
-                self.metadata_viewer.setHtml(extended_metadata)
-
-            except subprocess.CalledProcessError as e:
-                print(f"Error executing icat: {e}")
+        # Set the current tab to Hex after processing the file
+        hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
+        self.viewer_tab.setCurrentIndex(hex_tab_index)
 
         # Set the current tab to Hex after processing the file
         hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
         self.viewer_tab.setCurrentIndex(hex_tab_index)
+
+    def display_metadata(self, file_content, item, full_file_path, offset, inode_number):
+        # Calculate MD5 and SHA-256 hashes
+        md5_hash = hashlib.md5(file_content).hexdigest()
+        sha256_hash = hashlib.sha256(file_content).hexdigest()
+
+        # Determine MIME type
+        mime_type = magic.Magic().from_buffer(file_content)
+
+        # Fetch metadata using istat
+        metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe", "-o", str(offset), self.current_image_path,
+                        str(inode_number)]
+        metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
+        metadata_content = metadata_result.stdout
+
+        # Extract times using regular expressions
+        created_time = re.search(r"Created:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                 metadata_content)
+        modified_time = re.search(r"File Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                  metadata_content)
+        accessed_time = re.search(r"Accessed:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                  metadata_content)
+        changed_time = re.search(r"MFT Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
+                                 metadata_content)
+
+        # Combine all metadata in a table
+        extended_metadata = f"<b>Metadata:</b><br><table border='1'>"
+        extended_metadata += f"<tr><td>Name</td><td>{item.text(0)}</td></tr>"
+        extended_metadata += f"<tr><td>Path</td><td>{full_file_path}</td></tr>"
+        extended_metadata += f"<tr><td>Type</td><td>File</td></tr>"
+        extended_metadata += f"<tr><td>MIME Type</td><td>{mime_type}</td></tr>"
+        extended_metadata += f"<tr><td>Size</td><td>{len(file_content)}</td></tr>"
+        extended_metadata += f"<tr><td>Modified</b></td><td>{modified_time.group(1) if modified_time else 'N/A'}</td></tr>"
+        extended_metadata += f"<tr><td>Accessed</b></td><td>{accessed_time.group(1) if accessed_time else 'N/A'}</td></tr>"
+        extended_metadata += f"<tr><td>Created</b></td><td>{created_time.group(1) if created_time else 'N/A'}</td></tr>"
+        extended_metadata += f"<tr><td>Changed</b></td><td>{changed_time.group(1) if changed_time else 'N/A'}</td></tr>"
+        extended_metadata += f"<tr><td>MD5</td><td>{md5_hash}</td></tr>"
+        extended_metadata += f"<tr><td>SHA-256</td><td>{sha256_hash}</td></tr>"
+        extended_metadata += f"</table>"
+        extended_metadata += f"<br>"
+        extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
+        self.metadata_viewer.setHtml(extended_metadata)
 
     def on_hex_formatting_completed(self, formatted_hex):
         self.hex_viewer.setPlainText(formatted_hex)
