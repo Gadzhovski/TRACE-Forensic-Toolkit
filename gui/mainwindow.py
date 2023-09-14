@@ -218,8 +218,10 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # Create Application viewer
         self.application_viewer = UnifiedViewer(self)
+        # remove the borders and spacing
+        self.application_viewer.layout.setContentsMargins(0, 0, 0, 0)
+        self.application_viewer.layout.setSpacing(0)
         self.viewer_tab.addTab(self.application_viewer, 'Application')
-
 
         # Create File Metadata viewer
         self.metadata_viewer = QTextEdit()
