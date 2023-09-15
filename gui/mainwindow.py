@@ -17,8 +17,8 @@ from gui.widgets.pdf_viewer import PDFViewer
 from managers.unified_viewer_manager import UnifiedViewer
 from managers.image_manager import ImageManager
 from managers.database_manager import DatabaseManager
-from managers.hex_viewer_manager import HexFormatter
-from widgets.hex_viewer import HexViewer
+from gui.widgets.hex_viewer import HexViewer
+
 
 class ImageLoader(QThread):
     imageLoaded = Signal(bool, str)  # Signal to indicate completion
@@ -46,6 +46,7 @@ class DetailedAutopsyGUI(QMainWindow):
     def initialize_ui(self):
         self.setWindowTitle('Detailed Autopsy GUI')
         self.setGeometry(100, 100, 1200, 800)
+
 
         # Create a menu bar
         menu_bar = QMenuBar(self)
@@ -115,8 +116,10 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab = QTabWidget(self)
 
         # Create Hex viewer
-        self.hex_viewer = QTextEdit()
-        self.viewer_tab.addTab(self.hex_viewer, 'Hex')
+        # self.hex_viewer = QTextEdit()   old code
+        # self.viewer_tab.addTab(self.hex_viewer, 'Hex')
+        self.hex_viewer_widget = HexViewer(self)
+        self.viewer_tab.addTab(self.hex_viewer_widget, 'Hex')
 
         # Create Text viewer
         self.text_viewer = QTextEdit()
@@ -199,7 +202,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # Clear other UI components, e.g., listing_table, hex_viewer, etc.
         self.listing_table.clearContents()
-        self.hex_viewer.clear()
+        self.hex_viewer_widget.clear_content()
         self.text_viewer.clear()
         self.application_viewer.clear()
         self.metadata_viewer.clear()
@@ -294,12 +297,9 @@ class DetailedAutopsyGUI(QMainWindow):
             result = subprocess.run(cmd, capture_output=True, text=False, check=True)
             file_content = result.stdout
 
-            # Display hex content in formatted manner
+            # # Display hex content in formatted manner
             hex_content = file_content.hex()
-            formatter = HexFormatter(hex_content)
-            formatted_hex = formatter.format_hex()
-
-            self.hex_viewer.setPlainText(formatted_hex)
+            self.hex_viewer_widget.display_hex_content(hex_content)
 
             # Display text content
             try:
@@ -355,9 +355,7 @@ class DetailedAutopsyGUI(QMainWindow):
                     self.extract_exif_data(file_content)
                 except Exception as e:
                     print(f"Error extracting EXIF data: {e}")
-        # Set the current tab to Hex after processing the file
-        hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
-        self.viewer_tab.setCurrentIndex(hex_tab_index)
+
 
     def display_metadata(self, file_content, item, full_file_path, offset, inode_number):
         # Calculate MD5 and SHA-256 hashes
