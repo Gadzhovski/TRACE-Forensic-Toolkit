@@ -64,13 +64,13 @@ class PictureViewer(QWidget):
         container_layout.addWidget(self.toolbar)
 
         self.image_label = QLabel(self)
-        #self.image_label.setContentsMargins(0, 0, 0, 0)
+        self.image_label.setContentsMargins(0, 0, 0, 0)
         self.image_label.setAlignment(Qt.AlignCenter)
-        #self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
+        self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
 
         self.scroll_area = QScrollArea(self)
-        #self.scroll_area.setContentsMargins(0, 0, 0, 0)
-        #self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
+        self.scroll_area.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
         self.scroll_area.setWidget(self.image_label)
         self.scroll_area.setWidgetResizable(True)
 

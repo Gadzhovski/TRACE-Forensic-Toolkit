@@ -2,7 +2,6 @@ import hashlib
 import io
 import os
 import re
-import sqlite3
 import subprocess
 
 import magic
@@ -15,99 +14,11 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem)
 
 from gui.widgets.pdf_viewer import PDFViewer
-from managers.unified_viewer import UnifiedViewer
-
-
-class ImageMounter(QThread):
-    imageMounted = Signal(bool, str)  # Signal to indicate mounting completion
-
-    def __init__(self, image_path):
-        super().__init__()
-        self.image_path = os.path.normpath(image_path)
-        self.file_name = os.path.basename(self.image_path)
-
-    def run(self):
-        try:
-            subprocess.Popen(['tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--mount', '--readonly',
-                              '--filename=' + self.image_path])
-
-            self.imageMounted.emit(True, f"Image {self.file_name} mounted successfully.")
-        except Exception as e:
-            self.imageMounted.emit(False, f"Failed to mount the image. Error: {e}")
-
-
-class ImageDismounter(QThread):
-    imageDismounted = Signal(bool, str)  # Signal to indicate dismounting completion
-
-    def run(self):
-        try:
-            subprocess.run(['tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount'], check=True)
-            self.imageDismounted.emit(True, f"Image was dismounted successfully.")
-        except subprocess.CalledProcessError:
-            self.imageDismounted.emit(False, "Failed to dismount the image.")
-
-
-class DatabaseManager:
-    def __init__(self, db_path):
-        self.db_conn = sqlite3.connect(db_path)
-
-    def __del__(self):
-        self.db_conn.close()
-
-    def get_icon_path(self, icon_type, name):
-        c = self.db_conn.cursor()
-        try:
-            c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (icon_type, name))
-            result = c.fetchone()
-
-            if result:
-                return result[0]
-            else:
-                # Fallback to default icons
-                if icon_type == 'folder':
-                    c.execute("SELECT path FROM icons WHERE type = ? AND name = ?", (icon_type, 'Default_Folder'))
-                    result = c.fetchone()
-                    return result[0] if result else 'gui/icons/unknown.png'
-                else:
-                    return 'gui/icons/unknown.png'
-        finally:
-            c.close()
-
-
-class HexFormattingThread(QThread):
-    hexFormattingCompleted = Signal(str)  # Signal to emit formatted hex string
-
-    def __init__(self, hex_content):
-        super().__init__()
-        self.hex_content = hex_content
-
-    def format_hex_chunk(self, start, hex_content):
-        hex_part = []
-        ascii_repr = []
-        for j in range(start, start + 32, 2):
-            chunk = hex_content[j:j + 2]
-            if not chunk:
-                break
-            chunk_int = int(chunk, 16)
-            hex_part.append(chunk.upper())
-            ascii_repr.append(chr(chunk_int) if 32 <= chunk_int <= 126 else '.')
-
-        hex_line = ' '.join(hex_part)
-        padding = ' ' * (48 - len(hex_line))
-        ascii_line = ''.join(ascii_repr)
-        line = f'0x{start // 2:08x}: {hex_line}{padding}  {ascii_line}'
-        return line
-
-    def run(self):
-        lines = []
-        chunk_starts = range(0, len(self.hex_content), 32)
-
-        for start in chunk_starts:
-            lines.append(self.format_hex_chunk(start, self.hex_content))
-
-        formatted_hex = '\n'.join(lines)
-        self.hexFormattingCompleted.emit(formatted_hex)
-
+from managers.unified_viewer_manager import UnifiedViewer
+from managers.image_manager import ImageManager
+from managers.database_manager import DatabaseManager
+from managers.hex_viewer_manager import HexFormatter
+from widgets.hex_viewer import HexViewer
 
 class ImageLoader(QThread):
     imageLoaded = Signal(bool, str)  # Signal to indicate completion
@@ -121,23 +32,18 @@ class ImageLoader(QThread):
 
 
 class DetailedAutopsyGUI(QMainWindow):
-    def __init__(self, db_manager):
+    def __init__(self):
         super().__init__()
 
         # Initialize instance attributes
-        self.imageDismounter = None
-        self.imageMounter = None
         self.image_mounted = False
         self.current_offset = None
         self.current_image_path = None
-        self.hexFormattingThread = None
-        self.db_manager = db_manager  # Store the DatabaseManager instance
+        self.db_manager = DatabaseManager("icon_mappings.db")  # Directly instantiate the DatabaseManager
 
         self.initialize_ui()
 
     def initialize_ui(self):
-
-        # [Your GUI initialization code here]
         self.setWindowTitle('Detailed Autopsy GUI')
         self.setGeometry(100, 100, 1200, 800)
 
@@ -147,7 +53,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # Add the "Add Evidence File" action to the File menu
         add_evidence_file_action = file_menu.addAction('Add Evidence File')
-        add_evidence_file_action.triggered.connect(self.open_image_evidence)
+        add_evidence_file_action.triggered.connect(self.load_image_evidence)
 
         # Remove evidence file action
         remove_evidence_file_action = file_menu.addAction('Remove Evidence File')
@@ -255,6 +161,18 @@ class DetailedAutopsyGUI(QMainWindow):
             self.viewer_dock.setMinimumSize(1200, current_height)
             self.viewer_dock.setMaximumSize(1200, current_height)
 
+    def load_image_evidence(self):
+        """Open an image."""
+        # Open a file dialog to select the image
+        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
+        # Check if a file was selected
+        if image_path:
+            # Normalize the path
+            image_path = os.path.normpath(image_path)
+
+            # Load the image structure into the tree viewer
+            self.load_image_structure_into_tree(image_path)
+
     def remove_image_evidence(self):
         # Check if an image is currently loaded
         if self.current_image_path is None:
@@ -272,7 +190,6 @@ class DetailedAutopsyGUI(QMainWindow):
                 self.dismount_image()
 
         # Remove the image from the tree viewer
-        # Assuming self.tree_viewer is your QTreeWidget instance
         root = self.tree_viewer.invisibleRootItem()
         for i in range(root.childCount()):
             item = root.child(i)
@@ -321,33 +238,26 @@ class DetailedAutopsyGUI(QMainWindow):
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", supported_formats)
         if image_path:  # Check if a file was selected
             image_path = os.path.normpath(image_path)  # Normalize the path
-            self.imageMounter = ImageMounter(image_path)
-            self.imageMounter.imageMounted.connect(self.on_image_mounted)
-            self.imageMounter.start()
+            self.imageManager = ImageManager('mount', image_path)
+            self.imageManager.operationCompleted.connect(self.on_image_operation_completed)
+            self.imageManager.start()
         else:
-            print("No file selected.")
-
-    def on_image_mounted(self, success, message):
-        if success:
-            self.image_mounted = True
-            QMessageBox.information(self, "Image Mounting", message)
-        else:
-            QMessageBox.critical(self, "Image Mounting", message)
+            QMessageBox.warning(self, "Image Mounting", "No image was selected.")
 
     def dismount_image(self):
         if not self.image_mounted:  # Check if an image is mounted
             QMessageBox.warning(self, "Image Dismounting", "There is no mounted image.")
             return
-        self.imageDismounter = ImageDismounter()
-        self.imageDismounter.imageDismounted.connect(self.on_image_dismounted)
-        self.imageDismounter.start()
+        self.imageManager = ImageManager('dismount')
+        self.imageManager.operationCompleted.connect(self.on_image_operation_completed)
+        self.imageManager.start()
 
-    def on_image_dismounted(self, success, message):
+    def on_image_operation_completed(self, success, message):
         if success:
-            self.image_mounted = False
-            QMessageBox.information(self, "Image Dismounting", message)
+            self.image_mounted = not self.image_mounted  # Toggle the state depending on the operation
+            QMessageBox.information(self, "Image Operation", message)
         else:
-            QMessageBox.critical(self, "Image Dismounting", message)
+            QMessageBox.critical(self, "Image Operation", message)
 
     def get_icon_path(self, icon_type, name):
         return self.db_manager.get_icon_path(icon_type, name)
@@ -386,9 +296,10 @@ class DetailedAutopsyGUI(QMainWindow):
 
             # Display hex content in formatted manner
             hex_content = file_content.hex()
-            self.hexFormattingThread = HexFormattingThread(hex_content)
-            self.hexFormattingThread.hexFormattingCompleted.connect(self.on_hex_formatting_completed)
-            self.hexFormattingThread.start()
+            formatter = HexFormatter(hex_content)
+            formatted_hex = formatter.format_hex()
+
+            self.hex_viewer.setPlainText(formatted_hex)
 
             # Display text content
             try:
@@ -404,7 +315,6 @@ class DetailedAutopsyGUI(QMainWindow):
         except subprocess.CalledProcessError as e:
             print(f"Error executing icat: {e}")
             return None
-
 
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
@@ -440,18 +350,11 @@ class DetailedAutopsyGUI(QMainWindow):
             file_content = self.display_file_content(inode_number, offset, item)
             if file_content:  # If successfully fetched file content
                 self.display_metadata(file_content, item, full_file_path, offset, inode_number)
-                # EXIF data and other details can also be moved to another function for clarity, if desired.
+                # Try to extract EXIF data
                 try:
-                    exif_data = self.extract_exif_data(file_content)
-                    # ... rest of the EXIF data extraction code ...
+                    self.extract_exif_data(file_content)
                 except Exception as e:
                     print(f"Error extracting EXIF data: {e}")
-                    self.exif_viewer.setPlainText("Error extracting EXIF data.")
-
-        # Set the current tab to Hex after processing the file
-        hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
-        self.viewer_tab.setCurrentIndex(hex_tab_index)
-
         # Set the current tab to Hex after processing the file
         hex_tab_index = self.viewer_tab.indexOf(self.hex_viewer)
         self.viewer_tab.setCurrentIndex(hex_tab_index)
@@ -498,8 +401,6 @@ class DetailedAutopsyGUI(QMainWindow):
         extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
         self.metadata_viewer.setHtml(extended_metadata)
 
-    def on_hex_formatting_completed(self, formatted_hex):
-        self.hex_viewer.setPlainText(formatted_hex)
 
     def load_image_structure_into_tree(self, image_path):
         """Load the image structure into the tree viewer."""
@@ -520,21 +421,6 @@ class DetailedAutopsyGUI(QMainWindow):
                                    QIcon(self.get_icon_path('special', 'Partition')))  # Set an icon for the partition
 
             self.populate_tree_with_files(partition_item, image_path, offset)
-
-    def format_size(self, size_str):
-        """Formats a size string by removing leading zeros and expanding the unit."""
-        unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
-        number = int(size_str[:-1])  # Remove the unit and convert to integer
-
-        # Expand the unit abbreviation
-        unit_expanded = {
-            'K': 'KB',
-            'M': 'MB',
-            'G': 'GB',
-            'T': 'TB'
-        }.get(unit, unit)
-
-        return f"{number} {unit_expanded}"
 
     def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
         """Recursively populate the tree with files and directories."""
@@ -603,20 +489,8 @@ class DetailedAutopsyGUI(QMainWindow):
         item.setData(0, Qt.UserRole, data)
         print(f"Item expanded: {item.text(0)}")
 
-    def open_image_evidence(self):
-        """Open an image."""
-        # Open a file dialog to select the image
-        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
-        # Check if a file was selected
-        if image_path:
-            # Normalize the path
-            image_path = os.path.normpath(image_path)
-
-            # Load the image structure into the tree viewer
-            self.load_image_structure_into_tree(image_path)
-
-    def extract_exif_data(self, image_content):
-        image = Image.open(io.BytesIO(image_content))
+    def extract_exif_data(self, file_content):
+        image = Image.open(io.BytesIO(file_content))
 
         # Check if the image format supports EXIF
         if image.format != "JPEG":
@@ -633,8 +507,31 @@ class DetailedAutopsyGUI(QMainWindow):
                         structured_data.append((tag_name, tag_value))
                     except Exception as e:
                         print(f"Error processing key {key}: {e}")
-            return structured_data
-        return []
+
+            # Convert EXIF data into an HTML table
+            exif_table = "<table border='1'>"
+            for key, value in structured_data:
+                exif_table += f"<tr><td><b>{key}</b></td><td>{value}</td></tr>"
+            exif_table += "</table>"
+
+            self.exif_viewer.setHtml(exif_table)
+
+        return structured_data
+
+    def format_size(self, size_str):
+        """Formats a size string by removing leading zeros and expanding the unit."""
+        unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
+        number = int(size_str[:-1])  # Remove the unit and convert to integer
+
+        # Expand the unit abbreviation
+        unit_expanded = {
+            'K': 'KB',
+            'M': 'MB',
+            'G': 'GB',
+            'T': 'TB'
+        }.get(unit, unit)
+
+        return f"{number} {unit_expanded}"
 
 
 def get_partitions(image_path):

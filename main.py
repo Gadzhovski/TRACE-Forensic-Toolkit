@@ -1,6 +1,5 @@
 from PySide6.QtWidgets import QApplication
 from gui.mainwindow import DetailedAutopsyGUI
-from gui.mainwindow import DatabaseManager
 
 
 if __name__ == '__main__':
@@ -12,7 +11,7 @@ if __name__ == '__main__':
             color: black;
         }
     """)
-    db_manager = DatabaseManager('icon_mappings.db')  # Replace 'icon_mappings.db' with your actual database path
-    window = DetailedAutopsyGUI(db_manager)
+
+    window = DetailedAutopsyGUI()
     window.show()
     app.exec()

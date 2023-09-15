@@ -1,4 +1,5 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
+
 from gui.widgets.picture_viewer import PictureViewer
 from gui.widgets.pdf_viewer import PDFViewer
 
