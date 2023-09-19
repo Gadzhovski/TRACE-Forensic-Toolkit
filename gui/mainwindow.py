@@ -300,6 +300,40 @@ class DetailedAutopsyGUI(QMainWindow):
             print(f"Error executing icat: {e}")
             return None
 
+    # def on_item_clicked(self, item):
+    #     data = item.data(0, Qt.UserRole)
+    #     inode_number = data.get("inode_number") if data else None
+    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
+    #
+    #     if data is None:  # Check if data is None before proceeding
+    #         return
+    #
+    #     # If it's a directory or a partition
+    #     if 'd' in data.get("type", "") or inode_number is None:
+    #         self.handle_directory(data, item)
+    #
+    #     # For other types (e.g., QLabel or QTextEdit), clear their content
+    #     if isinstance(self.application_viewer, QLabel) or isinstance(self.application_viewer, QTextEdit):
+    #         self.application_viewer.clear()
+    #
+    #     # Construct the full path of the file by traversing the tree upwards
+    #     full_file_path = item.text(0)
+    #     parent_item = item.parent()
+    #     while parent_item is not None:
+    #         full_file_path = f"{parent_item.text(0)}/{full_file_path}"
+    #         parent_item = parent_item.parent()
+    #
+    #     if inode_number:  # It's a file
+    #         file_content = self.display_file_content(inode_number, offset)
+    #         if file_content:  # If successfully fetched file content
+    #             self.application_viewer.display(file_content)  # Use UnifiedViewer to handle the display
+    #             self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
+    #
+    #             # Try to extract EXIF data
+    #             try:
+    #                 self.extract_exif_data(file_content)
+    #             except Exception as e:
+    #                 print(f"Error extracting EXIF data: {e}")
     def on_item_clicked(self, item):
         data = item.data(0, Qt.UserRole)
         inode_number = data.get("inode_number") if data else None
@@ -326,7 +360,16 @@ class DetailedAutopsyGUI(QMainWindow):
         if inode_number:  # It's a file
             file_content = self.display_file_content(inode_number, offset)
             if file_content:  # If successfully fetched file content
-                self.application_viewer.display(file_content)  # Use UnifiedViewer to handle the display
+                file_extension = item.text(0).split('.')[-1].lower()  # Extract the file extension in lowercase
+
+                # Check if it's an audio or video file
+                audio_video_extensions = ["mp3", "wav", "mp4", "avi", "mkv", "flv"]  # Add more extensions as needed
+                if file_extension in audio_video_extensions:
+                    # Use UnifiedViewer to handle audio/video display
+                    self.application_viewer.display(file_content, file_type="audio_video")
+                else:
+                    self.application_viewer.display(file_content)
+
                 self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
 
                 # Try to extract EXIF data
@@ -453,3 +496,4 @@ class DetailedAutopsyGUI(QMainWindow):
         }.get(unit, unit)
 
         return f"{number} {unit_expanded}"
+
