@@ -1,9 +1,6 @@
-import io
 import os
 import subprocess
 
-from PIL import Image
-from PIL.ExifTags import TAGS
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
@@ -17,6 +14,7 @@ from managers.database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
 from managers.unified_viewer_manager import UnifiedViewer
+from gui.widgets.exif_viewer import ExifViewer
 
 
 class DetailedAutopsyGUI(QMainWindow):
@@ -131,7 +129,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
 
         # Create exif data viewer
-        self.exif_viewer = QTextEdit()
+        self.exif_viewer = ExifViewer(self)
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
 
         self.viewer_dock = QDockWidget('Viewer', self)
@@ -172,6 +170,19 @@ class DetailedAutopsyGUI(QMainWindow):
             # Load the image structure into the tree viewer
             self.load_image_structure_into_tree(image_path)
 
+    # Clear UI components and reset internal state
+    def clear_ui(self):
+        self.listing_table.clearContents()
+        self.hex_viewer_widget.clear_content()
+        self.text_viewer.clear_content()
+        self.application_viewer.clear()
+        self.metadata_viewer.clear()
+        self.exif_viewer.clear_content()
+
+        self.current_image_path = None
+        self.current_offset = None
+        self.image_mounted = False
+
     def remove_image_evidence(self):
         # Check if an image is currently loaded
         if self.current_image_path is None:
@@ -196,19 +207,7 @@ class DetailedAutopsyGUI(QMainWindow):
                 root.removeChild(item)
                 break
 
-        # Clear other UI components, e.g., listing_table, hex_viewer, etc.
-        self.listing_table.clearContents()
-        self.hex_viewer_widget.clear_content()
-        self.text_viewer.clear_content()
-        self.application_viewer.clear()
-        self.metadata_viewer.clear()
-        self.exif_viewer.clear()
-
-        # Reset internal state
-        self.current_image_path = None
-        self.current_offset = None
-        self.image_mounted = False
-
+        self.clear_ui()
         QMessageBox.information(self, "Remove Evidence", "Evidence has been removed.")
 
     def closeEvent(self, event):
@@ -428,33 +427,16 @@ class DetailedAutopsyGUI(QMainWindow):
         print(f"Item expanded: {item.text(0)}")
 
     def extract_exif_data(self, file_content):
-        image = Image.open(io.BytesIO(file_content))
+        # Use the ExifViewer widget to load and display EXIF data
+        exif_data = self.exif_viewer.manager.load_exif_data(file_content)
 
-        # Check if the image format supports EXIF
-        if image.format != "JPEG":
-            return []
+        if exif_data:
+            # Display the EXIF data using the ExifViewer widget
+            self.exif_viewer.display_exif_data(exif_data)
+        else:
+            self.exif_viewer.clear_content()
 
-        exif_data = image._getexif()
-        structured_data = []
-        if exif_data is not None:
-            for key in exif_data.keys():
-                if key in TAGS and isinstance(exif_data[key], (str, bytes)):
-                    try:
-                        tag_name = TAGS[key]
-                        tag_value = exif_data[key]
-                        structured_data.append((tag_name, tag_value))
-                    except Exception as e:
-                        print(f"Error processing key {key}: {e}")
-
-            # Convert EXIF data into an HTML table
-            exif_table = "<table border='1'>"
-            for key, value in structured_data:
-                exif_table += f"<tr><td><b>{key}</b></td><td>{value}</td></tr>"
-            exif_table += "</table>"
-
-            self.exif_viewer.setHtml(exif_table)
-
-        return structured_data
+        return exif_data
 
     @staticmethod
     def format_size(size_str):
