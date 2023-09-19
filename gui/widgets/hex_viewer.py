@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayo
                                QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QListWidget,
                                QDialog, QSizePolicy, QHBoxLayout, QFrame)
 
-from managers.hex_viewer_manager import HexFormatter
+from managers.hex_viewer_manager import HexViewerManager
 
 
 class HexViewer(QWidget):
@@ -14,6 +14,7 @@ class HexViewer(QWidget):
         self.hex_formatter = None
         self.current_page = 0
         self.initialize_ui()
+
 
     def initialize_ui(self):
         self.layout = QVBoxLayout()
@@ -126,7 +127,7 @@ class HexViewer(QWidget):
         self.search_results_frame.setVisible(False)
         # Clear the search bar text
         self.search_bar.setText("")
-        self.hex_formatter = HexFormatter(hex_content)
+        self.hex_formatter = HexViewerManager(hex_content)
         self.update_navigation_states()
         self.display_current_page()
         # clear the page number entry
@@ -272,7 +273,6 @@ class HexViewer(QWidget):
         else:
             QMessageBox.warning(self, "Navigation Error", "Invalid address.")
 
-
     def navigate_to_address(self, address):
         # Convert the address string back to an integer
         address_int = int(address, 16)
@@ -320,3 +320,4 @@ class SearchResultsDialog(QDialog):
     def item_clicked(self, item):
         address = item.text().split(":")[1].strip()
         self.navigate_to_address.emit(address)  # Emit the address
+

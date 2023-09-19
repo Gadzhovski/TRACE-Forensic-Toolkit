@@ -1,4 +1,4 @@
-class HexFormatter:
+class HexViewerManager:
     LINES_PER_PAGE = 1024
 
     def __init__(self, hex_content):
@@ -71,3 +71,4 @@ class HexFormatter:
             return line
         except ValueError:
             return None
+

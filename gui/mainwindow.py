@@ -1,34 +1,22 @@
-import hashlib
 import io
 import os
-import re
 import subprocess
 
-import magic
 from PIL import Image
 from PIL.ExifTags import TAGS
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
                                QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
                                QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem)
 
-from managers.unified_viewer_manager import UnifiedViewer
-from managers.image_manager import ImageManager
-from managers.database_manager import DatabaseManager
 from gui.widgets.hex_viewer import HexViewer
+from gui.widgets.metadata_viewer import MetadataViewer
+from gui.widgets.text_viewer import TextViewer
+from managers.database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
-
-
-class ImageLoader(QThread):
-    imageLoaded = Signal(bool, str)  # Signal to indicate completion
-
-    def __init__(self, gui):
-        super().__init__()
-        self.gui = gui
-
-    def run(self):
-        self.gui.load_image_structure_into_tree()
+from managers.image_manager import ImageManager
+from managers.unified_viewer_manager import UnifiedViewer
 
 
 class DetailedAutopsyGUI(QMainWindow):
@@ -42,6 +30,8 @@ class DetailedAutopsyGUI(QMainWindow):
         self.db_manager = DatabaseManager("icon_mappings.db")  # Directly instantiate the DatabaseManager
         self.image_manager = ImageManager()
         self.evidence_utils = EvidenceUtils()
+        self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
+
         self.image_manager.operationCompleted.connect(self.on_image_operation_completed)
         self.image_manager.showMessage.connect(self.display_message)
 
@@ -121,11 +111,12 @@ class DetailedAutopsyGUI(QMainWindow):
 
         self.viewer_tab = QTabWidget(self)
 
+        # Create Hex viewer
         self.hex_viewer_widget = HexViewer(self)
         self.viewer_tab.addTab(self.hex_viewer_widget, 'Hex')
 
         # Create Text viewer
-        self.text_viewer = QTextEdit()
+        self.text_viewer = TextViewer(self)
         self.viewer_tab.addTab(self.text_viewer, 'Text')
 
         # Create Application viewer
@@ -136,7 +127,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
         # Create File Metadata viewer
-        self.metadata_viewer = QTextEdit()
+        self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
 
         # Create exif data viewer
@@ -208,7 +199,7 @@ class DetailedAutopsyGUI(QMainWindow):
         # Clear other UI components, e.g., listing_table, hex_viewer, etc.
         self.listing_table.clearContents()
         self.hex_viewer_widget.clear_content()
-        self.text_viewer.clear()
+        self.text_viewer.clear_content()
         self.application_viewer.clear()
         self.metadata_viewer.clear()
         self.exif_viewer.clear()
@@ -289,24 +280,19 @@ class DetailedAutopsyGUI(QMainWindow):
             self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
             self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
 
-    def display_file_content(self, inode_number, offset, item):
+    def display_file_content(self, inode_number, offset):
         try:
-            cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe", "-o", str(offset), self.current_image_path,
-                   str(inode_number)]
-            result = subprocess.run(cmd, capture_output=True, text=False, check=True)
-            file_content = result.stdout
+            # Get the file content using the EvidenceUtils utility class
+            file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
 
-            # # Display hex content in formatted manner
+            # Display hex content in the HexViewer widget
             hex_content = file_content.hex()
             self.hex_viewer_widget.display_hex_content(hex_content)
 
             # Display text content
-            try:
-                text_content = file_content.decode('utf-8')
-            except UnicodeDecodeError:
-                text_content = "Non-text file"
-            self.text_viewer.setPlainText(text_content)
+            self.text_viewer.display_text_content(file_content)
 
+            # Display content in the application viewer
             self.application_viewer.display(file_content)
 
             return file_content  # Return file_content for further processing
@@ -339,57 +325,16 @@ class DetailedAutopsyGUI(QMainWindow):
             parent_item = parent_item.parent()
 
         if inode_number:  # It's a file
-            file_content = self.display_file_content(inode_number, offset, item)
+            file_content = self.display_file_content(inode_number, offset)
             if file_content:  # If successfully fetched file content
                 self.application_viewer.display(file_content)  # Use UnifiedViewer to handle the display
-                self.display_metadata(file_content, item, full_file_path, offset, inode_number)
+                self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
+
                 # Try to extract EXIF data
                 try:
                     self.extract_exif_data(file_content)
                 except Exception as e:
                     print(f"Error extracting EXIF data: {e}")
-
-    def display_metadata(self, file_content, item, full_file_path, offset, inode_number):
-        # Calculate MD5 and SHA-256 hashes
-        md5_hash = hashlib.md5(file_content).hexdigest()
-        sha256_hash = hashlib.sha256(file_content).hexdigest()
-
-        # Determine MIME type
-        mime_type = magic.Magic().from_buffer(file_content)
-
-        # Fetch metadata using istat
-        metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe", "-o", str(offset), self.current_image_path,
-                        str(inode_number)]
-        metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
-        metadata_content = metadata_result.stdout
-
-        # Extract times using regular expressions
-        created_time = re.search(r"Created:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                 metadata_content)
-        modified_time = re.search(r"File Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                  metadata_content)
-        accessed_time = re.search(r"Accessed:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                  metadata_content)
-        changed_time = re.search(r"MFT Modified:\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*? \((.*?)\)",
-                                 metadata_content)
-
-        # Combine all metadata in a table
-        extended_metadata = f"<b>Metadata:</b><br><table border='1'>"
-        extended_metadata += f"<tr><td>Name</td><td>{item.text(0)}</td></tr>"
-        extended_metadata += f"<tr><td>Path</td><td>{full_file_path}</td></tr>"
-        extended_metadata += f"<tr><td>Type</td><td>File</td></tr>"
-        extended_metadata += f"<tr><td>MIME Type</td><td>{mime_type}</td></tr>"
-        extended_metadata += f"<tr><td>Size</td><td>{len(file_content)}</td></tr>"
-        extended_metadata += f"<tr><td>Modified</b></td><td>{modified_time.group(1) if modified_time else 'N/A'}</td></tr>"
-        extended_metadata += f"<tr><td>Accessed</b></td><td>{accessed_time.group(1) if accessed_time else 'N/A'}</td></tr>"
-        extended_metadata += f"<tr><td>Created</b></td><td>{created_time.group(1) if created_time else 'N/A'}</td></tr>"
-        extended_metadata += f"<tr><td>Changed</b></td><td>{changed_time.group(1) if changed_time else 'N/A'}</td></tr>"
-        extended_metadata += f"<tr><td>MD5</td><td>{md5_hash}</td></tr>"
-        extended_metadata += f"<tr><td>SHA-256</td><td>{sha256_hash}</td></tr>"
-        extended_metadata += f"</table>"
-        extended_metadata += f"<br>"
-        extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
-        self.metadata_viewer.setHtml(extended_metadata)
 
     def load_image_structure_into_tree(self, image_path):
         """Load the image structure into the tree viewer."""
@@ -397,7 +342,10 @@ class DetailedAutopsyGUI(QMainWindow):
         root_item.setText(0, image_path)
         root_item.setIcon(0, QIcon(self.get_icon_path('special', 'Image')))  # Set an icon for the disk
         self.current_image_path = image_path
-        #partitions = get_partitions(image_path)
+
+        self.metadata_viewer.current_image_path = image_path
+        self.metadata_viewer.metadata_manager.set_image_path(image_path)
+
         partitions = self.evidence_utils.get_partitions(image_path)
 
         for partition in partitions:
@@ -406,7 +354,7 @@ class DetailedAutopsyGUI(QMainWindow):
             formatted_size = self.format_size(partition["size"])
             partition_item = QTreeWidgetItem(root_item)
             partition_item.setText(0,
-                                   f"{partition['description']} - {formatted_size} [Sectors: {offset} - {end_sector}]")  # Display size, start, and end sectors next to the name
+                                   f"{partition['description']} - {formatted_size} [Sectors: {offset} - {end_sector}]")
             partition_item.setIcon(0,
                                    QIcon(self.get_icon_path('special', 'Partition')))  # Set an icon for the partition
 
@@ -459,53 +407,6 @@ class DetailedAutopsyGUI(QMainWindow):
                 inode_number = entry.split()[1].split('-')[0]
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
 
-
-
-
-    ##### faster version #####
-    # def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
-    #     """Recursively populate the tree with files and directories."""
-    #     self.current_offset = offset
-    #
-    #     entries = self.evidence_utils.list_files(image_path, offset, inode_number)
-    #     for entry in entries:
-    #         entry_type, entry_name = entry.split()[0], entry.split()[-1]
-    #         child_item = QTreeWidgetItem(parent_item)
-    #         child_item.setText(0, entry_name)
-    #
-    #         if 'd' in entry_type:  # It's a directory
-    #             # Extract inode number
-    #             inode_number = entry.split()[1].split('-')[0]
-    #
-    #             # Fetch the icon path from the database
-    #             icon_path = self.get_icon_path('folder', entry_name)
-    #             if not icon_path:
-    #                 icon_path = self.get_icon_path('folder', 'Default_Folder')  # Fallback to default folder icon
-    #
-    #             icon = QIcon(icon_path)
-    #             child_item.setIcon(0, icon)
-    #             child_item.setData(0, Qt.UserRole,
-    #                                {"inode_number": inode_number, "offset": offset, "type": "directory"})
-    #
-    #             child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)  # Always show expand arrow initially
-    #
-    #         else:  # It's a file
-    #             # Extract the file extension and set the appropriate icon
-    #             file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
-    #
-    #             # Fetch the icon path from the database
-    #             icon_path = self.get_icon_path('file', file_extension)
-    #             if not icon_path:
-    #                 icon_path = self.get_icon_path('file', 'default_file')  # Fallback to default file icon
-    #
-    #             icon = QIcon(icon_path)
-    #             child_item.setIcon(0, icon)
-    #
-    #             # Extract inode number for the file
-    #             inode_number = entry.split()[1].split('-')[0]
-    #             child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
-
-
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
         offset = data.get("offset", self.current_offset) if data else self.current_offset
@@ -525,31 +426,6 @@ class DetailedAutopsyGUI(QMainWindow):
         data["expanded"] = True
         item.setData(0, Qt.UserRole, data)
         print(f"Item expanded: {item.text(0)}")
-
-
-
-    ##### faster version #####
-    # def on_item_expanded(self, item):
-    #     data = item.data(0, Qt.UserRole)
-    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
-    #     inode_number = data.get("inode_number") if data else None
-    #
-    #     # Check if this folder has been expanded before
-    #     if data and data.get("expanded", False):
-    #         print(f"Item already expanded: {item.text(0)}")
-    #         return  # Skip if already expanded
-    #
-    #     if inode_number or offset:
-    #         self.populate_tree_with_files(item, self.current_image_path, offset, inode_number)
-    #         if not item.childCount():  # No children means directory is empty
-    #             item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
-    #
-    #     # Mark this folder as expanded
-    #     if data is None:
-    #         data = {}
-    #     data["expanded"] = True
-    #     item.setData(0, Qt.UserRole, data)
-    #     print(f"Item expanded: {item.text(0)}")
 
     def extract_exif_data(self, file_content):
         image = Image.open(io.BytesIO(file_content))

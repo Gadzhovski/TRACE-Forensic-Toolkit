@@ -67,3 +67,20 @@ class EvidenceUtils:
             # print(f"Error executing fls: {e}")
             return []
 
+    @staticmethod
+    def get_file_content(offset, image_path, inode_number):
+        cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe", "-o", str(offset), image_path, str(inode_number)]
+        result = subprocess.run(cmd, capture_output=True, text=False, check=True)
+        return result.stdout
+
+    @staticmethod
+    def get_file_metadata(offset, image_path, inode_number):
+        if offset is None:
+            raise ValueError("Offset value is None!")
+        if image_path is None:
+            raise ValueError("Image path value is None!")
+        if inode_number is None:
+            raise ValueError("Inode number value is None!")
+        metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe", "-o", str(offset), image_path, str(inode_number)]
+        metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
+        return metadata_result.stdout
