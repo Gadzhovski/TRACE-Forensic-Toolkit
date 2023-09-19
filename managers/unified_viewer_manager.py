@@ -1,37 +1,39 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget
 
-from gui.widgets.picture_viewer import PictureViewer
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 from gui.widgets.pdf_viewer import PDFViewer
+from gui.widgets.picture_viewer import PictureViewer
 
 
 class UnifiedViewer(QWidget):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.initialize_ui()
+        super(UnifiedViewer, self).__init__(parent)
 
-    def initialize_ui(self):
-        self.layout = QVBoxLayout()
-        self.stacked_widget = QStackedWidget(self)
+        self.layout = QVBoxLayout(self)
 
+        # Initialize the viewers
+        self.pdf_viewer = PDFViewer()
         self.picture_viewer = PictureViewer(self)
-        self.pdf_viewer = PDFViewer(parent=self)
 
-        self.stacked_widget.addWidget(self.picture_viewer)
-        self.stacked_widget.addWidget(self.pdf_viewer)
+        # Add the viewers to the layout
+        self.layout.addWidget(self.pdf_viewer)
+        self.layout.addWidget(self.picture_viewer)
 
-        self.layout.addWidget(self.stacked_widget)
-        self.setLayout(self.layout)
+        # Hide both viewers initially
+        self.pdf_viewer.hide()
+        self.picture_viewer.hide()
 
     def display(self, content):
-        # Try to identify the type of content
-        if content.startswith(b'%PDF'):
+        # A simple check to determine content type.
+        # This can be extended to handle other types or be more sophisticated.
+        if content.startswith(b"%PDF"):
+            self.picture_viewer.hide()
+            self.pdf_viewer.show()
             self.pdf_viewer.display(content)
-            self.stacked_widget.setCurrentWidget(self.pdf_viewer)
         else:
-            # Default to displaying as an image
+            self.pdf_viewer.hide()
+            self.picture_viewer.show()
             self.picture_viewer.display(content)
-            self.stacked_widget.setCurrentWidget(self.picture_viewer)
 
     def clear(self):
-        self.picture_viewer.clear()
         self.pdf_viewer.clear()
+        self.picture_viewer.clear()

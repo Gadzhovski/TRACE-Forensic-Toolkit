@@ -24,9 +24,32 @@ class PictureViewer(QWidget):
         container_layout.setContentsMargins(0, 0, 0, 0)  # Remove any margins
         container_layout.setSpacing(0)  # Remove spacing between toolbar and viewer
 
-        # Create toolbar with page navigation controls
+        # Create and setup the toolbar
+        self.setup_toolbar()
+
+        # Add the toolbar to the container layout
+        container_layout.addWidget(self.toolbar)
+
+        self.image_label = QLabel(self)
+        self.image_label.setContentsMargins(0, 0, 0, 0)
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
+
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
+        self.scroll_area.setWidget(self.image_label)
+        self.scroll_area.setWidgetResizable(True)
+
+        container_layout.addWidget(self.scroll_area)
+        container_widget.setLayout(container_layout)
+        self.layout.addWidget(container_widget)
+        self.setLayout(self.layout)
+
+    def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
+        self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
         # Create actions for the toolbar
         zoom_in_icon = QIcon("gui/icons/zoom-in.png")
@@ -58,31 +81,10 @@ class PictureViewer(QWidget):
         self.toolbar.addAction(reset_action)
         self.toolbar.addAction(self.export_action)
 
-        # Set the toolbar style
-        self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
-
-        container_layout.addWidget(self.toolbar)
-
-        self.image_label = QLabel(self)
-        self.image_label.setContentsMargins(0, 0, 0, 0)
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
-
-        self.scroll_area = QScrollArea(self)
-        self.scroll_area.setContentsMargins(0, 0, 0, 0)
-        self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
-        self.scroll_area.setWidget(self.image_label)
-        self.scroll_area.setWidgetResizable(True)
-
-        container_layout.addWidget(self.scroll_area)
-        container_widget.setLayout(container_layout)
-        self.layout.addWidget(container_widget)
-        self.setLayout(self.layout)
-
-    def display(self, image_data):
-        self.original_image_bytes = image_data  # Save the original image bytes
+    def display(self, content):
+        self.original_image_bytes = content  # Save the original image bytes
         # Convert byte data to QPixmap
-        qt_image = QImage.fromData(image_data)
+        qt_image = QImage.fromData(content)
         pixmap = QPixmap.fromImage(qt_image)
         self.original_pixmap = pixmap.copy()  # Save the original pixmap
         self.image_label.setPixmap(pixmap)

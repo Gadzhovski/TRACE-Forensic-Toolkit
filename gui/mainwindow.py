@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
                                QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem)
 
-from gui.widgets.pdf_viewer import PDFViewer
 from managers.unified_viewer_manager import UnifiedViewer
 from managers.image_manager import ImageManager
 from managers.database_manager import DatabaseManager
 from gui.widgets.hex_viewer import HexViewer
+from managers.evidence_utils import EvidenceUtils
 
 
 class ImageLoader(QThread):
@@ -40,13 +40,16 @@ class DetailedAutopsyGUI(QMainWindow):
         self.current_offset = None
         self.current_image_path = None
         self.db_manager = DatabaseManager("icon_mappings.db")  # Directly instantiate the DatabaseManager
+        self.image_manager = ImageManager()
+        self.evidence_utils = EvidenceUtils()
+        self.image_manager.operationCompleted.connect(self.on_image_operation_completed)
+        self.image_manager.showMessage.connect(self.display_message)
 
         self.initialize_ui()
 
     def initialize_ui(self):
         self.setWindowTitle('Detailed Autopsy GUI')
         self.setGeometry(100, 100, 1200, 800)
-
 
         # Create a menu bar
         menu_bar = QMenuBar(self)
@@ -95,10 +98,13 @@ class DetailedAutopsyGUI(QMainWindow):
 
         self.tree_viewer = QTreeWidget(self)
         self.tree_viewer.setHeaderHidden(True)
+
         tree_dock = QDockWidget('Tree Viewer', self)
+
         tree_dock.setWidget(self.tree_viewer)
-        self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
+
+        self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
 
         result_viewer = QTabWidget(self)
@@ -115,9 +121,6 @@ class DetailedAutopsyGUI(QMainWindow):
 
         self.viewer_tab = QTabWidget(self)
 
-        # Create Hex viewer
-        # self.hex_viewer = QTextEdit()   old code
-        # self.viewer_tab.addTab(self.hex_viewer, 'Hex')
         self.hex_viewer_widget = HexViewer(self)
         self.viewer_tab.addTab(self.hex_viewer_widget, 'Hex')
 
@@ -141,7 +144,9 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
 
         self.viewer_dock = QDockWidget('Viewer', self)
+
         self.viewer_dock.setWidget(self.viewer_tab)
+
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
 
         # Set initial size constraints for the dock widget
@@ -151,10 +156,10 @@ class DetailedAutopsyGUI(QMainWindow):
         # Connect the visibilityChanged signal to a custom slot
         self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
 
-        details_area = QTextEdit(self)
-        details_dock = QDockWidget('Details Area', self)
-        details_dock.setWidget(details_area)
-        self.addDockWidget(Qt.RightDockWidgetArea, details_dock)
+        # details_area = QTextEdit(self)
+        # details_dock = QDockWidget('Details Area', self)
+        # details_dock.setWidget(details_area)
+        # self.addDockWidget(Qt.RightDockWidgetArea, details_dock)
 
     def on_viewer_dock_focus(self, visible):
         if visible:  # If the QDockWidget is focused/visible
@@ -206,6 +211,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.text_viewer.clear()
         self.application_viewer.clear()
         self.metadata_viewer.clear()
+        self.exif_viewer.clear()
 
         # Reset internal state
         self.current_image_path = None
@@ -239,21 +245,10 @@ class DetailedAutopsyGUI(QMainWindow):
                             "*.vdi);;XVA Files (*.xva);;VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow " \
                             "*.qcow2);;All Files (*)"
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", supported_formats)
-        if image_path:  # Check if a file was selected
-            image_path = os.path.normpath(image_path)  # Normalize the path
-            self.imageManager = ImageManager('mount', image_path)
-            self.imageManager.operationCompleted.connect(self.on_image_operation_completed)
-            self.imageManager.start()
-        else:
-            QMessageBox.warning(self, "Image Mounting", "No image was selected.")
+        self.image_manager.mount_image(image_path)  # Use ImageManager to mount the image
 
     def dismount_image(self):
-        if not self.image_mounted:  # Check if an image is mounted
-            QMessageBox.warning(self, "Image Dismounting", "There is no mounted image.")
-            return
-        self.imageManager = ImageManager('dismount')
-        self.imageManager.operationCompleted.connect(self.on_image_operation_completed)
-        self.imageManager.start()
+        self.image_manager.dismount_image()  # Use ImageManager to dismount the image
 
     def on_image_operation_completed(self, success, message):
         if success:
@@ -262,17 +257,21 @@ class DetailedAutopsyGUI(QMainWindow):
         else:
             QMessageBox.critical(self, "Image Operation", message)
 
+    def display_message(self, title, content):
+        QMessageBox.warning(self, title, content)
+
     def get_icon_path(self, icon_type, name):
         return self.db_manager.get_icon_path(icon_type, name)
 
     def handle_directory(self, data, item):
         inode_number = data.get("inode_number")
         offset = data.get("offset", self.current_offset)
+        entries = self.evidence_utils.list_files(self.current_image_path, offset, inode_number)
 
-        entries = list_files(self.current_image_path, offset, inode_number)
         self.listing_table.setRowCount(0)
         for entry in entries:
             entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
+
             description = "Directory" if 'd' in entry_type else "File"
 
             # Determine the icon path based on the file extension or folder name
@@ -321,13 +320,6 @@ class DetailedAutopsyGUI(QMainWindow):
         inode_number = data.get("inode_number") if data else None
         offset = data.get("offset", self.current_offset) if data else self.current_offset
 
-        index = self.viewer_tab.indexOf(self.application_viewer)
-        if isinstance(self.application_viewer, PDFViewer) and index != -1:
-            self.viewer_tab.removeTab(index)
-            self.application_viewer = QLabel(self.viewer_tab)
-            desired_index = self.viewer_tab.indexOf(self.text_viewer) + 1  # One index after Text tab
-            self.viewer_tab.insertTab(desired_index, self.application_viewer, 'Application')
-
         if data is None:  # Check if data is None before proceeding
             return
 
@@ -349,13 +341,13 @@ class DetailedAutopsyGUI(QMainWindow):
         if inode_number:  # It's a file
             file_content = self.display_file_content(inode_number, offset, item)
             if file_content:  # If successfully fetched file content
+                self.application_viewer.display(file_content)  # Use UnifiedViewer to handle the display
                 self.display_metadata(file_content, item, full_file_path, offset, inode_number)
                 # Try to extract EXIF data
                 try:
                     self.extract_exif_data(file_content)
                 except Exception as e:
                     print(f"Error extracting EXIF data: {e}")
-
 
     def display_metadata(self, file_content, item, full_file_path, offset, inode_number):
         # Calculate MD5 and SHA-256 hashes
@@ -399,14 +391,14 @@ class DetailedAutopsyGUI(QMainWindow):
         extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
         self.metadata_viewer.setHtml(extended_metadata)
 
-
     def load_image_structure_into_tree(self, image_path):
         """Load the image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
         root_item.setIcon(0, QIcon(self.get_icon_path('special', 'Image')))  # Set an icon for the disk
         self.current_image_path = image_path
-        partitions = get_partitions(image_path)
+        #partitions = get_partitions(image_path)
+        partitions = self.evidence_utils.get_partitions(image_path)
 
         for partition in partitions:
             offset = partition["start"]
@@ -424,7 +416,7 @@ class DetailedAutopsyGUI(QMainWindow):
         """Recursively populate the tree with files and directories."""
         self.current_offset = offset
 
-        entries = list_files(image_path, offset, inode_number)
+        entries = self.evidence_utils.list_files(image_path, offset, inode_number)
         for entry in entries:
             entry_type, entry_name = entry.split()[0], entry.split()[-1]
             child_item = QTreeWidgetItem(parent_item)
@@ -435,7 +427,7 @@ class DetailedAutopsyGUI(QMainWindow):
                 inode_number = entry.split()[1].split('-')[0]
 
                 # Check if the folder is empty
-                is_empty = not bool(list_files(image_path, offset, inode_number))
+                is_empty = not bool(self.evidence_utils.list_files(image_path, offset, inode_number))
 
                 # Fetch the icon path from the database
                 icon_path = self.get_icon_path('folder', entry_name)
@@ -467,6 +459,53 @@ class DetailedAutopsyGUI(QMainWindow):
                 inode_number = entry.split()[1].split('-')[0]
                 child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
 
+
+
+
+    ##### faster version #####
+    # def populate_tree_with_files(self, parent_item, image_path, offset, inode_number=None):
+    #     """Recursively populate the tree with files and directories."""
+    #     self.current_offset = offset
+    #
+    #     entries = self.evidence_utils.list_files(image_path, offset, inode_number)
+    #     for entry in entries:
+    #         entry_type, entry_name = entry.split()[0], entry.split()[-1]
+    #         child_item = QTreeWidgetItem(parent_item)
+    #         child_item.setText(0, entry_name)
+    #
+    #         if 'd' in entry_type:  # It's a directory
+    #             # Extract inode number
+    #             inode_number = entry.split()[1].split('-')[0]
+    #
+    #             # Fetch the icon path from the database
+    #             icon_path = self.get_icon_path('folder', entry_name)
+    #             if not icon_path:
+    #                 icon_path = self.get_icon_path('folder', 'Default_Folder')  # Fallback to default folder icon
+    #
+    #             icon = QIcon(icon_path)
+    #             child_item.setIcon(0, icon)
+    #             child_item.setData(0, Qt.UserRole,
+    #                                {"inode_number": inode_number, "offset": offset, "type": "directory"})
+    #
+    #             child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)  # Always show expand arrow initially
+    #
+    #         else:  # It's a file
+    #             # Extract the file extension and set the appropriate icon
+    #             file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+    #
+    #             # Fetch the icon path from the database
+    #             icon_path = self.get_icon_path('file', file_extension)
+    #             if not icon_path:
+    #                 icon_path = self.get_icon_path('file', 'default_file')  # Fallback to default file icon
+    #
+    #             icon = QIcon(icon_path)
+    #             child_item.setIcon(0, icon)
+    #
+    #             # Extract inode number for the file
+    #             inode_number = entry.split()[1].split('-')[0]
+    #             child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
+
+
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
         offset = data.get("offset", self.current_offset) if data else self.current_offset
@@ -486,6 +525,31 @@ class DetailedAutopsyGUI(QMainWindow):
         data["expanded"] = True
         item.setData(0, Qt.UserRole, data)
         print(f"Item expanded: {item.text(0)}")
+
+
+
+    ##### faster version #####
+    # def on_item_expanded(self, item):
+    #     data = item.data(0, Qt.UserRole)
+    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
+    #     inode_number = data.get("inode_number") if data else None
+    #
+    #     # Check if this folder has been expanded before
+    #     if data and data.get("expanded", False):
+    #         print(f"Item already expanded: {item.text(0)}")
+    #         return  # Skip if already expanded
+    #
+    #     if inode_number or offset:
+    #         self.populate_tree_with_files(item, self.current_image_path, offset, inode_number)
+    #         if not item.childCount():  # No children means directory is empty
+    #             item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
+    #
+    #     # Mark this folder as expanded
+    #     if data is None:
+    #         data = {}
+    #     data["expanded"] = True
+    #     item.setData(0, Qt.UserRole, data)
+    #     print(f"Item expanded: {item.text(0)}")
 
     def extract_exif_data(self, file_content):
         image = Image.open(io.BytesIO(file_content))
@@ -516,7 +580,8 @@ class DetailedAutopsyGUI(QMainWindow):
 
         return structured_data
 
-    def format_size(self, size_str):
+    @staticmethod
+    def format_size(size_str):
         """Formats a size string by removing leading zeros and expanding the unit."""
         unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
         number = int(size_str[:-1])  # Remove the unit and convert to integer
@@ -530,63 +595,3 @@ class DetailedAutopsyGUI(QMainWindow):
         }.get(unit, unit)
 
         return f"{number} {unit_expanded}"
-
-
-def get_partitions(image_path):
-    """Get partitions from an image using mmls."""
-    result = subprocess.run(
-        ["tools/sleuthkit-4.12.0-win32/bin/mmls.exe", "-M", "-B", image_path],
-        capture_output=True, text=True
-    )
-    lines = result.stdout.splitlines()
-    partitions = []
-
-    for line in lines:
-        parts = line.split()
-        # Check if the line starts with a number (partition entry)
-        if parts and re.match(r"^\d{3}:", parts[0]):
-            start_sector = int(parts[2])
-            end_sector = int(parts[3])
-            size_str = parts[5]  # Assuming that the size is now directly in the 5th column
-            description = " ".join(parts[6:])  # Description of the partition
-
-            # Run fsstat to get the file system type
-            fsstat_cmd = ["tools/sleuthkit-4.12.0-win32/bin/fsstat.exe", "-o", str(start_sector), "-t", image_path]
-            try:
-                fsstat_result = subprocess.run(fsstat_cmd, capture_output=True, text=True, check=True)
-                fs_type = fsstat_result.stdout.strip().upper()
-                fs_type = f"[{fs_type}]"
-            except subprocess.CalledProcessError:
-                fs_type = ""
-
-            partitions.append({
-                "start": start_sector,
-                "end": end_sector,
-                "size": size_str,
-                "description": f"{description} {fs_type}"
-            })
-
-    return partitions
-
-
-def list_files(image_path, offset, inode_number=None):
-    """List files in a directory using fls."""
-    try:
-        cmd = ["tools/sleuthkit-4.12.0-win32/bin/fls.exe", "-o", str(offset)]
-        if inode_number:
-            cmd.append(image_path)
-            cmd.append(str(inode_number))
-            # print(f"Executing command: {' '.join(cmd)}")  # Debugging line
-        else:
-            cmd.append(image_path)
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        lines = result.stdout.splitlines()
-        return lines
-    except subprocess.CalledProcessError as e:
-        # print(f"Error executing fls: {e}")
-        return []

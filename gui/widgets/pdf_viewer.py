@@ -6,9 +6,9 @@ from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QVBoxLayout, QWidg
 
 
 class PDFViewer(QWidget):
-    def __init__(self, pdf_content=None, parent=None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.pdf = fitz.open(stream=pdf_content, filetype="pdf") if pdf_content else None
+        self.pdf = None
         self.current_page = 0
         self.zoom_factor = 1.0  # Initialize the zoom factor here
         self.rotation_angle = 0
@@ -17,11 +17,9 @@ class PDFViewer(QWidget):
         self.pan_start_y = 0
         self.pan_mode = False
 
+        self.initialize_ui()
         if self.pdf:
-            self.initialize_ui()
             self.show_page(self.current_page)
-        else:
-            self.initialize_ui()
 
     def initialize_ui(self):
         # Set up the main layout
@@ -208,13 +206,28 @@ class PDFViewer(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to render page: {e}")
 
-    def display(self, pdf_content):
+    # def display(self, content):
+    #     if self.pdf:
+    #         self.pdf.close()
+    #     self.pdf = fitz.open(stream=content, filetype="pdf")
+    #     self.current_page = 0
+    #     self.show_page(self.current_page)
+    #     self.update_navigation_states()  # Add this line
+    def display(self, content):
         if self.pdf:
             self.pdf.close()
-        self.pdf = fitz.open(stream=pdf_content, filetype="pdf")
-        self.current_page = 0
-        self.show_page(self.current_page)
-        self.update_navigation_states()  # Add this line
+            self.pdf = None
+
+        if content:
+            try:
+                self.pdf = fitz.open(stream=content, filetype="pdf")
+                self.current_page = 0
+                self.show_page(self.current_page)
+                self.update_navigation_states()
+            except Exception as e:
+                print(f"Failed to load PDF: {e}")
+        else:
+            self.page_label.clear()
 
 
     def clear(self):
