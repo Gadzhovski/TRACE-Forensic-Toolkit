@@ -1,7 +1,6 @@
 import os
 import subprocess
 
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
@@ -367,6 +366,8 @@ class DetailedAutopsyGUI(QMainWindow):
     def on_item_clicked(self, item):
         # Clear the viewers first
         self.clear_viewers()
+        # set current tab to hex
+        self.viewer_tab.setCurrentIndex(0)
 
         data = item.data(0, Qt.UserRole)
         inode_number = data.get("inode_number") if data else None

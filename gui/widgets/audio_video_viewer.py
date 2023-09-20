@@ -120,7 +120,7 @@ class AudioVideoViewer(QWidget):
         self.playback_speed_combo.setCurrentText("1.0x")
         self._player.setPlaybackRate(1.0)
         self._player.setSource(QUrl.fromLocalFile(content))
-        self._player.play()
+        #self._player.play()
 
     def update_position(self, position):
         self.progress_label.setText("{:02d}:{:02d}".format(position // 60000, (position // 1000) % 60))
@@ -134,6 +134,8 @@ class AudioVideoViewer(QWidget):
 
     def clear(self):
         self._player.stop()
+        # clear the thumbnail of the video or audio file
+
 
     def change_playback_speed(self, speed_text):
         speed = float(speed_text.replace("x", ""))
@@ -179,5 +181,3 @@ class AudioVideoViewer(QWidget):
     def update_volume_display(self, value):
         """Update the volume display label based on the slider's value."""
         self.volume_display.setText(f"{value}%")
-
-

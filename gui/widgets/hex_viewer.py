@@ -317,4 +317,3 @@ class SearchResultsDialog(QDialog):
     def item_clicked(self, item):
         address = item.text().split(":")[1].strip()
         self.navigate_to_address.emit(address)  # Emit the address
-

@@ -64,6 +64,3 @@ class UnifiedViewer(QWidget):
         self.pdf_viewer.clear()
         self.picture_viewer.clear()
         self.audio_video_viewer.clear()
-
-
-
