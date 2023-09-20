@@ -92,6 +92,7 @@ class PictureViewer(QWidget):
     def clear(self):
         self.image_label.clear()
 
+
     def zoom_in(self):
         self.image_label.setPixmap(self.image_label.pixmap().scaled(
             self.image_label.width() * 1.2, self.image_label.height() * 1.2, Qt.KeepAspectRatio, Qt.SmoothTransformation))

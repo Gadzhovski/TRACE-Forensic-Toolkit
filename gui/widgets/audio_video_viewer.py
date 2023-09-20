@@ -135,6 +135,7 @@ class AudioVideoViewer(QWidget):
     def clear(self):
         self._player.stop()
 
+
     def change_playback_speed(self, speed_text):
         speed = float(speed_text.replace("x", ""))
         self._player.setPlaybackRate(speed)

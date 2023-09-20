@@ -1,6 +1,5 @@
 import subprocess
 import re
-from functools import lru_cache
 
 
 class EvidenceUtils:
@@ -44,17 +43,22 @@ class EvidenceUtils:
         return partitions
 
     @staticmethod
-    @lru_cache(maxsize=None)  # Unlimited cache
-    def list_files(image_path, offset, inode_number=None):
+    def list_files(image_path, offset=None, inode_number=None):
         """List files in a directory using fls."""
         try:
-            cmd = ["tools/sleuthkit-4.12.0-win32/bin/fls.exe", "-o", str(offset)]
+            cmd = ["tools/sleuthkit-4.12.0-win32/bin/fls.exe"]
+
+            # Add offset to the command if it's provided
+            if offset is not None:
+                cmd.extend(["-o", str(offset)])
+
+            cmd.append(image_path)
+
+            # Add inode number to the command if it's provided
             if inode_number:
-                cmd.append(image_path)
                 cmd.append(str(inode_number))
-                # print(f"Executing command: {' '.join(cmd)}")  # Debugging line
-            else:
-                cmd.append(image_path)
+
+            # print(f"Executing command: {' '.join(cmd)}")  # Debugging line
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -69,18 +73,50 @@ class EvidenceUtils:
 
     @staticmethod
     def get_file_content(offset, image_path, inode_number):
-        cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe", "-o", str(offset), image_path, str(inode_number)]
-        result = subprocess.run(cmd, capture_output=True, text=False, check=True)
-        return result.stdout
+        """Retrieve the content of a file using icat."""
+        try:
+            cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe"]
+
+            # Add offset to the command only if it's not None
+            if offset is not None:
+                cmd.extend(["-o", str(offset)])
+
+            cmd.append(image_path)
+            cmd.append(str(inode_number))
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=True
+            )
+            return result.stdout
+        except subprocess.CalledProcessError as e:
+            # print(f"Error executing icat: {e}")
+            return None
 
     @staticmethod
     def get_file_metadata(offset, image_path, inode_number):
-        if offset is None:
-            raise ValueError("Offset value is None!")
         if image_path is None:
             raise ValueError("Image path value is None!")
         if inode_number is None:
             raise ValueError("Inode number value is None!")
-        metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe", "-o", str(offset), image_path, str(inode_number)]
+
+        metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe"]
+
+        # Add offset to the command only if it's not None
+        if offset is not None:
+            metadata_cmd.extend(["-o", str(offset)])
+
+        metadata_cmd.extend([image_path, str(inode_number)])
+
         metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
-        return metadata_result.stdout
+        metadata_content = metadata_result.stdout
+
+        # Find the "init_size: <some number>" pattern and trim everything after it
+        match = re.search(r"(init_size: \d+)", metadata_content)
+        if match:
+            end_index = match.end()
+            metadata_content = metadata_content[:end_index]
+
+        return metadata_content
+

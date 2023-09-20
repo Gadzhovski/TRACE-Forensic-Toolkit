@@ -38,7 +38,6 @@ class HexViewer(QWidget):
         self.search_results_frame.setMaximumWidth(200)
         self.search_results_frame.setStyleSheet("border: 1px solid gray; border-radius: 5px; padding: 5px;")
 
-
         self.search_results_title = QLabel("Search Results", self.search_results_frame)
         self.search_results_title.setAlignment(Qt.AlignCenter)
 
@@ -98,7 +97,6 @@ class HexViewer(QWidget):
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-
         # After adding the search components to the toolbar:
         fixed_spacer = QWidget()
         fixed_spacer.setFixedSize(850, 10)  # Adjust 10 to control the distance from the window's border
@@ -106,10 +104,10 @@ class HexViewer(QWidget):
 
         # Search bar components
         self.search_bar = QLineEdit(self)
-        self.search_bar.setMaximumWidth(150)  # Adjust the number as per your needs
+        self.search_bar.setMaximumWidth(200)  # Adjust the number as per your needs
+        self.search_bar.setContentsMargins(5, 0, 5, 0)
         self.search_bar.setPlaceholderText("Enter search query...")
         self.search_bar.returnPressed.connect(self.trigger_search)
-
 
         self.toolbar.addWidget(self.search_bar)
 
