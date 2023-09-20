@@ -135,7 +135,6 @@ class AudioVideoViewer(QWidget):
     def clear(self):
         self._player.stop()
 
-
     def change_playback_speed(self, speed_text):
         speed = float(speed_text.replace("x", ""))
         self._player.setPlaybackRate(speed)
@@ -180,3 +179,5 @@ class AudioVideoViewer(QWidget):
     def update_volume_display(self, value):
         """Update the volume display label based on the slider's value."""
         self.volume_display.setText(f"{value}%")
+
+

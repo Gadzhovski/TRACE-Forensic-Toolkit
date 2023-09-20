@@ -127,5 +127,3 @@ class TextViewer(QWidget):
         current_font = self.text_edit.font()
         current_font.setPointSize(selected_size)
         self.text_edit.setFont(current_font)
-
-    # Clear the content when the

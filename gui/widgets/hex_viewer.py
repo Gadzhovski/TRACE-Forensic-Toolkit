@@ -15,7 +15,6 @@ class HexViewer(QWidget):
         self.current_page = 0
         self.initialize_ui()
 
-
     def initialize_ui(self):
         self.layout = QVBoxLayout()
         self.layout.setContentsMargins(0, 0, 0, 0)

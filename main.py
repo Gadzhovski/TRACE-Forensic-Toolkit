@@ -11,7 +11,6 @@ if __name__ == '__main__':
     #         color: black;
     #     }
     # """)
-
     window = DetailedAutopsyGUI()
     window.show()
     app.exec()

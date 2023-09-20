@@ -27,7 +27,8 @@ class UnifiedViewer(QWidget):
         self.picture_viewer.hide()
         self.audio_video_viewer.hide()
 
-    def display(self, content, file_type="text"):
+    def display(self, content, file_type="text", file_extension=".txt"):
+
         # Clear all views first
         self.pdf_viewer.clear()
         self.picture_viewer.clear()
@@ -45,13 +46,14 @@ class UnifiedViewer(QWidget):
                 self.audio_video_viewer.hide()
                 self.picture_viewer.show()
                 self.picture_viewer.display(content)
-        elif file_type == "audio_video":
+        elif file_type == "audio" or file_type == "video":
             self.pdf_viewer.hide()
             self.picture_viewer.hide()
             self.audio_video_viewer.show()
 
             # Save content to a temporary file
-            temp_file_path = os.path.join(os.getcwd(), 'temp_media_file')
+            temp_file_path = os.path.join(os.getcwd(), f'temp/temp_media_file{file_extension}')
+
             with open(temp_file_path, 'wb') as f:
                 f.write(content)
 
@@ -62,4 +64,6 @@ class UnifiedViewer(QWidget):
         self.pdf_viewer.clear()
         self.picture_viewer.clear()
         self.audio_video_viewer.clear()
+
+
 

@@ -1,12 +1,14 @@
 import os
 import subprocess
 
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
-                               QTreeWidget, QLabel, QTabWidget, QTreeWidgetItem,
+                               QTreeWidget, QTabWidget, QTreeWidgetItem,
                                QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem)
 
+from gui.widgets.exif_viewer import ExifViewer
 from gui.widgets.hex_viewer import HexViewer
 from gui.widgets.metadata_viewer import MetadataViewer
 from gui.widgets.text_viewer import TextViewer
@@ -14,7 +16,6 @@ from managers.database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
 from managers.unified_viewer_manager import UnifiedViewer
-from gui.widgets.exif_viewer import ExifViewer
 
 
 class DetailedAutopsyGUI(QMainWindow):
@@ -176,16 +177,21 @@ class DetailedAutopsyGUI(QMainWindow):
     # Clear UI components and reset internal state
     def clear_ui(self):
         self.listing_table.clearContents()
+        self.clear_viewers()
+
+        self.current_image_path = None
+        self.current_offset = None
+        self.image_mounted = False
+
+    # Clear all viewers
+    def clear_viewers(self):
         self.hex_viewer_widget.clear_content()
         self.text_viewer.clear_content()
         self.application_viewer.clear()
         self.metadata_viewer.clear()
         self.exif_viewer.clear_content()
 
-        self.current_image_path = None
-        self.current_offset = None
-        self.image_mounted = False
-
+    # Remove all items from the tree viewer
     def remove_image_evidence(self):
         # Check if an image is currently loaded
         if self.current_image_path is None:
@@ -213,6 +219,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.clear_ui()
         QMessageBox.information(self, "Remove Evidence", "Evidence has been removed.")
 
+    # Close the application
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -229,6 +236,7 @@ class DetailedAutopsyGUI(QMainWindow):
                     # Assuming you have a method to dismount the image
                     self.dismount_image()
 
+            self.cleanup_temp_directory()
             event.accept()
         else:
             event.ignore()
@@ -276,7 +284,6 @@ class DetailedAutopsyGUI(QMainWindow):
             self.listing_table.insertRow(row_position)
 
             name_item = QTableWidgetItem(entry_name)
-
             name_item.setIcon(icon)  # Set the icon
 
             self.listing_table.setItem(row_position, 0, name_item)
@@ -304,78 +311,7 @@ class DetailedAutopsyGUI(QMainWindow):
             print(f"Error executing icat: {e}")
             return None
 
-    def on_item_clicked(self, item):
-        data = item.data(0, Qt.UserRole)
-        inode_number = data.get("inode_number") if data else None
-        offset = data.get("offset", self.current_offset) if data else self.current_offset
-
-        if data is None:  # Check if data is None before proceeding
-            return
-
-        # If it's a directory or a partition
-        if 'd' in data.get("type", "") or inode_number is None:
-            self.handle_directory(data, item)
-            return
-
-        # Construct the full path of the file by traversing the tree upwards
-        full_file_path = item.text(0)
-        parent_item = item.parent()
-        while parent_item is not None:
-            full_file_path = f"{parent_item.text(0)}/{full_file_path}"
-            parent_item = parent_item.parent()
-
-        if inode_number:  # It's a file
-            # Load data for the currently active tab
-            current_tab_index = self.viewer_tab.currentIndex()
-            if current_tab_index == 0:  # Hex tab
-                self.display_file_content(inode_number, offset)
-            elif current_tab_index == 1:  # Text tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:  # If successfully fetched file content
-                    self.text_viewer.display_text_content(file_content)
-            elif current_tab_index == 2:  # Application tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:  # If successfully fetched file content
-                    self.application_viewer.display(file_content)
-            elif current_tab_index == 3:  # File Metadata tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:  # If successfully fetched file content
-                    self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
-            elif current_tab_index == 4:  # Exif Data tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:  # If successfully fetched file content
-                    self.extract_exif_data(file_content)
-
-    # def handle_viewer_tab_change(self, index):
-    #     item = self.tree_viewer.currentItem()
-    #     if not item:
-    #         return
-    #
-    #     data = item.data(0, Qt.UserRole)
-    #     inode_number = data.get("inode_number") if data else None
-    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
-    #
-    #     # Check if the item represents a file
-    #     if inode_number:
-    #         if index == 0:  # Hex tab
-    #             self.display_file_content(inode_number, offset)
-    #         elif index == 1:  # Text tab
-    #             file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-    #             if file_content:
-    #                 self.text_viewer.display_text_content(file_content)
-    #         elif index == 2:  # Application tab
-    #             file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-    #             if file_content:
-    #                 self.application_viewer.display(file_content)
-    #         elif index == 3:  # File Metadata tab
-    #             file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-    #             if file_content:
-    #                 self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
-    #         elif index == 4:  # Exif Data tab
-    #             file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-    #             if file_content:
-    #                 self.extract_exif_data(file_content)
-    def handle_viewer_tab_change(self, index):
+    def display_content_for_active_tab(self):
         item = self.tree_viewer.currentItem()
         if not item:
             return
@@ -393,6 +329,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # Check if the item represents a file
         if inode_number:
+            index = self.viewer_tab.currentIndex()
             if index == 0:  # Hex tab
                 self.display_file_content(inode_number, offset)
             elif index == 1:  # Text tab
@@ -402,7 +339,22 @@ class DetailedAutopsyGUI(QMainWindow):
             elif index == 2:  # Application tab
                 file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
                 if file_content:
-                    self.application_viewer.display(file_content)
+                    # Determine the file type based on the file extension
+                    file_extension = os.path.splitext(full_file_path)[-1].lower()
+                    file_type = "text"  # default
+
+                    # Define known file extensions for audio and video
+                    audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
+                    video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
+
+                    if file_extension in audio_extensions:
+                        file_type = "audio"
+                    elif file_extension in video_extensions:
+                        file_type = "video"
+
+                    # Pass the file_extension to the display method
+                    self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
+
             elif index == 3:  # File Metadata tab
                 file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
                 if file_content:
@@ -412,49 +364,26 @@ class DetailedAutopsyGUI(QMainWindow):
                 if file_content:
                     self.extract_exif_data(file_content)
 
-    # def on_item_clicked(self, item):
-    #     data = item.data(0, Qt.UserRole)
-    #     inode_number = data.get("inode_number") if data else None
-    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
-    #
-    #     if data is None:  # Check if data is None before proceeding
-    #         return
-    #
-    #     # If it's a directory or a partition
-    #     if 'd' in data.get("type", "") or inode_number is None:
-    #         self.handle_directory(data, item)
-    #
-    #     # For other types (e.g., QLabel or QTextEdit), clear their content
-    #     if isinstance(self.application_viewer, QLabel) or isinstance(self.application_viewer, QTextEdit):
-    #         self.application_viewer.clear()
-    #
-    #     # Construct the full path of the file by traversing the tree upwards
-    #     full_file_path = item.text(0)
-    #     parent_item = item.parent()
-    #     while parent_item is not None:
-    #         full_file_path = f"{parent_item.text(0)}/{full_file_path}"
-    #         parent_item = parent_item.parent()
-    #
-    #     if inode_number:  # It's a file
-    #         file_content = self.display_file_content(inode_number, offset)
-    #         if file_content:  # If successfully fetched file content
-    #             file_extension = item.text(0).split('.')[-1].lower()  # Extract the file extension in lowercase
-    #
-    #             # Check if it's an audio or video file
-    #             audio_video_extensions = ["mp3", "wav", "mp4", "avi", "mkv", "flv"]  # Add more extensions as needed
-    #             if file_extension in audio_video_extensions:
-    #                 # Use UnifiedViewer to handle audio/video display
-    #                 self.application_viewer.display(file_content, file_type="audio_video")
-    #             else:
-    #                 self.application_viewer.display(file_content)
-    #
-    #             self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
-    #
-    #             # Try to extract EXIF data
-    #             try:
-    #                 self.extract_exif_data(file_content)
-    #             except Exception as e:
-    #                 print(f"Error extracting EXIF data: {e}")
+    def on_item_clicked(self, item):
+        # Clear the viewers first
+        self.clear_viewers()
+
+        data = item.data(0, Qt.UserRole)
+        inode_number = data.get("inode_number") if data else None
+        offset = data.get("offset", self.current_offset) if data else self.current_offset
+
+        if data is None:  # Check if data is None before proceeding
+            return
+
+        # If it's a directory or a partition
+        if 'd' in data.get("type", "") or inode_number is None:
+            self.handle_directory(data, item)
+            return
+
+        self.display_content_for_active_tab()
+
+    def handle_viewer_tab_change(self, index):
+        self.display_content_for_active_tab()
 
     def load_image_structure_into_tree(self, image_path):
         """Load the image structure into the tree viewer."""
@@ -584,3 +513,11 @@ class DetailedAutopsyGUI(QMainWindow):
         }.get(unit, unit)
 
         return f"{number} {unit_expanded}"
+
+    @staticmethod
+    def cleanup_temp_directory():
+        temp_dir_path = os.path.join(os.getcwd(), 'temp')
+        for filename in os.listdir(temp_dir_path):
+            file_path = os.path.join(temp_dir_path, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
