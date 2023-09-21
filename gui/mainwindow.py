@@ -289,7 +289,7 @@ class DetailedAutopsyGUI(QMainWindow):
             self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
             self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
 
-    def display_file_content(self, inode_number, offset):
+    def display_hex_content(self, inode_number, offset):
         try:
             # Get the file content using the EvidenceUtils utility class
             file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
@@ -297,12 +297,6 @@ class DetailedAutopsyGUI(QMainWindow):
             # Display hex content in the HexViewer widget
             hex_content = file_content.hex()
             self.hex_viewer_widget.display_hex_content(hex_content)
-
-            # Display text content
-            self.text_viewer.display_text_content(file_content)
-
-            # Display content in the application viewer
-            self.application_viewer.display(file_content)
 
             return file_content  # Return file_content for further processing
 
@@ -330,7 +324,7 @@ class DetailedAutopsyGUI(QMainWindow):
         if inode_number:
             index = self.viewer_tab.currentIndex()
             if index == 0:  # Hex tab
-                self.display_file_content(inode_number, offset)
+                self.display_hex_content(inode_number, offset)
             elif index == 1:  # Text tab
                 file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
                 if file_content:

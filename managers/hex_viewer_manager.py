@@ -72,3 +72,5 @@ class HexViewerManager:
         except ValueError:
             return None
 
+    def convert_content_to_hex(self, file_content):
+        return file_content.hex()

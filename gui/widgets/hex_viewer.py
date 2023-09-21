@@ -11,7 +11,7 @@ from managers.hex_viewer_manager import HexViewerManager
 class HexViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.hex_formatter = None
+        self.hex_viewer_manager = None
         self.current_page = 0
         self.initialize_ui()
 
@@ -124,7 +124,7 @@ class HexViewer(QWidget):
         self.search_results_frame.setVisible(False)
         # Clear the search bar text
         self.search_bar.setText("")
-        self.hex_formatter = HexViewerManager(hex_content)
+        self.hex_viewer_manager = HexViewerManager(hex_content)
         self.update_navigation_states()
         self.display_current_page()
         # clear the page number entry
@@ -145,11 +145,11 @@ class HexViewer(QWidget):
         self.display_current_page()
 
     def load_last_page(self):
-        self.current_page = self.hex_formatter.total_pages() - 1
+        self.current_page = self.hex_viewer_manager.total_pages() - 1
         self.display_current_page()
 
     def next_page(self):
-        if self.current_page < self.hex_formatter.total_pages() - 1:
+        if self.current_page < self.hex_viewer_manager.total_pages() - 1:
             self.current_page += 1
         self.display_current_page()
 
@@ -163,7 +163,7 @@ class HexViewer(QWidget):
         self.navigate_to_address(address)
 
     def display_current_page(self):
-        formatted_hex = self.hex_formatter.format_hex(self.current_page)
+        formatted_hex = self.hex_viewer_manager.format_hex(self.current_page)
 
         # Clear the table first
         self.hex_table.setRowCount(0)
@@ -200,7 +200,7 @@ class HexViewer(QWidget):
     def go_to_page_by_entry(self):
         try:
             page_num = int(self.page_entry.text()) - 1
-            if 0 <= page_num < self.hex_formatter.total_pages():
+            if 0 <= page_num < self.hex_viewer_manager.total_pages():
                 self.current_page = page_num
                 self.display_current_page()
                 self.update_navigation_states()
@@ -210,18 +210,18 @@ class HexViewer(QWidget):
             QMessageBox.warning(self, "Invalid Page", "Please enter a valid page number.")
 
     def update_navigation_states(self):
-        if not self.hex_formatter:
+        if not self.hex_viewer_manager:
             self.prev_action.setEnabled(False)
             self.next_action.setEnabled(False)
             return
 
         self.prev_action.setEnabled(self.current_page > 0)
-        self.next_action.setEnabled(self.current_page < self.hex_formatter.total_pages() - 1)
+        self.next_action.setEnabled(self.current_page < self.hex_viewer_manager.total_pages() - 1)
         self.page_entry.setText(str(self.current_page + 1))
-        self.total_pages_label.setText(f"of {self.hex_formatter.total_pages()}")
+        self.total_pages_label.setText(f"of {self.hex_viewer_manager.total_pages()}")
 
     def update_total_pages_label(self):
-        total_pages = self.hex_formatter.total_pages()
+        total_pages = self.hex_viewer_manager.total_pages()
         current_page = self.current_page + 1
         self.total_pages_label.setText(f"{current_page} of {total_pages}")
 
@@ -231,7 +231,7 @@ class HexViewer(QWidget):
             QMessageBox.warning(self, "Search Error", "Please enter a search query.")
             return
 
-        matches = self.hex_formatter.search(query)
+        matches = self.hex_viewer_manager.search(query)
         self.search_results_widget.clear()  # Clear previous results
 
         if matches:
@@ -256,11 +256,11 @@ class HexViewer(QWidget):
 
         if line is not None:
             # The rest of the logic remains the same
-            self.current_page = line // self.hex_formatter.LINES_PER_PAGE
+            self.current_page = line // self.hex_viewer_manager.LINES_PER_PAGE
             self.display_current_page()
 
             # Navigate to the specific row on that page and highlight it
-            row_in_page = line % self.hex_formatter.LINES_PER_PAGE
+            row_in_page = line % self.hex_viewer_manager.LINES_PER_PAGE
             self.hex_table.selectRow(row_in_page)
             for col in range(1, 17):
                 item = self.hex_table.item(row_in_page, col)
@@ -279,11 +279,11 @@ class HexViewer(QWidget):
 
         if line is not None:
             # The rest of the logic remains the same
-            self.current_page = line // self.hex_formatter.LINES_PER_PAGE
+            self.current_page = line // self.hex_viewer_manager.LINES_PER_PAGE
             self.display_current_page()
 
             # Navigate to the specific row on that page and highlight it
-            row_in_page = line % self.hex_formatter.LINES_PER_PAGE
+            row_in_page = line % self.hex_viewer_manager.LINES_PER_PAGE
             self.hex_table.selectRow(row_in_page)
             for col in range(1, 17):
                 item = self.hex_table.item(row_in_page, col)
@@ -317,3 +317,4 @@ class SearchResultsDialog(QDialog):
     def item_clicked(self, item):
         address = item.text().split(":")[1].strip()
         self.navigate_to_address.emit(address)  # Emit the address
+

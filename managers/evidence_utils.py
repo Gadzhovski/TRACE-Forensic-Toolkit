@@ -1,6 +1,5 @@
 import subprocess
 import re
-import concurrent.futures
 
 
 class EvidenceUtils:
@@ -44,17 +43,6 @@ class EvidenceUtils:
         return partitions
 
     @staticmethod
-    def parallel_list_files(image_paths, offsets=None, inode_numbers=None):
-        # Use default empty lists if None are provided
-        offsets = offsets or [None] * len(image_paths)
-        inode_numbers = inode_numbers or [None] * len(image_paths)
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            results = list(executor.map(EvidenceUtils.list_files, image_paths, offsets, inode_numbers))
-
-        return results
-
-    @staticmethod
     def list_files(image_path, offset=None, inode_number=None):
         """List files in a directory using fls."""
         try:
@@ -82,6 +70,7 @@ class EvidenceUtils:
         except subprocess.CalledProcessError as e:
             # print(f"Error executing fls: {e}")
             return []
+
 
     @staticmethod
     def get_file_content(offset, image_path, inode_number):
