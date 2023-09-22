@@ -71,7 +71,6 @@ class EvidenceUtils:
             # print(f"Error executing fls: {e}")
             return []
 
-
     @staticmethod
     def get_file_content(offset, image_path, inode_number):
         """Retrieve the content of a file using icat."""

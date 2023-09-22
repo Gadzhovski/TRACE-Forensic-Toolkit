@@ -60,17 +60,3 @@ class HexViewerManager:
             start += len(query_hex)
 
         return matches
-
-    def get_line_by_address(self, address):
-        """Convert an address to a line number."""
-        if not address.startswith("0x"):
-            return None
-        try:
-            byte_address = int(address, 16)
-            line = byte_address // 16
-            return line
-        except ValueError:
-            return None
-
-    def convert_content_to_hex(self, file_content):
-        return file_content.hex()

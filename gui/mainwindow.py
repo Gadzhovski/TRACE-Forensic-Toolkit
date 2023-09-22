@@ -30,10 +30,19 @@ class DetailedAutopsyGUI(QMainWindow):
         self.evidence_utils = EvidenceUtils()
         self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
 
-        self.image_manager.operationCompleted.connect(self.on_image_operation_completed)
-        self.image_manager.showMessage.connect(self.display_message)
+        self.image_manager.operationCompleted.connect(
+            lambda success, message: (
+                QMessageBox.information(self, "Image Operation", message) if success else QMessageBox.critical(self,
+                                                                                                               "Image "
+                                                                                                               "Operation",
+                                                                                                               message),
+                setattr(self, "image_mounted", not self.image_mounted) if success else None)[1]
+        )
 
         self.initialize_ui()
+
+    def show_message_box(self, title, content):
+        QMessageBox.warning(self, title, content)
 
     def initialize_ui(self):
         self.setWindowTitle('Detailed Autopsy GUI')
@@ -53,11 +62,11 @@ class DetailedAutopsyGUI(QMainWindow):
 
         # Add "Image Mounting" submenu to the File menu
         image_mounting_menu = file_menu.addAction('Image Mounting')
-        image_mounting_menu.triggered.connect(self.mount_image)
+        image_mounting_menu.triggered.connect(self.image_manager.mount_image)
 
         # Add the "Image Unmounting" action to the File menu
         image_unmounting_menu = file_menu.addAction('Image Unmounting')
-        image_unmounting_menu.triggered.connect(self.dismount_image)
+        image_unmounting_menu.triggered.connect(self.image_manager.dismount_image)
 
         # Add the "Exit" action to the File menu
         exit_action = file_menu.addAction('Exit')
@@ -145,8 +154,8 @@ class DetailedAutopsyGUI(QMainWindow):
         # Connect the visibilityChanged signal to a custom slot
         self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
 
-        # Connect the currentChanged signal to handle_viewer_tab_change
-        self.viewer_tab.currentChanged.connect(self.handle_viewer_tab_change)
+        # Connect the currentChanged signal to
+        self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
 
         # details_area = QTextEdit(self)
         # details_dock = QDockWidget('Details Area', self)
@@ -160,18 +169,6 @@ class DetailedAutopsyGUI(QMainWindow):
             current_height = self.viewer_dock.size().height()  # Get the current height
             self.viewer_dock.setMinimumSize(1200, current_height)
             self.viewer_dock.setMaximumSize(1200, current_height)
-
-    def load_image_evidence(self):
-        """Open an image."""
-        # Open a file dialog to select the image
-        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
-        # Check if a file was selected
-        if image_path:
-            # Normalize the path
-            image_path = os.path.normpath(image_path)
-
-            # Load the image structure into the tree viewer
-            self.load_image_structure_into_tree(image_path)
 
     # Clear UI components and reset internal state
     def clear_ui(self):
@@ -190,22 +187,24 @@ class DetailedAutopsyGUI(QMainWindow):
         self.metadata_viewer.clear()
         self.exif_viewer.clear_content()
 
+    def load_image_evidence(self):
+        """Open an image."""
+        # Open a file dialog to select the image
+        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
+        # Check if a file was selected
+        if image_path:
+            # Normalize the path
+            image_path = os.path.normpath(image_path)
+
+            # Load the image structure into the tree viewer
+            self.load_image_structure_into_tree(image_path)
+
     # Remove all items from the tree viewer
     def remove_image_evidence(self):
         # Check if an image is currently loaded
         if self.current_image_path is None:
             QMessageBox.warning(self, "Remove Evidence", "No evidence is currently loaded.")
             return
-
-        # Check if an image is currently mounted
-        if self.image_mounted:
-            # Prompt the user to confirm if they want to dismount the mounted image
-            dismount_reply = QMessageBox.question(self, 'Dismount Image',
-                                                  'Do you want to dismount the mounted image before removing it?',
-                                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                                  QMessageBox.StandardButton.Yes)
-            if dismount_reply == QMessageBox.StandardButton.Yes:
-                self.dismount_image()
 
         # Remove the image from the tree viewer
         root = self.tree_viewer.invisibleRootItem()
@@ -233,61 +232,12 @@ class DetailedAutopsyGUI(QMainWindow):
 
                 if dismount_reply == QMessageBox.StandardButton.Yes:
                     # Assuming you have a method to dismount the image
-                    self.dismount_image()
+                    self.image_manager.dismount_image()
 
             self.cleanup_temp_directory()
             event.accept()
         else:
             event.ignore()
-
-    def mount_image(self):
-        supported_formats = "EWF Files (*.E01);;Raw Files (*.dd);;AFF4 Files (*.aff4);;VHD Files (*.vhd);;VDI Files (" \
-                            "*.vdi);;XVA Files (*.xva);;VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow " \
-                            "*.qcow2);;All Files (*)"
-        image_path, _ = QFileDialog.getOpenFileName(self, "Select Disk Image", "", supported_formats)
-        self.image_manager.mount_image(image_path)  # Use ImageManager to mount the image
-
-    def dismount_image(self):
-        self.image_manager.dismount_image()  # Use ImageManager to dismount the image
-
-    def on_image_operation_completed(self, success, message):
-        if success:
-            self.image_mounted = not self.image_mounted  # Toggle the state depending on the operation
-            QMessageBox.information(self, "Image Operation", message)
-        else:
-            QMessageBox.critical(self, "Image Operation", message)
-
-    def display_message(self, title, content):
-        QMessageBox.warning(self, title, content)
-
-    def get_icon_path(self, icon_type, name):
-        return self.db_manager.get_icon_path(icon_type, name)
-
-    def handle_directory(self, data, item):
-        inode_number = data.get("inode_number")
-        offset = data.get("offset", self.current_offset)
-        entries = self.evidence_utils.list_files(self.current_image_path, offset, inode_number)
-
-        self.listing_table.setRowCount(0)
-        for entry in entries:
-            entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
-
-            description = "Directory" if 'd' in entry_type else "File"
-
-            # Determine the icon path based on the file extension or folder name
-            icon_path = self.get_icon_path('folder' if 'd' in entry_type else 'file', entry_name)
-            icon = QIcon(icon_path)
-
-            # Add new row to the table
-            row_position = self.listing_table.rowCount()
-            self.listing_table.insertRow(row_position)
-
-            name_item = QTableWidgetItem(entry_name)
-            name_item.setIcon(icon)  # Set the icon
-
-            self.listing_table.setItem(row_position, 0, name_item)
-            self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
-            self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
 
     def display_hex_content(self, inode_number, offset):
         try:
@@ -355,7 +305,43 @@ class DetailedAutopsyGUI(QMainWindow):
             elif index == 4:  # Exif Data tab
                 file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
                 if file_content:
-                    self.extract_exif_data(file_content)
+                    self.exif_viewer.load_and_display_exif_data(file_content)
+
+    def handle_directory(self, data, item):
+        inode_number = data.get("inode_number")
+        offset = data.get("offset", self.current_offset)
+        entries = self.evidence_utils.list_files(self.current_image_path, offset, inode_number)
+
+        self.listing_table.setRowCount(0)
+        for entry in entries:
+            entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
+
+            description = "Directory" if 'd' in entry_type else "File"
+
+            if 'd' in entry_type:
+                # For directories, use the folder name
+                icon_name = entry_name
+                icon_type = 'folder'
+            else:
+                # For files, use the file extension
+                icon_name = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+                icon_type = 'file'
+
+            # Determine the icon path
+            icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
+
+            icon = QIcon(icon_path)
+
+            # Add new row to the table
+            row_position = self.listing_table.rowCount()
+            self.listing_table.insertRow(row_position)
+
+            name_item = QTableWidgetItem(entry_name)
+            name_item.setIcon(icon)  # Set the icon
+
+            self.listing_table.setItem(row_position, 0, name_item)
+            self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
+            self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
 
     def on_item_clicked(self, item):
         # Clear the viewers first
@@ -377,14 +363,11 @@ class DetailedAutopsyGUI(QMainWindow):
 
         self.display_content_for_active_tab()
 
-    def handle_viewer_tab_change(self, index):
-        self.display_content_for_active_tab()
-
     def load_image_structure_into_tree(self, image_path):
         """Load the image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
-        root_item.setIcon(0, QIcon(self.get_icon_path('special', 'Image')))
+        root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Image')))
         self.current_image_path = image_path
 
         self.metadata_viewer.current_image_path = image_path
@@ -403,7 +386,7 @@ class DetailedAutopsyGUI(QMainWindow):
             partition_item = QTreeWidgetItem(root_item)
             partition_item.setText(0,
                                    f"{partition['description']} - {formatted_size} [Sectors: {offset} - {end_sector}]")
-            partition_item.setIcon(0, QIcon(self.get_icon_path('special', 'Partition')))
+            partition_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Partition')))
 
             self.populate_tree_with_files(partition_item, image_path, offset)
 
@@ -432,9 +415,10 @@ class DetailedAutopsyGUI(QMainWindow):
                 is_empty = not bool(self.evidence_utils.list_files(image_path, offset, inode_number))
 
                 # Fetch the icon path from the database
-                icon_path = self.get_icon_path('folder', entry_name)
+                icon_path = (self.db_manager.get_icon_path('folder', entry_name))
                 if not icon_path:
-                    icon_path = self.get_icon_path('folder', 'Default_Folder')  # Fallback to default folder icon
+                    icon_path = self.db_manager.get_icon_path('folder',
+                                                              'Default_Folder')  # Fallback to default folder icon
 
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
@@ -450,9 +434,9 @@ class DetailedAutopsyGUI(QMainWindow):
                 file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
 
                 # Fetch the icon path from the database
-                icon_path = self.get_icon_path('file', file_extension)
+                icon_path = self.db_manager.get_icon_path('file', file_extension)
                 if not icon_path:
-                    icon_path = self.get_icon_path('file', 'default_file')  # Fallback to default file icon
+                    icon_path = self.db_manager.get_icon_path('file', 'default_file')  # Fallback to default file icon
 
                 icon = QIcon(icon_path)
                 child_item.setIcon(0, icon)
@@ -480,18 +464,6 @@ class DetailedAutopsyGUI(QMainWindow):
         data["expanded"] = True
         item.setData(0, Qt.UserRole, data)
         print(f"Item expanded: {item.text(0)}")
-
-    def extract_exif_data(self, file_content):
-        # Use the ExifViewer widget to load and display EXIF data
-        exif_data = self.exif_viewer.manager.load_exif_data(file_content)
-
-        if exif_data:
-            # Display the EXIF data using the ExifViewer widget
-            self.exif_viewer.display_exif_data(exif_data)
-        else:
-            self.exif_viewer.clear_content()
-
-        return exif_data
 
     @staticmethod
     def format_size(size_str):

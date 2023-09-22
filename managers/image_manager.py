@@ -1,6 +1,7 @@
 import os
 import subprocess
 from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 
 class ImageManager(QThread):
@@ -28,16 +29,31 @@ class ImageManager(QThread):
             except subprocess.CalledProcessError:
                 self.operationCompleted.emit(False, "Failed to dismount the image.")
 
-    def mount_image(self, image_path):
-        """Attempt to mount an image from the provided path."""
-        if image_path:
-            # Normalize the path
-            self.image_path = os.path.normpath(image_path)
-            self.file_name = os.path.basename(self.image_path)
-            self.operation = 'mount'
-            self.start()  # This will invoke the run method
-        else:
-            self.showMessage.emit("Image Mounting", "No image was selected.")
+    def mount_image(self):
+        """Attempt to mount an image after prompting the user to select one."""
+        supported_formats = ("EWF Files (*.E01);;Raw Files (*.dd);;AFF4 Files (*.aff4);;"
+                             "VHD Files (*.vhd);;VDI Files (*.vdi);;XVA Files (*.xva);;"
+                             "VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow *.qcow2);;All Files (*)")
+        valid_extensions = ['.e01', '.dd', '.aff4', '.vhd', '.vdi', '.xva', '.vmdk', '.ova', '.qcow', '.qcow2']
+
+        while True:
+            image_path, _ = QFileDialog.getOpenFileName(QWidget(None), "Select Disk Image", "", supported_formats)
+
+            if not image_path:
+                return  # No image was selected, so just exit the function
+
+            file_extension = os.path.splitext(image_path)[1].lower()
+            if file_extension in valid_extensions:
+                break  # Exit the loop if a valid image was selected
+            else:
+                # Show an error message for an invalid file
+                QMessageBox.warning(QWidget(None), "Invalid File Type", "The selected file is not a valid disk image.")
+
+        # Normalize the path
+        self.image_path = os.path.normpath(image_path)
+        self.file_name = os.path.basename(self.image_path)
+        self.operation = 'mount'
+        self.start()  # This will invoke the run method
 
     def dismount_image(self):
         """Attempt to dismount the currently mounted image."""
