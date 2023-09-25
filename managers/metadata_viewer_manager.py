@@ -2,12 +2,16 @@ import hashlib
 import magic
 import re
 
+from PySide6.QtWidgets import QTextEdit
 
-class MetadataViewerManager:
+
+class MetadataViewerManager(QTextEdit):
 
     def __init__(self, image_path, evidence_utils):
+        super().__init__()
         self.current_image_path = None
         self.evidence_utils = evidence_utils
+        self.setReadOnly(True)
 
     def set_image_path(self, image_path):
         self.current_image_path = image_path
@@ -48,3 +52,8 @@ class MetadataViewerManager:
         extended_metadata += f"<br>"
         extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
         return extended_metadata
+
+    def display_metadata(self, file_content, item, full_file_path, offset, inode_number):
+        metadata_content = self.generate_metadata(file_content, item, full_file_path, offset,
+                                                  inode_number)
+        self.setHtml(metadata_content)

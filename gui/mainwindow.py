@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 
 from gui.widgets.exif_viewer import ExifViewer
 from gui.widgets.hex_viewer import HexViewer
-from gui.widgets.metadata_viewer import MetadataViewer
+from managers.metadata_viewer_manager import MetadataViewerManager
 from gui.widgets.text_viewer import TextViewer
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
@@ -28,7 +28,7 @@ class DetailedAutopsyGUI(QMainWindow):
         self.db_manager = DatabaseManager("icon_mappings.db")  # Directly instantiate the DatabaseManager
         self.image_manager = ImageManager()
         self.evidence_utils = EvidenceUtils()
-        self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
+        self.metadata_viewer = MetadataViewerManager(self.current_image_path, self.evidence_utils)
 
         self.image_manager.operationCompleted.connect(
             lambda success, message: (
@@ -134,7 +134,8 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
         # Create File Metadata viewer
-        self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
+        #self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
+        self.metadata_viewer = MetadataViewerManager(self.current_image_path, self.evidence_utils)
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
 
         # Create exif data viewer
@@ -368,10 +369,9 @@ class DetailedAutopsyGUI(QMainWindow):
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
         root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Image')))
-        self.current_image_path = image_path
 
-        self.metadata_viewer.current_image_path = image_path
-        self.metadata_viewer.metadata_manager.set_image_path(image_path)
+        self.current_image_path = image_path
+        self.metadata_viewer.set_image_path(image_path)
 
         partitions = self.evidence_utils.get_partitions(image_path)
 

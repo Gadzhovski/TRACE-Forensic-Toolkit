@@ -108,37 +108,6 @@ class HexViewer(QWidget):
 
     def setup_hex_table(self):
         self.hex_table = QTableWidget()
-        # self.hex_table.verticalScrollBar().setStyleSheet("""
-        # QScrollBar:vertical {
-        #     border: none;
-        #     width: 12px;
-        #     margin: 15px 0 15px 0;  /* top, right, bottom, left */
-        #     background: #f1f1f1;
-        #     border-radius: 6px;
-        # }
-        #
-        # QScrollBar::handle:vertical {
-        #     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        #                                 stop: 0 #888, stop: 0.5 #555, stop:1 #888);
-        #     min-height: 30px;
-        #     border-radius: 6px;
-        # }
-        #
-        # QScrollBar::handle:vertical:hover {
-        #     background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        #                                 stop: 0 #999, stop: 0.5 #666, stop:1 #999);
-        # }
-        #
-        # QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-        #     border: none;
-        #     background: none;
-        # }
-        #
-        # QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-        #     background: none;
-        # }
-        # """)
-
         self.hex_table.setColumnCount(18)
         self.hex_table.setHorizontalHeaderLabels(['Address'] + [f'{i:02X}' for i in range(16)] + ['ASCII'])
         self.hex_table.verticalHeader().setVisible(False)
