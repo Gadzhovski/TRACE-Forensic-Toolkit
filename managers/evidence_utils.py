@@ -119,3 +119,70 @@ class EvidenceUtils:
             metadata_content = metadata_content[:end_index]
 
         return metadata_content
+
+    @staticmethod
+    def construct_full_file_path(item):
+        full_file_path = item.text(0)
+        parent_item = item.parent()
+        while parent_item is not None:
+            full_file_path = f"{parent_item.text(0)}/{full_file_path}"
+            parent_item = parent_item.parent()
+        return full_file_path
+
+    @staticmethod
+    def determine_file_properties(entry_type, entry_name):
+        description = "Directory" if 'd' in entry_type else "File"
+        if 'd' in entry_type:
+            icon_name = entry_name
+            icon_type = 'folder'
+        else:
+            icon_name = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+            icon_type = 'file'
+        return description, icon_name, icon_type
+
+    @staticmethod
+    def get_file_type_from_extension(file_extension):
+        audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
+        video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
+
+        if file_extension in audio_extensions:
+            return "audio"
+        elif file_extension in video_extensions:
+            return "video"
+        else:
+            return "text"
+
+    @staticmethod
+    def handle_directory(data, current_image_path):
+        inode_number = data.get("inode_number")
+        offset = data.get("offset")
+        entries = EvidenceUtils.list_files(current_image_path, offset, inode_number)
+        return entries
+
+    @staticmethod
+    def populate_tree_with_files(parent_item, image_path, offset, inode_number=None, db_manager=None):
+        current_offset = offset
+        if offset is None and inode_number is None:  # No partitions
+            entries = EvidenceUtils.list_files(image_path)
+        else:
+            entries = EvidenceUtils.list_files(image_path, offset, inode_number)
+        return entries
+
+    @staticmethod
+    def _populate_directory_item(child_item, entry_name, entry_parts, image_path, offset, db_manager):
+        inode_number = entry_parts[1].split('-')[0]
+        icon_path = EvidenceUtils._get_icon_path('folder', entry_name, default="Default_Folder", db_manager=db_manager)
+        entries = EvidenceUtils.list_files(image_path, offset, inode_number)
+        return icon_path, entries
+
+    @staticmethod
+    def _populate_file_item(child_item, entry_name, entry_parts, offset, db_manager):
+        file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+        inode_number = entry_parts[1].split('-')[0]
+        icon_path = EvidenceUtils._get_icon_path('file', file_extension, default="default_file", db_manager=db_manager)
+        return icon_path
+
+    @staticmethod
+    def _get_icon_path(item_type, name, default=None, db_manager=None):
+        icon_path = db_manager.get_icon_path(item_type, name)
+        return icon_path or db_manager.get_icon_path(item_type, default)

@@ -114,9 +114,10 @@ class HexViewer(QWidget):
         self.hex_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.hex_table.setShowGrid(False)
 
-    def display_hex_content(self, hex_content):
+    def display_hex_content(self, file_content):
+        hex_content = file_content.hex()
         self.search_results_widget.clear()
-        #self.search_results_frame.setVisible(False)
+        # self.search_results_frame.setVisible(False)
         # Clear the search bar text
         self.search_bar.setText("")
         self.hex_viewer_manager = HexViewerManager(hex_content)

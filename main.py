@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import QApplication
-from gui.mainwindow import DetailedAutopsyGUI
+from gui.mainwindow import MainWindow
 
 
 if __name__ == '__main__':
@@ -11,6 +11,6 @@ if __name__ == '__main__':
     #         color: black;
     #     }
     # """)
-    window = DetailedAutopsyGUI()
+    window = MainWindow()
     window.show()
     app.exec()

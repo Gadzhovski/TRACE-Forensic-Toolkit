@@ -1,5 +1,4 @@
 import os
-import subprocess
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
@@ -17,7 +16,7 @@ from managers.image_manager import ImageManager
 from managers.unified_viewer_manager import UnifiedViewer
 
 
-class DetailedAutopsyGUI(QMainWindow):
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
@@ -41,11 +40,8 @@ class DetailedAutopsyGUI(QMainWindow):
 
         self.initialize_ui()
 
-    def show_message_box(self, title, content):
-        QMessageBox.warning(self, title, content)
-
     def initialize_ui(self):
-        self.setWindowTitle('Detailed Autopsy GUI')
+        self.setWindowTitle('GUI4n6')
         self.setGeometry(100, 100, 1200, 800)
 
         # Create a menu bar
@@ -119,8 +115,8 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab = QTabWidget(self)
 
         # Create Hex viewer
-        self.hex_viewer_widget = HexViewer(self)
-        self.viewer_tab.addTab(self.hex_viewer_widget, 'Hex')
+        self.hex_viewer = HexViewer(self)
+        self.viewer_tab.addTab(self.hex_viewer, 'Hex')
 
         # Create Text viewer
         self.text_viewer = TextViewer(self)
@@ -134,7 +130,6 @@ class DetailedAutopsyGUI(QMainWindow):
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
         # Create File Metadata viewer
-        #self.metadata_viewer = MetadataViewer(self.current_image_path, self.evidence_utils)
         self.metadata_viewer = MetadataViewerManager(self.current_image_path, self.evidence_utils)
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
 
@@ -182,7 +177,7 @@ class DetailedAutopsyGUI(QMainWindow):
 
     # Clear all viewers
     def clear_viewers(self):
-        self.hex_viewer_widget.clear_content()
+        self.hex_viewer.clear_content()
         self.text_viewer.clear_content()
         self.application_viewer.clear()
         self.metadata_viewer.clear()
@@ -240,20 +235,13 @@ class DetailedAutopsyGUI(QMainWindow):
         else:
             event.ignore()
 
-    def display_hex_content(self, inode_number, offset):
-        try:
-            # Get the file content using the EvidenceUtils utility class
-            file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-
-            # Display hex content in the HexViewer widget
-            hex_content = file_content.hex()
-            self.hex_viewer_widget.display_hex_content(hex_content)
-
-            return file_content  # Return file_content for further processing
-
-        except subprocess.CalledProcessError as e:
-            print(f"Error executing icat: {e}")
-            return None
+    def construct_full_file_path(self, item):
+        full_file_path = item.text(0)
+        parent_item = item.parent()
+        while parent_item is not None:
+            full_file_path = f"{parent_item.text(0)}/{full_file_path}"
+            parent_item = parent_item.parent()
+        return full_file_path
 
     def display_content_for_active_tab(self):
         item = self.tree_viewer.currentItem()
@@ -264,85 +252,77 @@ class DetailedAutopsyGUI(QMainWindow):
         inode_number = data.get("inode_number") if data else None
         offset = data.get("offset", self.current_offset) if data else self.current_offset
 
-        # Construct the full path of the file by traversing the tree upwards
-        full_file_path = item.text(0)
-        parent_item = item.parent()
-        while parent_item is not None:
-            full_file_path = f"{parent_item.text(0)}/{full_file_path}"
-            parent_item = parent_item.parent()
+        full_file_path = self.construct_full_file_path(item)
 
         # Check if the item represents a file
         if inode_number:
+            file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
+            if not file_content:
+                return
+
             index = self.viewer_tab.currentIndex()
             if index == 0:  # Hex tab
-                self.display_hex_content(inode_number, offset)
+                self.hex_viewer.display_hex_content(file_content)
             elif index == 1:  # Text tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:
-                    self.text_viewer.display_text_content(file_content)
+                self.text_viewer.display_text_content(file_content)
             elif index == 2:  # Application tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:
-                    # Determine the file type based on the file extension
-                    file_extension = os.path.splitext(full_file_path)[-1].lower()
-                    file_type = "text"  # default
-
-                    # Define known file extensions for audio and video
-                    audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
-                    video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
-
-                    if file_extension in audio_extensions:
-                        file_type = "audio"
-                    elif file_extension in video_extensions:
-                        file_type = "video"
-
-                    # Pass the file_extension to the display method
-                    self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
-
+                self.display_application_content(file_content, full_file_path)
             elif index == 3:  # File Metadata tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:
-                    self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
+                self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
             elif index == 4:  # Exif Data tab
-                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-                if file_content:
-                    self.exif_viewer.load_and_display_exif_data(file_content)
+                self.exif_viewer.load_and_display_exif_data(file_content)
 
-    def handle_directory(self, data, item):
+    def display_application_content(self, file_content, full_file_path):
+        file_extension = os.path.splitext(full_file_path)[-1].lower()
+        file_type = "text"  # default
+
+        audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
+        video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
+
+        if file_extension in audio_extensions:
+            file_type = "audio"
+        elif file_extension in video_extensions:
+            file_type = "video"
+        self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
+
+    def handle_directory(self, data):
         inode_number = data.get("inode_number")
         offset = data.get("offset", self.current_offset)
         entries = self.evidence_utils.list_files(self.current_image_path, offset, inode_number)
+        self.update_listing_table(entries)
 
+    def update_listing_table(self, entries):
         self.listing_table.setRowCount(0)
         for entry in entries:
             entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
+            #description, icon_name, icon_type = self.determine_file_properties(entry_type, entry_name)
+            description, icon_name, icon_type = EvidenceUtils.determine_file_properties(entry_type, entry_name)
+            self.insert_row_into_listing_table(entry_name, entry_inode, description, icon_name, icon_type)
 
-            description = "Directory" if 'd' in entry_type else "File"
+    # def determine_file_properties(self, entry_type, entry_name):
+    #     description = "Directory" if 'd' in entry_type else "File"
+    #     if 'd' in entry_type:
+    #         icon_name = entry_name
+    #         icon_type = 'folder'
+    #     else:
+    #         icon_name = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+    #         icon_type = 'file'
+    #     return description, icon_name, icon_type
 
-            if 'd' in entry_type:
-                # For directories, use the folder name
-                icon_name = entry_name
-                icon_type = 'folder'
-            else:
-                # For files, use the file extension
-                icon_name = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
-                icon_type = 'file'
+    def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type):
+        icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
+        icon = QIcon(icon_path)
 
-            # Determine the icon path
-            icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
+        # Add new row to the table
+        row_position = self.listing_table.rowCount()
+        self.listing_table.insertRow(row_position)
 
-            icon = QIcon(icon_path)
+        name_item = QTableWidgetItem(entry_name)
+        name_item.setIcon(icon)  # Set the icon
 
-            # Add new row to the table
-            row_position = self.listing_table.rowCount()
-            self.listing_table.insertRow(row_position)
-
-            name_item = QTableWidgetItem(entry_name)
-            name_item.setIcon(icon)  # Set the icon
-
-            self.listing_table.setItem(row_position, 0, name_item)
-            self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
-            self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
+        self.listing_table.setItem(row_position, 0, name_item)
+        self.listing_table.setItem(row_position, 1, QTableWidgetItem(entry_inode))
+        self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
 
     def on_item_clicked(self, item):
         # Clear the viewers first
@@ -352,14 +332,13 @@ class DetailedAutopsyGUI(QMainWindow):
 
         data = item.data(0, Qt.UserRole)
         inode_number = data.get("inode_number") if data else None
-        offset = data.get("offset", self.current_offset) if data else self.current_offset
 
         if data is None:  # Check if data is None before proceeding
             return
 
         # If it's a directory or a partition
         if 'd' in data.get("type", "") or inode_number is None:
-            self.handle_directory(data, item)
+            self.handle_directory(data)
             return
 
         self.display_content_for_active_tab()
@@ -402,48 +381,40 @@ class DetailedAutopsyGUI(QMainWindow):
         for entry in entries:
             entry_parts = entry.split()
             entry_type = entry_parts[0]
-            entry_name = " ".join(entry_parts[2:])  # Adjusted parsing
+            entry_name = " ".join(entry_parts[2:])
 
             child_item = QTreeWidgetItem(parent_item)
             child_item.setText(0, entry_name)
 
             if 'd' in entry_type:  # It's a directory
-                # Extract inode number
-                inode_number = entry.split()[1].split('-')[0]
-
-                # Check if the folder is empty
-                is_empty = not bool(self.evidence_utils.list_files(image_path, offset, inode_number))
-
-                # Fetch the icon path from the database
-                icon_path = (self.db_manager.get_icon_path('folder', entry_name))
-                if not icon_path:
-                    icon_path = self.db_manager.get_icon_path('folder',
-                                                              'Default_Folder')  # Fallback to default folder icon
-
-                icon = QIcon(icon_path)
-                child_item.setIcon(0, icon)
-                child_item.setData(0, Qt.UserRole,
-                                   {"inode_number": inode_number, "offset": offset, "type": "directory"})
-
-                if not is_empty:
-                    child_item.setChildIndicatorPolicy(
-                        QTreeWidgetItem.ShowIndicator)  # Show expand arrow only if directory is not empty
-
+                self._populate_directory_item(child_item, entry_name, entry_parts, image_path, offset)
             else:  # It's a file
-                # Extract the file extension and set the appropriate icon
-                file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+                self._populate_file_item(child_item, entry_name, entry_parts, offset)
 
-                # Fetch the icon path from the database
-                icon_path = self.db_manager.get_icon_path('file', file_extension)
-                if not icon_path:
-                    icon_path = self.db_manager.get_icon_path('file', 'default_file')  # Fallback to default file icon
+    def _populate_directory_item(self, child_item, entry_name, entry_parts, image_path, offset):
+        inode_number = entry_parts[1].split('-')[0]
 
-                icon = QIcon(icon_path)
-                child_item.setIcon(0, icon)
+        # Fetch the icon path from the database
+        icon_path = self._get_icon_path('folder', entry_name, default="Default_Folder")
+        child_item.setIcon(0, QIcon(icon_path))
+        child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "directory"})
 
-                # Extract inode number for the file
-                inode_number = entry.split()[1].split('-')[0]
-                child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
+        # Check if the folder is empty
+        if self.evidence_utils.list_files(image_path, offset, inode_number):
+            child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+
+    def _populate_file_item(self, child_item, entry_name, entry_parts, offset):
+        file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
+        inode_number = entry_parts[1].split('-')[0]
+
+        # Fetch the icon path from the database
+        icon_path = self._get_icon_path('file', file_extension, default="default_file")
+        child_item.setIcon(0, QIcon(icon_path))
+        child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
+
+    def _get_icon_path(self, item_type, name, default=None):
+        icon_path = self.db_manager.get_icon_path(item_type, name)
+        return icon_path or self.db_manager.get_icon_path(item_type, default)
 
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
