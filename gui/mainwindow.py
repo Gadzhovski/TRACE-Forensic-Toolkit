@@ -6,10 +6,11 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QTreeWidget, QTabWidget, QTreeWidgetItem,
                                QFileDialog, QMessageBox, QTableWidget, QTableWidgetItem)
 
-from gui.widgets.exif_viewer import ExifViewer
-from gui.widgets.hex_viewer import HexViewer
+from modules.exif_tab import ExifViewer
+from modules.hex_tab import HexViewer
+from modules.text_tab import TextViewer
+
 from managers.metadata_viewer_manager import MetadataViewerManager
-from gui.widgets.text_viewer import TextViewer
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
@@ -235,14 +236,6 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
-    def construct_full_file_path(self, item):
-        full_file_path = item.text(0)
-        parent_item = item.parent()
-        while parent_item is not None:
-            full_file_path = f"{parent_item.text(0)}/{full_file_path}"
-            parent_item = parent_item.parent()
-        return full_file_path
-
     def display_content_for_active_tab(self):
         item = self.tree_viewer.currentItem()
         if not item:
@@ -286,28 +279,15 @@ class MainWindow(QMainWindow):
         self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
 
     def handle_directory(self, data):
-        inode_number = data.get("inode_number")
-        offset = data.get("offset", self.current_offset)
-        entries = self.evidence_utils.list_files(self.current_image_path, offset, inode_number)
+        entries = self.evidence_utils.handle_directory(data, self.current_image_path)
         self.update_listing_table(entries)
 
     def update_listing_table(self, entries):
         self.listing_table.setRowCount(0)
         for entry in entries:
             entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
-            #description, icon_name, icon_type = self.determine_file_properties(entry_type, entry_name)
-            description, icon_name, icon_type = EvidenceUtils.determine_file_properties(entry_type, entry_name)
+            description, icon_name, icon_type = self.evidence_utils.determine_file_properties(entry_type, entry_name)
             self.insert_row_into_listing_table(entry_name, entry_inode, description, icon_name, icon_type)
-
-    # def determine_file_properties(self, entry_type, entry_name):
-    #     description = "Directory" if 'd' in entry_type else "File"
-    #     if 'd' in entry_type:
-    #         icon_name = entry_name
-    #         icon_type = 'folder'
-    #     else:
-    #         icon_name = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
-    #         icon_type = 'file'
-    #     return description, icon_name, icon_type
 
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type):
         icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
@@ -459,3 +439,12 @@ class MainWindow(QMainWindow):
             file_path = os.path.join(temp_dir_path, filename)
             if os.path.isfile(file_path):
                 os.remove(file_path)
+
+    @staticmethod
+    def construct_full_file_path(item):
+        full_file_path = item.text(0)
+        parent_item = item.parent()
+        while parent_item is not None:
+            full_file_path = f"{parent_item.text(0)}/{full_file_path}"
+            parent_item = parent_item.parent()
+        return full_file_path
