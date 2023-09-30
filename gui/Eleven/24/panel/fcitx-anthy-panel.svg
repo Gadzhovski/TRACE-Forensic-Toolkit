@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg361"
+   inkscape:version="1.2.1 (9c6d41e410, 2022-07-14, custom)"
+   sodipodi:docname="fcitx-anthy-panel.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview363"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="33.416667"
+     inkscape:cx="12"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1011"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg361" />
+  <defs
+     id="defs358">
+    <style
+       id="current-color-scheme"
+       type="text/css">
+         .ColorScheme-Text { color:#dedede; }
+     </style>
+  </defs>
+  <path
+     id="rect584"
+     style="fill:currentColor;stroke-width:1.08012;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers"
+     class="ColorScheme-Text"
+     d="M 10.333984,5 9.9453125,7.2558245 C 8.9321135,7.2928072 7.959099,7.3051446 7,7.3105112 V 8.5136176 H 9.6660156 C 9.2216161,10.803747 8.7039275,13.178233 8.1113281,14.300781 l 1,0.906886 c 1.3333989,-1.513024 2.5576739,-1.767693 4.0761719,-1.767693 0.777799,0 1.369344,0.214999 1.777344,0.647125 0.406999,0.388377 0.611328,0.92827 0.611328,1.620092 0,0.776988 -0.31436,0.894364 -0.94336,1.282858 -0.592999,0.346494 -1.482769,0.519523 -2.667968,0.519523 -1.126299,0 -2.0205449,-0.03921 -2.964844,-0.26204 v 1.68845 c 1.119099,0.07117 2.053973,0.0638 3.076172,0.0638 1.629598,0 2.852969,-0.302563 3.667969,-0.906887 C 16.59614,17.444241 17,16.96017 17,15.707191 c 0,-1.080316 -0.311516,-1.965505 -0.978516,-2.65686 -0.665999,-0.691355 -1.611485,-1.036767 -2.833984,-1.036767 -0.962999,0 -1.928529,0.04037 -3.2988281,1.120569 l -0.1113281,-0.0638 C 10.258843,11.817235 10.649013,9.9463409 10.945313,8.563747 13.904609,8.4085828 15.832001,8.4864928 17,8.3313287 V 6.8388388 C 15.609001,7.0298189 13.729654,7.1874225 11.222656,7.3059539 11.407756,6.3122037 11.537328,5.6481893 11.611328,5 Z"
+     sodipodi:nodetypes="cccccccscscsccscscscccccccc" />
+</svg>

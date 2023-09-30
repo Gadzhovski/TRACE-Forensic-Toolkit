@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24.000001"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.2.1 (9c6d41e410, 2022-07-14, custom)"
+   sodipodi:docname="application-octet-stream.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="33.416667"
+     inkscape:cx="11.985037"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1011"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5" />
+  <defs
+     id="defs2" />
+  <path
+     id="rect234"
+     style="fill:#7d7d7b"
+     d="M 4,1 H 16.5 L 20,4.5 V 23 H 4 Z"
+     sodipodi:nodetypes="cccccc" />
+  <path
+     id="rect1746"
+     style="fill:#fafafa"
+     d="m 5,2 h 10 v 4 h 4 V 22 H 5 Z"
+     sodipodi:nodetypes="ccccccc" />
+  <path
+     id="rect1800"
+     style="fill:#fafafa;stroke-width:0.75"
+     d="m 16,2 3,3.0000008 h -3 z"
+     sodipodi:nodetypes="cccc" />
+  <path
+     id="rect233"
+     style="fill:#b4b4b4;stroke-width:1.11803;stroke-linecap:round;stroke-linejoin:round"
+     d="M 8.5,7 C 8.000001,7.6101054 7.6689586,7.6833987 7,8 V 9 C 7.4099688,8.8928974 7.6666673,8.6666663 8,8.5 V 13 H 9 V 7 Z M 12,7 a 2,3 0 0 0 -2,3 2,3 0 0 0 2,3 2,3 0 0 0 2,-3 2,3 0 0 0 -2,-3 z m 5,0 a 2,3 0 0 0 -2,3 2,3 0 0 0 2,3 2,3 0 0 0 2,-3 2,3 0 0 0 -2,-3 z m -5,1 a 1,2 0 0 1 1,2 1,2 0 0 1 -1,2 1,2 0 0 1 -1,-2 1,2 0 0 1 1,-2 z m 5,0 a 1,2 0 0 1 1,2 1,2 0 0 1 -1,2 1,2 0 0 1 -1,-2 1,2 0 0 1 1,-2 z m -9,6 a 2,3 0 0 0 -2,3 2,3 0 0 0 2,3 2,3 0 0 0 2,-3 2,3 0 0 0 -2,-3 z m 4.5,0 c -0.499999,0.610105 -0.831041,0.683398 -1.5,1 v 1 c 0.40997,-0.107103 0.666667,-0.333333 1,-0.5 V 20 h 1 v -6 z m 4.5,0 a 2,3 0 0 0 -2,3 2,3 0 0 0 2,3 2,3 0 0 0 2,-3 2,3 0 0 0 -2,-3 z m -9,1 a 1,2 0 0 1 1,2 1,2 0 0 1 -1,2 1,2 0 0 1 -1,-2 1,2 0 0 1 1,-2 z m 9,0 a 1,2 0 0 1 1,2 1,2 0 0 1 -1,2 1,2 0 0 1 -1,-2 1,2 0 0 1 1,-2 z" />
+</svg>

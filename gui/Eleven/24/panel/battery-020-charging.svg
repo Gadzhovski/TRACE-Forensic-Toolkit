@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg5"
+   sodipodi:docname="battery-020-charging.svg"
+   inkscape:version="1.2.1 (9c6d41e410, 2022-07-14, custom)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="33.708333"
+     inkscape:cx="12"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1012"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5"
+     showguides="false" />
+  <defs
+     id="defs2">
+    <style
+       id="current-color-scheme"
+       type="text/css">
+   .ColorScheme-Text { color:#dedede; } .ColorScheme-Highlight { color:#4285f4; } .ColorScheme-NeutralText { color:#ff9800; } .ColorScheme-PositiveText { color:#4caf50; } .ColorScheme-NegativeText { color:#f44336; }
+   </style>
+  </defs>
+  <path
+     id="path1017"
+     style="fill:currentColor;fill-opacity:1"
+     class="ColorScheme-Text"
+     d="M 9.9980469,7 C 9.9986904,7.1550982 9.9632515,7.3082211 9.8945312,7.4472656 L 9.6171875,8 H 17 c 0.553996,0 1,0.446003 1,1 v 6 c 0,0.553995 -0.446004,1 -1,1 H 7 C 6.4460042,16 6,15.553995 6,15 V 11 9 H 5 v 6 c 0,1.107995 0.8920052,2 2,2 h 10 c 1.107995,0 2,-0.892005 2,-2 v -0.863281 c 1.107996,0 2,-0.892004 2,-2 0,-1.107995 -0.892004,-2 -2,-2 V 9 C 19,7.8920055 18.107995,7 17,7 Z M 9,9.234375 7.8945312,11.447266 C 7.7234609,11.783771 7.377491,11.995281 7,11.994141 V 15 h 2 z" />
+  <path
+     style="color:#dedede;fill:currentColor;stroke:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"
+     d="M 7,4 V 7 H 9 L 7,11 V 8 H 5 Z"
+     id="path1378" />
+</svg>

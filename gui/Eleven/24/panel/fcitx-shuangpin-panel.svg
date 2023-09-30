@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.2.2 (1:1.2.2+202305151914+b0a8486541)"
+   sodipodi:docname="fcitx-shuangpin-panel.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="34.583333"
+     inkscape:cx="11.985542"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1008"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5" />
+  <defs
+     id="defs2">
+    <style
+       id="current-color-scheme"
+       type="text/css">.ColorScheme-Text { color:#dedede; }</style>
+  </defs>
+  <path
+     d="m 5.9996,6 h 5.5488 l -0.0508,0.5508 c 0,0 -0.3276,3.5189 -1.2246,6.1289 0.583,0.87 1.1389,1.7693 1.8379,3.0093 L 11.2418,16.18 C 10.7028,15.23 10.2579,14.491 9.8199,13.8105 8.4259,16.931 6.4547,18.293 6.4547,18.293 L 5.898,17.461 c 0,0 1.9707,-1.31 3.2637,-4.6505 -0.765,-1.11 -1.6347,-2.23 -3.0527,-4 l 0.7812,-0.621 c 1.181,1.47 1.973,2.4911 2.668,3.4511 C 10.1092,9.7406 10.3563,7.64 10.4273,7 H 5.9996 Z m 6,0 h 6 v 0.5 c 0,2.15 -0.833,4.9702 -1.707,6.9102 -0.111,0.25 -0.242,0.4594 -0.367,0.6898 0.624,1.09 1.46,2.12 2.844,3.232 l -0.627,0.779 c -1.282,-1.034 -2.147,-2.04 -2.803,-3.06 -1.3932,1.984 -3.1037,3.033 -3.1037,3.033 l -0.5175,-0.855 c 0,0 1.7803,-1.099 3.0682,-3.139 C 14.4486,13.4398 14.1656,12.7798 13.9,12.0898 13.142,10.1398 12.6914,7.59 12.5894,7 h -0.5898 z m 1.6074,1 c 0.14,0.77 0.5686,3.0305 1.2266,4.7305 0.173,0.45 0.351,0.8693 0.539,1.2793 0.757,-1.68 1.442,-4.1598 1.551,-6.0098 z"
+     style="fill:currentColor"
+     id="path396"
+     class="ColorScheme-Text" />
+</svg>

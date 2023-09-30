@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg423"
+   inkscape:version="1.2.1 (9c6d41e410, 2022-07-14, custom)"
+   sodipodi:docname="audio-volume-medium.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview425"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="33.416667"
+     inkscape:cx="12"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1011"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg423" />
+  <defs
+     id="defs420">
+    <style
+       id="current-color-scheme"
+       type="text/css">
+   .ColorScheme-Text { color:#dedede; } .ColorScheme-Highlight { color:#4285f4; } .ColorScheme-NeutralText { color:#ff9800; } .ColorScheme-PositiveText { color:#4caf50; } .ColorScheme-NegativeText { color:#f44336; }
+   </style>
+  </defs>
+  <path
+     d="M 9.9863281,6.7087813 C 9.7273013,6.7125904 9.4779832,6.816305 9.2929688,7.00175 L 7.296875,8.9997969 H 6 c -1.0906989,0 -2,0.9093011 -2,2.0000001 v 2 c 0,1.090699 0.9093011,2 2,2 h 1.296875 l 1.9960938,1.998047 C 9.9229644,17.627345 10.999622,17.181412 11,16.290813 V 7.7087813 c -2.6e-5,-0.4044048 -0.243598,-0.768993 -0.617187,-0.9238282 -0.09097,-0.038013 -0.187061,-0.062365 -0.285157,-0.072266 -0.03725,-0.00362 -0.07432,-0.00445 -0.1113279,-0.00391 z m 4.6093749,0.1953125 c -0.127944,0 -0.255889,0.048879 -0.353515,0.1464843 -0.195211,0.1952532 -0.195211,0.5117781 0,0.7070313 C 15.367586,8.8828083 15.9998,10.408399 16,11.999797 c -0.0065,1.588498 -0.643292,3.108217 -1.769531,4.228516 -0.197067,0.194919 -0.197917,0.512956 -0.002,0.708984 0.194919,0.197067 0.512956,0.197917 0.708984,0.002 C 16.251799,15.631951 16.9931,13.855348 17,12.00175 V 11.9998 C 16.99972,10.143599 16.261917,8.3629768 14.949219,7.0505781 14.851592,6.9529728 14.723647,6.9040938 14.595703,6.9040938 Z M 10,7.71 v 8.58 L 7.71,13.999797 H 6 c -0.5539994,0 -1,-0.446001 -1,-1 v -2 c 0,-0.554 0.4460006,-1.0000001 1,-1.0000001 h 1.71 z m 2.474609,1.3151875 c -0.132601,1.77e-5 -0.259761,0.052712 -0.353515,0.1464844 -0.195211,0.1952532 -0.195211,0.5117781 0,0.7070312 C 12.683863,10.441353 12.99988,11.203998 13,11.999797 c -0.0033,0.794099 -0.321816,1.555135 -0.884766,2.115234 -0.19521,0.195254 -0.19521,0.511778 0,0.707032 0.195254,0.19521 0.511779,0.19521 0.707032,0 C 13.573125,14.074913 13.9963,13.060949 14,12.00175 V 11.9998 C 13.99984,10.939198 13.578194,9.9215712 12.828125,9.1716719 12.734371,9.0778997 12.607211,9.0252052 12.474609,9.0251875 Z"
+     style="fill:currentColor;stroke-width:2.001;stroke-linecap:round;stroke-linejoin:round;-inkscape-stroke:none;paint-order:normal"
+     class="ColorScheme-Text"
+     id="path408"
+     sodipodi:nodetypes="cccssssccccccccscccccccssscccssssccccccccccscc" />
+  <path
+     d="m 16.716797,4.783 c -0.127944,0 -0.255889,0.048879 -0.353516,0.1464844 -0.195211,0.1952532 -0.195211,0.5117781 0,0.7070313 C 18.05128,7.324214 18.9997,9.6127993 19,11.999797 c -0.0097,2.382898 -0.964679,4.663252 -2.654297,6.34375 -0.197066,0.194919 -0.197917,0.512956 -0.002,0.708984 0.194919,0.197067 0.512956,0.197917 0.708984,0.002 C 18.930332,17.187086 19.9898,14.649847 20,12.00175 V 11.9998 C 19.999599,9.3479996 18.945611,6.8043825 17.070312,4.9294844 16.972686,4.831879 16.844741,4.783 16.716797,4.783 Z"
+     style="opacity:0.2;fill:currentColor;stroke-width:2.001;stroke-linecap:round;stroke-linejoin:round;-inkscape-stroke:none;paint-order:normal"
+     class="ColorScheme-Text"
+     id="path586" />
+</svg>
