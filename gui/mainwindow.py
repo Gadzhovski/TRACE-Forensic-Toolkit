@@ -1,6 +1,7 @@
 import os
 
-from PySide6.QtCore import Qt
+
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
                                QTreeWidget, QTabWidget, QTreeWidgetItem,
@@ -11,7 +12,7 @@ from modules.hex_tab import HexViewer
 from modules.text_tab import TextViewer
 
 from managers.metadata_viewer_manager import MetadataViewerManager
-from managers.database_manager import DatabaseManager
+from managers.new_database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
 from managers.unified_viewer_manager import UnifiedViewer
@@ -25,7 +26,7 @@ class MainWindow(QMainWindow):
         self.image_mounted = False
         self.current_offset = None
         self.current_image_path = None
-        self.db_manager = DatabaseManager("icon_mappings.db")  # Directly instantiate the DatabaseManager
+        self.db_manager = DatabaseManager("new_database_mappings.db")  # Directly instantiate the DatabaseManager
         self.image_manager = ImageManager()
         self.evidence_utils = EvidenceUtils()
         self.metadata_viewer = MetadataViewerManager(self.current_image_path, self.evidence_utils)
@@ -91,6 +92,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, main_toolbar)
 
         self.tree_viewer = QTreeWidget(self)
+        self.tree_viewer.setIconSize(QSize(16, 16))  # make this changeble upto 24
         self.tree_viewer.setHeaderHidden(True)
 
         tree_dock = QDockWidget('Tree Viewer', self)
@@ -327,8 +329,8 @@ class MainWindow(QMainWindow):
         """Load the image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
-        root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Image')))
-
+        #root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Image')))
+        root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'media-optical')))
         self.current_image_path = image_path
         self.metadata_viewer.set_image_path(image_path)
 
@@ -345,7 +347,8 @@ class MainWindow(QMainWindow):
             partition_item = QTreeWidgetItem(root_item)
             partition_item.setText(0,
                                    f"{partition['description']} - {formatted_size} [Sectors: {offset} - {end_sector}]")
-            partition_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Partition')))
+            #partition_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Partition')))
+            partition_item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'drive-harddisk')))
 
             self.populate_tree_with_files(partition_item, image_path, offset)
 
@@ -383,6 +386,8 @@ class MainWindow(QMainWindow):
         if self.evidence_utils.list_files(image_path, offset, inode_number):
             child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
 
+
+
     def _populate_file_item(self, child_item, entry_name, entry_parts, offset):
         file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
         inode_number = entry_parts[1].split('-')[0]
@@ -392,9 +397,11 @@ class MainWindow(QMainWindow):
         child_item.setIcon(0, QIcon(icon_path))
         child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
 
+
     def _get_icon_path(self, item_type, name, default=None):
         icon_path = self.db_manager.get_icon_path(item_type, name)
         return icon_path or self.db_manager.get_icon_path(item_type, default)
+
 
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)

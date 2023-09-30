@@ -279,7 +279,7 @@ class HexViewer(QWidget):
         self.search_bar = QLineEdit(self)
         self.search_bar.setMaximumWidth(200)  # Adjust the number as per your needs
         self.search_bar.setContentsMargins(5, 0, 5, 0)
-        self.search_bar.setPlaceholderText("Enter search query...")
+        self.search_bar.setPlaceholderText("Search...")
         self.search_bar.returnPressed.connect(self.trigger_search)
         self.toolbar.addWidget(self.search_bar)
 

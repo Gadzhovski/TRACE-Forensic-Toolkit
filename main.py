@@ -11,6 +11,8 @@ if __name__ == '__main__':
     #         color: black;
     #     }
     # """)
+    # Apply the Windows 11 style
+
     window = MainWindow()
     window.show()
     app.exec()

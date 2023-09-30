@@ -1,7 +1,7 @@
 import sqlite3
 
 def create_icon_db():
-    conn = sqlite3.connect('../icon_mappings.db')
+    conn = sqlite3.connect('../icon_mappings_new.db')
     c = conn.cursor()
 
     # Create table with UNIQUE constraint
@@ -13,39 +13,59 @@ def create_icon_db():
 
     # Insert file icon data
     file_icon_data = [
-        ('file', 'txt', 'gui/icons/text-x-generic.png'),
-        ('file', 'pdf', 'gui/icons/application-pdf.png'),
-        ('file', 'jpg', 'gui/icons/application-image-jpg.png'),
-        ('file', 'png', 'gui/icons/application-image-png.png'),
-        ('file', 'cd', 'application-x-cd-image.png'),
-        ('file', 'iso', 'application-x-cd-image.png'),
-        ('file', 'xml', 'gui/icons/application-xml.png'),
-        ('file', 'zip', 'file-roller.png'),
-        ('file', 'rar', 'file-roller.png'),
-        ('file', 'gz', 'file-roller.png'),
-        ('file', 'tar', 'file-roller.png'),
-        ('file', 'mp4', 'gui/icons/video-x-generic.png'),
-        ('file', 'mov', 'gui/icons/video-x-generic.png'),
-        ('file', 'avi', 'gui/icons/video-x-generic.png'),
-        ('file', 'wmv', 'gui/icons/video-x-generic.png'),
-        ('file', 'mp3', 'gui/icons/audio-x-generic.png'),
-        ('file', 'wav', 'gui/icons/audio-x-generic.png'),
-        ('file', 'xls', 'gui/icons/libreoffice-oasis-spreadsheet.png'),
-        ('file', 'xlsx', 'gui/icons/libreoffice-oasis-spreadsheet.png'),
-        ('file', 'doc', 'gui/icons/libreoffice-oasis-text.png'),
-        ('file', 'docx', 'gui/icons/libreoffice-oasis-text.png'),
-        ('file', 'ppt', 'gui/icons/libreoffice-oasis-presentation.png'),
-        ('file', 'pptx', 'gui/icons/libreoffice-oasis-presentation.png'),
-        ('file', 'eml', 'gui/icons/emblem-mail.png'),
-        ('file', 'msg', 'gui/icons/emblem-mail.png'),
-        ('file', 'exe', 'gui/icons/application-x-executable.png'),
-        ('file', 'html', 'gui/icons/text-html.png'),
-        ('file', 'htm', 'gui/icons/text-html.png')
+        ('file', 'java', 'gui/new_icons/java.png'),
+        ('file', 'cdr', 'gui/new_icons/cdr.png'),
+        ('file', 'docx', 'gui/new_icons/docx.png'),
+        ('file', 'autocad', 'gui/new_icons/autocad.png'),
+        ('file', 'gif', 'gui/new_icons/gif.png'),
+        ('file', 'eps', 'gui/new_icons/eps.png'),
+        ('file', 'html', 'gui/new_icons/html.png'),
+        ('file', 'hlp', 'gui/new_icons/hlp.png'),
+        ('file', 'database', 'gui/new_icons/database.png'),
+        ('file', 'css', 'gui/new_icons/css.png'),
+        ('file', 'documents', 'gui/new_icons/documents.png'),
+        ('file', 'auto', 'gui/new_icons/auto.png'),
+        ('file', 'bin', 'gui/new_icons/bin.png'),
+        ('file', 'csv', 'gui/new_icons/csv.png'),
+        ('file', 'bmp', 'gui/new_icons/bmp.png'),
+        ('file', 'jpg', 'gui/new_icons/jpg.png'),
+        ('file', 'iso', 'gui/new_icons/iso.png'),
+        ('file', 'aac', 'gui/new_icons/aac.png'),
+        ('file', 'illustrator', 'gui/new_icons/illustrator.png'),
+        ('file', 'exe', 'gui/new_icons/exe.png'),
+        ('file', 'file', 'gui/new_icons/file.png'),
+        ('file', 'flv', 'gui/new_icons/flv.png'),
+        ('file', 'avi', 'gui/new_icons/avi.png'),
+        ('file', 'mov', 'gui/new_icons/mov.png'),
+        ('file', 'mkv', 'gui/new_icons/mkv.png'),
+        ('file', 'mp3', 'gui/new_icons/mp3.png'),
+        ('file', 'mp4', 'gui/new_icons/mp4.png'),
+        ('file', 'mpeg', 'gui/new_icons/mpeg.png'),
+        ('file', 'mpg', 'gui/new_icons/mpg.png'),
+        ('file', 'pdf', 'gui/new_icons/pdf.png'),
+        ('file', 'png', 'gui/new_icons/png.png'),
+        ('file', 'php', 'gui/new_icons/php.png'),
+        ('file', 'ppt', 'gui/new_icons/ppt.png'),
+        ('file', 'psd', 'gui/new_icons/psd.png'),
+        ('file', 'rar', 'gui/new_icons/rar.png'),
+        ('file', 'rss', 'gui/new_icons/rss.png'),
+        ('file', 'rtf', 'gui/new_icons/rtf.png'),
+        ('file', 'sql', 'gui/new_icons/sql.png'),
+        ('file', 'svg', 'gui/new_icons/svg.png'),
+        ('file', 'swf', 'gui/new_icons/swf.png'),
+        ('file', 'sys', 'gui/new_icons/sys.png'),
+        ('file', 'txt', 'gui/new_icons/txt.png'),
+        ('file', 'wma', 'gui/new_icons/wma.png'),
+        ('file', 'xls', 'gui/new_icons/xls.png'),
+        ('file', 'xlsx', 'gui/new_icons/xlsx.png'),
+        ('file', 'xml', 'gui/new_icons/xml.png'),
+        ('file', 'zip', 'gui/new_icons/zip.png'),
+        ('file', 'db', 'gui/new_icons/database.png'),
     ]
 
     # Insert folder icon data
     folder_icon_data = [
-        ('folder', 'Default_Folder', 'gui/icons/folder_types/folder.png'),
+        ('folder', 'Default_Folder', 'gui/new_icons/folder.png'),
         ('folder', 'Desktop', 'gui/icons/folder_types/user-desktop.png'),
         ('folder', 'Documents', 'gui/icons/folder_types/folder-documents.png'),
         ('folder', 'Downloads', 'gui/icons/folder_types/folder-download.png'),
@@ -59,8 +79,8 @@ def create_icon_db():
 
     # Insert partition and image icon data
     special_icon_data = [
-        ('special', 'Partition', 'gui/icons/volume.png'),
-        ('special', 'Image', 'gui/icons/media-optical.png')
+        ('special', 'Partition', 'gui/new_icons/disk.png'),
+        ('special', 'Image', 'gui/new_icons/diskette.png')
     ]
 
     c.executemany('INSERT INTO icons VALUES (?, ?, ?)', file_icon_data)
