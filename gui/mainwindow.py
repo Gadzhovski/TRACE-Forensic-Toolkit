@@ -1,3 +1,4 @@
+import hashlib
 import os
 
 
@@ -16,6 +17,7 @@ from managers.new_database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
 from managers.unified_viewer_manager import UnifiedViewer
+from modules.virus_total import VirusTotal
 
 
 class MainWindow(QMainWindow):
@@ -92,7 +94,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.TopToolBarArea, main_toolbar)
 
         self.tree_viewer = QTreeWidget(self)
-        self.tree_viewer.setIconSize(QSize(16, 16))  # make this changeble upto 24
+        self.tree_viewer.setIconSize(QSize(16, 16))
         self.tree_viewer.setHeaderHidden(True)
 
         tree_dock = QDockWidget('Tree Viewer', self)
@@ -105,10 +107,16 @@ class MainWindow(QMainWindow):
 
         result_viewer = QTabWidget(self)
         self.setCentralWidget(result_viewer)
+
         # Create a QTableWidget for the Listing
         self.listing_table = QTableWidget()
+
+        # Set icon size for listing table
+        self.listing_table.setIconSize(QSize(24, 24))
         self.listing_table.setColumnCount(5)  # Assuming 3 columns: Name, Inode, and Description
         self.listing_table.setHorizontalHeaderLabels(['Name', 'Inode', 'Description', 'Size', 'Modified Date'])
+
+        self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)  ###
 
         # Add the QTableWidget to your result_viewer QTabWidget
         result_viewer.addTab(self.listing_table, 'Listing')
@@ -139,6 +147,11 @@ class MainWindow(QMainWindow):
         # Create exif data viewer
         self.exif_viewer = ExifViewer(self)
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
+
+        # tab for Virus total api
+        self.virus_total_api = VirusTotal()
+        self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
+
 
         self.viewer_dock = QDockWidget('Viewer', self)
 
@@ -247,25 +260,37 @@ class MainWindow(QMainWindow):
         inode_number = data.get("inode_number") if data else None
         offset = data.get("offset", self.current_offset) if data else self.current_offset
 
-        full_file_path = self.construct_full_file_path(item)
-
-        # Check if the item represents a file
         if inode_number:
             file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
-            if not file_content:
-                return
+            if file_content:
+                self.update_viewer_with_file_content(file_content, inode_number, offset)
 
-            index = self.viewer_tab.currentIndex()
-            if index == 0:  # Hex tab
-                self.hex_viewer.display_hex_content(file_content)
-            elif index == 1:  # Text tab
-                self.text_viewer.display_text_content(file_content)
-            elif index == 2:  # Application tab
-                self.display_application_content(file_content, full_file_path)
-            elif index == 3:  # File Metadata tab
-                self.metadata_viewer.display_metadata(file_content, item, full_file_path, offset, inode_number)
-            elif index == 4:  # Exif Data tab
-                self.exif_viewer.load_and_display_exif_data(file_content)
+    def on_listing_table_item_clicked(self, row, column):
+        inode_item = self.listing_table.item(row, 1)
+        inode_number = inode_item.text()
+
+        file_content = self.evidence_utils.get_file_content(self.current_offset, self.current_image_path, inode_number)
+        if file_content:
+            self.update_viewer_with_file_content(file_content, inode_number, self.current_offset)
+
+    def update_viewer_with_file_content(self, file_content, inode_number, offset):
+        full_file_path = self.construct_full_file_path(self.tree_viewer.currentItem())
+
+        index = self.viewer_tab.currentIndex()
+        if index == 0:  # Hex tab
+            self.hex_viewer.display_hex_content(file_content)
+        elif index == 1:  # Text tab
+            self.text_viewer.display_text_content(file_content)
+        elif index == 2:  # Application tab
+            self.display_application_content(file_content, full_file_path)
+        elif index == 3:  # File Metadata tab
+            self.metadata_viewer.display_metadata(file_content, self.tree_viewer.currentItem(), full_file_path, offset,
+                                                  inode_number)
+        elif index == 4:  # Exif Data tab
+            self.exif_viewer.load_and_display_exif_data(file_content)
+        elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
+            file_hash = hashlib.md5(file_content).hexdigest()
+            self.virus_total_api.set_file_hash(file_hash)
 
     def display_application_content(self, file_content, full_file_path):
         file_extension = os.path.splitext(full_file_path)[-1].lower()
@@ -329,8 +354,10 @@ class MainWindow(QMainWindow):
         """Load the image structure into the tree viewer."""
         root_item = QTreeWidgetItem(self.tree_viewer)
         root_item.setText(0, image_path)
-        #root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Image')))
+
+        # Set the icon for the root item
         root_item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'media-optical')))
+        # set the icon size for root item
         self.current_image_path = image_path
         self.metadata_viewer.set_image_path(image_path)
 
@@ -347,7 +374,7 @@ class MainWindow(QMainWindow):
             partition_item = QTreeWidgetItem(root_item)
             partition_item.setText(0,
                                    f"{partition['description']} - {formatted_size} [Sectors: {offset} - {end_sector}]")
-            #partition_item.setIcon(0, QIcon(self.db_manager.get_icon_path('special', 'Partition')))
+            # Set the icon for the partition item
             partition_item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'drive-harddisk')))
 
             self.populate_tree_with_files(partition_item, image_path, offset)
@@ -386,8 +413,6 @@ class MainWindow(QMainWindow):
         if self.evidence_utils.list_files(image_path, offset, inode_number):
             child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
 
-
-
     def _populate_file_item(self, child_item, entry_name, entry_parts, offset):
         file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
         inode_number = entry_parts[1].split('-')[0]
@@ -397,11 +422,9 @@ class MainWindow(QMainWindow):
         child_item.setIcon(0, QIcon(icon_path))
         child_item.setData(0, Qt.UserRole, {"inode_number": inode_number, "offset": offset, "type": "file"})
 
-
     def _get_icon_path(self, item_type, name, default=None):
         icon_path = self.db_manager.get_icon_path(item_type, name)
         return icon_path or self.db_manager.get_icon_path(item_type, default)
-
 
     def on_item_expanded(self, item):
         data = item.data(0, Qt.UserRole)
