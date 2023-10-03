@@ -16,7 +16,7 @@ class VirusTotal(QWidget):
         self.current_date = date.today()
 
         # Hardcoded API key
-        self.api_key = "c30a89c58bc092d2b5201ab1461b1eb978afa29282a200c9a7ec0ece87f4d7f6"  # Replace with your API key
+        self.api_key = "014e215d1cc11255fe69d71bea313e31bc0fbb1c2358edfdd7059621e6e1218a"  # Replace with your API key
 
         self.current_file_hash = None
 

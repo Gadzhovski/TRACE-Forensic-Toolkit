@@ -1,7 +1,6 @@
 import hashlib
 import os
 
-
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTextEdit,
@@ -12,12 +11,13 @@ from modules.exif_tab import ExifViewer
 from modules.hex_tab import HexViewer
 from modules.text_tab import TextViewer
 
-from managers.metadata_viewer_manager import MetadataViewerManager
+from modules.metadata_tab import MetadataViewerManager
 from managers.new_database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
-from managers.unified_viewer_manager import UnifiedViewer
-from modules.virus_total import VirusTotal
+#from managers.unified_application_manager import UnifiedViewer
+from modules.unified_application_manager import UnifiedViewer
+from modules.virus_total_tab import VirusTotal
 
 
 class MainWindow(QMainWindow):
@@ -152,7 +152,6 @@ class MainWindow(QMainWindow):
         self.virus_total_api = VirusTotal()
         self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
 
-
         self.viewer_dock = QDockWidget('Viewer', self)
 
         self.viewer_dock.setWidget(self.viewer_tab)
@@ -251,19 +250,44 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
+    # def display_content_for_active_tab(self):
+    #     item = self.tree_viewer.currentItem()
+    #     if not item:
+    #         return
+    #
+    #     data = item.data(0, Qt.UserRole)
+    #     inode_number = data.get("inode_number") if data else None
+    #     offset = data.get("offset", self.current_offset) if data else self.current_offset
+    #
+    #     if inode_number:
+    #         file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
+    #         if file_content:
+    #             self.update_viewer_with_file_content(file_content, inode_number, offset)
     def display_content_for_active_tab(self):
-        item = self.tree_viewer.currentItem()
-        if not item:
-            return
+        if self.tree_viewer.hasFocus():
+            item = self.tree_viewer.currentItem()
+            if not item:
+                return
 
-        data = item.data(0, Qt.UserRole)
-        inode_number = data.get("inode_number") if data else None
-        offset = data.get("offset", self.current_offset) if data else self.current_offset
+            data = item.data(0, Qt.UserRole)
+            inode_number = data.get("inode_number") if data else None
+            offset = data.get("offset", self.current_offset) if data else self.current_offset
 
-        if inode_number:
-            file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
+            if inode_number:
+                file_content = self.evidence_utils.get_file_content(offset, self.current_image_path, inode_number)
+                if file_content:
+                    self.update_viewer_with_file_content(file_content, inode_number, offset)
+        elif self.listing_table.hasFocus():
+            selected_rows = self.listing_table.selectedItems()
+            if not selected_rows:
+                return
+            row = selected_rows[0].row()
+            inode_item = self.listing_table.item(row, 1)
+            inode_number = inode_item.text()
+            file_content = self.evidence_utils.get_file_content(self.current_offset, self.current_image_path,
+                                                                inode_number)
             if file_content:
-                self.update_viewer_with_file_content(file_content, inode_number, offset)
+                self.update_viewer_with_file_content(file_content, inode_number, self.current_offset)
 
     def on_listing_table_item_clicked(self, row, column):
         inode_item = self.listing_table.item(row, 1)
@@ -271,10 +295,18 @@ class MainWindow(QMainWindow):
 
         file_content = self.evidence_utils.get_file_content(self.current_offset, self.current_image_path, inode_number)
         if file_content:
-            self.update_viewer_with_file_content(file_content, inode_number, self.current_offset)
+            item_name = self.listing_table.item(row, 0).text()
+            full_file_path = self.construct_full_file_path_for_listing(item_name)
+            self.update_viewer_with_file_content(file_content, inode_number, self.current_offset, full_file_path)
 
-    def update_viewer_with_file_content(self, file_content, inode_number, offset):
-        full_file_path = self.construct_full_file_path(self.tree_viewer.currentItem())
+    def construct_full_file_path_for_listing(self, file_name):
+        directory_path = self.construct_full_file_path(self.tree_viewer.currentItem())
+        return os.path.join(directory_path, file_name)
+
+    def update_viewer_with_file_content(self, file_content, inode_number, offset, full_file_path=None):
+        # full_file_path = self.construct_full_file_path(self.tree_viewer.currentItem())
+        if not full_file_path:
+            full_file_path = self.construct_full_file_path(self.tree_viewer.currentItem())
 
         index = self.viewer_tab.currentIndex()
         if index == 0:  # Hex tab
@@ -312,7 +344,11 @@ class MainWindow(QMainWindow):
     def update_listing_table(self, entries):
         self.listing_table.setRowCount(0)
         for entry in entries:
-            entry_type, entry_inode, entry_name = entry.split()[0], entry.split()[1].split('-')[0], entry.split()[-1]
+            entry_parts = entry.split()
+            entry_type = entry_parts[0]
+            entry_inode = entry_parts[1].split('-')[0]
+            entry_name = " ".join(entry_parts[2:])
+
             description, icon_name, icon_type = self.evidence_utils.determine_file_properties(entry_type, entry_name)
             self.insert_row_into_listing_table(entry_name, entry_inode, description, icon_name, icon_type)
 
