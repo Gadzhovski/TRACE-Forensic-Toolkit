@@ -222,8 +222,6 @@ class HexViewer(QWidget):
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
-
-
         # Navigation buttons
         self.first_action = QAction(QIcon("gui/icons/go-up.png"), "First", self)
         self.first_action.triggered.connect(self.load_first_page)
@@ -328,7 +326,6 @@ class HexViewer(QWidget):
         else:
             QMessageBox.warning(self, "Unsupported Format", "Unsupported export format selected.")
 
-
     def export_as_text(self, file_name):
         with open(file_name, "w") as text_file:
             # Add the header line with green color using ANSI escape codes
@@ -356,7 +353,8 @@ class HexViewer(QWidget):
         html_content += f'<span style="color:blue;">File Name: {filename}</span><br><br>\n'
 
         # Add the green header line
-        header_line = '<span style="color:green;">Address     00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F        ASCII</span>'
+        header_line = ('<span style="color:green;">Address     00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F        '
+                       'ASCII</span>')
         html_content += header_line + "<br>\n"
 
         html_content += self.hex_viewer_manager.format_hex(self.current_page).replace("\n", "<br>")

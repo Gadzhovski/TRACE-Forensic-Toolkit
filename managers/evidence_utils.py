@@ -1,5 +1,6 @@
 import subprocess
-import re
+from re import search as re_search
+from re import match as re_match
 
 
 class EvidenceUtils:
@@ -18,7 +19,7 @@ class EvidenceUtils:
         for line in lines:
             parts = line.split()
             # Check if the line starts with a number (partition entry)
-            if parts and re.match(r"^\d{3}:", parts[0]):
+            if parts and re_match(r"^\d{3}:", parts[0]):
                 start_sector = int(parts[2])
                 end_sector = int(parts[3])
                 size_str = parts[5]  # Assuming that the size is now directly in the 5th column
@@ -113,7 +114,7 @@ class EvidenceUtils:
         metadata_content = metadata_result.stdout
 
         # Find the "init_size: <some number>" pattern and trim everything after it
-        match = re.search(r"(init_size: \d+)", metadata_content)
+        match = re_search(r"(init_size: \d+)", metadata_content)
         if match:
             end_index = match.end()
             metadata_content = metadata_content[:end_index]
@@ -149,4 +150,3 @@ class EvidenceUtils:
         offset = data.get("offset")
         entries = EvidenceUtils.list_files(current_image_path, offset, inode_number)
         return entries
-

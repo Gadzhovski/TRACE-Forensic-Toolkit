@@ -1,5 +1,5 @@
-import hashlib
 import os
+from hashlib import md5
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
@@ -15,7 +15,6 @@ from modules.metadata_tab import MetadataViewerManager
 from managers.new_database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
-#from managers.unified_application_manager import UnifiedViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 
@@ -321,7 +320,7 @@ class MainWindow(QMainWindow):
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
-            file_hash = hashlib.md5(file_content).hexdigest()
+            file_hash = md5(file_content).hexdigest()
             self.virus_total_api.set_file_hash(file_hash)
 
     def display_application_content(self, file_content, full_file_path):

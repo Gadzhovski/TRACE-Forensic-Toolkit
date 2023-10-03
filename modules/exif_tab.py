@@ -1,7 +1,8 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
+from io import BytesIO as io_BytesIO
+
 from PIL import Image
 from PIL.ExifTags import TAGS
-import io
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
 
 
 class ExifViewerManager:
@@ -14,7 +15,7 @@ class ExifViewerManager:
         """Extract EXIF data from the given file content."""
         try:
             # Open the image from the given content
-            image = Image.open(io.BytesIO(file_content))
+            image = Image.open(io_BytesIO(file_content))
 
             # Return None if the image format doesn't support EXIF
             if image.format != "JPEG":

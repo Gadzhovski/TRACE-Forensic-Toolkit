@@ -1,9 +1,9 @@
-import sqlite3
+from sqlite3 import connect as sqlite3_connect
 
 
 class DatabaseManager:
     def __init__(self, db_path):
-        self.db_conn = sqlite3.connect(db_path)
+        self.db_conn = sqlite3_connect(db_path)
 
     def __del__(self):
         self.db_conn.close()
@@ -26,7 +26,3 @@ class DatabaseManager:
                     return 'gui/Eleven/24/mimetypes/application-x-zerosize.svg'
         finally:
             c.close()
-
-
-
-

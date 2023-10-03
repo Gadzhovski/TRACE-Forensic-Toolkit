@@ -1,5 +1,5 @@
-import hashlib
-import magic
+from hashlib import md5, sha256
+from magic import Magic
 import re
 
 from PySide6.QtWidgets import QTextEdit
@@ -18,11 +18,11 @@ class MetadataViewerManager(QTextEdit):
 
     def generate_metadata(self, file_content, item, full_file_path, offset, inode_number):
         # Calculate MD5 and SHA-256 hashes
-        md5_hash = hashlib.md5(file_content).hexdigest()
-        sha256_hash = hashlib.sha256(file_content).hexdigest()
+        md5_hash = md5(file_content).hexdigest()
+        sha256_hash = sha256(file_content).hexdigest()
 
         # Determine MIME type
-        mime_type = magic.Magic().from_buffer(file_content)
+        mime_type = Magic().from_buffer(file_content)
 
         # Fetch metadata using EvidenceUtils utility class
         metadata_content = self.evidence_utils.get_file_metadata(offset, self.current_image_path, inode_number)

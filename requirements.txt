@@ -1,0 +1,7 @@
+PySide6~=6.5.2
+Pillow~=10.0.0
+chardet~=5.2.0
+requests~=2.31.0
+comtypes~=1.2.0
+pycaw~=20230407
+

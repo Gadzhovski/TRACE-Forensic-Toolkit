@@ -1,6 +1,8 @@
+from requests import post as requests_post
+from requests.exceptions import RequestException
 from datetime import date
-import time
-import requests
+from time import time
+
 from PySide6.QtGui import QAction
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QToolBar, QWidgetAction, QSizePolicy, QTextBrowser
@@ -81,7 +83,7 @@ class VirusTotal(QWidget):
             return {}
 
         # Check if we made a request in the last minute
-        current_time = time.time()
+        current_time = time()
         if current_time - self.last_request_time < 60:
             self.requests_made_last_minute += 1
             if self.requests_made_last_minute > 3:  # Adjusted based on your requirement
@@ -108,12 +110,12 @@ class VirusTotal(QWidget):
             "User-Agent": "gzip, My Python requests library example client or username"
         }
         params = {'apikey': self.api_key, 'resource': hashes}
-        response = requests.post('https://www.virustotal.com/vtapi/v2/file/report', params=params, headers=headers)
+        response = requests_post('https://www.virustotal.com/vtapi/v2/file/report', params=params, headers=headers)
 
         # Handle the case where the response is not a valid JSON (for example, if the rate limit is exceeded)
         try:
             return response.json()
-        except requests.exceptions.RequestException:
+        except RequestException:
             self.info_text_edit.setPlainText("Error decoding JSON from the response. Please try again.")
             return {}
 
