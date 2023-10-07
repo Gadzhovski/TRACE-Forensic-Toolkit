@@ -14,6 +14,7 @@ from modules.text_tab import TextViewer
 from modules.metadata_tab import MetadataViewerManager
 from managers.new_database_manager import DatabaseManager
 from managers.evidence_utils import EvidenceUtils
+#from managers.pytks33 import EvidenceUtils
 from managers.image_manager import ImageManager
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
@@ -197,6 +198,17 @@ class MainWindow(QMainWindow):
         self.metadata_viewer.clear()
         self.exif_viewer.clear_content()
 
+    # def load_image_evidence(self):
+    #     """Open an image."""
+    #     # Open a file dialog to select the image
+    #     image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", "Image Files (*.E01);;All Files (*)")
+    #     # Check if a file was selected
+    #     if image_path:
+    #         # Normalize the path
+    #         image_path = os.path.normpath(image_path)
+    #
+    #         # Load the image structure into the tree viewer
+    #         self.load_image_structure_into_tree(image_path)
     def load_image_evidence(self):
         """Open an image."""
         # Open a file dialog to select the image
@@ -205,7 +217,8 @@ class MainWindow(QMainWindow):
         if image_path:
             # Normalize the path
             image_path = os.path.normpath(image_path)
-
+            # Open the image using the evidence_utils instance
+            self.evidence_utils.open_image(image_path)
             # Load the image structure into the tree viewer
             self.load_image_structure_into_tree(image_path)
 
@@ -396,7 +409,8 @@ class MainWindow(QMainWindow):
         self.current_image_path = image_path
         self.metadata_viewer.set_image_path(image_path)
 
-        partitions = self.evidence_utils.get_partitions(image_path)
+        #partitions = self.evidence_utils.get_partitions(image_path)
+        partitions = self.evidence_utils.get_partitions()
 
         if not partitions:  # If there are no partitions
             self.populate_tree_with_files(root_item, image_path, None, None)  # Call with default offset and inode
@@ -481,21 +495,46 @@ class MainWindow(QMainWindow):
         item.setData(0, Qt.UserRole, data)
         print(f"Item expanded: {item.text(0)}")
 
+    # @staticmethod
+    # def format_size(size_str):
+    #     """Formats a size string by removing leading zeros and expanding the unit."""
+    #     unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
+    #     number = int(size_str[:-1])  # Remove the unit and convert to integer
+    #
+    #     # Expand the unit abbreviation
+    #     unit_expanded = {
+    #         'K': 'KB',
+    #         'M': 'MB',
+    #         'G': 'GB',
+    #         'T': 'TB'
+    #     }.get(unit, unit)
+    #
+    #     return f"{number} {unit_expanded}"
     @staticmethod
-    def format_size(size_str):
+    def format_size(size_input):
         """Formats a size string by removing leading zeros and expanding the unit."""
-        unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
-        number = int(size_str[:-1])  # Remove the unit and convert to integer
+        if isinstance(size_input, int):
+            # Assuming size_input is in bytes
+            size = size_input
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                if size < 1024:
+                    return f"{size} {unit}"
+                size /= 1024
+            return f"{size:.2f} PB"
+        else:
+            size_str = size_input
+            unit = size_str[-1]  # The last character is the unit (K, M, G, T, etc.)
+            number = int(size_str[:-1])  # Remove the unit and convert to integer
 
-        # Expand the unit abbreviation
-        unit_expanded = {
-            'K': 'KB',
-            'M': 'MB',
-            'G': 'GB',
-            'T': 'TB'
-        }.get(unit, unit)
+            # Expand the unit abbreviation
+            unit_expanded = {
+                'K': 'KB',
+                'M': 'MB',
+                'G': 'GB',
+                'T': 'TB'
+            }.get(unit, unit)
 
-        return f"{number} {unit_expanded}"
+            return f"{number} {unit_expanded}"
 
     @staticmethod
     def cleanup_temp_directory():
