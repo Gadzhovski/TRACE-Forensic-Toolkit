@@ -1,273 +1,122 @@
-# import subprocess
-# from re import search as re_search
-# from re import match as re_match
-#
-# import pyewf
-# import pytsk3
-#
-#
-# class EvidenceUtils:
-#     """Utility class to handle evidence related operations."""
-#
-#     # @staticmethod
-#     # def get_partitions(image_path):
-#     #     """Get partitions from an image using mmls."""
-#     #     result = subprocess.run(
-#     #         ["tools/sleuthkit-4.12.0-win32/bin/mmls.exe", "-M", "-B", image_path],
-#     #         capture_output=True, text=True
-#     #     )
-#     #     lines = result.stdout.splitlines()
-#     #     partitions = []
-#     #
-#     #     for line in lines:
-#     #         parts = line.split()
-#     #         # Check if the line starts with a number (partition entry)
-#     #         if parts and re_match(r"^\d{3}:", parts[0]):
-#     #             start_sector = int(parts[2])
-#     #             end_sector = int(parts[3])
-#     #             size_str = parts[5]  # Assuming that the size is now directly in the 5th column
-#     #             description = " ".join(parts[6:])  # Description of the partition
-#     #
-#     #             # Run fsstat to get the file system type
-#     #             fsstat_cmd = ["tools/sleuthkit-4.12.0-win32/bin/fsstat.exe", "-o", str(start_sector), "-t", image_path]
-#     #             try:
-#     #                 fsstat_result = subprocess.run(fsstat_cmd, capture_output=True, text=True, check=True)
-#     #                 fs_type = fsstat_result.stdout.strip().upper()
-#     #                 fs_type = f"[{fs_type}]"
-#     #             except subprocess.CalledProcessError:
-#     #                 fs_type = ""
-#     #
-#     #             partitions.append({
-#     #                 "start": start_sector,
-#     #                 "end": end_sector,
-#     #                 "size": size_str,
-#     #                 "description": f"{description} {fs_type}"
-#     #             })
-#     #
-#     #     return partitions
-#     @staticmethod
-#     def get_partitions(image_path):
-#         """Get partitions from an image using pytsk3 and pyewf."""
-#
-#         class EWFImgInfo(pytsk3.Img_Info):
-#             def __init__(self, ewf_handle):
-#                 self._ewf_handle = ewf_handle
-#                 super(EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
-#
-#             def close(self):
-#                 self._ewf_handle.close()
-#
-#             def read(self, offset, size):
-#                 self._ewf_handle.seek(offset)
-#                 return self._ewf_handle.read(size)
-#
-#             def get_size(self):
-#                 return self._ewf_handle.get_media_size()
-#
-#         # Determine the format of the image based on file extension
-#         if image_path.lower().endswith(".e01"):
-#             filenames = pyewf.glob(image_path)
-#             ewf_handle = pyewf.handle()
-#             ewf_handle.open(filenames)
-#             img_info = EWFImgInfo(ewf_handle)
-#         else:  # For raw and dd images
-#             img_info = pytsk3.Img_Info(image_path)
-#
-#         partitions = []
-#         try:
-#             volumes = pytsk3.Volume_Info(img_info)
-#             for volume in volumes:
-#                 partition_info = {
-#                     "start": volume.start,
-#                     "end": volume.start + volume.len - 1,
-#                     "size": volume.len * 512,  # 512 bytes per sector is a common sector size
-#                     "description": volume.desc.decode("utf-8")
-#                 }
-#                 partitions.append(partition_info)
-#         except Exception:
-#             print("Failed to retrieve volume info. The image might not contain any partitions.")
-#
-#         if isinstance(img_info, EWFImgInfo):
-#             ewf_handle.close()
-#
-#         return partitions
-#
-#
-#     @staticmethod
-#     def list_files(image_path, offset=None, inode_number=None):
-#         """List files in a directory using fls."""
-#         try:
-#             cmd = ["tools/sleuthkit-4.12.0-win32/bin/fls.exe"]
-#
-#             # Add offset to the command if it's provided
-#             if offset is not None:
-#                 cmd.extend(["-o", str(offset)])
-#
-#             cmd.append(image_path)
-#
-#             # Add inode number to the command if it's provided
-#             if inode_number:
-#                 cmd.append(str(inode_number))
-#
-#
-#             print(f"Executing command: {' '.join(cmd)}")  # Debugging line
-#             result = subprocess.run(
-#                 cmd,
-#                 capture_output=True,
-#                 text=True,
-#                 check=True
-#             )
-#             lines = result.stdout.splitlines()
-#             return lines
-#         except subprocess.CalledProcessError as e:
-#             # print(f"Error executing fls: {e}")
-#             return []
-#
-#     @staticmethod
-#     def get_file_content(offset, image_path, inode_number):
-#         """Retrieve the content of a file using icat."""
-#         try:
-#             cmd = ["tools/sleuthkit-4.12.0-win32/bin/icat.exe"]
-#
-#             # Add offset to the command only if it's not None
-#             if offset is not None:
-#                 cmd.extend(["-o", str(offset)])
-#
-#             cmd.append(image_path)
-#             cmd.append(str(inode_number))
-#
-#             result = subprocess.run(
-#                 cmd,
-#                 capture_output=True,
-#                 check=True
-#             )
-#             return result.stdout
-#         except subprocess.CalledProcessError as e:
-#             # print(f"Error executing icat: {e}")
-#             return None
-#
-#     @staticmethod
-#     def get_file_metadata(offset, image_path, inode_number):
-#         if image_path is None:
-#             raise ValueError("Image path value is None!")
-#         if inode_number is None:
-#             raise ValueError("Inode number value is None!")
-#
-#         metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe"]
-#
-#         # Add offset to the command only if it's not None
-#         if offset is not None:
-#             metadata_cmd.extend(["-o", str(offset)])
-#
-#         metadata_cmd.extend([image_path, str(inode_number)])
-#
-#         metadata_result = subprocess.run(metadata_cmd, capture_output=True, text=True, check=True)
-#         metadata_content = metadata_result.stdout
-#
-#         # Find the "init_size: <some number>" pattern and trim everything after it
-#         match = re_search(r"(init_size: \d+)", metadata_content)
-#         if match:
-#             end_index = match.end()
-#             metadata_content = metadata_content[:end_index]
-#
-#         return metadata_content
-#
-#     @staticmethod
-#     def determine_file_properties(entry_type, entry_name):
-#         description = "Directory" if 'd' in entry_type else "File"
-#         if 'd' in entry_type:
-#             icon_name = entry_name
-#             icon_type = 'folder'
-#         else:
-#             icon_name = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
-#             icon_type = 'file'
-#         return description, icon_name, icon_type
-#
-#     @staticmethod
-#     def get_file_type_from_extension(file_extension):
-#         audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
-#         video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
-#
-#         if file_extension in audio_extensions:
-#             return "audio"
-#         elif file_extension in video_extensions:
-#             return "video"
-#         else:
-#             return "text"
-#
-#     @staticmethod
-#     def handle_directory(data, current_image_path):
-#         inode_number = data.get("inode_number")
-#         offset = data.get("offset")
-#         entries = EvidenceUtils.list_files(current_image_path, offset, inode_number)
-#         return entries
+import os
 
-
-import pytsk3
 import pyewf
+import pytsk3
 
 
-class EvidenceUtils:
-    """Utility class to handle evidence related operations."""
+class EWFImgInfo(pytsk3.Img_Info):
+    def __init__(self, ewf_handle):
+        self._ewf_handle = ewf_handle
+        super(EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
 
-    class EWFImgInfo(pytsk3.Img_Info):
-        def __init__(self, ewf_handle):
-            self._ewf_handle = ewf_handle
-            super(EvidenceUtils.EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
+    def close(self):
+        self._ewf_handle.close()
 
-        def close(self):
-            self._ewf_handle.close()
+    def read(self, offset, size):
+        self._ewf_handle.seek(offset)
+        return self._ewf_handle.read(size)
 
-        def read(self, offset, size):
-            self._ewf_handle.seek(offset)
-            return self._ewf_handle.read(size)
+    def get_size(self):
+        return self._ewf_handle.get_media_size()
 
-        def get_size(self):
-            return self._ewf_handle.get_media_size()
 
-    def __init__(self, image_path=None):
-        self.img = None
-        self.volume = None
-        self.fs = None
-        if image_path:
-            self.open_image(image_path)
+class ImageHandler:
+    def __init__(self, image_path):
+        self.image_path = image_path
+        self.img_info = None
+        self.volume_info = None  # Initialized once
+        self.fs_info_cache = {}  # Cache for FS_Info objects, keyed by start offset
+        self.load_image()
 
-    def open_image(self, image_path):
-        try:
-            # Attempt to open as E01
-            filenames = pyewf.glob(image_path)
+    def get_image_type(self):
+        """Determine the type of the image based on its extension."""
+        _, ext = os.path.splitext(self.image_path)
+        ext = ext.lower()
+
+        ewf = [".e01", ".s01", ".l01"]
+        raw = [".raw", ".img", ".dd"]
+
+        if ext in ewf:
+            return "ewf"
+        elif ext in raw:
+            return "raw"
+        else:
+            raise ValueError(f"Unsupported image type: {ext}")
+
+    def load_image(self):
+        image_type = self.get_image_type()
+
+        if image_type == "ewf":
+            filenames = pyewf.glob(self.image_path)
             ewf_handle = pyewf.handle()
             ewf_handle.open(filenames)
-            self.img = self.EWFImgInfo(ewf_handle)
-        except:
-            # If it's not E01, open as raw or other format
-            self.img = pytsk3.Img_Info(image_path)
+            self.img_info = EWFImgInfo(ewf_handle)
+        elif image_type == "raw":
+            self.img_info = pytsk3.Img_Info(self.image_path)
+        else:
+            raise ValueError(f"Unsupported image type: {image_type}")
+
+        try:
+            self.volume_info = pytsk3.Volume_Info(self.img_info)
+        except Exception as e:
+
+            self.volume_info = None
 
     def get_partitions(self):
+        """Retrieve partitions from the loaded image."""
         partitions = []
-        try:
-            self.volume = pytsk3.Volume_Info(self.img)
-            for vol in self.volume:
-                partitions.append({
-                    "start": vol.start,
-                    "end": vol.start + vol.len - 1,
-                    "size": vol.len * 512,  # 512 bytes per sector is a common sector size
-                    "description": vol.desc.decode("utf-8")
-                })
-        except IOError:
-            print("No volume information found. Assuming direct filesystem image.")
-
+        if self.volume_info:
+            for part in self.volume_info:
+                if not part.desc:
+                    continue
+                partitions.append((part.addr, part.desc, part.start, part.len))
         return partitions
 
-    def list_files(self, offset=0, inode_number=None):
-        self.fs = pytsk3.FS_Info(self.img, offset=offset * 512)
-        directory = self.fs.open_dir(inode=inode_number) if inode_number else self.fs.open_dir(path="/")
+    def has_partitions(self):
+        """Check if the image has partitions."""
+        return bool(self.get_partitions())
 
-        entries = []
-        for entry in directory:
-            if hasattr(entry, "info") and hasattr(entry.info, "name") and hasattr(entry.info.name, "name"):
-                name = entry.info.name.name.decode("utf-8")
-                if name not in [".", ".."]:
-                    entries.append(f"{name} (Inode: {entry.info.meta.addr})")
+    def get_fs_info(self, start_offset):
+        """Retrieve the FS_Info for a partition, initializing it if necessary."""
+        if start_offset not in self.fs_info_cache:
+            try:
+                fs_info = pytsk3.FS_Info(self.img_info, offset=start_offset * 512)
+                self.fs_info_cache[start_offset] = fs_info
+            except Exception as e:
+                return None
+        return self.fs_info_cache[start_offset]
 
-        return entries
+    def check_partition_contents(self, partition_start_offset):
+        """Check if a partition has any files or folders."""
+        fs = self.get_fs_info(partition_start_offset)
+        if fs:
+            try:
+                root_dir = fs.open_dir(path="/")
+                for _ in root_dir:
+                    return True
+                return False
+            except:
+                return False
+        return False
+
+    def get_directory_contents(self, start_offset, inode_number=None):
+        fs = self.get_fs_info(start_offset)
+        if fs:
+            try:
+                directory = fs.open_dir(inode=inode_number) if inode_number else fs.open_dir(path="/")
+                entries = []
+                for entry in directory:
+                    if entry.info.name.name not in [b".", b".."]:
+                        is_directory = False
+                        if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+                            is_directory = True
+
+                        entries.append({
+                            "name": entry.info.name.name.decode('utf-8'),
+                            "is_directory": is_directory,
+                            "inode_number": entry.info.meta.addr if entry.info.meta else None
+                        })
+                return entries
+            except:
+                return []
+        return []

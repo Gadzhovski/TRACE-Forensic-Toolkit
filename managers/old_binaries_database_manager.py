@@ -1,3 +1,6 @@
+""" Old database manager using when used The Sleuth Kit binaries"""
+
+
 from sqlite3 import connect as sqlite3_connect
 
 

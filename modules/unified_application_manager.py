@@ -593,7 +593,7 @@ class AudioVideoViewer(QWidget):
     def __init__(self, parent=None):
         super(AudioVideoViewer, self).__init__(parent)
 
-        # Initialize the volume control interface once
+        # Initialize the volumes control interface once
         devices = AudioUtilities.GetSpeakers()
         self.volume_interface = devices.Activate(
             IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
@@ -650,7 +650,7 @@ class AudioVideoViewer(QWidget):
         self.volume_display.setToolTip("Volume Percentage")
         self.controls_layout.addWidget(self.volume_display)
 
-        # Spacer to separate media controls and volume controls
+        # Spacer to separate media controls and volumes controls
         self.controls_layout.addSpacerItem(QSpacerItem(370, 10, QSizePolicy.Fixed, QSizePolicy.Minimum))
 
         # Media control buttons
@@ -672,7 +672,7 @@ class AudioVideoViewer(QWidget):
         self.stop_btn.clicked.connect(self._player.stop)
         self.controls_layout.addWidget(self.stop_btn)
 
-        # Spacer to separate volume controls and speed controls
+        # Spacer to separate volumes controls and speed controls
         self.controls_layout.addSpacerItem(QSpacerItem(370, 10, QSizePolicy.Fixed, QSizePolicy.Minimum))
 
         # Speed label
@@ -737,13 +737,13 @@ class AudioVideoViewer(QWidget):
         self.set_media_position(new_value)
 
     def get_system_volume(self):
-        """Return the current system volume as a value between 0 and 100."""
+        """Return the current system volumes as a value between 0 and 100."""
         current_volume = self.volume.GetMasterVolumeLevelScalar()
         return int(current_volume * 100)
 
     @Slot(int)
     def set_volume(self, value):
-        """Set the system volume based on the slider's value."""
+        """Set the system volumes based on the slider's value."""
         self.volume.SetMasterVolumeLevelScalar(value / 100.0, None)
 
     @Slot(int)
@@ -758,5 +758,5 @@ class AudioVideoViewer(QWidget):
 
     @Slot(int)
     def update_volume_display(self, value):
-        """Update the volume display label based on the slider's value."""
+        """Update the volumes display label based on the slider's value."""
         self.volume_display.setText(f"{value}%")
