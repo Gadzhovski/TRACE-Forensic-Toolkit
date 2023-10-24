@@ -5,3 +5,5 @@ requests~=2.31.0
 comtypes~=1.2.0
 pycaw~=20230407
 
+
+pytsk3~=20210801

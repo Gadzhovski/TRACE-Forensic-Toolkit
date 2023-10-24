@@ -1,4 +1,7 @@
+import hashlib
 import os
+import datetime
+import mimetypes
 
 import pyewf
 import pytsk3
@@ -112,11 +115,48 @@ class ImageHandler:
                             is_directory = True
 
                         entries.append({
-                            "name": entry.info.name.name.decode('utf-8'),
+                            # check before append to list if entry has meta
+
+                            "name": entry.info.name.name.decode('utf-8') if hasattr(entry.info.name, 'name') else None,
                             "is_directory": is_directory,
-                            "inode_number": entry.info.meta.addr if entry.info.meta else None
+                            "inode_number": entry.info.meta.addr if entry.info.meta else None,
+                            "size": entry.info.meta.size if entry.info.meta else None,
+
+
+
+                            "modified": datetime.datetime.fromtimestamp(entry.info.meta.mtime).strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
+                                                                'mtime') else None,
+                            "accessed": datetime.datetime.fromtimestamp(entry.info.meta.atime).strftime('%Y-%m-%d %H:%M:%S' if hasattr(entry.info.meta,
+                                                                'atime') else None),
+                            "created": datetime.datetime.fromtimestamp(entry.info.meta.crtime).strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
+                                                                'crtime') else None,
+                            "changed": datetime.datetime.fromtimestamp(entry.info.meta.ctime).strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
+                                                                'ctime') else None,
+                            "flag(??)": entry.info.meta.flags if entry.info.meta else None,
+
                         })
+                print(entries)
                 return entries
+
             except:
                 return []
         return []
+
+
+    def get_hashes(self, tsk_file):
+        # Create hash objects
+        md5_hash = hashlib.md5()
+        sha256_hash = hashlib.sha256()
+
+        # Define the offset
+        offset = 0
+        size = tsk_file.info.meta.size
+
+        # Read and update hash string value in blocks of 64K
+        while offset < size:
+            byte_block = tsk_file.read_random(offset, 65536)
+            md5_hash.update(byte_block)
+            sha256_hash.update(byte_block)
+            offset += len(byte_block)
+
+        return md5_hash.hexdigest(), sha256_hash.hexdigest()

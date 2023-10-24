@@ -125,12 +125,12 @@ class PictureViewer(QWidget):
         self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
         # Create actions for the toolbar
-        zoom_in_icon = QIcon("gui/icons/zoom-in.png")
-        zoom_out_icon = QIcon("gui/icons/zoom-out.png")
-        rotate_left_icon = QIcon("gui/icons/object-rotate-left.png")
-        rotate_right_icon = QIcon("gui/icons/object-rotate-right.png")
-        reset_icon = QIcon("gui/icons/document-revert.png")
-        export_icon = QIcon("gui/icons/folder-download.png")
+        zoom_in_icon = QIcon("gui/nav_icons/icons8-zoom-in-50.png")
+        zoom_out_icon = QIcon("gui/nav_icons/icons8-zoom-out-50.png")
+        rotate_left_icon = QIcon("gui/nav_icons/icons8-rotate-left-50.png")
+        rotate_right_icon = QIcon("gui/nav_icons/icons8-rotate-right-50.png")
+        reset_icon = QIcon("gui/nav_icons/icons8-no-rotation-50.png")
+        export_icon = QIcon("gui/nav_icons/icons8-download-50.png")
 
         zoom_in_action = QAction(zoom_in_icon, 'Zoom In', self)
         zoom_out_action = QAction(zoom_out_icon, 'Zoom Out', self)
@@ -257,11 +257,11 @@ class PDFViewer(QWidget):
         self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
         # Navigation buttons
-        self.first_action = QAction(QIcon("gui/icons/go-up.png"), "First", self)
+        self.first_action = QAction(QIcon("gui/nav_icons/icons8-thick-arrow-pointing-up-50.png"), "First", self)
         self.first_action.triggered.connect(self.show_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon("gui/icons/go-previous.png"), "Previous", self)
+        self.prev_action = QAction(QIcon("gui/nav_icons/icons8-left-arrow-50.png"), "Previous", self)
         self.prev_action.triggered.connect(self.show_previous_page)
         self.toolbar.addAction(self.prev_action)
 
@@ -277,16 +277,16 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
-        self.next_action = QAction(QIcon("gui/icons/go-next.png"), "Next", self)
+        self.next_action = QAction(QIcon("gui/nav_icons/icons8-right-arrow-50.png"), "Next", self)
         self.next_action.triggered.connect(self.show_next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon("gui/icons/go-down.png"), "Last", self)
+        self.last_action = QAction(QIcon("gui/nav_icons/icons8-down-50.png"), "Last", self)
         self.last_action.triggered.connect(self.show_last_page)
         self.toolbar.addAction(self.last_action)
 
         # Zoom actions
-        self.zoom_in_action = QAction(QIcon("gui/icons/zoom-in.png"), "Zoom In", self)
+        self.zoom_in_action = QAction(QIcon("gui/nav_icons/icons8-zoom-in-50.png"), "Zoom In", self)
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.toolbar.addAction(self.zoom_in_action)
 
@@ -298,54 +298,54 @@ class PDFViewer(QWidget):
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
         self.toolbar.addWidget(self.zoom_percentage_entry)
 
-        self.zoom_out_action = QAction(QIcon("gui/icons/zoom-out.png"), "Zoom Out", self)
+        self.zoom_out_action = QAction(QIcon("gui/nav_icons/icons8-zoom-out-50.png"), "Zoom Out", self)
         self.zoom_out_action.triggered.connect(self.zoom_out)
         self.toolbar.addAction(self.zoom_out_action)
 
         # Create a reset zoom button with its icon and add it to the toolbar
-        reset_zoom_icon = QIcon("gui/icons/document-revert.png")  # Replace with your icon path
+        reset_zoom_icon = QIcon("gui/nav_icons/icons8-zoom-to-actual-size-50.png")  # Replace with your icon path
         self.reset_zoom_action = QAction(reset_zoom_icon, "Reset Zoom", self)
         self.reset_zoom_action.triggered.connect(self.reset_zoom)
         self.toolbar.addAction(self.reset_zoom_action)
 
         # Fit in window
-        fit_window_icon = QIcon("gui/icons/fit-window.png")  # Replace with your icon path
+        fit_window_icon = QIcon("gui/nav_icons/icons8-enlarge-50.png")  # Replace with your icon path
         self.fit_window_action = QAction(fit_window_icon, "Fit in Window", self)
         self.fit_window_action.triggered.connect(self.fit_window)
         self.toolbar.addAction(self.fit_window_action)
 
         # Fit in width
-        fit_width_icon = QIcon("gui/icons/fit-width.png")  # Replace with your icon path
+        fit_width_icon = QIcon("gui/nav_icons/icons8-resize-horizontal-50.png")  # Replace with your icon path
         self.fit_width_action = QAction(fit_width_icon, "Fit in Width", self)
         self.fit_width_action.triggered.connect(self.fit_width)
         self.toolbar.addAction(self.fit_width_action)
 
         # Rotate left
-        rotate_left_icon = QIcon("gui/icons/object-rotate-left.png")  # Replace with your icon path
+        rotate_left_icon = QIcon("gui/nav_icons/icons8-rotate-left-50.png")  # Replace with your icon path
         self.rotate_left_action = QAction(rotate_left_icon, "Rotate Left", self)
         self.rotate_left_action.triggered.connect(self.rotate_left)
         self.toolbar.addAction(self.rotate_left_action)
 
         # Rotate right
-        rotate_right_icon = QIcon("gui/icons/object-rotate-right.png")  # Replace with your icon path
+        rotate_right_icon = QIcon("gui/nav_icons/icons8-rotate-right-50.png")  # Replace with your icon path
         self.rotate_right_action = QAction(rotate_right_icon, "Rotate Right", self)
         self.rotate_right_action.triggered.connect(self.rotate_right)
         self.toolbar.addAction(self.rotate_right_action)
 
         # Pan tool button
-        self.pan_tool_icon = QIcon("gui/icons/pan.png")  # Replace with your pan icon path
+        self.pan_tool_icon = QIcon("gui/nav_icons/icons8-drag-50.png")  # Replace with your pan icon path
         self.pan_tool_action = QAction(self.pan_tool_icon, "Pan Tool", self)
         self.pan_tool_action.setCheckable(True)
         self.pan_tool_action.toggled.connect(self.toggle_pan_mode)
         self.toolbar.addAction(self.pan_tool_action)
 
         # Print button
-        self.print_icon = QIcon("gui/icons/printer.png")  # Replace with your print icon path
+        self.print_icon = QIcon("gui/nav_icons/icons8-print-50.png")  # Replace with your print icon path
         self.print_action = QAction(self.print_icon, "Print", self)
         self.print_action.triggered.connect(self.print_pdf)
         self.toolbar.addAction(self.print_action)
 
-        self.save_pdf_action = QAction(QIcon("gui/icons/folder-download.png"), "Save PDF", self)
+        self.save_pdf_action = QAction(QIcon("gui/nav_icons/icons8-download-50.png"), "Save PDF", self)
         self.save_pdf_action.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.save_pdf_action)
 

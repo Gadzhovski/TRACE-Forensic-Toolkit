@@ -29,6 +29,7 @@ class MainWindow(QMainWindow):
         self.image_handler = None
         self.image_manager = ImageManager()
         self.db_manager = DatabaseManager('new_database_mappings.db')
+        self.current_selected_data = None
 
         self.image_manager.operationCompleted.connect(
             lambda success, message: (
@@ -43,6 +44,8 @@ class MainWindow(QMainWindow):
 
     def initialize_ui(self):
         self.setWindowTitle('GUI4n6')
+        # set logo for the application
+        self.setWindowIcon(QIcon('gui/logo.png'))
         self.setGeometry(100, 100, 1200, 800)
 
         # Create a menu bar
@@ -102,12 +105,12 @@ class MainWindow(QMainWindow):
 
         result_viewer = QTabWidget(self)
         # set qstyle for the tab
-        #result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }")
+        # result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }")
         # modern style for the tab
-# #result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }"
-#                                     "QTabBar::tab:selected { background: #a8a8a8; }"
-#                                     "QTabBar::tab:!selected { background: #d8d8d8; }"
-#                                     "QTabBar::tab:!selected:hover { background: #a8a8a8; }")
+        # #result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }"
+        #                                     "QTabBar::tab:selected { background: #a8a8a8; }"
+        #                                     "QTabBar::tab:!selected { background: #d8d8d8; }"
+        #                                     "QTabBar::tab:!selected:hover { background: #a8a8a8; }")
 
         self.setCentralWidget(result_viewer)
 
@@ -116,8 +119,8 @@ class MainWindow(QMainWindow):
 
         # Set icon size for listing table
         self.listing_table.setIconSize(QSize(24, 24))
-        self.listing_table.setColumnCount(5)  # Assuming 3 columns: Name, Inode, and Description
-        self.listing_table.setHorizontalHeaderLabels(['Name', 'Inode', 'Description', 'Size', 'Modified Date'])
+        self.listing_table.setColumnCount(9)
+        self.listing_table.setHorizontalHeaderLabels(['Name', 'Inode', 'Description', 'Size', 'Modified Date', 'Created Date', 'Accessed Date', 'Changed Date', 'Flags'])
 
         self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)  ###
 
@@ -246,39 +249,7 @@ class MainWindow(QMainWindow):
         self.clear_ui()
         QMessageBox.information(self, "Remove Evidence", "Evidence has been removed.")
 
-    # def load_partitions_into_tree(self, image_path):
-    #     """Load partitions from an image into the tree viewer."""
-    #     if not self.image_handler.has_partitions():
-    #         # Handle images without partitions here. You can directly load the directory structure
-    #         # of the image if needed.
-    #         root_item_tree = QTreeWidgetItem(self.tree_viewer)
-    #         root_item_tree.setText(0, image_path)
-    #         root_item_tree.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'media-optical')))
-    #         self.populate_contents(root_item_tree, {"start_offset": 0})
-    #
-    #         return
-    #
-    #     # Set the image file as the root item in the QTreeWidget
-    #     root_item_tree = QTreeWidgetItem(self.tree_viewer)
-    #     root_item_tree.setText(0, image_path)
-    #     root_item_tree.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'media-optical')))
-    #
-    #     # Load partitions from the image
-    #     partitions = self.image_handler.get_partitions()
-    #
-    #     for addr, desc, start, length in partitions:
-    #         end = start + length - 1
-    #         item_text = f"vol{addr} ({desc.decode('utf-8')}: {start}-{end})"
-    #         item = QTreeWidgetItem(root_item_tree)
-    #         item.setText(0, item_text)
-    #         item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'drive-harddisk')))
-    #         item.setData(0, Qt.UserRole, {"inode_number": None, "start_offset": start})
-    #
-    #         # Check if the partition has contents and set it as expandable
-    #         if self.image_handler.check_partition_contents(start):
-    #             item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-    #         else:
-    #             item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
+
     def load_partitions_into_tree(self, image_path):
         """Load partitions from an image into the tree viewer."""
         if not self.image_handler.has_partitions():
@@ -402,7 +373,11 @@ class MainWindow(QMainWindow):
             return None
 
     def on_item_clicked(self, item, column):
+        self.clear_viewers()
+
         data = item.data(0, Qt.UserRole)
+
+        self.current_selected_data = data
 
         if not data or "inode_number" not in data or "start_offset" not in data:
             print("Not a file or missing data!")
@@ -435,33 +410,18 @@ class MainWindow(QMainWindow):
             file_hash = md5(file_content).hexdigest()
             self.virus_total_api.set_file_hash(file_hash)
 
+
     def display_content_for_active_tab(self):
-        if self.tree_viewer.hasFocus():
-            item = self.tree_viewer.currentItem()
-            if not item:
-                return
+        if not self.current_selected_data:
+            return
 
-            data = item.data(0, Qt.UserRole)
-            inode_number = data.get("inode_number") if data else None
-            offset = data.get("offset", self.current_offset) if data else self.current_offset
+        inode_number = self.current_selected_data.get("inode_number")
+        offset = self.current_selected_data.get("start_offset", self.current_offset)
 
-            if inode_number:
-                file_content = self.get_file_content(inode_number, offset)
-                if file_content:
-                    self.update_viewer_with_file_content(file_content, data)  # Pass data as the second argument
-
-        elif self.listing_table.hasFocus():
-            selected_rows = self.listing_table.selectedItems()
-            if not selected_rows:
-                return
-
-            row = selected_rows[0].row()
-            inode_item = self.listing_table.item(row, 1)
-            inode_number = int(inode_item.text())
-            data = self.listing_table.item(row, 0).data(Qt.UserRole)  # Get data for the row
-            file_content = self.get_file_content(inode_number, self.current_offset)
+        if inode_number:
+            file_content = self.get_file_content(inode_number, offset)
             if file_content:
-                self.update_viewer_with_file_content(file_content, data)  # Pass data as the second argument
+                self.update_viewer_with_file_content(file_content, self.current_selected_data)  # Use the stored data
 
     def display_application_content(self, file_content, full_file_path):
         file_extension = os.path.splitext(full_file_path)[-1].lower()
@@ -476,12 +436,21 @@ class MainWindow(QMainWindow):
             file_type = "video"
         self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
 
+
     def populate_listing_table(self, entries, offset):
         self.listing_table.setRowCount(0)
         for entry in entries:
             entry_name = entry["name"]
             inode_number = entry["inode_number"]
             description = "Directory" if entry["is_directory"] else "File"
+            size_in_bytes = entry["size"] if "size" in entry else 0
+            readable_size = self.get_readable_size(size_in_bytes)
+            created = entry["created"] if "created" in entry else None
+            modified = entry["modified"] if "modified" in entry else None
+            accessed = entry["accessed"] if "accessed" in entry else None
+            changed = entry["changed"] if "changed" in entry else None
+            flags = entry["flag(??)"] if "flag(??)" in entry else None
+
 
             # Revised logic for determining icon_name and icon_type
             if entry["is_directory"]:
@@ -494,9 +463,10 @@ class MainWindow(QMainWindow):
                 else:
                     icon_name, icon_type = 'file', 'unknown'
 
-            self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
+            #self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
+            self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset, readable_size, modified, created, accessed, changed, flags)
 
-    def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset):
+    def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size, modified, created, accessed, changed, flags):
         icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
         icon = QIcon(icon_path)
 
@@ -508,17 +478,31 @@ class MainWindow(QMainWindow):
         name_item.setData(Qt.UserRole, {
             "inode_number": entry_inode,
             "start_offset": offset,
-            "type": "directory" if icon_type == 'folder' else 'file'
+            "type": "directory" if icon_type == 'folder' else 'file',
+            "name": entry_name,
+            "size": size,
+
+
         })
 
         self.listing_table.setItem(row_position, 0, name_item)
         self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))  # Convert inode to string
         self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
+        self.listing_table.setItem(row_position, 3, QTableWidgetItem(size))
+
+        self.listing_table.setItem(row_position, 4, QTableWidgetItem(str(modified)))
+        self.listing_table.setItem(row_position, 5, QTableWidgetItem(str(created)))
+        self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(accessed)))
+        self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
+        self.listing_table.setItem(row_position, 8, QTableWidgetItem(str(flags)))
+
 
     def on_listing_table_item_clicked(self, row, column):
         inode_item = self.listing_table.item(row, 1)
         inode_number = int(inode_item.text())
         data = self.listing_table.item(row, 0).data(Qt.UserRole)
+
+        self.current_selected_data = data
 
         if data.get("type") == "directory":
             entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
