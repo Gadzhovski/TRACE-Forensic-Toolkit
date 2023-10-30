@@ -17,6 +17,9 @@ from managers.image_manager import ImageManager
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 
+from modules.listing_table import ListingTab
+from modules.deleted_files import DeletedFilesTab
+from modules.results_tab import ResultsTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -104,32 +107,20 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
         result_viewer = QTabWidget(self)
-        # set qstyle for the tab
-        # result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }")
-        # modern style for the tab
-        # #result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }"
-        #                                     "QTabBar::tab:selected { background: #a8a8a8; }"
-        #                                     "QTabBar::tab:!selected { background: #d8d8d8; }"
-        #                                     "QTabBar::tab:!selected:hover { background: #a8a8a8; }")
 
         self.setCentralWidget(result_viewer)
 
         # Create a QTableWidget for the Listing
-        self.listing_table = QTableWidget()
+        #self.listing_table = QTableWidget()
+        self.listing_tab = ListingTab(self.db_manager, self.image_handler)
+        result_viewer.addTab(self.listing_tab, 'Listing')
 
-        # Set icon size for listing table
-        self.listing_table.setIconSize(QSize(24, 24))
-        self.listing_table.setColumnCount(9)
-        self.listing_table.setHorizontalHeaderLabels(
-            ['Name', 'Inode', 'Description', 'Size', 'Modified Date', 'Created Date', 'Accessed Date', 'Changed Date',
-             'Flags'])
+        self.deleted_files_tab = DeletedFilesTab()
+        result_viewer.addTab(self.deleted_files_tab, 'Deleted Files')
 
-        self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)  ###
+        self.results_tab = ResultsTab()
+        result_viewer.addTab(self.results_tab, 'Results')
 
-        # Add the QTableWidget to your result_viewer QTabWidget
-        result_viewer.addTab(self.listing_table, 'Listing')
-        result_viewer.addTab(QTextEdit(self), 'Results')
-        result_viewer.addTab(QTextEdit(self), 'Deleted Files')
 
         self.viewer_tab = QTabWidget(self)
 
@@ -380,13 +371,17 @@ class MainWindow(QMainWindow):
 
         if data.get("type") == "directory":
             entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
-            self.populate_listing_table(entries, data["start_offset"])
+            #self.populate_listing_table(entries, data["start_offset"])
+            self.listing_tab.populate_listing_table(entries, data["start_offset"])
         else:
             file_content = self.get_file_content(data["inode_number"], data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, data)
-            # Call this to make sure the content is displayed based on the active tab
+         # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
+
+        # call the function to display the file metadata
+        # self.get_file_metadata(data["start_offset"], self.current_image_path, data["inode_number"])
 
     def update_viewer_with_file_content(self, file_content, data):  # Add the data parameter here
         index = self.viewer_tab.currentIndex()
@@ -431,82 +426,6 @@ class MainWindow(QMainWindow):
             file_type = "video"
         self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
 
-    def populate_listing_table(self, entries, offset):
-        self.listing_table.setRowCount(0)
-        for entry in entries:
-            entry_name = entry["name"]
-            inode_number = entry["inode_number"]
-            description = "Directory" if entry["is_directory"] else "File"
-            size_in_bytes = entry["size"] if "size" in entry else 0
-            readable_size = self.get_readable_size(size_in_bytes)
-            created = entry["created"] if "created" in entry else None
-            modified = entry["modified"] if "modified" in entry else None
-            accessed = entry["accessed"] if "accessed" in entry else None
-            changed = entry["changed"] if "changed" in entry else None
-            flags = entry["flag(??)"] if "flag(??)" in entry else None
-
-            # Revised logic for determining icon_name and icon_type
-            if entry["is_directory"]:
-                icon_name, icon_type = 'folder', 'folder'
-            else:
-                if '.' in entry_name:
-                    icon_name = 'file'
-                    icon_type = entry_name.split('.')[-1].lower()  # Ensure the extension is in lowercase
-
-                else:
-                    icon_name, icon_type = 'file', 'unknown'
-
-            # self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
-            self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset,
-                                               readable_size, modified, created, accessed, changed, flags)
-
-    def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
-                                      modified, created, accessed, changed, flags):
-        icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
-        icon = QIcon(icon_path)
-
-        row_position = self.listing_table.rowCount()
-        self.listing_table.insertRow(row_position)
-
-        name_item = QTableWidgetItem(entry_name)
-        name_item.setIcon(icon)  # Ensure that the icon is set here
-        name_item.setData(Qt.UserRole, {
-            "inode_number": entry_inode,
-            "start_offset": offset,
-            "type": "directory" if icon_type == 'folder' else 'file',
-            "name": entry_name,
-            "size": size,
-
-        })
-
-        self.listing_table.setItem(row_position, 0, name_item)
-        self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))  # Convert inode to string
-        self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
-        self.listing_table.setItem(row_position, 3, QTableWidgetItem(size))
-
-        self.listing_table.setItem(row_position, 4, QTableWidgetItem(str(modified)))
-        self.listing_table.setItem(row_position, 5, QTableWidgetItem(str(created)))
-        self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(accessed)))
-        self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
-        self.listing_table.setItem(row_position, 8, QTableWidgetItem(str(flags)))
-
-    def on_listing_table_item_clicked(self, row, column):
-        inode_item = self.listing_table.item(row, 1)
-        inode_number = int(inode_item.text())
-        data = self.listing_table.item(row, 0).data(Qt.UserRole)
-
-        self.current_selected_data = data
-
-        if data.get("type") == "directory":
-            entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
-            self.populate_listing_table(entries, data["start_offset"])
-        else:
-            file_content = self.get_file_content(inode_number, data["start_offset"])
-            if file_content:
-                self.update_viewer_with_file_content(file_content, data)
-
-            # Call this to make sure the content is displayed based on the active tab
-        self.display_content_for_active_tab()
 
     @staticmethod
     def cleanup_temp_directory():

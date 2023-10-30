@@ -30,6 +30,8 @@ class ImageHandler:
         self.volume_info = None  # Initialized once
         self.fs_info_cache = {}  # Cache for FS_Info objects, keyed by start offset
         self.load_image()
+        self.hash_cache = {}
+
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
@@ -137,31 +139,52 @@ class ImageHandler:
                             "flag(??)": entry.info.meta.flags if entry.info.meta else None,
 
                         })
-                print(entries)
+                #print(entries)
                 return entries
 
             except:
                 return []
         return []
 
-    @staticmethod
-    def get_hashes(tsk_file):
-        # Create hash objects
+    # @staticmethod
+    # def get_hashes(tsk_file):
+    #     # Create hash objects
+    #     md5_hash = hashlib.md5()
+    #     sha256_hash = hashlib.sha256()
+
+    #     # Define the offset
+    #     offset = 0
+    #     size = tsk_file.info.meta.size
+
+    #     # Read and update hash string value in blocks of 64K
+    #     while offset < size:
+    #         byte_block = tsk_file.read_random(offset, 65536)
+    #         md5_hash.update(byte_block)
+    #         sha256_hash.update(byte_block)
+    #         offset += len(byte_block)
+
+    #     return md5_hash.hexdigest(), sha256_hash.hexdigest()
+
+    def get_hashes(self, tsk_file):
+        # Check if we've already computed the hashes for this file
+        if tsk_file in self.hash_cache:
+            return self.hash_cache[tsk_file]
+
+        # Compute the hashes
         md5_hash = hashlib.md5()
         sha256_hash = hashlib.sha256()
-
-        # Define the offset
         offset = 0
         size = tsk_file.info.meta.size
-
-        # Read and update hash string value in blocks of 64K
         while offset < size:
             byte_block = tsk_file.read_random(offset, 65536)
             md5_hash.update(byte_block)
             sha256_hash.update(byte_block)
             offset += len(byte_block)
 
-        return md5_hash.hexdigest(), sha256_hash.hexdigest()
+        # Cache the results
+        self.hash_cache[tsk_file] = (md5_hash.hexdigest(), sha256_hash.hexdigest())
+
+        return self.hash_cache[tsk_file]
 
     def get_file_metadata(self, offset, image_path, inode_number, path=None):
         fs_info = self.get_fs_info(offset)

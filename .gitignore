@@ -14,4 +14,8 @@
 /gui/Eleven/48/
 /gui/Eleven/64/
 /gui/Eleven/24/actions/
-
+__pycache__/
+*.pyc
+*.pyo
+.idea/  # PyCharm settings
+.vscode/  # VSCode settings (unless you intentionally want to share these)
