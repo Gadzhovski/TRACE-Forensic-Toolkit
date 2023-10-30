@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
     def initialize_ui(self):
         self.setWindowTitle('GUI4n6')
         # set logo for the application
-        self.setWindowIcon(QIcon('gui/logo.png'))
+        self.setWindowIcon(QIcon('gui/logos/logo.png'))
         self.setGeometry(100, 100, 1200, 800)
 
         # Create a menu bar
