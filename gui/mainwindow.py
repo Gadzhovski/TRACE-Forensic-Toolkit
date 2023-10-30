@@ -120,7 +120,9 @@ class MainWindow(QMainWindow):
         # Set icon size for listing table
         self.listing_table.setIconSize(QSize(24, 24))
         self.listing_table.setColumnCount(9)
-        self.listing_table.setHorizontalHeaderLabels(['Name', 'Inode', 'Description', 'Size', 'Modified Date', 'Created Date', 'Accessed Date', 'Changed Date', 'Flags'])
+        self.listing_table.setHorizontalHeaderLabels(
+            ['Name', 'Inode', 'Description', 'Size', 'Modified Date', 'Created Date', 'Accessed Date', 'Changed Date',
+             'Flags'])
 
         self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)  ###
 
@@ -148,6 +150,7 @@ class MainWindow(QMainWindow):
 
         # Create File Metadata viewer
         # self.metadata_viewer = MetadataViewerManager(self.current_image_path, self.evidence_utils)
+
         self.metadata_viewer = QTabWidget(self)
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
 
@@ -249,7 +252,6 @@ class MainWindow(QMainWindow):
         self.clear_ui()
         QMessageBox.information(self, "Remove Evidence", "Evidence has been removed.")
 
-
     def load_partitions_into_tree(self, image_path):
         """Load partitions from an image into the tree viewer."""
         if not self.image_handler.has_partitions():
@@ -288,13 +290,6 @@ class MainWindow(QMainWindow):
                 item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
             else:
                 item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
-
-    def get_readable_size(self, size_in_bytes):
-        """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size_in_bytes < 1024.0:
-                return f"{size_in_bytes:.2f} {unit}"
-            size_in_bytes /= 1024.0
 
     def populate_contents(self, item, data, inode=None):
         if self.current_image_path is None:
@@ -404,12 +399,12 @@ class MainWindow(QMainWindow):
             self.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
             print("File Metadata tab")
+
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
             file_hash = md5(file_content).hexdigest()
             self.virus_total_api.set_file_hash(file_hash)
-
 
     def display_content_for_active_tab(self):
         if not self.current_selected_data:
@@ -436,7 +431,6 @@ class MainWindow(QMainWindow):
             file_type = "video"
         self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
 
-
     def populate_listing_table(self, entries, offset):
         self.listing_table.setRowCount(0)
         for entry in entries:
@@ -451,7 +445,6 @@ class MainWindow(QMainWindow):
             changed = entry["changed"] if "changed" in entry else None
             flags = entry["flag(??)"] if "flag(??)" in entry else None
 
-
             # Revised logic for determining icon_name and icon_type
             if entry["is_directory"]:
                 icon_name, icon_type = 'folder', 'folder'
@@ -463,10 +456,12 @@ class MainWindow(QMainWindow):
                 else:
                     icon_name, icon_type = 'file', 'unknown'
 
-            #self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
-            self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset, readable_size, modified, created, accessed, changed, flags)
+            # self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
+            self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset,
+                                               readable_size, modified, created, accessed, changed, flags)
 
-    def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size, modified, created, accessed, changed, flags):
+    def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
+                                      modified, created, accessed, changed, flags):
         icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
         icon = QIcon(icon_path)
 
@@ -482,7 +477,6 @@ class MainWindow(QMainWindow):
             "name": entry_name,
             "size": size,
 
-
         })
 
         self.listing_table.setItem(row_position, 0, name_item)
@@ -495,7 +489,6 @@ class MainWindow(QMainWindow):
         self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(accessed)))
         self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
         self.listing_table.setItem(row_position, 8, QTableWidgetItem(str(flags)))
-
 
     def on_listing_table_item_clicked(self, row, column):
         inode_item = self.listing_table.item(row, 1)
@@ -522,3 +515,11 @@ class MainWindow(QMainWindow):
             file_path = os.path.join(temp_dir_path, filename)
             if os.path.isfile(file_path):
                 os.remove(file_path)
+
+    @staticmethod
+    def get_readable_size(size_in_bytes):
+        """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_in_bytes < 1024.0:
+                return f"{size_in_bytes:.2f} {unit}"
+            size_in_bytes /= 1024.0

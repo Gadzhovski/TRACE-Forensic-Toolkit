@@ -122,15 +122,17 @@ class ImageHandler:
                             "inode_number": entry.info.meta.addr if entry.info.meta else None,
                             "size": entry.info.meta.size if entry.info.meta else None,
 
-
-
-                            "modified": datetime.datetime.fromtimestamp(entry.info.meta.mtime).strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
+                            "modified": datetime.datetime.fromtimestamp(entry.info.meta.mtime).strftime(
+                                '%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
                                                                 'mtime') else None,
-                            "accessed": datetime.datetime.fromtimestamp(entry.info.meta.atime).strftime('%Y-%m-%d %H:%M:%S' if hasattr(entry.info.meta,
-                                                                'atime') else None),
-                            "created": datetime.datetime.fromtimestamp(entry.info.meta.crtime).strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
+                            "accessed": datetime.datetime.fromtimestamp(entry.info.meta.atime).strftime(
+                                '%Y-%m-%d %H:%M:%S' if hasattr(entry.info.meta,
+                                                               'atime') else None),
+                            "created": datetime.datetime.fromtimestamp(entry.info.meta.crtime).strftime(
+                                '%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
                                                                 'crtime') else None,
-                            "changed": datetime.datetime.fromtimestamp(entry.info.meta.ctime).strftime('%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
+                            "changed": datetime.datetime.fromtimestamp(entry.info.meta.ctime).strftime(
+                                '%Y-%m-%d %H:%M:%S') if hasattr(entry.info.meta,
                                                                 'ctime') else None,
                             "flag(??)": entry.info.meta.flags if entry.info.meta else None,
 
@@ -142,8 +144,8 @@ class ImageHandler:
                 return []
         return []
 
-
-    def get_hashes(self, tsk_file):
+    @staticmethod
+    def get_hashes(tsk_file):
         # Create hash objects
         md5_hash = hashlib.md5()
         sha256_hash = hashlib.sha256()
@@ -160,3 +162,24 @@ class ImageHandler:
             offset += len(byte_block)
 
         return md5_hash.hexdigest(), sha256_hash.hexdigest()
+
+    def get_file_metadata(self, offset, image_path, inode_number, path=None):
+        fs_info = self.get_fs_info(offset)
+        if fs_info:
+            try:
+                if path:
+                    file_obj = fs_info.open(path=path)
+                else:
+                    file_obj = fs_info.open(inode=inode_number)
+                metadata_content = ""
+
+                # Add your desired metadata extraction logic here.
+                metadata_content += f"Name: {file_obj.info.name.name.decode('utf-8')}\n"
+                metadata_content += f"Size: {file_obj.info.meta.size}\n"
+                metadata_content += f"Path: {image_path}\n"  # This can be enhanced later
+
+                # More attributes can be added as needed.
+                return metadata_content
+            except Exception as e:
+                print(f"Error getting file metadata: {e}")
+        return "No metadata available."

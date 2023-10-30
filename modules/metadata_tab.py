@@ -4,19 +4,30 @@ import re
 
 from PySide6.QtWidgets import QTextEdit
 
+#
+# class MetadataViewerManager(QTextEdit):
+#
+#     def __init__(self, image_path, evidence_utils):
+#         super().__init__()
+#         self.current_image_path = None
+#         self.evidence_utils = evidence_utils
+#         self.setReadOnly(True)
 
 class MetadataViewerManager(QTextEdit):
 
-    def __init__(self, image_path, evidence_utils):
+    def __init__(self, evidence_utils):
         super().__init__()
-        self.current_image_path = None
         self.evidence_utils = evidence_utils
         self.setReadOnly(True)
 
     def set_image_path(self, image_path):
         self.current_image_path = image_path
 
-    def generate_metadata(self, file_content, item, full_file_path, offset, inode_number):
+    def generate_metadata(self, file_content, data):
+        full_file_path = data.get("name", "")
+        offset = data.get("start_offset")
+        inode_number = data.get("inode_number")
+
         # Calculate MD5 and SHA-256 hashes
         md5_hash = md5(file_content).hexdigest()
         sha256_hash = sha256(file_content).hexdigest()
@@ -37,7 +48,7 @@ class MetadataViewerManager(QTextEdit):
 
         # Combine all metadata in a table
         extended_metadata = f"<b>Metadata:</b><br><table border='1'>"
-        extended_metadata += f"<tr><td>Name</td><td>{item.text(0)}</td></tr>"
+        #extended_metadata += f"<tr><td>Name</td><td>{item.text(0)}</td></tr>"
         extended_metadata += f"<tr><td>Path</td><td>{full_file_path}</td></tr>"
         extended_metadata += f"<tr><td>Type</td><td>File</td></tr>"
         extended_metadata += f"<tr><td>MIME Type</td><td>{mime_type}</td></tr>"
@@ -53,7 +64,10 @@ class MetadataViewerManager(QTextEdit):
         extended_metadata += f"<b>From The Sleuth Kit istat Tool</b><pre>{metadata_content}</pre>"
         return extended_metadata
 
-    def display_metadata(self, file_content, item, full_file_path, offset, inode_number):
-        metadata_content = self.generate_metadata(file_content, item, full_file_path, offset,
-                                                  inode_number)
+    def display_metadata(self, file_content, data):
+        full_file_path = data.get("name", "")
+        offset = data.get("start_offset")
+        inode_number = data.get("inode_number")
+
+        metadata_content = self.generate_metadata(file_content, full_file_path, offset, inode_number)
         self.setHtml(metadata_content)
