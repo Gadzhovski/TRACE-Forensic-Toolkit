@@ -21,3 +21,6 @@ __pycache__/
 .vscode/  # VSCode settings (unless you intentionally want to share these)
 /setup.py
 /try.py
+*.xml
+*.iml
+*.name
