@@ -45,7 +45,7 @@ class VirusTotal(QWidget):
         self.toolbar.addAction(spacer_action)
 
         # Add VirusTotal Logo to the toolbar on the right side
-        self.virus_total_logo = QSvgWidget("C:\\Users\\Radi\\Desktop\\VirusTotal_logo.svg")
+        self.virus_total_logo = QSvgWidget("gui/VirusTotal_logo.svg")
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)
