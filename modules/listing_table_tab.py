@@ -1,32 +1,36 @@
-
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QTableWidget, QTableWidgetItem)
 from PySide6.QtWidgets import QWidget, QVBoxLayout
-from PySide6.QtGui import QIcon
 
+
+# class ListingTab(QWidget):
+#     def __init__(self, db_manager, image_handler):
 class ListingTab(QWidget):
-    def __init__(self, db_manager, image_handler):
+    def __init__(self, db_manager, image_handler, get_file_content_method, update_viewer_with_file_content_method, display_content_for_active_tab_method):
         super().__init__()
         self.db_manager = db_manager
         self.image_handler = image_handler
-        
+        self.get_file_content_method = get_file_content_method
+        self.update_viewer_with_file_content = update_viewer_with_file_content_method
+        self.display_content_for_active_tab = display_content_for_active_tab_method
+
         self.layout = QVBoxLayout(self)
         self.listing_table = QTableWidget()
-        
+
         # Set icon size for listing table
         self.listing_table.setIconSize(QSize(24, 24))
         self.listing_table.setColumnCount(9)
         self.listing_table.setHorizontalHeaderLabels(
             ['Name', 'Inode', 'Description', 'Size', 'Modified Date', 'Created Date', 'Accessed Date', 'Changed Date',
              'Flags'])
-        self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)  ###
+        self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)
 
         self.layout.addWidget(self.listing_table)
         self.setLayout(self.layout)
 
-
     def on_listing_table_item_clicked(self, row, column):
+        print("file clicked")
         inode_item = self.listing_table.item(row, 1)
         inode_number = int(inode_item.text())
         data = self.listing_table.item(row, 0).data(Qt.UserRole)
@@ -37,13 +41,14 @@ class ListingTab(QWidget):
             entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
             self.populate_listing_table(entries, data["start_offset"])
         else:
-            file_content = self.get_file_content(inode_number, data["start_offset"])
+            file_content = self.get_file_content_method(inode_number, data["start_offset"])
+            print("file content:")
             if file_content:
+                print("file content found")
                 self.update_viewer_with_file_content(file_content, data)
 
             # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
-
 
 
     def populate_listing_table(self, entries, offset):
@@ -73,7 +78,7 @@ class ListingTab(QWidget):
 
             # self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
             self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset,
-                                            readable_size, modified, created, accessed, changed, flags)
+                                               readable_size, modified, created, accessed, changed, flags)
 
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
                                       modified, created, accessed, changed, flags):

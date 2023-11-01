@@ -4,22 +4,20 @@ from hashlib import md5
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
-                               QFileDialog, QTreeWidgetItem, QTextEdit, QTableWidget, QMessageBox, QTableWidgetItem)
+                               QFileDialog, QTreeWidgetItem, QMessageBox)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
-from modules.hex_tab import HexViewer
-from modules.exif_tab import ExifViewer
-from modules.metadata_tab import MetadataViewerManager
-from modules.text_tab import TextViewer
-
 from managers.image_manager import ImageManager
+from modules.deleted_files import DeletedFilesTab
+from modules.exif_tab import ExifViewer
+from modules.hex_tab import HexViewer
+from modules.listing_table_tab import ListingTab
+from modules.results_tab import ResultsTab
+from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 
-from modules.listing_table import ListingTab
-from modules.deleted_files import DeletedFilesTab
-from modules.results_tab import ResultsTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -111,8 +109,10 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(result_viewer)
 
         # Create a QTableWidget for the Listing
-        #self.listing_table = QTableWidget()
-        self.listing_tab = ListingTab(self.db_manager, self.image_handler)
+        # self.listing_table = QTableWidget()
+        #self.listing_tab = ListingTab(self.db_manager, self.image_handler)
+        self.listing_tab = ListingTab(self.db_manager, self.image_handler, self.get_file_content, self.update_viewer_with_file_content, self.display_content_for_active_tab)
+
         result_viewer.addTab(self.listing_tab, 'Listing')
 
         self.deleted_files_tab = DeletedFilesTab()
@@ -120,7 +120,6 @@ class MainWindow(QMainWindow):
 
         self.results_tab = ResultsTab()
         result_viewer.addTab(self.results_tab, 'Results')
-
 
         self.viewer_tab = QTabWidget(self)
 
@@ -180,6 +179,7 @@ class MainWindow(QMainWindow):
     def clear_ui(self):
         self.listing_table.clearContents()
         self.listing_table.setRowCount(0)
+
 
         self.clear_viewers()
         self.current_image_path = None
@@ -371,17 +371,14 @@ class MainWindow(QMainWindow):
 
         if data.get("type") == "directory":
             entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
-            #self.populate_listing_table(entries, data["start_offset"])
+            # self.populate_listing_table(entries, data["start_offset"])
             self.listing_tab.populate_listing_table(entries, data["start_offset"])
         else:
             file_content = self.get_file_content(data["inode_number"], data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, data)
-         # Call this to make sure the content is displayed based on the active tab
+        # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
-
-        # call the function to display the file metadata
-        # self.get_file_metadata(data["start_offset"], self.current_image_path, data["inode_number"])
 
     def update_viewer_with_file_content(self, file_content, data):  # Add the data parameter here
         index = self.viewer_tab.currentIndex()
@@ -425,7 +422,6 @@ class MainWindow(QMainWindow):
         elif file_extension in video_extensions:
             file_type = "video"
         self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
-
 
     @staticmethod
     def cleanup_temp_directory():
