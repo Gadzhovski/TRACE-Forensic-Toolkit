@@ -5,6 +5,7 @@ import codecs
 import chardet
 import re
 
+
 class SearchDirection(Enum):
     NEXT = 1
     PREVIOUS = 2
@@ -54,6 +55,7 @@ class TextViewerManager:
         start_idx = self.current_page * self.PAGE_SIZE
         end_idx = (self.current_page + 1) * self.PAGE_SIZE
         return self.text_content[start_idx:end_idx]
+
     # def change_page(self, delta):
     #     new_page = self.current_page + delta
     #     if 0 <= new_page * self.PAGE_SIZE < len(self.file_content):
@@ -119,7 +121,6 @@ class TextViewerManager:
         self.last_search_str = ""
         self.current_match_index = -1
         self.matches = []
-
 
 
 class TextViewer(QWidget):
@@ -204,7 +205,6 @@ class TextViewer(QWidget):
         self.manager.search_for_string(self.search_input.text(), SearchDirection.NEXT)
         self.update_highlighted_text()
 
-
     def update_highlighted_text(self):
         if not self.manager.matches or not (0 <= self.manager.current_match_index < len(self.manager.matches)):
             return
@@ -221,6 +221,7 @@ class TextViewer(QWidget):
         cursor.setPosition(start_pos, QTextCursor.MoveAnchor)
         cursor.setPosition(end_pos, QTextCursor.KeepAnchor)
         cursor.setCharFormat(highlight_format)
+
     def perform_search(self):
         self.search_next()
 

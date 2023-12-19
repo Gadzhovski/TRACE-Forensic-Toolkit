@@ -1,16 +1,18 @@
+import datetime
 import os
 from hashlib import md5
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
-                               QFileDialog, QTreeWidgetItem, QTextEdit, QTableWidget, QMessageBox, QTableWidgetItem)
+                               QFileDialog, QTreeWidgetItem, QTextEdit, QTableWidget, QMessageBox, QTableWidgetItem,
+                               QDialog, QVBoxLayout)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from modules.hex_tab import HexViewer
 from modules.exif_tab import ExifViewer
-from modules.metadata_tab import MetadataViewerManager
+#from modules.metadata_tab import MetadataViewerManager
 from modules.text_tab import TextViewer
 
 from managers.image_manager import ImageManager
@@ -31,6 +33,8 @@ class MainWindow(QMainWindow):
         self.db_manager = DatabaseManager('new_database_mappings.db')
         self.current_selected_data = None
 
+
+
         self.image_manager.operationCompleted.connect(
             lambda success, message: (
                 QMessageBox.information(self, "Image Operation", message) if success else QMessageBox.critical(self,
@@ -43,7 +47,7 @@ class MainWindow(QMainWindow):
         self.initialize_ui()
 
     def initialize_ui(self):
-        self.setWindowTitle('GUI4n6')
+        self.setWindowTitle('4n6Factor')
         # set logo for the application
         self.setWindowIcon(QIcon('gui/logo.png'))
         self.setGeometry(100, 100, 1200, 800)
@@ -99,6 +103,10 @@ class MainWindow(QMainWindow):
         self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
 
+        self.tree_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tree_viewer.customContextMenuRequested.connect(self.open_tree_context_menu)
+
+
         tree_dock = QDockWidget('Tree Viewer', self)
         tree_dock.setWidget(self.tree_viewer)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
@@ -150,6 +158,7 @@ class MainWindow(QMainWindow):
         # self.metadata_viewer = MetadataViewerManager(self.current_image_path, self.evidence_utils)
         self.metadata_viewer = QTabWidget(self)
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
+
 
         # Create exif data viewer
         self.exif_viewer = ExifViewer(self)
@@ -231,6 +240,11 @@ class MainWindow(QMainWindow):
             self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
             self.current_image_path = image_path  # ensure this line is present
             self.load_partitions_into_tree(image_path)
+
+        partitions = self.image_handler.get_partitions()
+        for part in partitions:
+            os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
+            print(f"Partition {part[0]} OS Version: {os_version}")
 
     def remove_image_evidence(self):
         # Check if an image is currently loaded
@@ -351,6 +365,9 @@ class MainWindow(QMainWindow):
             "name": entry_name  # Add this line
         })
 
+
+
+
     def get_file_content(self, inode_number, offset):
         """
         Helper function to retrieve file content for a given inode number and offset.
@@ -393,6 +410,7 @@ class MainWindow(QMainWindow):
             # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
 
+
     def update_viewer_with_file_content(self, file_content, data):  # Add the data parameter here
         index = self.viewer_tab.currentIndex()
         if index == 0:  # Hex tab
@@ -404,6 +422,7 @@ class MainWindow(QMainWindow):
             self.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
             print("File Metadata tab")
+
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
@@ -465,7 +484,7 @@ class MainWindow(QMainWindow):
 
             #self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
             self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset, readable_size, modified, created, accessed, changed, flags)
-
+        print(entries)
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size, modified, created, accessed, changed, flags):
         icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
         icon = QIcon(icon_path)
@@ -481,15 +500,12 @@ class MainWindow(QMainWindow):
             "type": "directory" if icon_type == 'folder' else 'file',
             "name": entry_name,
             "size": size,
-
-
         })
 
         self.listing_table.setItem(row_position, 0, name_item)
         self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))  # Convert inode to string
         self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
         self.listing_table.setItem(row_position, 3, QTableWidgetItem(size))
-
         self.listing_table.setItem(row_position, 4, QTableWidgetItem(str(modified)))
         self.listing_table.setItem(row_position, 5, QTableWidgetItem(str(created)))
         self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(accessed)))
@@ -522,3 +538,67 @@ class MainWindow(QMainWindow):
             file_path = os.path.join(temp_dir_path, filename)
             if os.path.isfile(file_path):
                 os.remove(file_path)
+
+
+    def open_tree_context_menu(self, position):
+        # Get the selected item
+        indexes = self.tree_viewer.selectedIndexes()
+        if indexes:
+            selected_item = self.tree_viewer.itemFromIndex(indexes[0])
+
+            # Check if the selected item is the root item (first line in the tree view)
+            if selected_item and selected_item == self.tree_viewer.topLevelItem(0):
+                menu = QMenu()
+                view_os_info_action = menu.addAction("View OS Information")
+                action = menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
+
+                # Handle the action
+                if action == view_os_info_action:
+                    self.view_os_information(indexes[0])
+
+    # def view_os_information(self, index):
+    #     item = self.tree_viewer.itemFromIndex(index)
+    #     if item is None or item.parent() is not None:
+    #         # Ensure that only the root item triggers the OS information display
+    #         return
+    #
+    #     os_info_list = []
+    #     partitions = self.image_handler.get_partitions()
+    #     for part in partitions:
+    #         start_offset = part[2]  # part[2] is the start offset
+    #         os_version = self.image_handler.get_windows_version(start_offset)
+    #         os_info_list.append(f"Partition {part[0]} OS Version: {os_version}")
+    #
+    #     os_info_str = "\n".join(os_info_list)
+    #     QMessageBox.information(self, "OS Information", os_info_str)
+    def view_os_information(self, index):
+        item = self.tree_viewer.itemFromIndex(index)
+        if item is None or item.parent() is not None:
+            return
+
+        # Call the new method to show the dialog
+        self.show_os_information_dialog()
+
+    def show_os_information_dialog(self):
+        os_info_list = []
+        partitions = self.image_handler.get_partitions()
+        for part in partitions:
+            start_offset = part[2]  # part[2] is the start offset
+            os_version = self.image_handler.get_windows_version(start_offset)
+            os_info_list.append(f"Partition {part[0]} OS Version: {os_version}")
+
+        # Create and setup the dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("OS Information")
+        dialog.resize(400, 300)  # Adjust size as needed
+
+        # Create and setup the QTextEdit
+        text_edit = QTextEdit(dialog)
+        text_edit.setReadOnly(True)
+        text_edit.setText("\n".join(os_info_list))
+
+        # Create a layout and add the QTextEdit to it
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(text_edit)
+
+        dialog.exec_()
