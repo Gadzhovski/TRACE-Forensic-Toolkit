@@ -25,14 +25,13 @@ class EWFImgInfo(pytsk3.Img_Info):
         return self._ewf_handle.get_media_size()
 
 
-
 class ImageHandler:
     def __init__(self, image_path):
         self.image_path = image_path  # Path to the image
-        self.img_info = None          # Initialized once
-        self.volume_info = None       # Initialized once
-        self.fs_info_cache = {}       # Cache for FS_Info objects, keyed by start offset
-        self.load_image()             # Load the image
+        self.img_info = None  # Initialized once
+        self.volume_info = None  # Initialized once
+        self.fs_info_cache = {}  # Cache for FS_Info objects, keyed by start offset
+        self.load_image()  # Load the image
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
@@ -77,6 +76,7 @@ class ImageHandler:
                 partitions.append((partition.addr, partition.desc, partition.start, partition.len))
         return partitions
 
+
     def has_partitions(self):
         """Check if the image has partitions."""
         return bool(self.get_partitions())
@@ -90,6 +90,40 @@ class ImageHandler:
             except Exception as e:
                 return None
         return self.fs_info_cache[start_offset]
+
+    def get_fs_type(self, start_offset):
+        """Retrieve the file system type for a partition."""
+        try:
+            fs_info = pytsk3.FS_Info(self.img_info, offset=start_offset * 512)
+            fs_type = fs_info.info.ftype
+
+            # Map the file system type to its name
+            if fs_type == pytsk3.TSK_FS_TYPE_NTFS:
+                return "NTFS"
+            elif fs_type == pytsk3.TSK_FS_TYPE_FAT12:
+                return "FAT12"
+            elif fs_type == pytsk3.TSK_FS_TYPE_FAT16:
+                return "FAT16"
+            elif fs_type == pytsk3.TSK_FS_TYPE_FAT32:
+                return "FAT32"
+            elif fs_type == pytsk3.TSK_FS_TYPE_EXFAT:
+                return "ExFAT"
+            elif fs_type == pytsk3.TSK_FS_TYPE_EXT2:
+                return "Ext2"
+            elif fs_type == pytsk3.TSK_FS_TYPE_EXT3:
+                return "Ext3"
+            elif fs_type == pytsk3.TSK_FS_TYPE_EXT4:
+                return "Ext4"
+            elif fs_type == pytsk3.TSK_FS_TYPE_ISO9660:
+                return "ISO9660"
+            elif fs_type == pytsk3.TSK_FS_TYPE_HFS:
+                return "HFS"
+            elif fs_type == pytsk3.TSK_FS_TYPE_APFS:
+                return "APFS"
+            else:
+                return "Unknown"
+        except Exception as e:
+            return "N/A"
 
     def check_partition_contents(self, partition_start_offset):
         """Check if a partition has any files or folders."""
@@ -176,55 +210,19 @@ class ImageHandler:
             print(f"Error reading registry hive: {e}")
             return None
 
-
-    # def get_windows_version(self, start_offset):
-    #     """Get the Windows version from the SOFTWARE registry hive."""
-    #     fs_info = self.get_fs_info(start_offset)
-    #     if not fs_info:
-    #         return "Unknown OS"
-    #
-    #     software_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
-    #     if not software_hive_data:
-    #         return "Unable to extract SOFTWARE hive"
-    #
-    #     # Create a temporary file and store the hive data
-    #     temp_hive_path = None
-    #     try:
-    #         with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
-    #             temp_hive.write(software_hive_data)
-    #             temp_hive_path = temp_hive.name
-    #
-    #         # Now, use the python-registry to parse the hive file
-    #         if temp_hive_path:
-    #             reg = Registry.Registry(temp_hive_path)
-    #             key = reg.open("Microsoft\\Windows NT\\CurrentVersion")
-    #             product_name = key.value("ProductName").value()
-    #             current_version = key.value("CurrentVersion").value()
-    #             current_build = key.value("CurrentBuild").value()
-    #             registered_owner = key.value("RegisteredOwner").value()
-    #             csd_version = key.value("CSDVersion").value()
-    #             product_id = key.value("ProductId").value()
-    #             os_version = f"{product_name} {current_version}.{current_build} {csd_version} ({registered_owner}) ({product_id})"
-    #
-    #         else:
-    #             os_version = "Failed to create temporary hive file"
-    #
-    #         # Clean up the temporary file
-    #         if temp_hive_path and os.path.exists(temp_hive_path):
-    #             os.remove(temp_hive_path)
-    #
-    #         return os_version
-    #
-    #     except Exception as e:
-    #         print(f"Error parsing SOFTWARE hive: {e}")
-    #         return "Error in parsing OS version"
     def get_windows_version(self, start_offset):
         """Get the Windows version from the SOFTWARE registry hive."""
         fs_info = self.get_fs_info(start_offset)
+
         if not fs_info:
             return "Unknown OS"
 
+        # if file system is not ntfs, return unknown OS and exit the function
+        if self.get_fs_type(start_offset) != "NTFS":
+            return "Unknown OS"
+
         software_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
+
         if not software_hive_data:
             return "Unable to extract SOFTWARE hive"
 
@@ -254,7 +252,7 @@ class ImageHandler:
                 csd_version = get_reg_value(key, "CSDVersion")
                 product_id = get_reg_value(key, "ProductId")
 
-                os_version = f"{product_name}, Version {current_version}, Build {current_build}, {csd_version}, Owner: {registered_owner}, Product ID: {product_id}"
+                os_version = f"{product_name} Version {current_version}\nBuild {current_build} {csd_version}\nOwner: {registered_owner}\nProduct ID: {product_id}"
             else:
                 os_version = "Failed to create temporary hive file"
 
@@ -267,3 +265,5 @@ class ImageHandler:
         except Exception as e:
             print(f"Error parsing SOFTWARE hive: {e}")
             return "Error in parsing OS version"
+
+

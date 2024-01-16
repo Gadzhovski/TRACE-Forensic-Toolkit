@@ -57,4 +57,3 @@
 #         metadata_content = self.generate_metadata(file_content, item, full_file_path, offset,
 #                                                   inode_number)
 #         self.setHtml(metadata_content)
-
