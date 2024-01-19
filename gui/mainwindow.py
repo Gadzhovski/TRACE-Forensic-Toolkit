@@ -313,12 +313,15 @@ class MainWindow(QMainWindow):
             end = start + length - 1
             size_in_bytes = length * SECTOR_SIZE
             readable_size = self.get_readable_size(size_in_bytes)
+            # file system type
+            fs_type = self.image_handler.get_fs_type(start)
 
-            item_text = f"vol{addr} ({desc.decode('utf-8')}: {start}-{end}, Size: {readable_size})"
+            item_text = f"vol{addr} ({desc.decode('utf-8')}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
             item = QTreeWidgetItem(root_item_tree)
             item.setText(0, item_text)
             item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'drive-harddisk')))
             item.setData(0, Qt.UserRole, {"inode_number": None, "start_offset": start})
+
 
             # Check if the partition has contents and set it as expandable
             if self.image_handler.check_partition_contents(start):
