@@ -1,19 +1,18 @@
-from magic import Magic
 import os
 import hashlib
-import datetime
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTextEdit, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView)
+                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QWidget)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from modules.hex_tab import HexViewer
 from modules.exif_tab import ExifViewer
-# from modules.metadata_tab import MetadataViewerManager
+from modules.metadata_tab import MetadataViewer
 from modules.text_tab import TextViewer
+from modules.registry_viewer import RegistryViewer
 
 from managers.image_manager import ImageManager
 from modules.unified_application_manager import UnifiedViewer
@@ -33,6 +32,9 @@ class MainWindow(QMainWindow):
         self.db_manager = DatabaseManager('new_database_mappings.db')
         self.current_selected_data = None
 
+        self.back_stack = []
+        self.forward_stack = []
+
         # Initialize a list to store evidence files
         self.evidence_files = []
 
@@ -49,45 +51,24 @@ class MainWindow(QMainWindow):
 
     def initialize_ui(self):
         self.setWindowTitle('4n6Factor')
-        # set logo for the application
         self.setWindowIcon(QIcon('gui/logo.png'))
         self.setGeometry(100, 100, 1200, 800)
 
-        # Create a menu bar
         menu_bar = QMenuBar(self)
-        file_menu = QMenu('File', self)
+        file_actions = {
+            'Add Evidence File': self.load_image_evidence,
+            'Remove Evidence File': self.remove_image_evidence,
+            'Image Mounting': self.image_manager.mount_image,
+            'Image Unmounting': self.image_manager.dismount_image,
+            'Exit': self.close
+        }
+        self.create_menu(menu_bar, 'File', file_actions)
 
-        # Add the "Add Evidence File" action to the File menu
-        add_evidence_file_action = file_menu.addAction('Add Evidence File')
-        add_evidence_file_action.triggered.connect(self.load_image_evidence)
-
-        # Remove evidence file action
-        remove_evidence_file_action = file_menu.addAction('Remove Evidence File')
-        remove_evidence_file_action.triggered.connect(self.remove_image_evidence)
-
-        # Add "Image Mounting" submenu to the File menu
-        image_mounting_menu = file_menu.addAction('Image Mounting')
-        image_mounting_menu.triggered.connect(self.image_manager.mount_image)
-
-        # Add the "Image Unmounting" action to the File menu
-        image_unmounting_menu = file_menu.addAction('Image Unmounting')
-        image_unmounting_menu.triggered.connect(self.image_manager.dismount_image)
-
-        # Add the "Exit" action to the File menu
-        exit_action = file_menu.addAction('Exit')
-        exit_action.triggered.connect(self.close)
-
+        # Keep the buttons for future implementation
         edit_menu = QMenu('Edit', self)
         view_menu = QMenu('View', self)
         tools_menu = QMenu('Tools', self)
-
-        # Add "Dual-Tool Verification" action to the Tools menu
-        dual_tool_verification_action = tools_menu.addAction('Dual-Tool Verification')
-
         help_menu = QMenu('Help', self)
-        user_guide_action = help_menu.addAction('User Guide')
-        about_action = help_menu.addAction('About')
-        menu_bar.addMenu(file_menu)
         menu_bar.addMenu(edit_menu)
         menu_bar.addMenu(view_menu)
         menu_bar.addMenu(tools_menu)
@@ -111,80 +92,74 @@ class MainWindow(QMainWindow):
         tree_dock.setWidget(self.tree_viewer)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
-        result_viewer = QTabWidget(self)
-        # set qstyle for the tab
-        # result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }")
-        # modern style for the tab
-        # #result_viewer.setStyleSheet("QTabBar::tab { height: 30px; width: 100px; }"
-        #                                     "QTabBar::tab:selected { background: #a8a8a8; }"
-        #                                     "QTabBar::tab:!selected { background: #d8d8d8; }"
-        #                                     "QTabBar::tab:!selected:hover { background: #a8a8a8; }")
+        self.result_viewer = QTabWidget(self)
+        self.setCentralWidget(self.result_viewer)
 
-        self.setCentralWidget(result_viewer)
-
-        # Create a QTableWidget for the Listing
         self.listing_table = QTableWidget()
-
-        # Set icon size for listing table
+        self.listing_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.listing_table.setIconSize(QSize(24, 24))
         self.listing_table.setColumnCount(9)
         self.listing_table.setHorizontalHeaderLabels(
-            ['Name', 'Inode', 'Description', 'Size', 'Modified Date', 'Created Date', 'Accessed Date', 'Changed Date',
+            ['Name', 'Inode', 'Description', 'Size', 'Created Date', 'Accessed Date', 'Modified Date', 'Changed Date',
              'Flags'])
 
-        self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)  ###
+        # self.listing_table.cellClicked.connect(self.on_listing_table_item_clicked)
+        self.listing_table.itemDoubleClicked.connect(self.on_listing_table_item_clicked)
 
-        # Add the QTableWidget to your result_viewer QTabWidget
-        result_viewer.addTab(self.listing_table, 'Listing')
-        result_viewer.addTab(QTextEdit(self), 'Results')
-        result_viewer.addTab(QTextEdit(self), 'Deleted Files')
+        self.result_viewer.addTab(self.listing_table, 'Listing')
+        self.result_viewer.addTab(QTextEdit(self), 'Results')
+        self.result_viewer.addTab(QTextEdit(self), 'Deleted Files')
+
+        self.registry_viewer_tab = QTextEdit(self)
+        self.registry_viewer_tab.setReadOnly(True)
+        self.result_viewer.addTab(self.registry_viewer_tab, 'Registry')
 
         self.viewer_tab = QTabWidget(self)
 
-        # Create Hex viewer
         self.hex_viewer = HexViewer(self)
         self.viewer_tab.addTab(self.hex_viewer, 'Hex')
 
-        # Create Text viewer
         self.text_viewer = TextViewer(self)
         self.viewer_tab.addTab(self.text_viewer, 'Text')
 
-        # Create Application viewer
         self.application_viewer = UnifiedViewer(self)
-        # remove the borders and spacing
         self.application_viewer.layout.setContentsMargins(0, 0, 0, 0)
         self.application_viewer.layout.setSpacing(0)
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
-        # # Create File Metadata viewer
-        # add the metadata text edit
-        self.metadata_text_edit = QTextEdit(self)
-        self.metadata_text_edit.setReadOnly(True)
-        self.viewer_tab.addTab(self.metadata_text_edit, 'File Metadata')
+        self.metadata_viewer = MetadataViewer(self)
+        self.viewer_tab.addTab(self.metadata_viewer.get_widget(), 'File Metadata')
 
-        # Create exif data viewer
         self.exif_viewer = ExifViewer(self)
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
 
-        # tab for Virus total api
         self.virus_total_api = VirusTotal()
         self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
 
         self.viewer_dock = QDockWidget('Viewer', self)
-
         self.viewer_dock.setWidget(self.viewer_tab)
-
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
 
-        # Set initial size constraints for the dock widget
         self.viewer_dock.setMinimumSize(1200, 222)
         self.viewer_dock.setMaximumSize(1200, 222)
 
-        # Connect the visibilityChanged signal to a custom slot
         self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
-
-        # Connect the currentChanged signal to
         self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
+
+    def create_menu(self, menu_bar, menu_name, actions):
+        menu = QMenu(menu_name, self)
+        for action_name, action_function in actions.items():
+            action = menu.addAction(action_name)
+            action.triggered.connect(action_function)
+        menu_bar.addMenu(menu)
+        return menu
+
+    def create_tree_item(self, parent, text, icon_path, data):
+        item = QTreeWidgetItem(parent)
+        item.setText(0, text)
+        item.setIcon(0, QIcon(icon_path))
+        item.setData(0, Qt.UserRole, data)
+        return item
 
     def on_viewer_dock_focus(self, visible):
         if visible:  # If the QDockWidget is focused/visible
@@ -208,7 +183,8 @@ class MainWindow(QMainWindow):
         self.hex_viewer.clear_content()
         self.text_viewer.clear_content()
         self.application_viewer.clear()
-        self.metadata_text_edit.clear()
+        # self.metadata_text_edit.clear()
+        self.metadata_viewer.clear()
         self.exif_viewer.clear_content()
 
     # Close the application
@@ -246,10 +222,14 @@ class MainWindow(QMainWindow):
             self.current_image_path = image_path  # ensure this line is present
             self.load_partitions_into_tree(image_path)
 
+            # self.init_registry_viewer()###########
+
         partitions = self.image_handler.get_partitions()
         for part in partitions:
-            os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
-            # print(f"Partition {part[0]} OS Version: {os_version}")
+            # os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
+            partition_desc = part[1].decode('utf-8')
+            if "Basic data partition" in partition_desc or "NTFS" in partition_desc or "FAT" in partition_desc or "exFAT" in partition_desc:
+                os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
 
     def remove_image_evidence(self):
         if not self.evidence_files:
@@ -290,44 +270,39 @@ class MainWindow(QMainWindow):
     def load_partitions_into_tree(self, image_path):
         """Load partitions from an image into the tree viewer."""
         if not self.image_handler.has_partitions():
-            # Handle images without partitions here. You can directly load the directory structure
-            # of the image if needed.
-            root_item_tree = QTreeWidgetItem(self.tree_viewer)
-            root_item_tree.setText(0, image_path)
-            root_item_tree.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'media-optical')))
+            root_item_tree = self.create_tree_item(self.tree_viewer, image_path,
+                                                   self.db_manager.get_icon_path('device', 'media-optical'),
+                                                   {"start_offset": 0})
             self.populate_contents(root_item_tree, {"start_offset": 0})
             return
 
-        # Set the image file as the root item in the QTreeWidget
-        root_item_tree = QTreeWidgetItem(self.tree_viewer)
-        root_item_tree.setText(0, image_path)
-        root_item_tree.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'media-optical')))
+        root_item_tree = self.create_tree_item(self.tree_viewer, image_path,
+                                               self.db_manager.get_icon_path('device', 'media-optical'),
+                                               {"start_offset": 0})
 
-        # Load partitions from the image
         partitions = self.image_handler.get_partitions()
 
-        # Assuming a sector size of 512 bytes. Adjust if needed.
         SECTOR_SIZE = 512
 
         for addr, desc, start, length in partitions:
             end = start + length - 1
             size_in_bytes = length * SECTOR_SIZE
             readable_size = self.get_readable_size(size_in_bytes)
-            # file system type
             fs_type = self.image_handler.get_fs_type(start)
 
             item_text = f"vol{addr} ({desc.decode('utf-8')}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
-            item = QTreeWidgetItem(root_item_tree)
-            item.setText(0, item_text)
-            item.setIcon(0, QIcon(self.db_manager.get_icon_path('device', 'drive-harddisk')))
-            item.setData(0, Qt.UserRole, {"inode_number": None, "start_offset": start})
+            icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
+            data = {"inode_number": None, "start_offset": start, "end_offset": end}
+            item = self.create_tree_item(root_item_tree, item_text, icon_path, data)
 
-
-            # Check if the partition has contents and set it as expandable
             if self.image_handler.check_partition_contents(start):
                 item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
             else:
                 item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
+                unallocated_item = self.create_tree_item(item, "Unallocated Space",
+                                                         self.db_manager.get_icon_path('file', 'unknown'),
+                                                         {"is_unallocated": True, "start_offset": start,
+                                                          "end_offset": end})
 
     def get_readable_size(self, size_in_bytes):
         """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
@@ -413,23 +388,30 @@ class MainWindow(QMainWindow):
 
     def on_item_clicked(self, item, column):
         self.clear_viewers()
-
         data = item.data(0, Qt.UserRole)
-
         self.current_selected_data = data
 
-        if not data or "inode_number" not in data or "start_offset" not in data:
-            return
-
-        if data.get("type") == "directory":
+        if data.get("is_unallocated"):
+            # Handle unallocated space
+            unallocated_space = self.image_handler.read_unallocated_space(data["start_offset"], data["end_offset"])
+            if unallocated_space is not None:
+                self.hex_viewer.display_hex_content(unallocated_space)
+            else:
+                print("Invalid size for unallocated space or unable to read.")
+        elif data.get("type") == "directory":
+            # Handle directories
             entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
             self.populate_listing_table(entries, data["start_offset"])
-        else:
+        elif data.get("inode_number") is not None:
+            # Handle files
             file_content, metadata = self.get_file_content(data["inode_number"], data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata, data)
+            else:
+                print("Unable to read file content.")
+        else:
+            print("Clicked item is not a file, directory, or unallocated space.")
 
-            # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
 
     def update_viewer_with_file_content(self, file_content, metadata, data):  # Add the data parameter here
@@ -442,8 +424,8 @@ class MainWindow(QMainWindow):
             full_file_path = data.get("name", "")  # Retrieve the name from the data dictionary
             self.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
-            self.display_metadata_in_tab(metadata, data, file_content)
-
+            # self.display_metadata_in_tab(metadata, data, file_content)
+            self.metadata_viewer.display_metadata(metadata, data, file_content)
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
@@ -485,36 +467,25 @@ class MainWindow(QMainWindow):
             size_in_bytes = entry["size"] if "size" in entry else 0
             readable_size = self.get_readable_size(size_in_bytes)
             created = entry["created"] if "created" in entry else None
-            modified = entry["modified"] if "modified" in entry else None
             accessed = entry["accessed"] if "accessed" in entry else None
+            modified = entry["modified"] if "modified" in entry else None
             changed = entry["changed"] if "changed" in entry else None
             flags = entry["flag(??)"] if "flag(??)" in entry else None
 
-            # Revised logic for determining icon_name and icon_type
-            if entry["is_directory"]:
-                icon_name, icon_type = 'folder', 'folder'
-            else:
-                if '.' in entry_name:
-                    icon_name = 'file'
-                    icon_type = entry_name.split('.')[-1].lower()  # Ensure the extension is in lowercase
-
-                else:
-                    icon_name, icon_type = 'file', 'unknown'
-
-            # self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset)
+            icon_name, icon_type = ('folder', 'folder') if entry["is_directory"] else (
+                'file', entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown')
             self.insert_row_into_listing_table(entry_name, inode_number, description, icon_type, icon_name, offset,
-                                               readable_size, modified, created, accessed, changed, flags)
+                                               readable_size, created, accessed, modified, changed, flags)
 
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
-                                      modified, created, accessed, changed, flags):
+                                      created, accessed, modified, changed, flags):
         icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
         icon = QIcon(icon_path)
-
         row_position = self.listing_table.rowCount()
         self.listing_table.insertRow(row_position)
 
         name_item = QTableWidgetItem(entry_name)
-        name_item.setIcon(icon)  # Ensure that the icon is set here
+        name_item.setIcon(icon)
         name_item.setData(Qt.UserRole, {
             "inode_number": entry_inode,
             "start_offset": offset,
@@ -524,16 +495,36 @@ class MainWindow(QMainWindow):
         })
 
         self.listing_table.setItem(row_position, 0, name_item)
-        self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))  # Convert inode to string
+        self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))
         self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
         self.listing_table.setItem(row_position, 3, QTableWidgetItem(size))
-        self.listing_table.setItem(row_position, 4, QTableWidgetItem(str(modified)))
-        self.listing_table.setItem(row_position, 5, QTableWidgetItem(str(created)))
-        self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(accessed)))
+        self.listing_table.setItem(row_position, 4, QTableWidgetItem(str(created)))
+        self.listing_table.setItem(row_position, 5, QTableWidgetItem(str(accessed)))
+        self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(modified)))
         self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
         self.listing_table.setItem(row_position, 8, QTableWidgetItem(str(flags)))
 
-    def on_listing_table_item_clicked(self, row, column):
+    # def on_listing_table_item_clicked(self, row, column):
+    #     inode_item = self.listing_table.item(row, 1)
+    #     inode_number = int(inode_item.text())
+    #     data = self.listing_table.item(row, 0).data(Qt.UserRole)
+    #
+    #     self.current_selected_data = data
+    #
+    #     if data.get("type") == "directory":
+    #         entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
+    #         self.populate_listing_table(entries, data["start_offset"])
+    #     else:
+    #         file_content, metadata = self.get_file_content(inode_number, data["start_offset"])
+    #         if file_content:
+    #             self.update_viewer_with_file_content(file_content, metadata, data)
+    #
+    #         # Call this to make sure the content is displayed based on the active tab
+    #     self.display_content_for_active_tab()
+    def on_listing_table_item_clicked(self, item):
+        row = item.row()
+        column = item.column()
+
         inode_item = self.listing_table.item(row, 1)
         inode_number = int(inode_item.text())
         data = self.listing_table.item(row, 0).data(Qt.UserRole)
@@ -546,9 +537,9 @@ class MainWindow(QMainWindow):
         else:
             file_content, metadata = self.get_file_content(inode_number, data["start_offset"])
             if file_content:
-                self.update_viewer_with_file_content(file_content, metadata, data)  #######
+                self.update_viewer_with_file_content(file_content, metadata, data)
 
-            # Call this to make sure the content is displayed based on the active tab
+        # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
 
     @staticmethod
@@ -596,15 +587,15 @@ class MainWindow(QMainWindow):
             start_offset = part[2]
             fs_type = self.image_handler.get_fs_type(start_offset)
 
-            os_version = "N/A"
+            os_version = None
             if fs_type == "NTFS":
-                os_version = self.image_handler.get_windows_version(start_offset) or "Unknown"
+                os_version = self.image_handler.get_windows_version(start_offset)
 
             table.insertRow(row)
             partition_item = QTableWidgetItem(f"Partition {part[0]}")
             partition_item.setIcon(partition_icon)
-            os_version_item = QTableWidgetItem(os_version)
-            if os_version != "N/A" and os_version != "Unknown":
+            os_version_item = QTableWidgetItem(os_version if os_version else "N/A")
+            if os_version:
                 os_version_item.setIcon(os_icon)
             fs_type_item = QTableWidgetItem(fs_type or "Unrecognized")
 
@@ -627,61 +618,3 @@ class MainWindow(QMainWindow):
         layout.addWidget(buttonBox)
 
         dialog.exec_()
-
-    def display_metadata_in_tab(self, metadata, data, file_content):
-        if not metadata:
-            self.metadata_text_edit.setHtml("<b>No metadata available.</b>")
-            return
-
-        # Function to convert epoch time to a readable format
-        def format_epoch_time(epoch_time):
-            if epoch_time:
-                return datetime.datetime.fromtimestamp(epoch_time).strftime('%Y-%m-%d %H:%M:%S')
-            return 'N/A'
-
-        # Calculate MD5 and SHA-256 hashes
-        md5_hash = hashlib.md5(file_content).hexdigest()
-        sha256_hash = hashlib.sha256(file_content).hexdigest()
-
-        # Determine MIME type
-        mime_type = Magic().from_buffer(file_content)
-
-        # Format the times
-        created_time = format_epoch_time(metadata.crtime)
-        modified_time = format_epoch_time(metadata.mtime)
-        accessed_time = format_epoch_time(metadata.atime)
-        changed_time = format_epoch_time(metadata.ctime)
-
-        extended_metadata = f"""
-            <style>
-                table {{
-                    width: 100%;
-                    border-collapse: collapse;
-                }}
-                td, th {{
-                    border: 1px solid #ddd;
-                    padding: 8px;
-                    word-wrap: break-word;
-                }}
-                th {{
-                    background-color: #f2f2f2;
-                    text-align: left;
-                }}
-            </style>
-            <b>File Metadata:</b><br>
-            <table>
-                <tr><th>Attribute</th><th>Value</th></tr>
-                <tr><td>Name</td><td>{data.get('name', 'N/A')}</td></tr>
-                <tr><td>Inode Number</td><td>{data.get('inode_number', 'N/A')}</td></tr>
-                <tr><td>Size</td><td>{metadata.size if metadata.size else 'N/A'}</td></tr>
-                <tr><td>Created Time</td><td>{created_time}</td></tr>
-                <tr><td>Modified Time</td><td>{modified_time}</td></tr>
-                <tr><td>Accessed Time</td><td>{accessed_time}</td></tr>
-                <tr><td>Changed Time</td><td>{changed_time}</td></tr>
-                <tr><td>MIME Type</td><td>{mime_type}</td></tr>
-                <tr><td>MD5 Hash</td><td>{md5_hash}</td></tr>
-                <tr><td>SHA-256 Hash</td><td>{sha256_hash}</td></tr>
-            </table>
-        """
-
-        self.metadata_text_edit.setHtml(extended_metadata)

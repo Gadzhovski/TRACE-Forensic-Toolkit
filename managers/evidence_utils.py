@@ -1,12 +1,12 @@
-import hashlib
 import os
 import datetime
-import mimetypes
 from Registry import Registry
 import pyewf
 import pytsk3
 import tempfile
 
+
+SECTOR_SIZE = 512  # 512 bytes per
 
 # Class to handle EWF images
 class EWFImgInfo(pytsk3.Img_Info):
@@ -76,7 +76,6 @@ class ImageHandler:
                 partitions.append((partition.addr, partition.desc, partition.start, partition.len))
         return partitions
 
-
     def has_partitions(self):
         """Check if the image has partitions."""
         return bool(self.get_partitions())
@@ -94,8 +93,7 @@ class ImageHandler:
     def get_fs_type(self, start_offset):
         """Retrieve the file system type for a partition."""
         try:
-            fs_info = pytsk3.FS_Info(self.img_info, offset=start_offset * 512)
-            fs_type = fs_info.info.ftype
+            fs_type = self.get_fs_info(start_offset).info.ftype
 
             # Map the file system type to its name
             if fs_type == pytsk3.TSK_FS_TYPE_NTFS:
@@ -137,7 +135,6 @@ class ImageHandler:
             except:
                 return False
         return False
-
 
     def get_directory_contents(self, start_offset, inode_number=None):
         fs = self.get_fs_info(start_offset)
@@ -181,25 +178,6 @@ class ImageHandler:
                 return []
         return []
 
-
-    def get_hashes(self, tsk_file):
-        # Create hash objects
-        md5_hash = hashlib.md5()
-        sha256_hash = hashlib.sha256()
-
-        # Define the offset
-        offset = 0
-        size = tsk_file.info.meta.size
-
-        # Read and update hash string value in blocks of 64K
-        while offset < size:
-            byte_block = tsk_file.read_random(offset, 65536)
-            md5_hash.update(byte_block)
-            sha256_hash.update(byte_block)
-            offset += len(byte_block)
-
-        return md5_hash.hexdigest(), sha256_hash.hexdigest()
-
     def get_registry_hive(self, fs_info, hive_path):
         """Extract a registry hive from the given filesystem."""
         try:
@@ -215,16 +193,16 @@ class ImageHandler:
         fs_info = self.get_fs_info(start_offset)
 
         if not fs_info:
-            return "Unknown OS"
+            return None
 
         # if file system is not ntfs, return unknown OS and exit the function
         if self.get_fs_type(start_offset) != "NTFS":
-            return "Unknown OS"
+            return None
 
         software_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
 
         if not software_hive_data:
-            return "Unable to extract SOFTWARE hive"
+            return None
 
         # Create a temporary file and store the hive data
         temp_hive_path = None
@@ -266,4 +244,48 @@ class ImageHandler:
             print(f"Error parsing SOFTWARE hive: {e}")
             return "Error in parsing OS version"
 
+    def get_all_registry_hives(self, start_offset):
+        fs_info = self.get_fs_info(start_offset)
+        if not fs_info:
+            return []
 
+        hives = []
+        paths = [
+            "/Windows/System32/config/SAM",
+            "/Windows/System32/config/SECURITY",
+            "/Windows/System32/config/SOFTWARE",
+            "/Windows/System32/config/SYSTEM",
+            "/Windows/System32/config/DEFAULT"
+            # Add more paths as needed
+        ]
+
+        for path in paths:
+            try:
+                hive_data = self.get_registry_hive(fs_info, path)
+                if hive_data:
+                    hives.append((path, hive_data))
+            except Exception as e:
+                print(f"Error reading registry hive at {path}: {e}")
+
+        return hives
+
+
+    def read_unallocated_space(self, start_offset, end_offset):
+        try:
+            start_byte_offset = start_offset * SECTOR_SIZE
+            end_byte_offset = end_offset * SECTOR_SIZE
+            size_in_bytes = end_byte_offset - start_byte_offset
+
+            if size_in_bytes <= 0:
+                print("Invalid size for unallocated space.")
+                return None
+
+            unallocated_space = self.img_info.read(start_byte_offset, size_in_bytes)
+            if unallocated_space is None:
+                print(f"Failed to read unallocated space from offset {start_byte_offset} to {end_byte_offset}")
+                return None
+
+            return unallocated_space
+        except Exception as e:
+            print(f"Error reading unallocated space: {e}")
+            return None

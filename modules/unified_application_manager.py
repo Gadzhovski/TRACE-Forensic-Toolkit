@@ -38,7 +38,6 @@ class UnifiedViewer(QWidget):
         self.audio_video_viewer.hide()
 
     def display(self, content, file_type="text", file_extension=".txt"):
-
         # Clear all views first
         self.pdf_viewer.clear()
         self.picture_viewer.clear()
@@ -69,6 +68,7 @@ class UnifiedViewer(QWidget):
 
             # Pass the path to AudioVideoViewer's display method
             self.audio_video_viewer.display(temp_file_path)
+
 
     def clear(self):
         self.pdf_viewer.clear()
@@ -700,7 +700,7 @@ class AudioVideoViewer(QWidget):
         self.playback_speed_combo.setCurrentText("1.0x")
         self._player.setPlaybackRate(1.0)
         self._player.setSource(QUrl.fromLocalFile(content))
-        # self._player.play()
+        #very_old# self._player.play()
 
     def update_position(self, position):
         self.progress_label.setText("{:02d}:{:02d}".format(position // 60000, (position // 1000) % 60))
