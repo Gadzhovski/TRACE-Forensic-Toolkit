@@ -6,7 +6,7 @@ import pytsk3
 import tempfile
 
 
-SECTOR_SIZE = 512  # 512 bytes per
+SECTOR_SIZE = 512  # 512 bytes
 
 # Class to handle EWF images
 class EWFImgInfo(pytsk3.Img_Info):
@@ -168,7 +168,7 @@ class ImageHandler:
                                                                                         'crtime') else "N/A",
                             "changed": safe_datetime(entry.info.meta.ctime) if hasattr(entry.info.meta,
                                                                                        'ctime') else "N/A",
-                            "flags": entry.info.meta.flags if entry.info.meta else None,
+                            #"flags": entry.info.meta.flags if entry.info.meta else None,
                         })
                 return entries
 
@@ -177,6 +177,7 @@ class ImageHandler:
                 print(f"Error in get_directory_contents: {e}")
                 return []
         return []
+
 
     def get_registry_hive(self, fs_info, hive_path):
         """Extract a registry hive from the given filesystem."""
@@ -187,6 +188,28 @@ class ImageHandler:
         except Exception as e:
             print(f"Error reading registry hive: {e}")
             return None
+
+    def get_all_registry_hives(self, start_offset):
+        """Get all registry hives from the given filesystem."""
+        fs_info = self.get_fs_info(start_offset)
+
+        if not fs_info:
+            return None
+
+        # if file system is not ntfs, return unknown OS and exit the function
+        if self.get_fs_type(start_offset) != "NTFS":
+            return None
+
+        software_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
+        system_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SYSTEM")
+        sam_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SAM")
+        security_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SECURITY")
+        ntuser_hive_data = self.get_registry_hive(fs_info, "/Users/NTUSER.DAT")
+
+        return software_hive_data, system_hive_data, sam_hive_data, security_hive_data, ntuser_hive_data
+
+
+
 
     def get_windows_version(self, start_offset):
         """Get the Windows version from the SOFTWARE registry hive."""
@@ -244,31 +267,6 @@ class ImageHandler:
             print(f"Error parsing SOFTWARE hive: {e}")
             return "Error in parsing OS version"
 
-    def get_all_registry_hives(self, start_offset):
-        fs_info = self.get_fs_info(start_offset)
-        if not fs_info:
-            return []
-
-        hives = []
-        paths = [
-            "/Windows/System32/config/SAM",
-            "/Windows/System32/config/SECURITY",
-            "/Windows/System32/config/SOFTWARE",
-            "/Windows/System32/config/SYSTEM",
-            "/Windows/System32/config/DEFAULT"
-            # Add more paths as needed
-        ]
-
-        for path in paths:
-            try:
-                hive_data = self.get_registry_hive(fs_info, path)
-                if hive_data:
-                    hives.append((path, hive_data))
-            except Exception as e:
-                print(f"Error reading registry hive at {path}: {e}")
-
-        return hives
-
 
     def read_unallocated_space(self, start_offset, end_offset):
         try:
@@ -289,3 +287,5 @@ class ImageHandler:
         except Exception as e:
             print(f"Error reading unallocated space: {e}")
             return None
+
+

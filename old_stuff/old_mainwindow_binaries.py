@@ -15,8 +15,8 @@ from modules.hex_tab import HexViewer
 from modules.text_tab import TextViewer
 
 from modules.metadata_tab import MetadataViewerManager
-from managers.old_binaries_database_manager import DatabaseManager
-from managers.old_binaries_evidence_utils import EvidenceUtils
+from old_stuff.old_binaries_database_manager import DatabaseManager
+from old_stuff.old_binaries_evidence_utils import EvidenceUtils
 from managers.image_manager import ImageManager
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
