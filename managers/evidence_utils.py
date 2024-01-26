@@ -168,7 +168,6 @@ class ImageHandler:
                                                                                         'crtime') else "N/A",
                             "changed": safe_datetime(entry.info.meta.ctime) if hasattr(entry.info.meta,
                                                                                        'ctime') else "N/A",
-                            #"flags": entry.info.meta.flags if entry.info.meta else None,
                         })
                 return entries
 
@@ -207,8 +206,6 @@ class ImageHandler:
         ntuser_hive_data = self.get_registry_hive(fs_info, "/Users/NTUSER.DAT")
 
         return software_hive_data, system_hive_data, sam_hive_data, security_hive_data, ntuser_hive_data
-
-
 
 
     def get_windows_version(self, start_offset):

@@ -29,3 +29,4 @@ class DatabaseManager:
                 return 'gui/Eleven/24/mimetypes/application-x-zerosize.svg'
         finally:
             c.close()
+

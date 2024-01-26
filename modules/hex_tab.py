@@ -1,11 +1,12 @@
 import os
+from functools import lru_cache
 
 from PySide6.QtCore import Qt, QObject, Signal, QThread
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QFont
 from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayout,
                                QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QListWidget,
                                QSizePolicy, QHBoxLayout, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
-                               QToolButton)
+                               QToolButton, QComboBox)
 
 
 class SearchWorker(QObject):
@@ -31,6 +32,7 @@ class HexViewerManager:
         if (len(hex_content) // 32) % self.LINES_PER_PAGE:
             self.num_total_pages += 1
 
+    @lru_cache(maxsize=None)
     def format_hex(self, page=0):
         start_index = page * self.LINES_PER_PAGE * 32
         end_index = start_index + (self.LINES_PER_PAGE * 32)
@@ -268,6 +270,19 @@ class HexViewer(QWidget):
         self.export_button.setMenu(self.export_menu)
         self.toolbar.addWidget(self.export_button)
 
+        # Add a small spacer
+        spacer = QWidget(self)
+        spacer.setFixedSize(10, 10)  # Adjust the size as per your needs
+        self.toolbar.addWidget(spacer)
+
+        # Add a QLabel and a QComboBox for font size to the toolbar
+        self.toolbar.addWidget(QLabel("Font: "))
+
+        self.font_size_combobox = QComboBox(self)
+        self.font_size_combobox.addItems(["8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36"])
+        self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
+        self.toolbar.addWidget(self.font_size_combobox)
+
         # Add a spacer to push the following widgets to the right
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -281,8 +296,36 @@ class HexViewer(QWidget):
         self.search_bar.returnPressed.connect(self.trigger_search)
         self.toolbar.addWidget(self.search_bar)
 
+    def update_font_size(self):
+        # Get the current font
+        current_font = self.hex_table.font()
+
+        # Set the font size to the selected size
+        selected_size = int(self.font_size_combobox.currentText())
+        current_font.setPointSize(selected_size)
+
+        # Set the new font to the hex_table
+        self.hex_table.setFont(current_font)
+
+        # Adjust the column width based on the font size
+        for i in range(self.hex_table.columnCount()):
+            self.hex_table.setColumnWidth(i, selected_size * 6)  # Adjust the multiplier as needed
+
+        # Get the font of the horizontal header
+        header_font = self.hex_table.horizontalHeader().font()
+
+        # Set the font size to the selected size
+        header_font.setPointSize(selected_size)
+
+        # Set the new font to the horizontal header
+        self.hex_table.horizontalHeader().setFont(header_font)
+
     def setup_hex_table(self):
         self.hex_table = QTableWidget()
+        # Set the font of the hex_table
+        font = QFont("Courier")
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 2)
+        self.hex_table.setFont(font)
         self.hex_table.setColumnCount(18)
         self.hex_table.horizontalHeader().setStyleSheet("QHeaderView::section { color: green; }")
         self.hex_table.setHorizontalHeaderLabels(['Address'] + [f'{i:02X}' for i in range(16)] + ['ASCII'])
@@ -414,7 +457,7 @@ class HexViewer(QWidget):
                 continue
 
             # Set address and center-align
-            address_item = QTableWidgetItem(address)
+            address_item = QTableWidgetItem(address + ":")  # Add a colon after the address
             address_item.setTextAlignment(Qt.AlignCenter)
             self.hex_table.setItem(row, 0, address_item)
 

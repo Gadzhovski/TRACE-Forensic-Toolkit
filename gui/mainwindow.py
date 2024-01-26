@@ -1,5 +1,6 @@
 import hashlib
 import os
+import ctypes
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush
@@ -48,6 +49,8 @@ class MainWindow(QMainWindow):
     def initialize_ui(self):
         self.setWindowTitle('4n6Factor')
         self.setWindowIcon(QIcon('gui/logo.png'))
+        myappid = '4n6Factor'
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         self.setGeometry(100, 100, 1200, 800)
 
         menu_bar = QMenuBar(self)
@@ -183,29 +186,6 @@ class MainWindow(QMainWindow):
         self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
         self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
 
-    def open_listing_context_menu(self, position):
-        # Get the selected item
-        indexes = self.listing_table.selectedIndexes()
-        if indexes:
-            selected_item = self.listing_table.item(indexes[0].row(),
-                                                    0)  # Assuming the first column contains the item data
-            data = selected_item.data(Qt.UserRole)
-            menu = QMenu()
-
-            # Add the 'Export' option for any file or folder
-            export_action = menu.addAction("Export")
-            export_action.triggered.connect(lambda: self.export_item_from_table(data))
-
-            menu.exec_(self.listing_table.viewport().mapToGlobal(position))
-
-    def export_item_from_table(self, data):
-        dest_dir = QFileDialog.getExistingDirectory(self, "Select Destination Directory")
-        if dest_dir:
-            if data.get("type") == "directory":
-                self.export_directory(data["inode_number"], data["start_offset"], dest_dir, data["name"])
-            else:
-                self.export_file(data["inode_number"], data["start_offset"], dest_dir, data["name"])
-
     def create_menu(self, menu_bar, menu_name, actions):
         menu = QMenu(menu_name, self)
         for action_name, action_function in actions.items():
@@ -245,7 +225,6 @@ class MainWindow(QMainWindow):
         self.metadata_viewer.clear()
         self.exif_viewer.clear_content()
 
-    # Close the application
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -346,38 +325,27 @@ class MainWindow(QMainWindow):
             data = {"inode_number": None, "start_offset": start, "end_offset": end}
             item = self.create_tree_item(root_item_tree, item_text, icon_path, data)
 
-            if self.image_handler.check_partition_contents(start):
+            special_partitions = ["Primary Table", "Safety Table", "GPT Header"]
+            is_special = any(special_case in desc.decode('utf-8') for special_case in special_partitions)
+
+            # Check if the partition is an unallocated space partition
+            is_unallocated = "Unallocated" in desc.decode('utf-8') or "Microsoft reserved" in desc.decode('utf-8')
+
+            if is_special:
+                item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+            elif is_unallocated:
                 item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-            else:
-                item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
+                # Add unallocated space for these cases
                 unallocated_item = self.create_tree_item(item, "Unallocated Space",
                                                          self.db_manager.get_icon_path('file', 'unknown'),
                                                          {"is_unallocated": True, "start_offset": start,
                                                           "end_offset": end})
-
-    # def populate_contents(self, item, data, inode=None):
-    #     if self.current_image_path is None:
-    #         return
-    #
-    #     entries = self.image_handler.get_directory_contents(data["start_offset"], inode)
-    #
-    #     for entry in entries:
-    #         child_item = QTreeWidgetItem(item)
-    #         child_item.setText(0, entry["name"])
-    #
-    #         if entry["is_directory"]:
-    #             sub_entries = self.image_handler.get_directory_contents(data["start_offset"], entry["inode_number"])
-    #
-    #             if sub_entries:  # If the directory has sub-entries
-    #                 self.populate_directory_item(child_item, entry["name"], entry["inode_number"],
-    #                                              data["start_offset"])
-    #                 child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-    #             else:  # If the directory does not have sub-entries
-    #                 self.populate_directory_item(child_item, entry["name"], entry["inode_number"],
-    #                                              data["start_offset"])
-    #                 child_item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
-    #         else:
-    #             self.populate_file_item(child_item, entry["name"], entry["inode_number"], data["start_offset"])
+            else:
+                # Check for regular partition contents
+                if self.image_handler.check_partition_contents(start):
+                    item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                else:
+                    item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
 
     def populate_contents(self, item, data, inode=None):
         if self.current_image_path is None:
@@ -391,18 +359,34 @@ class MainWindow(QMainWindow):
 
             if entry["is_directory"]:
                 sub_entries = self.image_handler.get_directory_contents(data["start_offset"], entry["inode_number"])
+                has_sub_entries = bool(sub_entries)
 
-                if sub_entries:  # If the directory has sub-entries
-                    self.populate_item(child_item, entry["name"], entry["inode_number"], data["start_offset"],
-                                       is_directory=True)
-                    child_item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-                else:  # If the directory does not have sub-entries
-                    self.populate_item(child_item, entry["name"], entry["inode_number"], data["start_offset"],
-                                       is_directory=True)
-                    child_item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
+                self.populate_item(child_item, entry["name"], entry["inode_number"], data["start_offset"],
+                                   is_directory=True)
+                child_item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ShowIndicator if has_sub_entries else QTreeWidgetItem.DontShowIndicatorWhenChildless)
             else:
                 self.populate_item(child_item, entry["name"], entry["inode_number"], data["start_offset"],
                                    is_directory=False)
+
+    def populate_item(self, child_item, entry_name, inode_number, start_offset, is_directory):
+        if is_directory:
+            icon_key = 'folder'
+        else:
+            # For files, determine the icon based on the file extension
+            file_extension = entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown'
+            icon_key = file_extension
+
+        icon_path = self.db_manager.get_icon_path('folder' if is_directory else 'file', icon_key)
+
+        child_item.setIcon(0, QIcon(icon_path))
+        child_item.setData(0, Qt.UserRole, {
+            "inode_number": inode_number,
+            "type": 'directory' if is_directory else 'file',
+            "start_offset": start_offset,
+            "name": entry_name
+        })
+
 
     def on_item_expanded(self, item):
         # Check if the item already has children; if so, don't repopulate
@@ -417,41 +401,6 @@ class MainWindow(QMainWindow):
             self.populate_contents(item, data)
         else:  # It's a directory
             self.populate_contents(item, data, data.get("inode_number"))
-
-    # def populate_directory_item(self, child_item, entry_name, inode_number, start_offset=None):
-    #     icon_path = self.db_manager.get_icon_path('folder', entry_name)
-    #     child_item.setIcon(0, QIcon(icon_path))
-    #     child_item.setData(0, Qt.UserRole, {
-    #         "inode_number": inode_number,
-    #         "type": "directory",
-    #         "start_offset": start_offset
-    #     })
-    #
-    # def populate_file_item(self, child_item, entry_name, inode_number, start_offset):
-    #     file_extension = entry_name.split('.')[-1] if '.' in entry_name else 'unknown'
-    #     icon_path = self.db_manager.get_icon_path('file', file_extension)
-    #
-    #     child_item.setIcon(0, QIcon(icon_path))
-    #     child_item.setData(0, Qt.UserRole, {
-    #         "inode_number": inode_number,
-    #         "type": "file",
-    #         "start_offset": start_offset,
-    #         "name": entry_name  # Add this line
-    #     })
-
-    def populate_item(self, child_item, entry_name, inode_number, start_offset, is_directory):
-        item_type = 'directory' if is_directory else 'file'
-        icon_name = 'folder' if is_directory else (
-            entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown')
-        icon_path = self.db_manager.get_icon_path(item_type, icon_name)
-
-        child_item.setIcon(0, QIcon(icon_path))
-        child_item.setData(0, Qt.UserRole, {
-            "inode_number": inode_number,
-            "type": item_type,
-            "start_offset": start_offset,
-            "name": entry_name,
-        })
 
     def get_file_content(self, inode_number, offset):
         fs = self.image_handler.get_fs_info(offset)
@@ -490,7 +439,6 @@ class MainWindow(QMainWindow):
             # Handle directories
             entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
             self.populate_listing_table(entries, data["start_offset"])
-
         elif data.get("inode_number") is not None:
             # Handle files
             file_content, metadata = self.get_file_content(data["inode_number"], data["start_offset"])
@@ -498,10 +446,27 @@ class MainWindow(QMainWindow):
                 self.update_viewer_with_file_content(file_content, metadata, data)
             else:
                 print("Unable to read file content.")
+        elif data.get("start_offset") is not None:
+            # Handle partitions
+            entries = self.image_handler.get_directory_contents(data["start_offset"], 5)  # 5 is the root inode for NTFS
+            self.populate_listing_table(entries, data["start_offset"])
         else:
             print("Clicked item is not a file, directory, or unallocated space.")
 
         self.display_content_for_active_tab()
+
+    def display_content_for_active_tab(self):
+        if not self.current_selected_data:
+            return
+
+        inode_number = self.current_selected_data.get("inode_number")
+        offset = self.current_selected_data.get("start_offset", self.current_offset)
+
+        if inode_number:
+            file_content, metadata = self.get_file_content(inode_number, offset)
+            if file_content:
+                self.update_viewer_with_file_content(file_content, metadata,
+                                                     self.current_selected_data)  # Use the stored data
 
     def update_viewer_with_file_content(self, file_content, metadata, data):  # Add the data parameter here
         index = self.viewer_tab.currentIndex()
@@ -520,19 +485,6 @@ class MainWindow(QMainWindow):
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
             file_hash = hashlib.md5(file_content).hexdigest()
             self.virus_total_api.set_file_hash(file_hash)
-
-    def display_content_for_active_tab(self):
-        if not self.current_selected_data:
-            return
-
-        inode_number = self.current_selected_data.get("inode_number")
-        offset = self.current_selected_data.get("start_offset", self.current_offset)
-
-        if inode_number:
-            file_content, metadata = self.get_file_content(inode_number, offset)
-            if file_content:
-                self.update_viewer_with_file_content(file_content, metadata,
-                                                     self.current_selected_data)  # Use the stored data
 
     def display_application_content(self, file_content, full_file_path):
         file_extension = os.path.splitext(full_file_path)[-1].lower()
@@ -611,6 +563,29 @@ class MainWindow(QMainWindow):
 
         # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
+
+    def open_listing_context_menu(self, position):
+        # Get the selected item
+        indexes = self.listing_table.selectedIndexes()
+        if indexes:
+            selected_item = self.listing_table.item(indexes[0].row(),
+                                                    0)  # Assuming the first column contains the item data
+            data = selected_item.data(Qt.UserRole)
+            menu = QMenu()
+
+            # Add the 'Export' option for any file or folder
+            export_action = menu.addAction("Export")
+            export_action.triggered.connect(lambda: self.export_item_from_table(data))
+
+            menu.exec_(self.listing_table.viewport().mapToGlobal(position))
+
+    def export_item_from_table(self, data):
+        dest_dir = QFileDialog.getExistingDirectory(self, "Select Destination Directory")
+        if dest_dir:
+            if data.get("type") == "directory":
+                self.export_directory(data["inode_number"], data["start_offset"], dest_dir, data["name"])
+            else:
+                self.export_file(data["inode_number"], data["start_offset"], dest_dir, data["name"])
 
     def open_tree_context_menu(self, position):
         # Get the selected item
