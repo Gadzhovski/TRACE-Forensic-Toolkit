@@ -119,8 +119,19 @@ class FileCarvingWidget(QWidget):
 
     def is_valid_file(self, data, file_type):
         try:
-            if file_type in ['jpg', 'gif']:
-                Image.MAX_IMAGE_PIXELS = None  # Disables Decompression Bomb protection
+            if file_type == 'wav':
+                # Corrected check for a valid WAV file
+                if data[0:4] == b'RIFF' and data[8:12] == b'WAVE':
+                    return True
+                return False
+
+            # check for valid mov file
+            elif file_type == 'mov':
+                if data[0:4] == b'ftyp' and data[12:16] == b'qt  ':
+                    return True
+                return False
+            elif file_type in ['jpg', 'gif']:
+                Image.MAX_IMAGE_PIXELS = None
                 Image.open(io.BytesIO(data)).verify()
             elif file_type == 'pdf':
                 PdfReader(io.BytesIO(data))
@@ -207,6 +218,98 @@ class FileCarvingWidget(QWidget):
                 else:
                     offset = start_index + 1  # Continue searching
 
+    def carve_wav_files(self, chunk):
+        wav_start_signature = b'RIFF'
+        offset = 0
+        while offset < len(chunk):
+            start_index = chunk.find(wav_start_signature, offset)
+            if start_index == -1:
+                break
+
+            if chunk[start_index + 8:start_index + 12] != b'WAVE':
+                offset = start_index + 4
+                continue
+
+            file_size_bytes = chunk[start_index + 4:start_index + 8]
+            file_size = int.from_bytes(file_size_bytes, byteorder='little') + 8
+
+            if start_index + file_size > len(chunk):
+                # Handle cases where the WAV file extends beyond the current chunk
+                # Append the remaining part of the WAV file in the next chunk to the extracted WAV file
+                wav_content = chunk[start_index:]
+                offset = len(chunk)
+            else:
+                wav_content = chunk[start_index:start_index + file_size]
+                offset = start_index + file_size
+
+            file_type = 'wav'
+
+            if self.is_valid_file(wav_content, file_type):
+                file_name = f"carved_{offset + start_index}.{file_type}"
+                file_path = os.path.join("carved_files", file_name)
+                with open(file_path, "ab") as f:  # Open the file in append mode
+                    f.write(wav_content)
+
+                modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                self.carved_files.append((file_name, str(len(wav_content)), file_type, file_path))
+                self.file_carved.emit(file_name, str(len(wav_content)), file_type, modification_date, file_path)
+
+    def carve_mov_files(self, chunk, offset):
+        mov_signatures = [
+            # b'ftyp', b'moov', b'mdat', #b'pnot', b'udta', #b'uuid',
+            # b'moof', b'free', b'skip', b'jP2 ', b'wide', b'load',
+            # b'ctab', b'imap', b'matt', b'kmat', b'clip', b'crgn',
+            # b'sync', b'chap', b'tmcd', b'scpt', b'ssrc', b'PICT'
+
+            b'moov', b'mdat', b'free', b'wide'
+        ]
+
+        mov_file_found = False
+        mov_data = b''
+        mov_file_offset = offset
+        mov_file_size = 0
+
+        while offset < len(chunk):
+            if offset + 8 > len(chunk):
+                # Not enough data for an atom header
+                break
+
+            atom_size = int.from_bytes(chunk[offset:offset + 4], 'big')
+            atom_type = chunk[offset + 4:offset + 8]
+
+            if atom_type not in mov_signatures:
+                if mov_file_found:
+                    # End of MOV file
+                    break
+                else:
+                    # Not a MOV file or just a stray header, skip ahead
+                    offset += 4
+                    continue
+
+            mov_file_found = True
+            mov_file_size += atom_size
+
+            if offset + atom_size > len(chunk):
+                # Atom extends beyond this chunk, store what we have and wait for more data
+                mov_data += chunk[offset:]
+                break
+            else:
+                # We have the whole atom, store it
+                mov_data += chunk[offset:offset + atom_size]
+
+            offset += atom_size
+
+        if mov_file_found and mov_data:
+            file_name = f"carved_{mov_file_offset}.mov"
+            file_path = os.path.join("carved_files", file_name)
+            with open(file_path, "wb") as f:
+                f.write(mov_data)
+
+            modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.carved_files.append((file_name, str(mov_file_size), 'mov', file_path))
+            self.file_carved.emit(file_name, str(mov_file_size), 'mov', modification_date, file_path)
+
     def carve_files(self):
         self.stop_carving = False
         print("Carving files...")
@@ -214,7 +317,8 @@ class FileCarvingWidget(QWidget):
             'jpg': {'start': b'\xFF\xD8\xFF', 'end': b'\xFF\xD9'},
             'gif': {'start': b'\x47\x49\x46\x38', 'end': b'\x00\x3B'},
             'pdf': {'start': b'%PDF-', 'end': b'%%EOF'},  # PDF start and end signatures
-            # 'pdf': {'start': b'\x25\x50\x44\x46', 'end': b'\x25\x25\x45\x4F\x46\x0A'}
+            'wav': {'start': b'RIFF', 'end': b'WAVE'},  # WAV start and end signatures
+            'mov': {'start': b'\x00\x00\x00\x14ftypqt  ', 'end': None},
         }
         chunk_size = 1024 * 1024 * 100
         offset = 0
@@ -238,12 +342,18 @@ class FileCarvingWidget(QWidget):
                 self.stop_button.setEnabled(False)
                 return
 
-            # Check for PDF start signatures in the chunk
-            pdf_start_indices = [m.start() for m in re.finditer(b'%PDF-', chunk)]
+            # Check for WAV start signatures in the chunk
+            wav_start_indices = [m.start() for m in re.finditer(b'RIFF', chunk)]
 
-            if pdf_start_indices:
-                # Call the PDF carving function
-                self.carve_pdf_files(chunk)
+            if wav_start_indices:
+                # Call the WAV carving function
+                self.carve_wav_files(chunk)
+
+            # Carve MOV files
+            self.carve_mov_files(chunk, offset)
+
+            # Check for PDF start signatures in the chunk
+            self.carve_pdf_files(chunk)
 
             # Handle other file types as before
             for file_type, sig in signatures.items():
@@ -283,6 +393,8 @@ class FileCarvingWidget(QWidget):
                         start = start_index + len(sig['start'])
 
             offset += chunk_size
+    # print finish when function is done
+    print("Finish carving files")
 
     @Slot(str, str, str, str, str)
     def display_carved_file(self, name, size, type_, modification_date, file_path):
