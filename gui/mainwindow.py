@@ -17,6 +17,7 @@ from modules.metadata_tab import MetadataViewer
 from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
+from modules.file_carving import FileCarvingWidget
 
 SECTOR_SIZE = 512
 
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self.image_manager = ImageManager()
         self.db_manager = DatabaseManager('new_database_mappings.db')
         self.current_selected_data = None
+
 
         self.evidence_files = []
 
@@ -152,7 +154,10 @@ class MainWindow(QMainWindow):
         header.setDefaultAlignment(Qt.AlignLeft)
 
         self.result_viewer.addTab(self.listing_table, 'Listing')
-        self.result_viewer.addTab(QTextEdit(self), 'Deleted Files')
+        #self.result_viewer.addTab(QTextEdit(self), 'Deleted Files')
+        self.deleted_files_widget = FileCarvingWidget(self)
+        self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
+
         self.result_viewer.addTab(QTextEdit(self), 'Registry')
 
         self.viewer_tab = QTabWidget(self)
@@ -256,12 +261,16 @@ class MainWindow(QMainWindow):
             self.evidence_files.append(image_path)
             self.current_image_path = image_path  # ensure this line is present
             self.load_partitions_into_tree(image_path)
+            self.deleted_files_widget.set_image_handler(self.image_handler)
 
             partitions = self.image_handler.get_partitions()
             for part in partitions:
                 partition_desc = part[1].decode('utf-8')
                 if "Basic data partition" in partition_desc or "NTFS" in partition_desc or "FAT" in partition_desc or "exFAT" in partition_desc:
                     os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
+
+
+
 
     def remove_image_evidence(self):
         if not self.evidence_files:
@@ -290,6 +299,7 @@ class MainWindow(QMainWindow):
         # clear all tabs if there are no evidence files loaded
         if not self.evidence_files:
             self.clear_ui()
+            self.deleted_files_widget.clear()
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()

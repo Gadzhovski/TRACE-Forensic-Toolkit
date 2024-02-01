@@ -33,6 +33,29 @@ class ImageHandler:
         self.fs_info_cache = {}  # Cache for FS_Info objects, keyed by start offset
         self.load_image()  # Load the image
 
+    def get_size(self):
+        """Returns the size of the disk image."""
+        if isinstance(self.img_info, EWFImgInfo):
+            return self.img_info.get_size()
+        elif isinstance(self.img_info, pytsk3.Img_Info):
+            # For raw images handled directly by pytsk3.Img_Info,
+            # pytsk3 does not directly provide a method to get the total image size.
+            # If pytsk3 is being used for raw images, you might need to adapt based on
+            # how you've structured your raw image handling.
+            # As a placeholder, this method assumes a direct getSize method which may not exist.
+            # You'll need to adjust this based on your application's structure.
+            return self.img_info.get_size()
+        else:
+            raise AttributeError("Unsupported image format for size retrieval.")
+
+    def read(self, offset, size):
+        """Reads data from the image starting at `offset` for `size` bytes."""
+        if hasattr(self.img_info, 'read'):
+            # This will work directly for both EWFImgInfo and pytsk3.Img_Info instances
+            return self.img_info.read(offset, size)
+        else:
+            raise NotImplementedError("The image format does not support direct reading.")
+
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
         _, extension = os.path.splitext(self.image_path)
