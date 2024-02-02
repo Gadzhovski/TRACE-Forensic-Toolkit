@@ -1,19 +1,21 @@
+import datetime
 import io
 import os
-import threading
-import datetime
 import re
+import threading
 
+import pandas as pd
+import xlrd
 from PIL import Image, UnidentifiedImageError
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
 from PySide6.QtCore import QSize, QUrl
+from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QIcon, QAction, QDesktopServices
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMenu
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
 
 
 class FileCarvingWidget(QWidget):
@@ -120,14 +122,20 @@ class FileCarvingWidget(QWidget):
     def is_valid_file(self, data, file_type):
         try:
             if file_type == 'wav':
-                # Corrected check for a valid WAV file
                 if data[0:4] == b'RIFF' and data[8:12] == b'WAVE':
-                    return True
-                return False
+                    # Additional checks for 'wav' files
+                    audio_format = int.from_bytes(data[20:22], byteorder='little')
+                    num_channels = int.from_bytes(data[22:24], byteorder='little')
+                    sample_rate = int.from_bytes(data[24:28], byteorder='little')
+                    bits_per_sample = int.from_bytes(data[34:36], byteorder='little')
 
-            # check for valid mov file
+                    # You can add more validation criteria here if needed
+                    if audio_format == 1 and num_channels in [1, 2] and sample_rate > 0 and bits_per_sample in [8, 16]:
+                        return True
+
+                return False
             elif file_type == 'mov':
-                if data[0:4] == b'ftyp' and data[12:16] == b'qt  ':
+                if data[0:4] == b'\x00\x00\x00\x14' and data[8:12] == b'ftyp' and data[12:16] == b'qt  ':
                     return True
                 return False
             elif file_type in ['jpg', 'gif']:
@@ -135,6 +143,16 @@ class FileCarvingWidget(QWidget):
                 Image.open(io.BytesIO(data)).verify()
             elif file_type == 'pdf':
                 PdfReader(io.BytesIO(data))
+            elif file_type == 'xls':
+                try:
+                    xlrd.open_workbook(file_contents=data)
+                except xlrd.biffh.XLRDError:
+                    try:
+                        pd.read_excel(io.BytesIO(data))
+                    except:
+                        return False
+                except:
+                    return False
             else:
                 return False
             return True
@@ -310,6 +328,39 @@ class FileCarvingWidget(QWidget):
             self.carved_files.append((file_name, str(mov_file_size), 'mov', file_path))
             self.file_carved.emit(file_name, str(mov_file_size), 'mov', modification_date, file_path)
 
+    def carve_xls_files(self, chunk, global_offset):
+        xls_header = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
+        pattern_hex = "44006F00630075006D0065006E007400530075006D006D0061007200790049006E0066006F0072006D006100740069006F006E00"
+        pattern_bytes = bytes.fromhex(pattern_hex)
+
+        offset = 0
+        while offset < len(chunk):
+            start_index = chunk.find(xls_header, offset)
+            if start_index == -1:
+                break
+
+            pattern_index = chunk.find(pattern_bytes, start_index)
+            if pattern_index == -1:
+                offset += len(chunk)
+                continue
+
+            end_index = pattern_index + len(pattern_bytes) + 74
+            end_index = min(end_index, len(chunk))
+
+            xls_data = chunk[start_index:end_index]
+
+            if self.is_valid_file(xls_data, 'xls'):  # Validate the xls file before saving
+                file_name = f"carved_{global_offset + start_index}.xls"
+                file_path = os.path.join("carved_files", file_name)
+                with open(file_path, "wb") as f:
+                    f.write(xls_data)
+
+                modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.carved_files.append((file_name, str(len(xls_data)), 'xls', file_path))
+                self.file_carved.emit(file_name, str(len(xls_data)), 'xls', modification_date, file_path)
+
+            offset = end_index
+
     def carve_files(self):
         self.stop_carving = False
         print("Carving files...")
@@ -355,6 +406,9 @@ class FileCarvingWidget(QWidget):
             # Check for PDF start signatures in the chunk
             self.carve_pdf_files(chunk)
 
+            # Carve XLS files
+            self.carve_xls_files(chunk, offset)
+
             # Handle other file types as before
             for file_type, sig in signatures.items():
                 start = 0
@@ -393,6 +447,7 @@ class FileCarvingWidget(QWidget):
                         start = start_index + len(sig['start'])
 
             offset += chunk_size
+
     # print finish when function is done
     print("Finish carving files")
 
