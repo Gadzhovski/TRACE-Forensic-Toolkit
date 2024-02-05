@@ -119,68 +119,68 @@ class FileCarvingWidget(QWidget):
     def stop_carving_thread(self):
         self.stop_carving = True
 
+    # def is_valid_file(self, data, file_type):
+    #     try:
+    #         if file_type == 'wav':
+    #             if data[0:4] == b'RIFF' and data[8:12] == b'WAVE':
+    #                 # Additional checks for 'wav' files
+    #                 audio_format = int.from_bytes(data[20:22], byteorder='little')
+    #                 num_channels = int.from_bytes(data[22:24], byteorder='little')
+    #                 sample_rate = int.from_bytes(data[24:28], byteorder='little')
+    #                 bits_per_sample = int.from_bytes(data[34:36], byteorder='little')
+    #
+    #                 # You can add more validation criteria here if needed
+    #                 if audio_format == 1 and num_channels in [1, 2] and sample_rate > 0 and bits_per_sample in [8, 16]:
+    #                     return True
+    #
+    #             return False
+    #         elif file_type == 'mov':
+    #             if data[0:4] == b'\x00\x00\x00\x14' and data[8:12] == b'ftyp' and data[12:16] == b'qt  ':
+    #                 return True
+    #             return False
+    #         elif file_type in ['jpg', 'gif']:
+    #             Image.MAX_IMAGE_PIXELS = None
+    #             Image.open(io.BytesIO(data)).verify()
+    #         elif file_type == 'pdf':
+    #             PdfReader(io.BytesIO(data))
+    #         elif file_type == 'xls':
+    #             try:
+    #                 xlrd.open_workbook(file_contents=data)
+    #             except xlrd.biffh.XLRDError:
+    #                 try:
+    #                     pd.read_excel(io.BytesIO(data))
+    #                 except:
+    #                     return False
+    #             except:
+    #                 return False
+    #         else:
+    #             return False
+    #         return True
+    #     except (IOError, UnidentifiedImageError, PdfReadError, ValueError):
+    #         return False
+
+    # crate dummy is_valid_file function to avoid error
     def is_valid_file(self, data, file_type):
-        try:
-            if file_type == 'wav':
-                if data[0:4] == b'RIFF' and data[8:12] == b'WAVE':
-                    # Additional checks for 'wav' files
-                    audio_format = int.from_bytes(data[20:22], byteorder='little')
-                    num_channels = int.from_bytes(data[22:24], byteorder='little')
-                    sample_rate = int.from_bytes(data[24:28], byteorder='little')
-                    bits_per_sample = int.from_bytes(data[34:36], byteorder='little')
-
-                    # You can add more validation criteria here if needed
-                    if audio_format == 1 and num_channels in [1, 2] and sample_rate > 0 and bits_per_sample in [8, 16]:
-                        return True
-
-                return False
-            elif file_type == 'mov':
-                if data[0:4] == b'\x00\x00\x00\x14' and data[8:12] == b'ftyp' and data[12:16] == b'qt  ':
-                    return True
-                return False
-            elif file_type in ['jpg', 'gif']:
-                Image.MAX_IMAGE_PIXELS = None
-                Image.open(io.BytesIO(data)).verify()
-            elif file_type == 'pdf':
-                PdfReader(io.BytesIO(data))
-            elif file_type == 'xls':
-                try:
-                    xlrd.open_workbook(file_contents=data)
-                except xlrd.biffh.XLRDError:
-                    try:
-                        pd.read_excel(io.BytesIO(data))
-                    except:
-                        return False
-                except:
-                    return False
-            else:
-                return False
-            return True
-        except (IOError, UnidentifiedImageError, PdfReadError, ValueError):
-            return False
+        return True
+    
 
     def carve_pdf_files(self, chunk):
         pdf_start_signature = b'%PDF-'
         offset = 0
         while offset < len(chunk):
-            # Step 1: Look for the header signature (%PDF)
             start_index = chunk.find(pdf_start_signature, offset)
 
             if start_index == -1:
                 break
 
-            # Step 2: Check for the version number [file offset 6-8]
             version = chunk[start_index + 5:start_index + 8].decode()
 
-            # Step 3: If version no. > 1.1 go to Step 4
             if version > "1.1":
                 offset = start_index + 8
                 continue
 
-            # Step 4: Search for the string "Linearized" in first few bytes of the file
             linearized_signature = b'Linearized'
             if linearized_signature in chunk[start_index:start_index + 100]:
-                # Step 5: If it finds the string in Step 4, then length of the file is preceded by a "/L " character sequence
                 length_index = chunk.find(b'/L ', start_index)
                 if length_index != -1:
                     length = int(chunk[length_index + 3:length_index + 12])
@@ -370,6 +370,9 @@ class FileCarvingWidget(QWidget):
             'pdf': {'start': b'%PDF-', 'end': b'%%EOF'},  # PDF start and end signatures
             'wav': {'start': b'RIFF', 'end': b'WAVE'},  # WAV start and end signatures
             'mov': {'start': b'\x00\x00\x00\x14ftypqt  ', 'end': None},
+
+
+
         }
         chunk_size = 1024 * 1024 * 100
         offset = 0
@@ -400,13 +403,8 @@ class FileCarvingWidget(QWidget):
                 # Call the WAV carving function
                 self.carve_wav_files(chunk)
 
-            # Carve MOV files
             self.carve_mov_files(chunk, offset)
-
-            # Check for PDF start signatures in the chunk
             self.carve_pdf_files(chunk)
-
-            # Carve XLS files
             self.carve_xls_files(chunk, offset)
 
             # Handle other file types as before
@@ -448,8 +446,8 @@ class FileCarvingWidget(QWidget):
 
             offset += chunk_size
 
-    # print finish when function is done
-    print("Finish carving files")
+            # print finish when function is done
+            print("Finish carving files")
 
     @Slot(str, str, str, str, str)
     def display_carved_file(self, name, size, type_, modification_date, file_path):

@@ -1,6 +1,9 @@
 
 import hashlib
 from magic import Magic
+
+# pip install python-magic-bin==0.4.14
+
 import datetime
 import pytz
 from PySide6.QtWidgets import QTextEdit

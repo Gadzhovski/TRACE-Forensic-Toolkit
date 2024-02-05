@@ -263,6 +263,7 @@ class MainWindow(QMainWindow):
             self.load_partitions_into_tree(image_path)
             self.deleted_files_widget.set_image_handler(self.image_handler)
 
+
             partitions = self.image_handler.get_partitions()
             for part in partitions:
                 partition_desc = part[1].decode('utf-8')
