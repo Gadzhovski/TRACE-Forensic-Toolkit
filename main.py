@@ -1,6 +1,5 @@
 from PySide6.QtWidgets import QApplication
 
-#from gui.old_mainwindow_binaries import MainWindow  ##Old version using binaries
 from gui.mainwindow import MainWindow
 
 
@@ -14,6 +13,13 @@ if __name__ == '__main__':
    #      }
    #  """)
    # #Apply the Windows 11 style
+
+    # # set modern windows style but not dark mode
+    # app.setStyle('Fusion')
+    # app.setPalette(app.style().standardPalette())
+
+
+
 
     window = MainWindow()
     window.show()

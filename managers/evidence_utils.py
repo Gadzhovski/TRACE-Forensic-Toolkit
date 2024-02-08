@@ -31,7 +31,12 @@ class ImageHandler:
         self.img_info = None  # Initialized once
         self.volume_info = None  # Initialized once
         self.fs_info_cache = {}  # Cache for FS_Info objects, keyed by start offset
+
+        self.fs_info = None  # Added to check for direct filesystem
+        self.is_wiped_image = False  # Indicator if image is wiped
+
         self.load_image()  # Load the image
+
 
     def get_size(self):
         """Returns the size of the disk image."""
@@ -71,37 +76,89 @@ class ImageHandler:
         else:
             raise ValueError(f"Unsupported image type: {extension}")
 
-    def load_image(self):
-        image_type = self.get_image_type()  # ewf or raw
+    # def load_image(self): #og
+    #     image_type = self.get_image_type()  # ewf or raw
+    #     if image_type == "ewf":
+    #         filenames = pyewf.glob(self.image_path)
+    #         ewf_handle = pyewf.handle()
+    #         ewf_handle.open(filenames)
+    #         self.img_info = EWFImgInfo(ewf_handle)  # instance of EWFImgInfo class to work with
+    #     elif image_type == "raw":
+    #         self.img_info = pytsk3.Img_Info(self.image_path)  # instance of Img_Info class to work with
+    #     else:
+    #         raise ValueError(f"Unsupported image type: {image_type}")
+    #     try:
+    #         self.volume_info = pytsk3.Volume_Info(self.img_info)  # instance of Volume_Info class to work with
+    #     except Exception as e:
+    #         self.volume_info = None
+    #         print(f"Error loading volume info: {e}")
 
+    def load_image(self):
+        image_type = self.get_image_type()
         if image_type == "ewf":
             filenames = pyewf.glob(self.image_path)
             ewf_handle = pyewf.handle()
             ewf_handle.open(filenames)
-            self.img_info = EWFImgInfo(ewf_handle)  # instance of EWFImgInfo class to work with
+            self.img_info = EWFImgInfo(ewf_handle)
         elif image_type == "raw":
-            self.img_info = pytsk3.Img_Info(self.image_path)  # instance of Img_Info class to work with
+            self.img_info = pytsk3.Img_Info(self.image_path)
         else:
             raise ValueError(f"Unsupported image type: {image_type}")
 
         try:
-            self.volume_info = pytsk3.Volume_Info(self.img_info)  # instance of Volume_Info class to work with
-        except Exception as e:
+            self.volume_info = pytsk3.Volume_Info(self.img_info)
+        except Exception:
             self.volume_info = None
+            # Attempt to detect a filesystem directly if no volume info
+            try:
+                self.fs_info = pytsk3.FS_Info(self.img_info)
+            except Exception:
+                self.fs_info = None
+                # If no volume info and no filesystem, mark as wiped
+                self.is_wiped_image = True
+
+
+    def has_filesystem(self, start_offset):
+        fs_info = self.get_fs_info(start_offset)
+        return fs_info is not None
+
+    def is_wiped(self):
+        # Image is considered wiped if no volume info, no filesystem detected
+        return self.is_wiped_image
+
+
+
+    # def get_partitions(self):  #og
+    #     """Retrieve partitions from the loaded image."""
+    #     partitions = []
+    #     if self.volume_info:
+    #         for partition in self.volume_info:
+    #             if not partition.desc:
+    #                 continue
+    #             partitions.append((partition.addr, partition.desc, partition.start, partition.len))
+    #     return partitions
 
     def get_partitions(self):
-        """Retrieve partitions from the loaded image."""
+        """Retrieve partitions from the loaded image, or indicate unpartitioned space."""
         partitions = []
         if self.volume_info:
             for partition in self.volume_info:
                 if not partition.desc:
                     continue
                 partitions.append((partition.addr, partition.desc, partition.start, partition.len))
+        elif self.is_wiped():
+            # For a wiped image with no partitions, return a placeholder for unallocated space
+            # This is a simplified representation. You might need to adjust based on how you handle sizes and offsets.
+            #total_size = self.get_size()
+            #partitions.append((0, "Unallocated Space", 0, total_size // SECTOR_SIZE))
+            #dont do nothing
+            pass
         return partitions
 
-    def has_partitions(self):
-        """Check if the image has partitions."""
-        return bool(self.get_partitions())
+
+    # def has_partitions(self):
+    #     """Check if the image has partitions."""
+    #     return bool(self.get_partitions())
 
     def get_fs_info(self, start_offset):
         """Retrieve the FS_Info for a partition, initializing it if necessary."""
@@ -112,6 +169,7 @@ class ImageHandler:
             except Exception as e:
                 return None
         return self.fs_info_cache[start_offset]
+
 
     def get_fs_type(self, start_offset):
         """Retrieve the file system type for a partition."""
@@ -226,15 +284,13 @@ class ImageHandler:
         system_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SYSTEM")
         sam_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SAM")
         security_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SECURITY")
-        ntuser_hive_data = self.get_registry_hive(fs_info, "/Users/NTUSER.DAT")
 
-        return software_hive_data, system_hive_data, sam_hive_data, security_hive_data, ntuser_hive_data
+        return software_hive_data, system_hive_data, sam_hive_data, security_hive_data
 
 
     def get_windows_version(self, start_offset):
         """Get the Windows version from the SOFTWARE registry hive."""
         fs_info = self.get_fs_info(start_offset)
-
         if not fs_info:
             return None
 
@@ -291,15 +347,18 @@ class ImageHandler:
     def read_unallocated_space(self, start_offset, end_offset):
         try:
             start_byte_offset = start_offset * SECTOR_SIZE
-            end_byte_offset = end_offset * SECTOR_SIZE
-            size_in_bytes = end_byte_offset - start_byte_offset
+            end_byte_offset = max(end_offset * SECTOR_SIZE, start_byte_offset + SECTOR_SIZE - 1)
+            size_in_bytes = end_byte_offset - start_byte_offset + 1  # Ensuring at least some data is read
+
+            print("end_offset: ", end_offset)
+            print("end_byte_offset: ", end_byte_offset)
 
             if size_in_bytes <= 0:
-                print("Invalid size for unallocated space.")
-                return None
+                print("Invalid size for unallocated space, adjusting to read at least one sector.")
+                size_in_bytes = SECTOR_SIZE  # Adjust to read at least one sector
 
             unallocated_space = self.img_info.read(start_byte_offset, size_in_bytes)
-            if unallocated_space is None:
+            if unallocated_space is None or len(unallocated_space) == 0:
                 print(f"Failed to read unallocated space from offset {start_byte_offset} to {end_byte_offset}")
                 return None
 
@@ -307,5 +366,4 @@ class ImageHandler:
         except Exception as e:
             print(f"Error reading unallocated space: {e}")
             return None
-
 

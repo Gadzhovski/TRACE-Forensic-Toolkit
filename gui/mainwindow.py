@@ -18,6 +18,7 @@ from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 from modules.file_carving import FileCarvingWidget
+from modules.registry import RegistryExtractor
 
 SECTOR_SIZE = 512
 
@@ -34,7 +35,6 @@ class MainWindow(QMainWindow):
         self.image_manager = ImageManager()
         self.db_manager = DatabaseManager('new_database_mappings.db')
         self.current_selected_data = None
-
 
         self.evidence_files = []
 
@@ -154,11 +154,15 @@ class MainWindow(QMainWindow):
         header.setDefaultAlignment(Qt.AlignLeft)
 
         self.result_viewer.addTab(self.listing_table, 'Listing')
-        #self.result_viewer.addTab(QTextEdit(self), 'Deleted Files')
+
+
         self.deleted_files_widget = FileCarvingWidget(self)
         self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
 
-        self.result_viewer.addTab(QTextEdit(self), 'Registry')
+
+        self.registry_extractor_widget = RegistryExtractor(self.image_handler)
+        self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
+
 
         self.viewer_tab = QTabWidget(self)
 
@@ -263,15 +267,14 @@ class MainWindow(QMainWindow):
             self.load_partitions_into_tree(image_path)
             self.deleted_files_widget.set_image_handler(self.image_handler)
 
+            # pass the image handler to the registry extractor widget
+            self.registry_extractor_widget.image_handler = self.image_handler
 
-            partitions = self.image_handler.get_partitions()
-            for part in partitions:
-                partition_desc = part[1].decode('utf-8')
-                if "Basic data partition" in partition_desc or "NTFS" in partition_desc or "FAT" in partition_desc or "exFAT" in partition_desc:
-                    os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
-
-
-
+            # partitions = self.image_handler.get_partitions() #og
+            # for part in partitions:
+            #     partition_desc = part[1].decode('utf-8')
+            #     if "Basic data partition" in partition_desc or "NTFS" in partition_desc or "FAT" in partition_desc or "exFAT" in partition_desc:
+            #         os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
 
     def remove_image_evidence(self):
         if not self.evidence_files:
@@ -312,47 +315,53 @@ class MainWindow(QMainWindow):
 
     def load_partitions_into_tree(self, image_path):
         """Load partitions from an image into the tree viewer."""
-        if not self.image_handler.has_partitions():
-            root_item_tree = self.create_tree_item(self.tree_viewer, image_path,
-                                                   self.db_manager.get_icon_path('device', 'media-optical'),
-                                                   {"start_offset": 0})
-            self.populate_contents(root_item_tree, {"start_offset": 0})
-            return
-
         root_item_tree = self.create_tree_item(self.tree_viewer, image_path,
                                                self.db_manager.get_icon_path('device', 'media-optical'),
                                                {"start_offset": 0})
 
         partitions = self.image_handler.get_partitions()
 
+        # Check if the image has partitions or a recognizable file system
+        if not partitions:
+            if self.image_handler.has_filesystem(0):
+                # The image has a filesystem but no partitions, populate root directory
+                self.populate_contents(root_item_tree, {"start_offset": 0})
+            else:
+                # Entire image is considered as unallocated space
+                size_in_bytes = self.image_handler.get_size()
+                readable_size = self.get_readable_size(size_in_bytes)
+                unallocated_item_text = f"Unallocated Space: Size: {readable_size}"
+                self.create_tree_item(root_item_tree, unallocated_item_text,
+                                      self.db_manager.get_icon_path('file', 'unknown'),
+                                      {"is_unallocated": True, "start_offset": 0,
+                                       "end_offset": size_in_bytes // SECTOR_SIZE})
+            return
+
         for addr, desc, start, length in partitions:
             end = start + length - 1
             size_in_bytes = length * SECTOR_SIZE
             readable_size = self.get_readable_size(size_in_bytes)
             fs_type = self.image_handler.get_fs_type(start)
-
-            item_text = f"vol{addr} ({desc.decode('utf-8')}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
+            desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+            item_text = f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
             icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
             data = {"inode_number": None, "start_offset": start, "end_offset": end}
             item = self.create_tree_item(root_item_tree, item_text, icon_path, data)
 
+            # Determine if the partition is special or contains unallocated space
             special_partitions = ["Primary Table", "Safety Table", "GPT Header"]
-            is_special = any(special_case in desc.decode('utf-8') for special_case in special_partitions)
-
-            # Check if the partition is an unallocated space partition
-            is_unallocated = "Unallocated" in desc.decode('utf-8') or "Microsoft reserved" in desc.decode('utf-8')
+            is_special = any(special_case in desc_str for special_case in special_partitions)
+            is_unallocated = "Unallocated" in desc_str or "Microsoft reserved" in desc_str
 
             if is_special:
                 item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
             elif is_unallocated:
                 item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
-                # Add unallocated space for these cases
-                unallocated_item = self.create_tree_item(item, "Unallocated Space",
-                                                         self.db_manager.get_icon_path('file', 'unknown'),
-                                                         {"is_unallocated": True, "start_offset": start,
-                                                          "end_offset": end})
+                # Directly add unallocated space under the partition
+                self.create_tree_item(item, f"Unallocated Space: Size: {readable_size}",
+                                      self.db_manager.get_icon_path('file', 'unknown'),
+                                      {"is_unallocated": True, "start_offset": start, "end_offset": end})
             else:
-                # Check for regular partition contents
                 if self.image_handler.check_partition_contents(start):
                     item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
                 else:
@@ -398,7 +407,6 @@ class MainWindow(QMainWindow):
             "name": entry_name
         })
 
-
     def on_item_expanded(self, item):
         # Check if the item already has children; if so, don't repopulate
         if item.childCount() > 0:
@@ -443,7 +451,9 @@ class MainWindow(QMainWindow):
             # Handle unallocated space
             unallocated_space = self.image_handler.read_unallocated_space(data["start_offset"], data["end_offset"])
             if unallocated_space is not None:
-                self.hex_viewer.display_hex_content(unallocated_space)
+                # self.hex_viewer.display_hex_content(unallocated_space)
+                # use the update_viewer_with_file_content method to display the unallocated space for hex and text tabs
+                self.update_viewer_with_file_content(unallocated_space, None, data)
             else:
                 print("Invalid size for unallocated space or unable to read.")
         elif data.get("type") == "directory":
@@ -496,6 +506,8 @@ class MainWindow(QMainWindow):
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
             file_hash = hashlib.md5(file_content).hexdigest()
             self.virus_total_api.set_file_hash(file_hash)
+            self.virus_total_api.set_file_content(file_content, data.get("name", ""))
+
 
     def display_application_content(self, file_content, full_file_path):
         file_extension = os.path.splitext(full_file_path)[-1].lower()
