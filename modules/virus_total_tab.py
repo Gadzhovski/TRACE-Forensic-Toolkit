@@ -102,7 +102,7 @@ class VirusTotal(QWidget):
         # Styling the toolbars
         self.logo_toolbar.setStyleSheet(
             "QToolBar { background-color: lightgray; border: 0px solid gray; }")  # Light grey background
-        self.virus_total_logo = QSvgWidget("gui/VirusTotal_logo.svg")
+        self.virus_total_logo = QSvgWidget("Icons/VirusTotal_logo.svg")
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)

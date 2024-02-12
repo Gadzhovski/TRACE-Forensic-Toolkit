@@ -24,6 +24,7 @@ class EWFImgInfo(pytsk3.Img_Info):
     def get_size(self):
         return self._ewf_handle.get_media_size()
 
+
 class ImageHandler:
     def __init__(self, image_path):
         self.image_path = image_path  # Path to the image
@@ -116,8 +117,6 @@ class ImageHandler:
             # dont do nothing
             pass
         return partitions
-
-
 
     def get_fs_info(self, start_offset):
         """Retrieve the FS_Info for a partition, initializing it if necessary."""
@@ -244,9 +243,10 @@ class ImageHandler:
         # Create a temporary file and store the hive data
         temp_hive_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False) as temp_hive: # Create a temporary file and store the hive data
-                temp_hive.write(software_hive_data) # Write the hive data to the temporary file
-                temp_hive_path = temp_hive.name     # Get the path of the temporary file
+            with tempfile.NamedTemporaryFile(
+                    delete=False) as temp_hive:  # Create a temporary file and store the hive data
+                temp_hive.write(software_hive_data)  # Write the hive data to the temporary file
+                temp_hive_path = temp_hive.name  # Get the path of the temporary file
 
             if temp_hive_path:
                 reg = Registry.Registry(temp_hive_path)
@@ -304,7 +304,6 @@ class ImageHandler:
             print(f"Error reading unallocated space: {e}")
             return None
 
-
     def get_all_registry_hives(self, start_offset):
         fs_info = self.get_fs_info(start_offset)
         if not fs_info or self.get_fs_type(start_offset) != "NTFS":
@@ -334,13 +333,6 @@ class ImageHandler:
                 os.remove(temp_hive_path)
 
         return hives_data
-
-
-
-
-
-
-
 
     # def load_image(self): #og
     #     image_type = self.get_image_type()  # ewf or raw

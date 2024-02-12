@@ -23,3 +23,5 @@
 /tsk_volume_system.raw
 /carved_files/
 /12-carve-ext2.dd
+/old_stuff/old_initialize_ui.py
+/test/

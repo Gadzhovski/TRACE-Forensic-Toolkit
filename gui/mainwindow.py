@@ -1,25 +1,24 @@
+import ctypes
 import hashlib
 import os
-import ctypes
-import time
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QTextEdit)
+                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from managers.image_manager import ImageManager
 from modules.exif_tab import ExifViewer
+from modules.file_carving import FileCarvingWidget
 from modules.hex_tab import HexViewer
 from modules.metadata_tab import MetadataViewer
+from modules.registry import RegistryExtractor
 from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
-from modules.file_carving import FileCarvingWidget
-from modules.registry import RegistryExtractor
 
 SECTOR_SIZE = 512
 
@@ -51,7 +50,7 @@ class MainWindow(QMainWindow):
 
     def initialize_ui(self):
         self.setWindowTitle('4n6Factor')
-        self.setWindowIcon(QIcon('gui/logo.png'))
+        self.setWindowIcon(QIcon('Icons/logo.png'))
         myappid = '4n6Factor'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         self.setGeometry(100, 100, 1200, 800)
@@ -156,14 +155,11 @@ class MainWindow(QMainWindow):
 
         self.result_viewer.addTab(self.listing_table, 'Listing')
 
-
         self.deleted_files_widget = FileCarvingWidget(self)
         self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
 
-
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
-        
 
         self.viewer_tab = QTabWidget(self)
 
@@ -251,7 +247,6 @@ class MainWindow(QMainWindow):
                     # Assuming you have a method to dismount the image
                     self.image_manager.dismount_image()
 
-            self.cleanup_temp_directory()
             event.accept()
         else:
             event.ignore()
@@ -509,7 +504,6 @@ class MainWindow(QMainWindow):
             self.virus_total_api.set_file_hash(file_hash)
             self.virus_total_api.set_file_content(file_content, data.get("name", ""))
 
-
     def display_application_content(self, file_content, full_file_path):
         file_extension = os.path.splitext(full_file_path)[-1].lower()
         file_type = "text"  # default
@@ -521,8 +515,8 @@ class MainWindow(QMainWindow):
             file_type = "audio"
         elif file_extension in video_extensions:
             file_type = "video"
-        #self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
-        #pass the file name to the application viewer
+        # self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
+        # pass the file name to the application viewer
         self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
 
     def populate_listing_table(self, entries, offset):
@@ -679,9 +673,8 @@ class MainWindow(QMainWindow):
         partition_icon = QIcon('gui/Eleven/24/devices/drive-harddisk.svg')  # Replace with your partition icon path
         os_icon = QIcon('gui/Eleven/24/places/start-here.svg')  # Replace with your OS icon path
 
-
         for row, part in enumerate(partitions):
-            start_offset = part[2] # Start offset of the partition
+            start_offset = part[2]  # Start offset of the partition
             fs_type = self.image_handler.get_fs_type(start_offset)
 
             os_version = None
@@ -723,11 +716,3 @@ class MainWindow(QMainWindow):
             if size_in_bytes < 1024.0:
                 return f"{size_in_bytes:.2f} {unit}"
             size_in_bytes /= 1024.0
-
-    @staticmethod
-    def cleanup_temp_directory():
-        temp_dir_path = os.path.join(os.getcwd(), 'temp')
-        for filename in os.listdir(temp_dir_path):
-            file_path = os.path.join(temp_dir_path, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)

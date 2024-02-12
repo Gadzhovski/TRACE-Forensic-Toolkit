@@ -13,9 +13,9 @@ class RegistryExtractor(QWidget):
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
-        self.hive_icon = QIcon("gui/icons8-hive-48.png")
-        self.key_icon = QIcon("gui/icons8-key-48_blue.png")
-        self.value_icon = QIcon("gui/icons8-wasp-48.png")
+        self.hive_icon = QIcon("Icons/icons8-hive-48.png")
+        self.key_icon = QIcon("Icons/icons8-key-48_blue.png")
+        self.value_icon = QIcon("Icons/icons8-wasp-48.png")
         self.init_ui()
 
     def init_ui(self):
@@ -44,7 +44,7 @@ class RegistryExtractor(QWidget):
 
         # Icon Setup
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QIcon("gui/icons8-registry-editor-96.png").pixmap(48, 48))
+        self.icon_label.setPixmap(QIcon("Icons/icons8-registry-editor-96.png").pixmap(48, 48))
         self.toolbar.addWidget(self.icon_label)
 
         # Label Setup
@@ -87,7 +87,7 @@ class RegistryExtractor(QWidget):
                 border-bottom-right-radius: 4px;
             }
             QComboBox::down-arrow {
-                image: url('gui/icons8-dropdown-48.png');
+                image: url('Icons/icons8-dropdown-48.png');
                 width: 16px;  /* Adjust the width of the image */
                 height: 16px;  /* Adjust the height of the image */
             }

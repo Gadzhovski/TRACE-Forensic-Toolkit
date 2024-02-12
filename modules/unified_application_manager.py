@@ -1,11 +1,7 @@
-import os
 import tempfile
 from ctypes import cast, POINTER
-from fitz import open as fitz_open, Matrix
 
-
-from PySide6.QtCore import Qt, QUrl, Slot, QByteArray, QBuffer, QTemporaryFile
-
+from PySide6.QtCore import Qt, QUrl, Slot
 from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout
 from PySide6.QtGui import QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -15,6 +11,7 @@ from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QF
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QStyle, QLabel, QHBoxLayout, QComboBox, \
     QSpacerItem, QSizePolicy
 from comtypes import CLSCTX_ALL
+from fitz import open as fitz_open, Matrix
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
 
@@ -61,24 +58,6 @@ class UnifiedViewer(QWidget):
             self.pdf_viewer.hide()
             self.picture_viewer.hide()
             self.audio_video_viewer.show()
-
-            # Save content to a temporary file
-            # temp_file_path = os.path.join(os.getcwd(), f'temp/temp_media_file{file_extension}')
-            #
-            # with open(temp_file_path, 'wb') as f:
-            #     f.write(content)
-            #
-            # # Pass the path to AudioVideoViewer's display method
-            # self.audio_video_viewer.display(temp_file_path)
-
-            # temp_file = QTemporaryFile(f"{file_name}{file_extension}")
-            # if temp_file.open():
-            #     temp_file.write(content)
-            #     temp_file_path = temp_file.fileName()  # Get the path of the temporary file
-            #     temp_file.close()  # Close the file (in this case, the file remains until the QTemporaryFile object is deleted)
-            #
-            #     # Pass the path to AudioVideoViewer's display method
-            #     self.audio_video_viewer.display(temp_file_path)
 
             with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
                 tmp_file.write(content)
@@ -717,8 +696,7 @@ class AudioVideoViewer(QWidget):
         self.playback_speed_combo.setCurrentText("1.0x")
         self._player.setPlaybackRate(1.0)
         self._player.setSource(QUrl.fromLocalFile(content))
-        #very_old# self._player.play()
-
+        # very_old# self._player.play()
 
     def update_position(self, position):
         self.progress_label.setText("{:02d}:{:02d}".format(position // 60000, (position // 1000) % 60))
