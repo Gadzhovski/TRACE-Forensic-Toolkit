@@ -1,9 +1,11 @@
 import os
+import tempfile
 from ctypes import cast, POINTER
 from fitz import open as fitz_open, Matrix
 
 
-from PySide6.QtCore import Qt, QUrl, Slot
+from PySide6.QtCore import Qt, QUrl, Slot, QByteArray, QBuffer, QTemporaryFile
+
 from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout
 from PySide6.QtGui import QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -37,7 +39,7 @@ class UnifiedViewer(QWidget):
         self.picture_viewer.hide()
         self.audio_video_viewer.hide()
 
-    def display(self, content, file_type="text", file_extension=".txt"):
+    def load(self, content, file_type="text", file_extension=".txt"):
         # Clear all views first
         self.pdf_viewer.clear()
         self.picture_viewer.clear()
@@ -61,14 +63,29 @@ class UnifiedViewer(QWidget):
             self.audio_video_viewer.show()
 
             # Save content to a temporary file
-            temp_file_path = os.path.join(os.getcwd(), f'temp/temp_media_file{file_extension}')
+            # temp_file_path = os.path.join(os.getcwd(), f'temp/temp_media_file{file_extension}')
+            #
+            # with open(temp_file_path, 'wb') as f:
+            #     f.write(content)
+            #
+            # # Pass the path to AudioVideoViewer's display method
+            # self.audio_video_viewer.display(temp_file_path)
 
-            with open(temp_file_path, 'wb') as f:
-                f.write(content)
+            # temp_file = QTemporaryFile(f"{file_name}{file_extension}")
+            # if temp_file.open():
+            #     temp_file.write(content)
+            #     temp_file_path = temp_file.fileName()  # Get the path of the temporary file
+            #     temp_file.close()  # Close the file (in this case, the file remains until the QTemporaryFile object is deleted)
+            #
+            #     # Pass the path to AudioVideoViewer's display method
+            #     self.audio_video_viewer.display(temp_file_path)
 
-            # Pass the path to AudioVideoViewer's display method
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as tmp_file:
+                tmp_file.write(content)
+                temp_file_path = tmp_file.name  # Save the temporary file path
+
+                # Make sure to display the correct viewer and pass the file path
             self.audio_video_viewer.display(temp_file_path)
-
 
     def clear(self):
         self.pdf_viewer.clear()
@@ -701,6 +718,7 @@ class AudioVideoViewer(QWidget):
         self._player.setPlaybackRate(1.0)
         self._player.setSource(QUrl.fromLocalFile(content))
         #very_old# self._player.play()
+
 
     def update_position(self, position):
         self.progress_label.setText("{:02d}:{:02d}".format(position // 60000, (position // 1000) % 60))

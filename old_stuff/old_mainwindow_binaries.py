@@ -324,7 +324,7 @@ class MainWindow(QMainWindow):
             file_type = "audio"
         elif file_extension in video_extensions:
             file_type = "video"
-        self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
+        self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
 
     def handle_directory(self, data):
         entries = self.evidence_utils.handle_directory(data, self.current_image_path)

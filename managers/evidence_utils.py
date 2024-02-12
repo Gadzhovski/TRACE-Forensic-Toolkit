@@ -5,8 +5,8 @@ import pyewf
 import pytsk3
 import tempfile
 
-
 SECTOR_SIZE = 512  # 512 bytes
+
 
 # Class to handle EWF images
 class EWFImgInfo(pytsk3.Img_Info):
@@ -24,7 +24,6 @@ class EWFImgInfo(pytsk3.Img_Info):
     def get_size(self):
         return self._ewf_handle.get_media_size()
 
-
 class ImageHandler:
     def __init__(self, image_path):
         self.image_path = image_path  # Path to the image
@@ -37,18 +36,11 @@ class ImageHandler:
 
         self.load_image()  # Load the image
 
-
     def get_size(self):
         """Returns the size of the disk image."""
         if isinstance(self.img_info, EWFImgInfo):
             return self.img_info.get_size()
         elif isinstance(self.img_info, pytsk3.Img_Info):
-            # For raw images handled directly by pytsk3.Img_Info,
-            # pytsk3 does not directly provide a method to get the total image size.
-            # If pytsk3 is being used for raw images, you might need to adapt based on
-            # how you've structured your raw image handling.
-            # As a placeholder, this method assumes a direct getSize method which may not exist.
-            # You'll need to adjust this based on your application's structure.
             return self.img_info.get_size()
         else:
             raise AttributeError("Unsupported image format for size retrieval.")
@@ -76,23 +68,6 @@ class ImageHandler:
         else:
             raise ValueError(f"Unsupported image type: {extension}")
 
-    # def load_image(self): #og
-    #     image_type = self.get_image_type()  # ewf or raw
-    #     if image_type == "ewf":
-    #         filenames = pyewf.glob(self.image_path)
-    #         ewf_handle = pyewf.handle()
-    #         ewf_handle.open(filenames)
-    #         self.img_info = EWFImgInfo(ewf_handle)  # instance of EWFImgInfo class to work with
-    #     elif image_type == "raw":
-    #         self.img_info = pytsk3.Img_Info(self.image_path)  # instance of Img_Info class to work with
-    #     else:
-    #         raise ValueError(f"Unsupported image type: {image_type}")
-    #     try:
-    #         self.volume_info = pytsk3.Volume_Info(self.img_info)  # instance of Volume_Info class to work with
-    #     except Exception as e:
-    #         self.volume_info = None
-    #         print(f"Error loading volume info: {e}")
-
     def load_image(self):
         image_type = self.get_image_type()
         if image_type == "ewf":
@@ -117,7 +92,6 @@ class ImageHandler:
                 # If no volume info and no filesystem, mark as wiped
                 self.is_wiped_image = True
 
-
     def has_filesystem(self, start_offset):
         fs_info = self.get_fs_info(start_offset)
         return fs_info is not None
@@ -125,18 +99,6 @@ class ImageHandler:
     def is_wiped(self):
         # Image is considered wiped if no volume info, no filesystem detected
         return self.is_wiped_image
-
-
-
-    # def get_partitions(self):  #og
-    #     """Retrieve partitions from the loaded image."""
-    #     partitions = []
-    #     if self.volume_info:
-    #         for partition in self.volume_info:
-    #             if not partition.desc:
-    #                 continue
-    #             partitions.append((partition.addr, partition.desc, partition.start, partition.len))
-    #     return partitions
 
     def get_partitions(self):
         """Retrieve partitions from the loaded image, or indicate unpartitioned space."""
@@ -149,16 +111,13 @@ class ImageHandler:
         elif self.is_wiped():
             # For a wiped image with no partitions, return a placeholder for unallocated space
             # This is a simplified representation. You might need to adjust based on how you handle sizes and offsets.
-            #total_size = self.get_size()
-            #partitions.append((0, "Unallocated Space", 0, total_size // SECTOR_SIZE))
-            #dont do nothing
+            # total_size = self.get_size()
+            # partitions.append((0, "Unallocated Space", 0, total_size // SECTOR_SIZE))
+            # dont do nothing
             pass
         return partitions
 
 
-    # def has_partitions(self):
-    #     """Check if the image has partitions."""
-    #     return bool(self.get_partitions())
 
     def get_fs_info(self, start_offset):
         """Retrieve the FS_Info for a partition, initializing it if necessary."""
@@ -169,7 +128,6 @@ class ImageHandler:
             except Exception as e:
                 return None
         return self.fs_info_cache[start_offset]
-
 
     def get_fs_type(self, start_offset):
         """Retrieve the file system type for a partition."""
@@ -258,7 +216,6 @@ class ImageHandler:
                 return []
         return []
 
-
     def get_registry_hive(self, fs_info, hive_path):
         """Extract a registry hive from the given filesystem."""
         try:
@@ -268,25 +225,6 @@ class ImageHandler:
         except Exception as e:
             print(f"Error reading registry hive: {e}")
             return None
-
-    def get_all_registry_hives(self, start_offset):
-        """Get all registry hives from the given filesystem."""
-        fs_info = self.get_fs_info(start_offset)
-
-        if not fs_info:
-            return None
-
-        # if file system is not ntfs, return unknown OS and exit the function
-        if self.get_fs_type(start_offset) != "NTFS":
-            return None
-
-        software_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
-        system_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SYSTEM")
-        sam_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SAM")
-        security_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SECURITY")
-
-        return software_hive_data, system_hive_data, sam_hive_data, security_hive_data
-
 
     def get_windows_version(self, start_offset):
         """Get the Windows version from the SOFTWARE registry hive."""
@@ -306,9 +244,9 @@ class ImageHandler:
         # Create a temporary file and store the hive data
         temp_hive_path = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
-                temp_hive.write(software_hive_data)
-                temp_hive_path = temp_hive.name
+            with tempfile.NamedTemporaryFile(delete=False) as temp_hive: # Create a temporary file and store the hive data
+                temp_hive.write(software_hive_data) # Write the hive data to the temporary file
+                temp_hive_path = temp_hive.name     # Get the path of the temporary file
 
             if temp_hive_path:
                 reg = Registry.Registry(temp_hive_path)
@@ -343,7 +281,6 @@ class ImageHandler:
             print(f"Error parsing SOFTWARE hive: {e}")
             return "Error in parsing OS version"
 
-
     def read_unallocated_space(self, start_offset, end_offset):
         try:
             start_byte_offset = start_offset * SECTOR_SIZE
@@ -367,3 +304,67 @@ class ImageHandler:
             print(f"Error reading unallocated space: {e}")
             return None
 
+
+    def get_all_registry_hives(self, start_offset):
+        fs_info = self.get_fs_info(start_offset)
+        if not fs_info or self.get_fs_type(start_offset) != "NTFS":
+            return None
+
+        hive_paths = {
+            "SOFTWARE": "/Windows/System32/config/SOFTWARE",
+            # "SYSTEM": "/Windows/System32/config/SYSTEM",
+            # "SAM": "/Windows/System32/config/SAM",
+            # "SECURITY": "/Windows/System32/config/SECURITY"
+        }
+
+        hives_data = {}
+        for hive_name, hive_path in hive_paths.items():
+            hive_data = self.get_registry_hive(fs_info, hive_path)
+            if hive_data:
+                # Temporarily save the hive data to a file
+                with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
+                    temp_hive.write(hive_data)
+                    temp_hive_path = temp_hive.name
+
+                # Open the temporary file as a registry hive and get the root key
+                with open(temp_hive_path, "rb") as hive_file:
+                    reg = Registry.Registry(hive_file)
+                    hives_data[hive_name] = reg.root()  # Store the root key instead of the whole registry
+
+                os.remove(temp_hive_path)
+
+        return hives_data
+
+
+
+
+
+
+
+
+    # def load_image(self): #og
+    #     image_type = self.get_image_type()  # ewf or raw
+    #     if image_type == "ewf":
+    #         filenames = pyewf.glob(self.image_path)
+    #         ewf_handle = pyewf.handle()
+    #         ewf_handle.open(filenames)
+    #         self.img_info = EWFImgInfo(ewf_handle)  # instance of EWFImgInfo class to work with
+    #     elif image_type == "raw":
+    #         self.img_info = pytsk3.Img_Info(self.image_path)  # instance of Img_Info class to work with
+    #     else:
+    #         raise ValueError(f"Unsupported image type: {image_type}")
+    #     try:
+    #         self.volume_info = pytsk3.Volume_Info(self.img_info)  # instance of Volume_Info class to work with
+    #     except Exception as e:
+    #         self.volume_info = None
+    #         print(f"Error loading volume info: {e}")
+
+    # def get_partitions(self):  #og
+    #     """Retrieve partitions from the loaded image."""
+    #     partitions = []
+    #     if self.volume_info:
+    #         for partition in self.volume_info:
+    #             if not partition.desc:
+    #                 continue
+    #             partitions.append((partition.addr, partition.desc, partition.start, partition.len))
+    #     return partitions

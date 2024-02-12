@@ -1,6 +1,7 @@
 import hashlib
 import os
 import ctypes
+import time
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush
@@ -162,7 +163,7 @@ class MainWindow(QMainWindow):
 
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
-
+        
 
         self.viewer_tab = QTabWidget(self)
 
@@ -520,7 +521,9 @@ class MainWindow(QMainWindow):
             file_type = "audio"
         elif file_extension in video_extensions:
             file_type = "video"
-        self.application_viewer.display(file_content, file_type=file_type, file_extension=file_extension)
+        #self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
+        #pass the file name to the application viewer
+        self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
 
     def populate_listing_table(self, entries, offset):
         self.listing_table.setRowCount(0)
@@ -676,8 +679,9 @@ class MainWindow(QMainWindow):
         partition_icon = QIcon('gui/Eleven/24/devices/drive-harddisk.svg')  # Replace with your partition icon path
         os_icon = QIcon('gui/Eleven/24/places/start-here.svg')  # Replace with your OS icon path
 
+
         for row, part in enumerate(partitions):
-            start_offset = part[2]
+            start_offset = part[2] # Start offset of the partition
             fs_type = self.image_handler.get_fs_type(start_offset)
 
             os_version = None
