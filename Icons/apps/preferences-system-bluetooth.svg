@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg993"
+   inkscape:version="1.2.1 (9c6d41e410, 2022-07-14, custom)"
+   sodipodi:docname="preferences-system-bluetooth.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview995"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:document-units="px"
+     showgrid="false"
+     units="px"
+     inkscape:zoom="33.666667"
+     inkscape:cx="10.871287"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1010"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg993"
+     inkscape:showpageshadow="2"
+     inkscape:deskcolor="#d1d1d1" />
+  <defs
+     id="defs990" />
+  <rect
+     style="fill:#1e91fa;fill-opacity:1;stroke-width:2.25;stroke-linecap:round;stroke-linejoin:round"
+     id="rect1076"
+     width="14"
+     height="20"
+     x="5"
+     y="2"
+     ry="8" />
+  <path
+     d="m 11.322327,5.0294718 c -0.19404,0.07377 -0.32231,0.25977 -0.32231,0.46736 V 10.825034 L 7.8089342,8.1035649 c -0.21714,-0.1706 -0.53146,-0.13289 -0.70207,0.08425 -0.17061,0.21714 -0.13289,0.53146 0.08425,0.70207 l 3.6813828,3.1066701 -3.6813828,3.10702 c -0.21714,0.1706 -0.25486,0.4849 -0.08425,0.702 0.17061,0.2172 0.48493,0.2549 0.70207,0.0843 l 3.1910828,-2.72172 v 5.328337 c 0,0.2076 0.12827,0.3936 0.32231,0.4674 0.194039,0.0738 0.41348,0.02 0.551399,-0.1352 l 3.999317,-3.499807 c 0.09159,-0.103 0.13658,-0.2393 0.12431,-0.3767 -0.01227,-0.1373 -0.0807,-0.2635 -0.18911,-0.3486 l -3.317117,-2.60703 3.317117,-2.6066501 c 0.10841,-0.08518 0.17684,-0.21135 0.18911,-0.34867 0.01227,-0.13733 -0.03272,-0.27362 -0.12431,-0.37667 L 11.873726,5.1646118 c -0.156221,-0.136716 -0.35736,-0.20895 -0.551399,-0.13518 z m 0.67769,7.8530022 2.572426,2.179131 -2.572426,2.119807 z m 0,-1.7718 V 6.8118718 l 2.572426,2.1199531 z"
+     id="path346"
+     sodipodi:nodetypes="csccsccccccssccccccscscccccccccc"
+     style="fill:#ffffff" />
+</svg>

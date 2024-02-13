@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1"
+   id="svg364"
+   inkscape:version="1.2.2 (1:1.2.2+202305151914+b0a8486541)"
+   sodipodi:docname="youtube-music.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview366"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="34.583333"
+     inkscape:cx="11.985542"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1008"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg364" />
+  <defs
+     id="defs361">
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient3143"
+       id="linearGradient1070"
+       x1="5.8539066"
+       y1="6.3996096"
+       x2="4.7955728"
+       y2="4.8121095"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(4.4094477,0,0,3.915921,-12.145829,-8.9160166)" />
+    <linearGradient
+       inkscape:collect="always"
+       id="linearGradient3143">
+      <stop
+         style="stop-color:#d2d2d2;stop-opacity:1;"
+         offset="0"
+         id="stop3139" />
+      <stop
+         style="stop-color:#ffffff;stop-opacity:1"
+         offset="1"
+         id="stop3141" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient1284"
+       id="linearGradient879"
+       x1="2.4440167"
+       y1="2.2440422"
+       x2="13.206448"
+       y2="14"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.25,0,0,1.25,1.9999999,1.9999998)" />
+    <linearGradient
+       inkscape:collect="always"
+       id="linearGradient1284">
+      <stop
+         style="stop-color:#e94f11;stop-opacity:1;"
+         offset="0"
+         id="stop1280" />
+      <stop
+         style="stop-color:#c62300;stop-opacity:1;"
+         offset="1"
+         id="stop1282" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient3143"
+       id="linearGradient1047"
+       x1="11.962613"
+       y1="12.505297"
+       x2="3.9256349"
+       y2="3.5955081"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.3333334,0,0,1.3333334,1.3333333,1.3333334)" />
+  </defs>
+  <circle
+     style="fill:url(#linearGradient879);fill-opacity:1;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round"
+     id="path294"
+     cx="12"
+     cy="12"
+     r="10" />
+  <path
+     id="path1011"
+     style="fill:url(#linearGradient1047);fill-opacity:1;stroke-width:2.28573;stroke-linecap:round;stroke-linejoin:round"
+     d="M 12 4 C 7.5817261 3.9999998 4.0000002 7.5817263 4 12 C 4.0000002 16.418274 7.5817261 20 12 20 C 16.418274 19.999999 20 16.418273 20 12 C 20 7.581727 16.418274 4.0000009 12 4 z M 12 5 A 7 7 0 0 1 19 12 A 7 7 0 0 1 12 19 A 7 7 0 0 1 5 12 A 7 7 0 0 1 12 5 z " />
+  <path
+     style="color:#000000;fill:url(#linearGradient1070);fill-opacity:1;stroke:none;stroke-width:5.91637;stroke-linecap:round;stroke-linejoin:round;-inkscape-stroke:none"
+     d="M 9.5150226,8.0589567 C 9.2061567,8.1716169 9.0032767,8.4375797 9.0000217,8.7341016 v 6.5216594 c -0.0051,0.662315 0.8990269,0.994571 1.4223763,0.522693 l 5.333084,-3.261327 c 0.326025,-0.288316 0.326025,-0.757066 0,-1.045384 L 10.4224,8.2114083 C 10.182552,8.0021979 9.8243495,7.9420187 9.5150226,8.0589567 Z"
+     id="path2850"
+     sodipodi:nodetypes="cccccccc" />
+</svg>
