@@ -11,8 +11,9 @@ from PyPDF2.errors import PdfReadError
 from PySide6.QtCore import QSize, QUrl
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal, Slot
-from PySide6.QtGui import QIcon, QAction, QDesktopServices
-from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle
+from PySide6.QtGui import QIcon, QAction, QDesktopServices, QPixmap
+from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle, QToolBar, QSizePolicy, QHBoxLayout, \
+    QCheckBox
 from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
 
@@ -24,33 +25,81 @@ class FileCarvingWidget(QWidget):
         super().__init__(parent)
         self.image_handler = None
         self.executor = ThreadPoolExecutor(max_workers=4)  # ThreadPoolExecutor for background tasks
-        self.init_ui()
         self.carved_files = []
+        self.carved_file_names = set()  # Track carved file names to avoid duplicates
+        self.init_ui()
 
     def init_ui(self):
-        self.layout = QVBoxLayout(self)
 
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)  # Set the spacing to zero
+
+        self.toolbar = QToolBar()
+        self.toolbar.setContentsMargins(0, 0, 0, 0)
+        self.layout.addWidget(self.toolbar)
+
+        self.icon_label = QLabel()
+        self.icon_label.setPixmap(QPixmap('Icons/icons8-carving-64.png'))
+        self.icon_label.setFixedSize(48, 48)
+        self.toolbar.addWidget(self.icon_label)
+
+        self.title_label = QLabel("File Carving")
+        self.title_label.setStyleSheet("""
+            QLabel {
+                font-size: 20px; /* Slightly larger size for the title */
+                color: #37c6d0; /* Hex color for the text */
+                font-weight: bold; /* Make the text bold */
+                margin-left: 8px; /* Space between icon and label */
+            }
+        """)
+        self.toolbar.addWidget(self.title_label)
+
+        self.spacer = QLabel()
+        self.spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(self.spacer)
 
         self.table_widget = self.create_table_widget()
         self.list_widget = self.create_list_widget()
-        self.carve_button, self.stop_button = self.create_control_buttons()
 
+        self.fileTypeLayout = QHBoxLayout()
+        self.fileTypes = {"All": QCheckBox("All"), "PDF": QCheckBox("PDF"), "JPG": QCheckBox("JPG"),
+                          "PNG": QCheckBox("PNG"),
+                          "GIF": QCheckBox("GIF"), "XLS": QCheckBox("XLS"), "WAV": QCheckBox("WAV"),
+                          "MOV": QCheckBox("MOV")}
 
+        for fileType, checkBox in self.fileTypes.items():
+            self.fileTypeLayout.addWidget(checkBox)
+
+        # Adding a widget to contain the file type checkboxes
+        self.fileTypeWidget = QWidget()
+        self.fileTypeWidget.setLayout(self.fileTypeLayout)
+        self.toolbar.addWidget(self.fileTypeWidget)
+
+        self.start_button = QPushButton("Start")
+        self.start_button.clicked.connect(self.start_carving)
+
+        self.toolbar.addWidget(self.start_button)
+
+        self.stop_button = QPushButton("Stop")
+        self.stop_button.clicked.connect(self.stop_carving)
+        self.stop_button.setEnabled(False)
+
+        self.toolbar.addWidget(self.stop_button)
         self.layout.addWidget(self.tab_widget)
-        self.layout.addWidget(self.carve_button)
-        self.layout.addWidget(self.stop_button)
 
         self.file_carved.connect(self.display_carved_file)
 
     def create_table_widget(self):
         table_widget = QTableWidget()
+
         table_widget.setColumnCount(5)
         table_widget.setHorizontalHeaderLabels(['Name', 'Size', 'Type', 'Modification Date', 'File Path'])
         table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         table_widget.customContextMenuRequested.connect(self.open_context_menu)
 
         self.tab_widget = QTabWidget()
-        self.tab_widget.addTab(table_widget, "Table")
+        self.tab_widget.addTab(table_widget, "File List")
         return table_widget
 
     def create_list_widget(self):
@@ -64,29 +113,27 @@ class FileCarvingWidget(QWidget):
         self.tab_widget.addTab(list_widget, "Thumbnails")
         return list_widget
 
-    def create_control_buttons(self):
-        carve_button = QPushButton("Start Carving")
-        carve_button.clicked.connect(self.start_carving)
-
-        stop_button = QPushButton("Stop Carving")
-        stop_button.clicked.connect(self.stop_carving)
-        stop_button.setEnabled(False)
-
-        return carve_button, stop_button
-
     def start_carving(self):
-        self.carve_button.setEnabled(False)
+        self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.executor.submit(self.carve_files)  # Launch carving in a background thread
+        # Clear internal tracking and UI components to start fresh
+        self.clear_ui()
+        self.carved_files.clear()
+        self.carved_file_names.clear()
+
+        selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
+                               checkbox.isChecked()]
+        self.executor.submit(self.carve_files, selected_file_types)
 
     def stop_carving(self):
-        self.executor.shutdown(wait=False)
-        self.carve_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
+        # Code to stop the carving process...
+        self.executor.shutdown(wait=True)  # Properly shutdown the executor
+        self.start_button.setEnabled(True)  # Re-enable the start button
+        self.stop_button.setEnabled(False)  # Disable the stop button
 
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler
-        self.carve_button.setEnabled(True)
+        self.start_button.setEnabled(True)
 
     def open_context_menu(self, position):
         menu = QMenu()
@@ -107,20 +154,20 @@ class FileCarvingWidget(QWidget):
                     break
 
     def setup_buttons(self):
-        self.carve_button.setEnabled(False)
-        self.carve_button.clicked.connect(self.start_carving_thread)
+        self.start_button.setEnabled(False)
+        self.start_button.clicked.connect(self.start_carving_thread)
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_carving_thread)
 
     def start_carving_thread(self):
-        self.carve_button.setEnabled(False)
+        self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         # Launch carving in a background thread
         self.executor.submit(self.carve_files)
 
     def stop_carving_thread(self):
         self.executor.shutdown(wait=False)
-        self.carve_button.setEnabled(True)
+        self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
 
     def is_valid_file(self, data, file_type):
@@ -150,9 +197,6 @@ class FileCarvingWidget(QWidget):
         except (IOError, UnidentifiedImageError, PdfReadError, ValueError) as e:
             print(f"Error validating file of type {file_type}: {str(e)}")
             return False
-
-    # def is_valid_file(self, data, file_type):
-    #     return True
 
     def is_valid_xls(self, data):
         try:
@@ -379,43 +423,67 @@ class FileCarvingWidget(QWidget):
             else:
                 offset = start_index + 1
 
-    def carve_files(self):
-        self.stop_carving = False
-        chunk_size = 1024 * 1024 * 100
-        offset = 0
+    def carve_files(self, selected_file_types):
+        try:
+            self.stop_carving = False
+            chunk_size = 1024 * 1024 * 100
+            offset = 0
 
-        while offset < self.image_handler.get_size():
-            chunk = self.image_handler.read(offset, chunk_size)
-            if not chunk:
-                break
+            while offset < self.image_handler.get_size():
+                chunk = self.image_handler.read(offset, chunk_size)
+                if not chunk:
+                    break
 
-            if self.stop_carving:
-                self.stop_carving = False
-                self.carve_button.setEnabled(True)
-                self.stop_button.setEnabled(False)
-                return
+                if self.stop_carving:
+                    self.stop_carving = False
+                    self.start_button.setEnabled(True)
+                    self.stop_button.setEnabled(False)
+                    return
 
-            # Call the carving functions for each file type
-            self.carve_wav_files(chunk)
-            self.carve_mov_files(chunk, offset)
-            self.carve_pdf_files(chunk)
-            self.carve_xls_files(chunk, offset)
-            self.carve_jpg_files(chunk)
-            self.carve_gif_files(chunk)
-            self.carve_png_files(chunk)
-            offset += chunk_size
+                # Call the carve function for each selected file type
+                for file_type in selected_file_types:
+                    if file_type == 'all':
+                        self.carve_wav_files(chunk)
+                        self.carve_mov_files(chunk, offset)
+                        self.carve_pdf_files(chunk)
+                        self.carve_xls_files(chunk, offset)
+                        self.carve_jpg_files(chunk)
+                        self.carve_gif_files(chunk)
+                        self.carve_png_files(chunk)
+                    elif file_type == 'wav':
+                        self.carve_wav_files(chunk)
+                    elif file_type == 'mov':
+                        self.carve_mov_files(chunk, offset)
+                    elif file_type == 'pdf':
+                        self.carve_pdf_files(chunk)
+                    elif file_type == 'xls':
+                        self.carve_xls_files(chunk, offset)
+                    elif file_type == 'jpg':
+                        self.carve_jpg_files(chunk)
+                    elif file_type == 'gif':
+                        self.carve_gif_files(chunk)
+                    elif file_type == 'png':
+                        self.carve_png_files(chunk)
+
+                offset += chunk_size
+        finally:
+            self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
 
     def save_file(self, file_content, file_type, file_path):
-
-        with open(file_path, "wb") as f:
-            f.write(file_content)
-
-        modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_name = os.path.basename(file_path)
-        file_size = str(len(file_content))
 
-        self.carved_files.append((file_name, file_size, file_type, file_path))
-        self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
+        # Check if file has already been carved and displayed
+        if file_name not in self.carved_file_names:
+            with open(file_path, "wb") as f:
+                f.write(file_content)
+
+            modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            file_size = str(len(file_content))
+
+            self.carved_files.append((file_name, file_size, file_type, file_path))
+            self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
+            self.carved_file_names.add(file_name)  # Add to the set of carved file names
 
     @Slot(str, str, str, str, str)
     def display_carved_file(self, name, size, type_, modification_date, file_path):
@@ -439,11 +507,15 @@ class FileCarvingWidget(QWidget):
         self.list_widget.addItem(item)
 
         total_files = self.table_widget.rowCount()
-        #self.info_label.setText(f"Latest Carved File: {name}, Total Files: {total_files}")
+        # self.info_label.setText(f"Latest Carved File: {name}, Total Files: {total_files}")
 
     def clear(self):
         self.table_widget.setRowCount(0)
         self.list_widget.clear()
         self.carved_files.clear()
-        self.carve_button.setEnabled(True)
+        self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
+
+    def clear_ui(self):
+        self.table_widget.setRowCount(0)
+        self.list_widget.clear()

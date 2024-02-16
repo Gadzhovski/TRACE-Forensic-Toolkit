@@ -1,8 +1,8 @@
 import tempfile
 from ctypes import cast, POINTER
 
-from PySide6.QtCore import Qt, QUrl, Slot
-from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout
+from PySide6.QtCore import Qt, QUrl, Slot, QSize
+from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout, QPalette
 from PySide6.QtGui import QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -10,12 +10,12 @@ from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QFileDialog)
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QStyle, QLabel, QHBoxLayout, QComboBox, \
     QSpacerItem, QSizePolicy
-#from comtypes import CLSCTX_ALL
+# from comtypes import CLSCTX_ALL
 from fitz import open as fitz_open, Matrix
-#from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+# from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 import os
 
-if os.name == "nt": # Windows
+if os.name == "nt":  # Windows
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
     from comtypes import CLSCTX_ALL
 
@@ -92,7 +92,6 @@ class PictureViewer(QWidget):
 
         # Create a container for the toolbar and the application viewer
         container_widget = QWidget(self)
-        container_widget.setStyleSheet("border: none; margin: 0px; padding: 0px;")  # Set style for the container widget
 
         container_layout = QVBoxLayout()
         container_layout.setContentsMargins(0, 0, 0, 0)  # Remove any margins
@@ -107,11 +106,9 @@ class PictureViewer(QWidget):
         self.image_label = QLabel(self)
         self.image_label.setContentsMargins(0, 0, 0, 0)
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("border: none; margin: 0px; padding: 0px;")
 
         self.scroll_area = QScrollArea(self)
         self.scroll_area.setContentsMargins(0, 0, 0, 0)
-        self.scroll_area.setStyleSheet("border: none; margin: 0px; padding: 0px;")
         self.scroll_area.setWidget(self.image_label)
         self.scroll_area.setWidgetResizable(True)
 
@@ -123,22 +120,21 @@ class PictureViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
-        self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
+        # self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
-        # Create actions for the toolbar
-        zoom_in_icon = QIcon("gui/nav_icons/icons8-zoom-in-50.png")
-        zoom_out_icon = QIcon("gui/nav_icons/icons8-zoom-out-50.png")
-        rotate_left_icon = QIcon("gui/nav_icons/icons8-rotate-left-50.png")
-        rotate_right_icon = QIcon("gui/nav_icons/icons8-rotate-right-50.png")
-        reset_icon = QIcon("gui/nav_icons/icons8-no-rotation-50.png")
-        export_icon = QIcon("gui/nav_icons/icons8-download-50.png")
+        zoom_in_icon = QIcon("Icons/icons8-zoom-in-50.png")
+        zoom_out_icon = QIcon("Icons/icons8-zoom-out-50.png")
+        rotate_left_icon = QIcon("Icons/icons8-rotate-left-50.png")
+        rotate_right_icon = QIcon("Icons/icons8-rotate-right-50.png")
+        reset_icon = QIcon("Icons/icons8-no-rotation-50.png")
+        export_icon = QIcon("Icons/icons8-save-as-50.png")
 
         zoom_in_action = QAction(zoom_in_icon, 'Zoom In', self)
         zoom_out_action = QAction(zoom_out_icon, 'Zoom Out', self)
         rotate_left_action = QAction(rotate_left_icon, 'Rotate Left', self)
         rotate_right_action = QAction(rotate_right_icon, 'Rotate Right', self)
         reset_action = QAction(reset_icon, 'Reset', self)
-        self.export_action = QAction(export_icon, 'Export Image', self)
+        self.export_action = QAction(export_icon, 'Save Image', self)
 
         zoom_in_action.triggered.connect(self.zoom_in)
         zoom_out_action.triggered.connect(self.zoom_out)
@@ -255,20 +251,20 @@ class PDFViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
-        self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
+        # self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
         # Navigation buttons
-        self.first_action = QAction(QIcon("gui/nav_icons/icons8-thick-arrow-pointing-up-50.png"), "First", self)
+        self.first_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "First", self)
         self.first_action.triggered.connect(self.show_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon("gui/nav_icons/icons8-left-arrow-50.png"), "Previous", self)
+        self.prev_action = QAction(QIcon("Icons/icons8-left-arrow-50.png"), "Previous", self)
         self.prev_action.triggered.connect(self.show_previous_page)
         self.toolbar.addAction(self.prev_action)
 
         # Page entry
         self.page_entry = QLineEdit(self)
-        self.page_entry.setMaximumWidth(20)
+        self.page_entry.setMaximumWidth(60)
         self.page_entry.setAlignment(Qt.AlignRight)
         self.page_entry.returnPressed.connect(self.go_to_page)
         self.toolbar.addWidget(self.page_entry)
@@ -278,75 +274,90 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
-        self.next_action = QAction(QIcon("gui/nav_icons/icons8-right-arrow-50.png"), "Next", self)
+        self.next_action = QAction(QIcon("Icons/icons8-right-arrow-50.png"), "Next", self)
         self.next_action.triggered.connect(self.show_next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon("gui/nav_icons/icons8-down-50.png"), "Last", self)
+        self.last_action = QAction(QIcon("Icons/icons8-down-50.png"), "Last", self)
         self.last_action.triggered.connect(self.show_last_page)
         self.toolbar.addAction(self.last_action)
 
+        #add separator
+        self.toolbar.addSeparator()
+
         # Zoom actions
-        self.zoom_in_action = QAction(QIcon("gui/nav_icons/icons8-zoom-in-50.png"), "Zoom In", self)
+        self.zoom_in_action = QAction(QIcon("Icons/icons8-zoom-in-50.png"), "Zoom In", self)
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.toolbar.addAction(self.zoom_in_action)
 
         # QLineEdit for zoom percentage
         self.zoom_percentage_entry = QLineEdit(self)
-        self.zoom_percentage_entry.setFixedWidth(40)  # Set a fixed width for consistency
+        self.zoom_percentage_entry.setFixedWidth(60)  # Set a fixed width for consistency
         self.zoom_percentage_entry.setAlignment(Qt.AlignRight)
         self.zoom_percentage_entry.setPlaceholderText("100%")  # Default zoom is 100%
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
         self.toolbar.addWidget(self.zoom_percentage_entry)
 
-        self.zoom_out_action = QAction(QIcon("gui/nav_icons/icons8-zoom-out-50.png"), "Zoom Out", self)
+        self.zoom_out_action = QAction(QIcon("Icons/icons8-zoom-out-50.png"), "Zoom Out", self)
         self.zoom_out_action.triggered.connect(self.zoom_out)
         self.toolbar.addAction(self.zoom_out_action)
 
         # Create a reset zoom button with its icon and add it to the toolbar
-        reset_zoom_icon = QIcon("gui/nav_icons/icons8-zoom-to-actual-size-50.png")  # Replace with your icon path
+        reset_zoom_icon = QIcon("Icons/icons8-zoom-to-actual-size-50.png")  # Replace with your icon path
         self.reset_zoom_action = QAction(reset_zoom_icon, "Reset Zoom", self)
         self.reset_zoom_action.triggered.connect(self.reset_zoom)
         self.toolbar.addAction(self.reset_zoom_action)
 
+        #add separator
+        self.toolbar.addSeparator()
+
         # Fit in window
-        fit_window_icon = QIcon("gui/nav_icons/icons8-enlarge-50.png")  # Replace with your icon path
+        fit_window_icon = QIcon("Icons/icons8-enlarge-50.png")  # Replace with your icon path
         self.fit_window_action = QAction(fit_window_icon, "Fit in Window", self)
         self.fit_window_action.triggered.connect(self.fit_window)
         self.toolbar.addAction(self.fit_window_action)
 
         # Fit in width
-        fit_width_icon = QIcon("gui/nav_icons/icons8-resize-horizontal-50.png")  # Replace with your icon path
+        fit_width_icon = QIcon("Icons/icons8-resize-horizontal-50.png")  # Replace with your icon path
         self.fit_width_action = QAction(fit_width_icon, "Fit in Width", self)
         self.fit_width_action.triggered.connect(self.fit_width)
         self.toolbar.addAction(self.fit_width_action)
 
+        #add separator
+        self.toolbar.addSeparator()
+
         # Rotate left
-        rotate_left_icon = QIcon("gui/nav_icons/icons8-rotate-left-50.png")  # Replace with your icon path
+        rotate_left_icon = QIcon("Icons/icons8-rotate-left-50.png")  # Replace with your icon path
         self.rotate_left_action = QAction(rotate_left_icon, "Rotate Left", self)
         self.rotate_left_action.triggered.connect(self.rotate_left)
         self.toolbar.addAction(self.rotate_left_action)
 
         # Rotate right
-        rotate_right_icon = QIcon("gui/nav_icons/icons8-rotate-right-50.png")  # Replace with your icon path
+        rotate_right_icon = QIcon("Icons/icons8-rotate-right-50.png")  # Replace with your icon path
         self.rotate_right_action = QAction(rotate_right_icon, "Rotate Right", self)
         self.rotate_right_action.triggered.connect(self.rotate_right)
         self.toolbar.addAction(self.rotate_right_action)
 
+        #add separator
+        self.toolbar.addSeparator()
+
         # Pan tool button
-        self.pan_tool_icon = QIcon("gui/nav_icons/icons8-drag-50.png")  # Replace with your pan icon path
+        self.pan_tool_icon = QIcon("Icons/icons8-drag-50.png")  # Replace with your pan icon path
         self.pan_tool_action = QAction(self.pan_tool_icon, "Pan Tool", self)
         self.pan_tool_action.setCheckable(True)
         self.pan_tool_action.toggled.connect(self.toggle_pan_mode)
         self.toolbar.addAction(self.pan_tool_action)
 
+        #add separator
+        self.toolbar.addSeparator()
+
         # Print button
-        self.print_icon = QIcon("gui/nav_icons/icons8-print-50.png")  # Replace with your print icon path
+        self.print_icon = QIcon("Icons/icons8-print-50.png")  # Replace with your print icon path
         self.print_action = QAction(self.print_icon, "Print", self)
         self.print_action.triggered.connect(self.print_pdf)
         self.toolbar.addAction(self.print_action)
 
-        self.save_pdf_action = QAction(QIcon("gui/nav_icons/icons8-download-50.png"), "Save PDF", self)
+        self.save_pdf_action = QAction(QIcon("Icons/icons8-save-as-50.png"), "Save PDF", self)
         self.save_pdf_action.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.save_pdf_action)
 
@@ -356,7 +367,6 @@ class PDFViewer(QWidget):
         self.page_label.setAlignment(Qt.AlignCenter)
 
         self.scroll_area = QScrollArea(self)
-        self.scroll_area.setStyleSheet("border: 0px;")
         self.scroll_area.setContentsMargins(0, 0, 0, 0)
         self.scroll_area.setWidget(self.page_label)
         self.scroll_area.setWidgetResizable(True)
@@ -611,6 +621,7 @@ class AudioVideoViewer(QWidget):
 
         self._audio_output = QAudioOutput()
         self._player = QMediaPlayer()
+
         self._player.setAudioOutput(self._audio_output)
 
         self._video_widget = QVideoWidget(self)
@@ -642,12 +653,8 @@ class AudioVideoViewer(QWidget):
 
         # If system is Windows, add a volume slider
         if os.name == 'nt':
-            print("Windows")
             # Volume label
             self.controls_layout.addWidget(QLabel("Volume"))
-
-        # # Volume label
-        # self.controls_layout.addWidget(QLabel("Volume"))
 
             # Volume slider
             self.volume_slider = QSlider(Qt.Horizontal, self)
@@ -667,22 +674,27 @@ class AudioVideoViewer(QWidget):
         # Spacer to separate media controls and volumes controls
         self.controls_layout.addSpacerItem(QSpacerItem(370, 10, QSizePolicy.Fixed, QSizePolicy.Minimum))
 
+        icon_size = QSize(24, 24)
+
         # Media control buttons
         self.play_btn = QPushButton(self)
         self.play_btn.setToolTip("Play")
-        self.play_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.play_btn.setIcon(QIcon("Icons/icons8-circled-play-50.png"))
+        self.play_btn.setIconSize(icon_size)
         self.play_btn.clicked.connect(self._player.play)
         self.controls_layout.addWidget(self.play_btn)
 
         self.pause_btn = QPushButton(self)
         self.pause_btn.setToolTip("Pause")
-        self.pause_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+        self.pause_btn.setIcon(QIcon("Icons/icons8-pause-button-50.png"))
+        self.pause_btn.setIconSize(icon_size)
         self.pause_btn.clicked.connect(self._player.pause)
         self.controls_layout.addWidget(self.pause_btn)
 
         self.stop_btn = QPushButton(self)
         self.stop_btn.setToolTip("Stop")
-        self.stop_btn.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.stop_btn.setIcon(QIcon("Icons/icons8-stop-circled-50.png"))
+        self.stop_btn.setIconSize(icon_size)
         self.stop_btn.clicked.connect(self._player.stop)
         self.controls_layout.addWidget(self.stop_btn)
 
@@ -765,7 +777,6 @@ class AudioVideoViewer(QWidget):
     #     """Update the volumes display label based on the slider's value."""
     #     self.volume_display.setText(f"{value}%")
 
-
     def get_system_volume(self):
         """Return the current system volume as a value between 0 and 100."""
         if os.name == 'nt':  # Windows
@@ -793,4 +804,3 @@ class AudioVideoViewer(QWidget):
     def update_slider_position(self, position):
         """Update the slider's position based on the media's playback position."""
         self.progress_slider.setValue(position)
-

@@ -1,9 +1,8 @@
-import ctypes
 import hashlib
 import os
 
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QFont, QPalette, QBrush
+from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
                                QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView)
@@ -11,6 +10,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from managers.image_manager import ImageManager
+from modules.about_tab import AboutDialog
 from modules.exif_tab import ExifViewer
 from modules.file_carving import FileCarvingWidget
 from modules.hex_tab import HexViewer
@@ -49,10 +49,14 @@ class MainWindow(QMainWindow):
         self.initialize_ui()
 
     def initialize_ui(self):
-        self.setWindowTitle('Trace 1.0')
+        self.setWindowTitle('Trace 1.0.0')
         self.setWindowIcon(QIcon('Icons/logo.png'))
-        myappid = 'Trace'
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
+        if os.name == 'nt':
+            import ctypes
+            myappid = 'Trace'
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
         self.setGeometry(100, 100, 1200, 800)
 
         menu_bar = QMenuBar(self)
@@ -63,14 +67,26 @@ class MainWindow(QMainWindow):
             'Image Unmounting': self.image_manager.dismount_image,
             'Exit': self.close
         }
+
         self.create_menu(menu_bar, 'File', file_actions)
 
-        # Keep the buttons for future implementation
-        edit_menu = QMenu('Edit', self)
         view_menu = QMenu('View', self)
+
+        # Create the "Full Screen" action and connect it to the showFullScreen slot
+        full_screen_action = QAction("Full Screen", self)
+        full_screen_action.triggered.connect(self.showFullScreen)
+        view_menu.addAction(full_screen_action)
+
+        # Create the "Normal Screen" action and connect it to the showNormal slot
+        normal_screen_action = QAction("Normal Screen", self)
+        normal_screen_action.triggered.connect(self.showNormal)
+        view_menu.addAction(normal_screen_action)
+
         tools_menu = QMenu('Tools', self)
         help_menu = QMenu('Help', self)
-        menu_bar.addMenu(edit_menu)
+        help_menu.addAction("About")
+        help_menu.triggered.connect(lambda: AboutDialog(self).exec_())
+
         menu_bar.addMenu(view_menu)
         menu_bar.addMenu(tools_menu)
         menu_bar.addMenu(help_menu)
@@ -78,6 +94,8 @@ class MainWindow(QMainWindow):
         self.setMenuBar(menu_bar)
 
         main_toolbar = QToolBar('Main Toolbar', self)
+        main_toolbar.setToolTip("Main Toolbar")
+
         self.addToolBar(Qt.TopToolBarArea, main_toolbar)
 
         self.tree_viewer = QTreeWidget(self)
@@ -89,6 +107,7 @@ class MainWindow(QMainWindow):
         self.tree_viewer.customContextMenuRequested.connect(self.open_tree_context_menu)
 
         tree_dock = QDockWidget('Tree Viewer', self)
+
         tree_dock.setWidget(self.tree_viewer)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
@@ -192,6 +211,17 @@ class MainWindow(QMainWindow):
         self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
         self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
 
+        # disable all tabs before loading an image file
+        self.enable_tabs(False)
+
+    # function to disable and enable all tabs
+    def enable_tabs(self, state):
+        self.result_viewer.setEnabled(state)
+        self.viewer_tab.setEnabled(state)
+        self.listing_table.setEnabled(state)
+        self.deleted_files_widget.setEnabled(state)
+        self.registry_extractor_widget.setEnabled(state)
+
     def create_menu(self, menu_bar, menu_name, actions):
         menu = QMenu(menu_name, self)
         for action_name, action_function in actions.items():
@@ -266,6 +296,8 @@ class MainWindow(QMainWindow):
 
             # pass the image handler to the registry extractor widget
             self.registry_extractor_widget.image_handler = self.image_handler
+
+            self.enable_tabs(True)
 
             # partitions = self.image_handler.get_partitions() #og
             # for part in partitions:
@@ -486,8 +518,6 @@ class MainWindow(QMainWindow):
                 self.update_viewer_with_file_content(file_content, metadata,
                                                      self.current_selected_data)  # Use the stored data
 
-
-
     def update_viewer_with_file_content(self, file_content, metadata, data):  # Add the data parameter here
         index = self.viewer_tab.currentIndex()
         if index == 0:  # Hex tab
@@ -673,8 +703,8 @@ class MainWindow(QMainWindow):
         table.horizontalHeader().setFont(QFont("Arial", 10, QFont.Bold))
         table.verticalHeader().setVisible(False)
 
-        partition_icon = QIcon('gui/Eleven/24/devices/drive-harddisk.svg')  # Replace with your partition icon path
-        os_icon = QIcon('gui/Eleven/24/places/start-here.svg')  # Replace with your OS icon path
+        partition_icon = QIcon('Icons/devices/drive-harddisk.svg')  # Replace with your partition icon path
+        os_icon = QIcon('Icons/start-here.svg')  # Replace with your OS icon path
 
         for row, part in enumerate(partitions):
             start_offset = part[2]  # Start offset of the partition

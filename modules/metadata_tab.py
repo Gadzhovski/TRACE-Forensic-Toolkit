@@ -1,15 +1,17 @@
-
 import hashlib
 from magic import Magic
 # pip install python-magic-bin==0.4.14
 import datetime
-from PySide6.QtWidgets import QTextEdit
+from PySide6.QtWidgets import QTextEdit, QSizePolicy
+
 
 class MetadataViewer:
     def __init__(self, parent=None):
         self.metadata_text_edit = QTextEdit(parent)
-        self.metadata_text_edit.setReadOnly(True)
+        self.metadata_text_edit.setStyleSheet("border: 0px;")
 
+        self.metadata_text_edit.setReadOnly(True)
+        self.metadata_text_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def display_metadata(self, metadata, data, file_content):
         if not metadata:
@@ -27,13 +29,10 @@ class MetadataViewer:
         sha256_hash = hashlib.sha256(file_content).hexdigest()
         mime_type = Magic().from_buffer(file_content)
 
-
         created_time = safe_datetime(metadata.crtime) if metadata.crtime else 'N/A'
         modified_time = safe_datetime(metadata.mtime) if metadata.mtime else 'N/A'
         accessed_time = safe_datetime(metadata.atime) if metadata.atime else 'N/A'
         changed_time = safe_datetime(metadata.ctime) if metadata.ctime else 'N/A'
-
-
 
         extended_metadata = f"""
                     <style>
@@ -41,6 +40,7 @@ class MetadataViewer:
                             margin: 0;
                             padding: 0;
                             font-family: Arial, sans-serif;
+
                         }}
                         table {{
                             width: 100%;
@@ -54,8 +54,8 @@ class MetadataViewer:
                             text-align: left;
                         }}
                         th {{
-                            background-color: #4CAF50;
-                            color: white;
+                            background-color: #ddd;  /* Changed color to a light gray */
+                            color: black;  /* Changed color to black */
                         }}
                         tr:nth-child(even) {{
                             background-color: #f2f2f2;
@@ -64,7 +64,6 @@ class MetadataViewer:
                             background-color: #ddd;
                         }}
                     </style>
-                   <b>File Metadata:</b><br>
                     <table>
                         <tr><th>Attribute</th><th>Value</th></tr>
                         <tr><td>Name</td><td>{data.get('name', 'N/A')}</td></tr>
@@ -79,7 +78,6 @@ class MetadataViewer:
                         <tr><td>SHA-256 Hash</td><td>{sha256_hash}</td></tr>
                     </table>
                """
-
         self.metadata_text_edit.setHtml(extended_metadata)
 
     def get_widget(self):

@@ -21,34 +21,19 @@ class RegistryExtractor(QWidget):
     def init_ui(self):
         main_layout = QVBoxLayout()  # Main layout is vertical
         main_layout.setContentsMargins(0, 0, 0, 0)  # Set the margins to 0
+        main_layout.setSpacing(0)
 
         self.setLayout(main_layout)
 
-        # Toolbar Setup
         self.toolbar = QToolBar("Toolbar")
         self.toolbar.setContentsMargins(0, 0, 0, 0)
-        self.toolbar.setStyleSheet("""
-            QToolBar {
-                background-color: #f5f5f5;  /* White background for a modern look */
-                border-bottom: 1px solid #d7d7d7;  /* Light border for subtle separation */
-                padding: 5px;  /* Padding inside the toolbar */
-            }
-            QToolBar::item:hover {
-                background-color: #e7e7e7;  /* Light gray background for hover effect */
-            }
-            QToolBar::item:pressed {
-                background-color: #d7d7d7;  /* Slightly darker for pressed effect */
-            }
-        """)
         main_layout.addWidget(self.toolbar)
 
-        # Icon Setup
         self.icon_label = QLabel()
         self.icon_label.setPixmap(QIcon("Icons/icons8-registry-editor-96.png").pixmap(48, 48))
         self.toolbar.addWidget(self.icon_label)
 
-        # Label Setup
-        self.label = QLabel("Registry Extractor")
+        self.label = QLabel("Registry Browser")
         self.label.setStyleSheet("""
             QLabel {
                 font-size: 20px; /* Slightly larger size for the title */
@@ -59,7 +44,6 @@ class RegistryExtractor(QWidget):
         """)
         self.toolbar.addWidget(self.label)
 
-        # add space between label and combobox
         spacer = QLabel()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
@@ -68,54 +52,12 @@ class RegistryExtractor(QWidget):
         self.hiveSelector = QComboBox()
         self.hiveSelector.addItems(
             ["SOFTWARE", "SYSTEM", "SAM", "SECURITY", "DEFAULT", "COMPONENTS"])  # Add more hives as needed
-        self.hiveSelector.setStyleSheet("""
-            QComboBox {
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                padding: 5px 10px;
-                background-color: #ffffff;
-                selection-background-color: #56CCF2;
-            }
-            QComboBox::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 25px;
-                border-left-width: 1px;
-                border-left-color: #ced4da;
-                border-left-style: solid;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-            }
-            QComboBox::down-arrow {
-                image: url('Icons/icons8-dropdown-48.png');
-                width: 16px;  /* Adjust the width of the image */
-                height: 16px;  /* Adjust the height of the image */
-            }
-            QComboBox::hover {
-                border: 1px solid #a2a9b1;
-            }
-        """)
+
         self.toolbar.addWidget(self.hiveSelector)
 
         self.loadHiveButton = QPushButton("Load")
         self.loadHiveButton.clicked.connect(self.load_selected_hive)
-        self.loadHiveButton.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #ced4da;
-                border-radius: 4px;
-                padding: 5px 15px;
-                background-color: #ffffff;
-                margin-left: 8px; /* Left margin for spacing */
-                margin-right: 8px; /* Right margin for spacing */
-                width: 25px;
-            }
-            QPushButton:hover {
-                background-color: #e7e7e7;
-            }
-            QPushButton:pressed {
-                background-color: #d7d7d7;
-            }
-        """)
+
         self.toolbar.addWidget(self.loadHiveButton)
 
         # Splitter setup for resizable tree and details panels
@@ -235,7 +177,6 @@ class RegistryExtractor(QWidget):
         hive_item.setData(0, Qt.UserRole, root_key)
         self.display_registry_keys(hive_item, root_key)
 
-
     def display_registry_keys(self, parent_item, registry_key):
         subkeys = registry_key.subkeys()  # Call the method once and store the result
         items = [QTreeWidgetItem(parent_item, [subkey.name()]) for subkey in subkeys]  # Use list comprehension
@@ -247,11 +188,11 @@ class RegistryExtractor(QWidget):
 
     def display_registry_values(self, parent_key_item, registry_key):
         values = registry_key.values()  # Call the method once and store the result
-        items = [QTreeWidgetItem(parent_key_item, [value.name() or "(Default)"]) for value in values]  # Use list comprehension
+        items = [QTreeWidgetItem(parent_key_item, [value.name() or "(Default)"]) for value in
+                 values]  # Use list comprehension
         for item, value in zip(items, values):
             item.setData(0, Qt.UserRole, value)  # Store the value object for later retrieval
             item.setIcon(0, self.value_icon)
-
 
     def display_metadata(self, registry_object):
         metadata = {
@@ -272,7 +213,6 @@ class RegistryExtractor(QWidget):
         details += '</body></html>'
 
         self.metadataPanel.setHtml(details)
-
 
     def setup_table(self, values):
         self.tableWidget.clear()  # Clear previous content
@@ -306,68 +246,8 @@ class RegistryExtractor(QWidget):
             # For this example, let's clear the table and show just this value
             self.setup_table([registry_object])
 
-
-    #clear the window
+    # clear the window
     def clear(self):
         self.treeWidget.clear()
         self.metadataPanel.clear()
         self.tableWidget.clear()
-
-
-
-    # def on_item_clicked(self, item, column):
-    #     # Retrieve the stored RegistryKey or RegistryValue object
-    #     registry_object = item.data(0, Qt.UserRole)
-    #
-    #     if isinstance(registry_object, RegistryKey):
-    #         self.display_metadata(registry_object)
-    #         self.display_values_in_table(registry_object.values())
-    #
-    #     elif isinstance(registry_object, RegistryValue):
-    #         # If a value is clicked, you might want to do something specific
-    #         # For this example, let's clear the table and show just this value
-    #         self.tableWidget.clear()  # Clear previous content
-    #         self.tableWidget.setRowCount(1)  # Set row count for a single value
-    #         self.tableWidget.setColumnCount(3)  # Name and Data columns
-    #         self.tableWidget.setHorizontalHeaderLabels(["Name", "Type", "Value"])
-    #         self.tableWidget.horizontalHeader().show()
-    #         self.tableWidget.setColumnWidth(0, 150)  # Set the width of the first column to 200 pixels
-    #         self.tableWidget.setColumnWidth(1, 100)  # Set the width of the second column to 100 pixels
-    #         self.tableWidget.setItem(0, 0, QTableWidgetItem(registry_object.name()))
-    #         self.tableWidget.setItem(0, 1, QTableWidgetItem(str(registry_object.value_type_str())))
-    #         self.tableWidget.setItem(0, 2, QTableWidgetItem(str(registry_object.value())))
-    #         self.tableWidget.resizeColumnToContents(2)
-
-    # def display_values_in_table(self, values):
-    #     self.tableWidget.clear()  # Clear previous content
-    #     self.tableWidget.setRowCount(len(values))  # Set row count based on the number of values
-    #     self.tableWidget.setColumnCount(3)  # Name and Data columns
-    #     self.tableWidget.setHorizontalHeaderLabels(["Name", "Type", "Value"])
-    #     self.tableWidget.horizontalHeader().show()
-    #     self.tableWidget.setColumnWidth(0, 150)  # Set the width of the first column to 200 pixels
-    #     self.tableWidget.setColumnWidth(1, 100)  # Set the width of the second column to 100 pixels
-    #
-    #     for i, value in enumerate(values):
-    #         self.tableWidget.setItem(i, 0, QTableWidgetItem(value.name()))
-    #         self.tableWidget.setItem(i, 1, QTableWidgetItem(str(value.value_type_str())))
-    #         self.tableWidget.setItem(i, 2, QTableWidgetItem(str(value.value())))
-    #
-    #     self.tableWidget.resizeColumnToContents(2)
-
-
-    # def display_registry_keys(self, parent_item, registry_key):
-    #     for subkey in registry_key.subkeys():
-    #         key_item = QTreeWidgetItem(parent_item, [subkey.name()])
-    #         key_item.setData(0, Qt.UserRole, subkey)  # Store the key object for later retrieval
-    #         key_item.setIcon(0, self.key_icon)
-    #         num_subkeys = len(subkey.subkeys())
-    #         num_subvalues = len(subkey.values())
-    #         self.display_registry_keys(key_item, subkey)
-    #         self.display_registry_values(key_item, subkey)
-    #
-    # def display_registry_values(self, parent_key_item, registry_key):
-    #     for value in registry_key.values():
-    #         value_name = value.name() or "(Default)"
-    #         value_item = QTreeWidgetItem(parent_key_item, [f"{value_name}"])
-    #         value_item.setData(0, Qt.UserRole, value)  # Store the value object for later retrieval
-    #         value_item.setIcon(0, self.value_icon)

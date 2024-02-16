@@ -120,7 +120,6 @@ class TextViewer(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.manager = TextViewerManager()
-
         self.manager.page_changed_callback = self.refresh_content
 
         self.init_ui()
@@ -138,7 +137,6 @@ class TextViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
-        self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
 
         actions_data = [
             ("icons8-thick-arrow-pointing-up-50.png", 'Jump to Start', self.manager.jump_to_start),
@@ -146,7 +144,7 @@ class TextViewer(QWidget):
         ]
 
         for icon_name, text, handler in actions_data:
-            action = QAction(QIcon(f"gui/nav_icons/{icon_name}"), text, self)
+            action = QAction(QIcon(f"Icons/{icon_name}"), text, self)
             action.triggered.connect(handler)
             self.toolbar.addAction(action)
 
@@ -156,7 +154,7 @@ class TextViewer(QWidget):
         self.page_entry.returnPressed.connect(self.go_to_page_by_entry)
         self.toolbar.addWidget(self.page_entry)
 
-        self.total_pages_label = QLabel(self)
+        self.total_pages_label = QLabel(" of ")
         self.toolbar.addWidget(self.total_pages_label)
 
         actions_data = [
@@ -165,12 +163,17 @@ class TextViewer(QWidget):
         ]
 
         for icon_name, text, handler in actions_data:
-            action = QAction(QIcon(f"gui/nav_icons/{icon_name}"), text, self)
+            action = QAction(QIcon(f"Icons/{icon_name}"), text, self)
             action.triggered.connect(handler)
             self.toolbar.addAction(action)
 
-        self.toolbar.addWidget(QLabel("Font Size: "))
+        #add spacer
+        spacer = QWidget(self)
+        spacer.setFixedSize(50,0)
+        self.toolbar.addWidget(spacer)
 
+
+        self.toolbar.addWidget(QLabel("Font Size: "))
         self.font_size_combobox = QComboBox(self)
         self.font_size_combobox.addItems(["8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36"])
         self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
@@ -250,3 +253,4 @@ class TextViewer(QWidget):
         total_pages = self.manager.get_total_pages()
         self.page_entry.setText(str(current_page))
         self.total_pages_label.setText(f" of {total_pages}")
+

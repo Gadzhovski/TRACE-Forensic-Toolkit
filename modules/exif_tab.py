@@ -7,7 +7,6 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
 
 class ExifViewerManager:
     def __init__(self):
-        # Initialize exif_data attribute to store the EXIF information
         self.exif_data = None
 
     @staticmethod
@@ -58,6 +57,7 @@ class ExifViewer(QWidget):
         """Initialize the user interface components."""
         # Set up a read-only text edit for displaying the EXIF data
         self.text_edit = QTextEdit(self)
+        self.text_edit.setStyleSheet("border: 0px;")
         self.text_edit.setReadOnly(True)
         self.text_edit.setContentsMargins(0, 0, 0, 0)
 
@@ -72,8 +72,38 @@ class ExifViewer(QWidget):
     def display_exif_data(self, exif_data):
         """Display the provided EXIF data in the text edit."""
         if exif_data:
-            # Format the EXIF data as an HTML table
-            exif_table = "<table border='1'>"
+            # Format the EXIF data as an HTML table with CSS styling
+            exif_table = f"""
+                <style>
+                    body {{
+                        margin: 0;
+                        padding: 0;
+                        font-family: Arial, sans-serif;
+                    }}
+                    table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+                    }}
+                    td, th {{
+                        border: 1px solid #ddd;
+                        padding: 8px;
+                        word-wrap: break-word;
+                        text-align: left;
+                    }}
+                    th {{
+                        background-color: #ddd;  /* Changed color to a light gray */
+                        color: black;  /* Changed color to black */
+                    }}
+                    tr:nth-child(even) {{
+                        background-color: #f2f2f2;
+                    }}
+                    tr:hover {{
+                        background-color: #ddd;
+                    }}
+                </style>
+                <table>
+            """
             for key, value in exif_data:
                 exif_table += f"<tr><td><b>{key}</b></td><td>{value}</td></tr>"
             exif_table += "</table>"

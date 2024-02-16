@@ -28,7 +28,7 @@ class VirusTotal(QWidget):
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)
-        self.layout.setSpacing(10)
+        self.layout.setSpacing(0)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         # First toolbar for the VirusTotal logo
@@ -52,18 +52,7 @@ class VirusTotal(QWidget):
         # self.pass_hash_button.clicked.connect(self.pass_hash)
         self.pass_hash_button.clicked.connect(self.pass_hash)
         self.pass_hash_button.setFixedSize(120, 40)  # Set fixed size for a modern look
-        self.pass_hash_button.setStyleSheet("""
-            QPushButton {
-                background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                                  stop: 0 #7b68ee, stop: 1 #4169e1);
-                color: white;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                                  stop: 0 #6a5acd, stop: 1 #4682b4);
-            }
-        """)
+
         buttonLayout.addWidget(self.pass_hash_button)
 
         # Upload File Button
@@ -72,18 +61,7 @@ class VirusTotal(QWidget):
         # lambda: self.zip_file(self.current_file_content, self.current_file_name))
         self.upload_file_button.clicked.connect(self.upload_file)
         self.upload_file_button.setFixedSize(120, 40)  # Set fixed size for a modern look
-        self.upload_file_button.setStyleSheet("""
-            QPushButton {
-                background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                                  stop: 0 #7b68ee, stop: 1 #4169e1);
-                color: white;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                                  stop: 0 #6a5acd, stop: 1 #4682b4);
-            }
-        """)
+
         buttonLayout.addWidget(self.upload_file_button)
         self.layout.addLayout(buttonLayout)
 
@@ -99,9 +77,6 @@ class VirusTotal(QWidget):
 
     def setup_logo_toolbar(self):
         self.logo_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        # Styling the toolbars
-        self.logo_toolbar.setStyleSheet(
-            "QToolBar { background-color: lightgray; border: 0px solid gray; }")  # Light grey background
         self.virus_total_logo = QSvgWidget("Icons/VirusTotal_logo.svg")
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
@@ -111,20 +86,18 @@ class VirusTotal(QWidget):
         self.virus_total_logo.setCursor(Qt.PointingHandCursor)
 
     def setup_action_toolbar(self):
-        self.view_in_browser_action = QAction(QIcon('gui/Eleven/24/apps/internet-web-browser.svg'), "View in Browser",
+        self.view_in_browser_action = QAction(QIcon('Icons/apps/internet-web-browser.svg'), "View in Browser",
                                               self)
-        self.action_toolbar.setStyleSheet(
-            "QToolBar { background-color: lightgray; border: 0px solid gray; }")  # Light grey background
         self.view_in_browser_action.triggered.connect(self.view_in_browser)
         self.action_toolbar.addAction(self.view_in_browser_action)
         self.view_in_browser_action.setVisible(True)
 
-        self.back_action = QAction(QIcon('gui/nav_icons/icons8-left-arrow-50.png'), "Back", self)
+        self.back_action = QAction(QIcon('Icons/icons8-left-arrow-50.png'), "Back", self)
         self.back_action.triggered.connect(self.reset_ui)
         self.action_toolbar.addAction(self.back_action)
         self.action_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))
 
-        self.virus_total_logo = QSvgWidget("gui/VirusTotal_logo.svg")
+        self.virus_total_logo = QSvgWidget("Icons/VirusTotal_logo.svg")
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)

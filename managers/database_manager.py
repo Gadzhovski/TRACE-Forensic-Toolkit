@@ -24,9 +24,9 @@ class DatabaseManager:
                 c.execute("SELECT path FROM icons WHERE type = ? AND extention = 'folder'", (icon_type,))
 
                 result = c.fetchone()
-                return result[0] if result else 'gui/Eleven/24/mimetypes/application-x-zerosize.svg'
+                return result[0] if result else 'Icons/mimetypes/application-x-zerosize.svg'
             else:
-                return 'gui/Eleven/24/mimetypes/application-x-zerosize.svg'
+                return 'Icons/mimetypes/application-x-zerosize.svg'
         finally:
             c.close()
 

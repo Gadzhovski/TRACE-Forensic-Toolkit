@@ -222,14 +222,16 @@ class HexViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
-        self.toolbar.setStyleSheet("QToolBar { background-color: lightgray; border: 0px solid gray; }")
+        self.toolbar.setMovable(False)
+        # disable right click
+        self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = QAction(QIcon("gui/nav_icons/icons8-thick-arrow-pointing-up-50.png"), "First", self)
+        self.first_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "First", self)
         self.first_action.triggered.connect(self.load_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon("gui/nav_icons/icons8-left-arrow-50.png"), "Previous", self)
+        self.prev_action = QAction(QIcon("Icons/icons8-left-arrow-50.png"), "Previous", self)
         self.prev_action.triggered.connect(self.previous_page)
         self.toolbar.addAction(self.prev_action)
 
@@ -244,16 +246,67 @@ class HexViewer(QWidget):
         self.total_pages_label = QLabel(" of ")
         self.toolbar.addWidget(self.total_pages_label)
 
-        self.next_action = QAction(QIcon("gui/nav_icons/icons8-right-arrow-50.png"), "Next", self)
+        self.next_action = QAction(QIcon("Icons/icons8-right-arrow-50.png"), "Next", self)
         self.next_action.triggered.connect(self.next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon("gui/nav_icons/icons8-down-50.png"), "Last", self)
+        self.last_action = QAction(QIcon("Icons/icons8-down-50.png"), "Last", self)
         self.last_action.triggered.connect(self.load_last_page)
         self.toolbar.addAction(self.last_action)
 
+        # Add a spacer
+        spacer = QWidget(self)
+        spacer.setFixedSize(50, 0)
+        self.toolbar.addWidget(spacer)
+
+        # Add a QLabel and a QComboBox for font size to the toolbar
+        self.toolbar.addWidget(QLabel("Font Size: "))
+
+        self.font_size_combobox = QComboBox(self)
+        self.font_size_combobox.addItems(["8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36"])
+        self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
+        self.toolbar.addWidget(self.font_size_combobox)
+
+        #add spacer
+        spacer = QWidget(self)
+        spacer.setFixedSize(50,0)
+        self.toolbar.addWidget(spacer)
+
+
         self.export_button = QToolButton(self)
+
+        export_button_stylesheet = """
+            QToolButton {
+                border: 1px solid #ced4da;
+                border-radius: 2px;
+                padding: 5px 30px 5px 5px; /* Adjust right padding to push text more to the left */
+                background-color: #ffffff;
+                width: 60px; /* Adjust width as necessary to fit text and menu arrow */
+            }
+
+            QToolButton::menu-button {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 25px;
+                border-left-width: 1px;
+                border-left-color: #ced4da;
+                border-left-style: solid;
+                border-top-right-radius: 2px;
+                border-bottom-right-radius: 2px;
+            }
+
+            QToolButton::menu-button:hover {
+                background-color: #ced4da;
+            }
+
+            QToolButton::menu-arrow {
+                image: url('Icons/icons8-dropdown-48.png');
+                width: 16px;  /* Adjust the width of the image */
+                height: 16px;  /* Adjust the height of the image */
+            }
+        """
         self.export_button.setText("Export")
+        self.export_button.setStyleSheet(export_button_stylesheet)
         self.export_button.setPopupMode(QToolButton.MenuButtonPopup)  # Set the popup mode
 
         # Add format options to the menu
@@ -270,19 +323,6 @@ class HexViewer(QWidget):
         self.export_button.setMenu(self.export_menu)
         self.toolbar.addWidget(self.export_button)
 
-        # Add a small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(10, 10)  # Adjust the size as per your needs
-        self.toolbar.addWidget(spacer)
-
-        # Add a QLabel and a QComboBox for font size to the toolbar
-        self.toolbar.addWidget(QLabel("Font: "))
-
-        self.font_size_combobox = QComboBox(self)
-        self.font_size_combobox.addItems(["8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36"])
-        self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
-        self.toolbar.addWidget(self.font_size_combobox)
-
         # Add a spacer to push the following widgets to the right
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -291,7 +331,7 @@ class HexViewer(QWidget):
         # Search bar components
         self.search_bar = QLineEdit(self)
         self.search_bar.setMaximumWidth(200)  # Adjust the number as per your needs
-        self.search_bar.setContentsMargins(5, 0, 5, 0)
+        self.search_bar.setContentsMargins(10, 0, 10, 0)
         self.search_bar.setPlaceholderText("Search...")
         self.search_bar.returnPressed.connect(self.trigger_search)
         self.toolbar.addWidget(self.search_bar)
@@ -327,7 +367,13 @@ class HexViewer(QWidget):
         font.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         self.hex_table.setFont(font)
         self.hex_table.setColumnCount(18)
-        self.hex_table.horizontalHeader().setStyleSheet("QHeaderView::section { color: green; }")
+        # self.hex_table.horizontalHeader().setStyleSheet("QHeaderView::section { color: green; }")
+        self.hex_table.horizontalHeader().setStyleSheet("""
+            QHeaderView::section {
+            border-radius: 2px;
+            background-color: #d7d7d7;
+            }
+        """)
         self.hex_table.setHorizontalHeaderLabels(['Address'] + [f'{i:02X}' for i in range(16)] + ['ASCII'])
         self.hex_table.verticalHeader().setVisible(False)
         self.hex_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -418,22 +464,34 @@ class HexViewer(QWidget):
         self.hex_table.clear()
 
     def load_first_page(self):
-        self.current_page = 0
-        self.display_current_page()
+        try:
+            self.current_page = 0
+            self.display_current_page()
+        except (AttributeError, IndexError) as e:
+            print(f"Error occurred: {e}")
 
     def load_last_page(self):
-        self.current_page = self.hex_viewer_manager.total_pages() - 1
-        self.display_current_page()
+        try:
+            self.current_page = self.hex_viewer_manager.total_pages() - 1
+            self.display_current_page()
+        except (AttributeError, IndexError) as e:
+            print(f"Error occurred: {e}")
 
     def next_page(self):
-        if self.current_page < self.hex_viewer_manager.total_pages() - 1:
-            self.current_page += 1
-        self.display_current_page()
+        try:
+            if self.current_page < self.hex_viewer_manager.total_pages() - 1:
+                self.current_page += 1
+            self.display_current_page()
+        except (AttributeError, IndexError) as e:
+            print(f"Error occurred: {e}")
 
     def previous_page(self):
-        if self.current_page > 0:
-            self.current_page -= 1
-        self.display_current_page()
+        try:
+            if self.current_page > 0:
+                self.current_page -= 1
+            self.display_current_page()
+        except (AttributeError, IndexError) as e:
+            print(f"Error occurred: {e}")
 
     def search_result_clicked(self, item):
         address = item.text().split(":")[1].strip()
