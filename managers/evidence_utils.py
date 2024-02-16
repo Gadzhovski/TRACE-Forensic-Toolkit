@@ -304,35 +304,35 @@ class ImageHandler:
             print(f"Error reading unallocated space: {e}")
             return None
 
-    def get_all_registry_hives(self, start_offset):
-        fs_info = self.get_fs_info(start_offset)
-        if not fs_info or self.get_fs_type(start_offset) != "NTFS":
-            return None
-
-        hive_paths = {
-            "SOFTWARE": "/Windows/System32/config/SOFTWARE",
-            # "SYSTEM": "/Windows/System32/config/SYSTEM",
-            # "SAM": "/Windows/System32/config/SAM",
-            # "SECURITY": "/Windows/System32/config/SECURITY"
-        }
-
-        hives_data = {}
-        for hive_name, hive_path in hive_paths.items():
-            hive_data = self.get_registry_hive(fs_info, hive_path)
-            if hive_data:
-                # Temporarily save the hive data to a file
-                with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
-                    temp_hive.write(hive_data)
-                    temp_hive_path = temp_hive.name
-
-                # Open the temporary file as a registry hive and get the root key
-                with open(temp_hive_path, "rb") as hive_file:
-                    reg = Registry.Registry(hive_file)
-                    hives_data[hive_name] = reg.root()  # Store the root key instead of the whole registry
-
-                os.remove(temp_hive_path)
-
-        return hives_data
+    # def get_all_registry_hives(self, start_offset):
+    #     fs_info = self.get_fs_info(start_offset)
+    #     if not fs_info or self.get_fs_type(start_offset) != "NTFS":
+    #         return None
+    #
+    #     hive_paths = {
+    #         "SOFTWARE": "/Windows/System32/config/SOFTWARE",
+    #         # "SYSTEM": "/Windows/System32/config/SYSTEM",
+    #         # "SAM": "/Windows/System32/config/SAM",
+    #         # "SECURITY": "/Windows/System32/config/SECURITY"
+    #     }
+    #
+    #     hives_data = {}
+    #     for hive_name, hive_path in hive_paths.items():
+    #         hive_data = self.get_registry_hive(fs_info, hive_path)
+    #         if hive_data:
+    #             # Temporarily save the hive data to a file
+    #             with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
+    #                 temp_hive.write(hive_data)
+    #                 temp_hive_path = temp_hive.name
+    #
+    #             # Open the temporary file as a registry hive and get the root key
+    #             with open(temp_hive_path, "rb") as hive_file:
+    #                 reg = Registry.Registry(hive_file)
+    #                 hives_data[hive_name] = reg.root()  # Store the root key instead of the whole registry
+    #
+    #             os.remove(temp_hive_path)
+    #
+    #     return hives_data
 
     # def load_image(self): #og
     #     image_type = self.get_image_type()  # ewf or raw

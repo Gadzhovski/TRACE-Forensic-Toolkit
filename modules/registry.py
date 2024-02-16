@@ -307,7 +307,11 @@ class RegistryExtractor(QWidget):
             self.setup_table([registry_object])
 
 
-
+    #clear the window
+    def clear(self):
+        self.treeWidget.clear()
+        self.metadataPanel.clear()
+        self.tableWidget.clear()
 
 
 

@@ -29,12 +29,13 @@ class FileCarvingWidget(QWidget):
 
     def init_ui(self):
         self.layout = QVBoxLayout(self)
-        self.info_label = QLabel("Ready to start file carving.")
+
+
         self.table_widget = self.create_table_widget()
         self.list_widget = self.create_list_widget()
         self.carve_button, self.stop_button = self.create_control_buttons()
 
-        self.layout.addWidget(self.info_label)
+
         self.layout.addWidget(self.tab_widget)
         self.layout.addWidget(self.carve_button)
         self.layout.addWidget(self.stop_button)
@@ -85,7 +86,6 @@ class FileCarvingWidget(QWidget):
 
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler
-        self.info_label.setText("Ready to start file carving.")
         self.carve_button.setEnabled(True)
 
     def open_context_menu(self, position):
@@ -439,12 +439,11 @@ class FileCarvingWidget(QWidget):
         self.list_widget.addItem(item)
 
         total_files = self.table_widget.rowCount()
-        self.info_label.setText(f"Latest Carved File: {name}, Total Files: {total_files}")
+        #self.info_label.setText(f"Latest Carved File: {name}, Total Files: {total_files}")
 
     def clear(self):
         self.table_widget.setRowCount(0)
         self.list_widget.clear()
         self.carved_files.clear()
-        self.info_label.setText("Ready to start file carving.")
         self.carve_button.setEnabled(True)
         self.stop_button.setEnabled(False)

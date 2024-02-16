@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
         self.initialize_ui()
 
     def initialize_ui(self):
-        self.setWindowTitle('GUI4n6')
+        self.setWindowTitle('Trace')
         self.setGeometry(100, 100, 1200, 800)
 
         # Create a menu bar

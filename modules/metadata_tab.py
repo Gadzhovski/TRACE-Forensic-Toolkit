@@ -16,29 +16,24 @@ class MetadataViewer:
             self.metadata_text_edit.setHtml("<b>No metadata available.</b>")
             return
 
-        def format_epoch_time(epoch_time):
+        def safe_datetime(timestamp):
             try:
-                # Check if the epoch_time is None or not a number
-                if epoch_time is None or not isinstance(epoch_time, (int, float)):
-                    return 'N/A'
-
-                # Convert to datetime and format
-                return datetime.datetime.fromtimestamp(epoch_time).strftime('%Y-%m-%d %H:%M:%S')
-            except Exception as e:
-                print(f"Error converting timestamp: {epoch_time}, Error: {e}")
-                print(epoch_time)
-                return 'Invalid Timestamp'
+                return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            except (OverflowError, OSError, ValueError):
+                return "N/A"
 
         # Generate hashes and determine MIME type
         md5_hash = hashlib.md5(file_content).hexdigest()
         sha256_hash = hashlib.sha256(file_content).hexdigest()
         mime_type = Magic().from_buffer(file_content)
 
-        # Format times
-        created_time = format_epoch_time(metadata.crtime)
-        modified_time = format_epoch_time(metadata.mtime)
-        accessed_time = format_epoch_time(metadata.atime)
-        changed_time = format_epoch_time(metadata.ctime)
+
+        created_time = safe_datetime(metadata.crtime) if metadata.crtime else 'N/A'
+        modified_time = safe_datetime(metadata.mtime) if metadata.mtime else 'N/A'
+        accessed_time = safe_datetime(metadata.atime) if metadata.atime else 'N/A'
+        changed_time = safe_datetime(metadata.ctime) if metadata.ctime else 'N/A'
+
+
 
         extended_metadata = f"""
                     <style>

@@ -10,9 +10,14 @@ from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QFileDialog)
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QStyle, QLabel, QHBoxLayout, QComboBox, \
     QSpacerItem, QSizePolicy
-from comtypes import CLSCTX_ALL
+#from comtypes import CLSCTX_ALL
 from fitz import open as fitz_open, Matrix
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+#from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+import os
+
+if os.name == "nt": # Windows
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    from comtypes import CLSCTX_ALL
 
 
 class UnifiedViewer(QWidget):
@@ -589,11 +594,18 @@ class AudioVideoViewer(QWidget):
     def __init__(self, parent=None):
         super(AudioVideoViewer, self).__init__(parent)
 
-        # Initialize the volumes control interface once
-        devices = AudioUtilities.GetSpeakers()
-        self.volume_interface = devices.Activate(
-            IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        self.volume = cast(self.volume_interface, POINTER(IAudioEndpointVolume))
+        # # Initialize the volumes control interface once
+        # devices = AudioUtilities.GetSpeakers()
+        # self.volume_interface = devices.Activate(
+        #     IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        # self.volume = cast(self.volume_interface, POINTER(IAudioEndpointVolume))
+
+        # Initialize the volumes control
+        if os.name == 'nt':  # Windows
+            devices = AudioUtilities.GetSpeakers()
+            self.volume_interface = devices.Activate(
+                IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            self.volume = self.volume_interface.QueryInterface(IAudioEndpointVolume)
 
         self.layout = QVBoxLayout(self)
 
@@ -628,23 +640,29 @@ class AudioVideoViewer(QWidget):
         # Spacer to push media control buttons to the center
         self.controls_layout.addSpacerItem(QSpacerItem(20, 10, QSizePolicy.Expanding, QSizePolicy.Minimum))
 
-        # Volume label
-        self.controls_layout.addWidget(QLabel("Volume"))
+        # If system is Windows, add a volume slider
+        if os.name == 'nt':
+            print("Windows")
+            # Volume label
+            self.controls_layout.addWidget(QLabel("Volume"))
 
-        # Volume slider
-        self.volume_slider = QSlider(Qt.Horizontal, self)
-        self.volume_slider.setToolTip("Volume")
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(self.get_system_volume())
-        self.volume_slider.setFixedWidth(150)
-        self.volume_slider.valueChanged.connect(self.update_volume_display)
-        self.volume_slider.valueChanged.connect(self.set_volume)
-        self.controls_layout.addWidget(self.volume_slider)
+        # # Volume label
+        # self.controls_layout.addWidget(QLabel("Volume"))
 
-        # Volume display label
-        self.volume_display = QLabel(f"{self.get_system_volume()}%", self)
-        self.volume_display.setToolTip("Volume Percentage")
-        self.controls_layout.addWidget(self.volume_display)
+            # Volume slider
+            self.volume_slider = QSlider(Qt.Horizontal, self)
+            self.volume_slider.setToolTip("Volume")
+            self.volume_slider.setRange(0, 100)
+            self.volume_slider.setValue(self.get_system_volume())
+            self.volume_slider.setFixedWidth(150)
+            self.volume_slider.valueChanged.connect(self.update_volume_display)
+            self.volume_slider.valueChanged.connect(self.set_volume)
+            self.controls_layout.addWidget(self.volume_slider)
+
+            # Volume display label
+            self.volume_display = QLabel(f"{self.get_system_volume()}%", self)
+            self.volume_display.setToolTip("Volume Percentage")
+            self.controls_layout.addWidget(self.volume_display)
 
         # Spacer to separate media controls and volumes controls
         self.controls_layout.addSpacerItem(QSpacerItem(370, 10, QSizePolicy.Fixed, QSizePolicy.Minimum))
@@ -732,15 +750,39 @@ class AudioVideoViewer(QWidget):
         self.progress_slider.setValue(new_value)
         self.set_media_position(new_value)
 
+    # def get_system_volume(self):
+    #     """Return the current system volumes as a value between 0 and 100."""
+    #     current_volume = self.volume.GetMasterVolumeLevelScalar()
+    #     return int(current_volume * 100)
+    #
+    # @Slot(int)
+    # def set_volume(self, value):
+    #     """Set the system volumes based on the slider's value."""
+    #     self.volume.SetMasterVolumeLevelScalar(value / 100.0, None)
+
+    # @Slot(int)
+    # def update_volume_display(self, value):
+    #     """Update the volumes display label based on the slider's value."""
+    #     self.volume_display.setText(f"{value}%")
+
+
     def get_system_volume(self):
-        """Return the current system volumes as a value between 0 and 100."""
-        current_volume = self.volume.GetMasterVolumeLevelScalar()
-        return int(current_volume * 100)
+        """Return the current system volume as a value between 0 and 100."""
+        if os.name == 'nt':  # Windows
+            current_volume = self.volume.GetMasterVolumeLevelScalar()
+            return int(current_volume * 100)
 
     @Slot(int)
     def set_volume(self, value):
-        """Set the system volumes based on the slider's value."""
-        self.volume.SetMasterVolumeLevelScalar(value / 100.0, None)
+        """Set the system volume based on the slider's value."""
+        if os.name == 'nt':  # Windows
+            self.volume.SetMasterVolumeLevelScalar(value / 100.0, None)
+
+    @Slot(int)
+    def update_volume_display(self, value):
+        """Update the volumes display label based on the slider's value."""
+        if os.name == 'nt':  # Only for Windows
+            self.volume_display.setText(f"{value}%")
 
     @Slot(int)
     def set_position(self, position):
@@ -752,7 +794,3 @@ class AudioVideoViewer(QWidget):
         """Update the slider's position based on the media's playback position."""
         self.progress_slider.setValue(position)
 
-    @Slot(int)
-    def update_volume_display(self, value):
-        """Update the volumes display label based on the slider's value."""
-        self.volume_display.setText(f"{value}%")

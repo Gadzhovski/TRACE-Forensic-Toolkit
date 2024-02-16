@@ -49,9 +49,9 @@ class MainWindow(QMainWindow):
         self.initialize_ui()
 
     def initialize_ui(self):
-        self.setWindowTitle('4n6Factor')
+        self.setWindowTitle('Trace 1.0')
         self.setWindowIcon(QIcon('Icons/logo.png'))
-        myappid = '4n6Factor'
+        myappid = 'Trace'
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         self.setGeometry(100, 100, 1200, 800)
 
@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
         self.application_viewer.clear()
         self.metadata_viewer.clear()
         self.exif_viewer.clear_content()
+        self.registry_extractor_widget.clear()
 
     def closeEvent(self, event):
         reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
@@ -485,6 +486,8 @@ class MainWindow(QMainWindow):
                 self.update_viewer_with_file_content(file_content, metadata,
                                                      self.current_selected_data)  # Use the stored data
 
+
+
     def update_viewer_with_file_content(self, file_content, metadata, data):  # Add the data parameter here
         index = self.viewer_tab.currentIndex()
         if index == 0:  # Hex tab
@@ -495,8 +498,8 @@ class MainWindow(QMainWindow):
             full_file_path = data.get("name", "")  # Retrieve the name from the data dictionary
             self.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
-            # self.display_metadata_in_tab(metadata, data, file_content)
             self.metadata_viewer.display_metadata(metadata, data, file_content)
+
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
