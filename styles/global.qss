@@ -104,6 +104,8 @@ QListWidget::item:selected, QTableWidget::item:selected {
     background-color: #e7e7e7;
 }
 
+
+
 /* Menu and MenuBar Styles */
 QMenuBar {
     background-color: white;
@@ -126,29 +128,81 @@ QMessageBox {
     border: 1px solid #d7d7d7;
 }
 
-/* ScrollBar Styles */
-QScrollBar:horizontal, QScrollBar:vertical {
+QScrollBar:vertical {
+    border: none;
+    background: #F1F1F1;
+    width: 10px;
+    margin: 0px;
+    border-radius: 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #C1C1C1;
+    min-height: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:vertical {
     border: none;
     background: none;
-    margin: 15px 0 15px 0; /* Adjust for horizontal scrollbar */
+    height: 0px;
+    subcontrol-position: bottom;
+    subcontrol-origin: margin;
 }
-QScrollBar::handle:horizontal, QScrollBar::handle:vertical {
-    background: #d3d3d3;
-    min-size: 30px; /* Adjust for horizontal scrollbar */
-    border-radius: 7px;
-}
-QScrollBar::handle:horizontal:hover, QScrollBar::handle:vertical:hover {
-    background: #a9a9a9;
-}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+
+QScrollBar::sub-line:vertical {
     border: none;
     background: none;
+    height: 0px;
+    subcontrol-position: top;
+    subcontrol-origin: margin;
 }
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal,
+
+QScrollBar:horizontal {
+    border: none;
+    background: #F1F1F1;
+    height: 10px;
+    margin: 0px;
+    border-radius: 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #C1C1C1;
+    min-width: 20px;
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:horizontal {
+    border: none;
+    background: none;
+    width: 0px;
+    subcontrol-position: right;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::sub-line:horizontal {
+    border: none;
+    background: none;
+    width: 0px;
+    subcontrol-position: left;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical,
+QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
+    background: none;
+}
+
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: none;
 }
+
+
 
 /* Slider Styles */
 QSlider::groove:horizontal {
@@ -233,9 +287,7 @@ QTreeWidget {
     border-radius: 2px;
     background-color: #ffffff;
 }
-QTreeWidget::item {
-    padding: 5px;
-}
+
 
 /* Action Styles */
 QAction {

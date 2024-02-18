@@ -1,9 +1,13 @@
+import hashlib
 import os
 import datetime
 from Registry import Registry
 import pyewf
 import pytsk3
 import tempfile
+
+
+
 
 SECTOR_SIZE = 512  # 512 bytes
 
@@ -68,6 +72,97 @@ class ImageHandler:
             return "raw"
         else:
             raise ValueError(f"Unsupported image type: {extension}")
+
+
+    # def calculate_hashes(self):
+    #     hash_md5 = hashlib.md5()
+    #     hash_sha1 = hashlib.sha1()
+    #     hash_sha256 = hashlib.sha256()
+    #     size = 0
+    #
+    #
+    #     image_type = self.get_image_type()
+    #     if image_type == "ewf":
+    #         filenames = pyewf.glob(self.image_path)
+    #         ewf_handle = pyewf.handle()
+    #         ewf_handle.open(filenames)
+    #         stored_md5 = ewf_handle.get_hash_value("MD5")
+    #         stored_sha1 = ewf_handle.get_hash_value("SHA1")
+    #         while True:
+    #             chunk = ewf_handle.read(4096)
+    #             if not chunk:
+    #                 break
+    #             hash_md5.update(chunk)
+    #             hash_sha1.update(chunk)
+    #             hash_sha256.update(chunk)
+    #             size += len(chunk)
+    #     elif image_type == "raw":
+    #         with open(self.image_path, "rb") as f:
+    #             for chunk in iter(lambda: f.read(4096), b""):
+    #                 hash_md5.update(chunk)
+    #                 hash_sha1.update(chunk)
+    #                 hash_sha256.update(chunk)
+    #                 size += len(chunk)
+    #
+    #     return {
+    #         'md5': hash_md5.hexdigest(),
+    #         'sha1': hash_sha1.hexdigest(),
+    #         'sha256': hash_sha256.hexdigest(),
+    #         'size': size,
+    #         'path': self.image_path,
+    #     }
+
+    def calculate_hashes(self):
+        hash_md5 = hashlib.md5()
+        hash_sha1 = hashlib.sha1()
+        hash_sha256 = hashlib.sha256()
+        size = 0
+        stored_md5, stored_sha1 = None, None
+
+        image_type = self.get_image_type()
+        if image_type == "ewf":
+            filenames = pyewf.glob(self.image_path)
+            ewf_handle = pyewf.handle()
+            ewf_handle.open(filenames)
+            try:
+                # Attempt to retrieve the stored hash values
+                stored_md5 = ewf_handle.get_hash_value("MD5")
+                stored_sha1 = ewf_handle.get_hash_value("SHA1")
+            except Exception as e:
+                print(f"Unable to retrieve stored hash values: {e}")
+
+            # Calculate the hash values by reading the image file
+            while True:
+                chunk = ewf_handle.read(4096)
+                if not chunk:
+                    break
+                hash_md5.update(chunk)
+                hash_sha1.update(chunk)
+                hash_sha256.update(chunk)
+                size += len(chunk)
+            ewf_handle.close()
+        elif image_type == "raw":
+            with open(self.image_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+                    hash_sha1.update(chunk)
+                    hash_sha256.update(chunk)
+                    size += len(chunk)
+
+        # Compile the computed and stored hashes in a dictionary
+        hashes = {
+            'computed_md5': hash_md5.hexdigest(),
+            'computed_sha1': hash_sha1.hexdigest(),
+            'computed_sha256': hash_sha256.hexdigest(),
+            'size': size,
+            'path': self.image_path,
+            'stored_md5': stored_md5,
+            'stored_sha1': stored_sha1
+        }
+
+        # Optionally, you can add logic here to compare the computed and stored hashes
+
+        return hashes
 
     def load_image(self):
         image_type = self.get_image_type()
@@ -215,6 +310,7 @@ class ImageHandler:
                 return []
         return []
 
+
     def get_registry_hive(self, fs_info, hive_path):
         """Extract a registry hive from the given filesystem."""
         try:
@@ -281,14 +377,13 @@ class ImageHandler:
             print(f"Error parsing SOFTWARE hive: {e}")
             return "Error in parsing OS version"
 
+
+
     def read_unallocated_space(self, start_offset, end_offset):
         try:
             start_byte_offset = start_offset * SECTOR_SIZE
             end_byte_offset = max(end_offset * SECTOR_SIZE, start_byte_offset + SECTOR_SIZE - 1)
             size_in_bytes = end_byte_offset - start_byte_offset + 1  # Ensuring at least some data is read
-
-            print("end_offset: ", end_offset)
-            print("end_byte_offset: ", end_byte_offset)
 
             if size_in_bytes <= 0:
                 print("Invalid size for unallocated space, adjusting to read at least one sector.")

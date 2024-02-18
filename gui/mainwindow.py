@@ -19,6 +19,7 @@ from modules.registry import RegistryExtractor
 from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
+from modules.verification import VerificationWidget
 
 SECTOR_SIZE = 512
 
@@ -82,7 +83,18 @@ class MainWindow(QMainWindow):
         normal_screen_action.triggered.connect(self.showNormal)
         view_menu.addAction(normal_screen_action)
 
+
+
         tools_menu = QMenu('Tools', self)
+
+        verify_image_action = QAction("Verify Image", self)
+        #verify_image_action.triggered.connect(lambda: VerificationW(self.image_handler).exec_())
+        verify_image_action.triggered.connect(self.verify_image)
+
+        tools_menu.addAction(verify_image_action)
+
+
+
         help_menu = QMenu('Help', self)
         help_menu.addAction("About")
         help_menu.triggered.connect(lambda: AboutDialog(self).exec_())
@@ -213,6 +225,14 @@ class MainWindow(QMainWindow):
 
         # disable all tabs before loading an image file
         self.enable_tabs(False)
+
+    def verify_image(self):
+        if self.image_handler is None:
+            QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
+            return
+
+        self.verification_widget = VerificationWidget(self.image_handler)
+        self.verification_widget.show()
 
     # function to disable and enable all tabs
     def enable_tabs(self, state):
@@ -486,7 +506,7 @@ class MainWindow(QMainWindow):
             else:
                 print("Invalid size for unallocated space or unable to read.")
         elif data.get("type") == "directory":
-            # Handle directories
+            # # Handle directories
             entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
             self.populate_listing_table(entries, data["start_offset"])
         elif data.get("inode_number") is not None:
@@ -529,7 +549,6 @@ class MainWindow(QMainWindow):
             self.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
             self.metadata_viewer.display_metadata(metadata, data, file_content)
-
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
@@ -554,6 +573,7 @@ class MainWindow(QMainWindow):
 
     def populate_listing_table(self, entries, offset):
         self.listing_table.setRowCount(0)
+
         for entry in entries:
             entry_name = entry["name"]
             inode_number = entry["inode_number"]
@@ -596,6 +616,7 @@ class MainWindow(QMainWindow):
         self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(modified)))
         self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
 
+
     def on_listing_table_item_clicked(self, item):
         row = item.row()
         column = item.column()
@@ -609,6 +630,10 @@ class MainWindow(QMainWindow):
         if data.get("type") == "directory":
             entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
             self.populate_listing_table(entries, data["start_offset"])
+
+            # self.current_selected_folder = data["name"]
+            # self.parent_folder = data["start_offset"]
+
         else:
             file_content, metadata = self.get_file_content(inode_number, data["start_offset"])
             if file_content:
@@ -616,6 +641,8 @@ class MainWindow(QMainWindow):
 
         # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
+
+
 
     def open_listing_context_menu(self, position):
         # Get the selected item

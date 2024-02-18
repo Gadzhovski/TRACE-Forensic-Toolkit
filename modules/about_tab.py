@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont, QPalette, QColor
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QApplication, QHBoxLayout
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 
 
 class AboutDialog(QDialog):
