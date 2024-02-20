@@ -20,6 +20,7 @@ from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
+from modules.all_files import AllFilesWidget
 
 SECTOR_SIZE = 512
 
@@ -223,8 +224,8 @@ class MainWindow(QMainWindow):
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
 
         # #add tab for displaying all files chosen by user
-        # self.all_files_widget = AllFilesWidget(self.image_handler)
-        # self.result_viewer.addTab(self.all_files_widget, 'All Files')
+        self.all_files_widget = AllFilesWidget(self.image_handler)
+        self.result_viewer.addTab(self.all_files_widget, 'All Files')
 
 
         self.viewer_tab = QTabWidget(self)
@@ -316,6 +317,9 @@ class MainWindow(QMainWindow):
         self.current_image_path = None
         self.current_offset = None
         self.image_mounted = False
+        self.all_files_widget.clear()
+        self.evidence_files.clear()
+        self.deleted_files_widget.clear()
 
     def clear_viewers(self):
         self.hex_viewer.clear_content()
@@ -360,6 +364,8 @@ class MainWindow(QMainWindow):
             # pass the image handler to the registry extractor widget
             self.registry_extractor_widget.image_handler = self.image_handler
 
+            self.all_files_widget.image_handler = self.image_handler
+
             self.enable_tabs(True)
 
             # partitions = self.image_handler.get_partitions() #og
@@ -383,7 +389,7 @@ class MainWindow(QMainWindow):
             if selected_option == "Remove All":
                 # Remove all evidence files
                 self.tree_viewer.invisibleRootItem().takeChildren()  # Remove all children from the tree viewer
-                self.evidence_files.clear()  # Clear evidence files list
+                #self.evidence_files.clear()  # Clear evidence files list
                 self.clear_ui()  # Clear the UI
                 QMessageBox.information(self, "Remove Evidence", "All evidence files have been removed.")
             else:
@@ -395,7 +401,7 @@ class MainWindow(QMainWindow):
         # clear all tabs if there are no evidence files loaded
         if not self.evidence_files:
             self.clear_ui()
-            self.deleted_files_widget.clear()
+            #self.deleted_files_widget.clear()
             # disable all tabs
             self.enable_tabs(False)
             # set the icon back to the original

@@ -6,9 +6,6 @@ import pyewf
 import pytsk3
 import tempfile
 
-
-
-
 SECTOR_SIZE = 512  # 512 bytes
 
 
@@ -72,45 +69,6 @@ class ImageHandler:
             return "raw"
         else:
             raise ValueError(f"Unsupported image type: {extension}")
-
-
-    # def calculate_hashes(self):
-    #     hash_md5 = hashlib.md5()
-    #     hash_sha1 = hashlib.sha1()
-    #     hash_sha256 = hashlib.sha256()
-    #     size = 0
-    #
-    #
-    #     image_type = self.get_image_type()
-    #     if image_type == "ewf":
-    #         filenames = pyewf.glob(self.image_path)
-    #         ewf_handle = pyewf.handle()
-    #         ewf_handle.open(filenames)
-    #         stored_md5 = ewf_handle.get_hash_value("MD5")
-    #         stored_sha1 = ewf_handle.get_hash_value("SHA1")
-    #         while True:
-    #             chunk = ewf_handle.read(4096)
-    #             if not chunk:
-    #                 break
-    #             hash_md5.update(chunk)
-    #             hash_sha1.update(chunk)
-    #             hash_sha256.update(chunk)
-    #             size += len(chunk)
-    #     elif image_type == "raw":
-    #         with open(self.image_path, "rb") as f:
-    #             for chunk in iter(lambda: f.read(4096), b""):
-    #                 hash_md5.update(chunk)
-    #                 hash_sha1.update(chunk)
-    #                 hash_sha256.update(chunk)
-    #                 size += len(chunk)
-    #
-    #     return {
-    #         'md5': hash_md5.hexdigest(),
-    #         'sha1': hash_sha1.hexdigest(),
-    #         'sha256': hash_sha256.hexdigest(),
-    #         'size': size,
-    #         'path': self.image_path,
-    #     }
 
     def calculate_hashes(self):
         hash_md5 = hashlib.md5()
@@ -310,7 +268,6 @@ class ImageHandler:
                 return []
         return []
 
-
     def get_registry_hive(self, fs_info, hive_path):
         """Extract a registry hive from the given filesystem."""
         try:
@@ -377,8 +334,6 @@ class ImageHandler:
             print(f"Error parsing SOFTWARE hive: {e}")
             return "Error in parsing OS version"
 
-
-
     def read_unallocated_space(self, start_offset, end_offset):
         try:
             start_byte_offset = start_offset * SECTOR_SIZE
@@ -398,6 +353,76 @@ class ImageHandler:
         except Exception as e:
             print(f"Error reading unallocated space: {e}")
             return None
+
+    def open_image(self):
+        if self.get_image_type() == "ewf":
+            filenames = pyewf.glob(self.image_path)
+            ewf_handle = pyewf.handle()
+            ewf_handle.open(filenames)
+            return EWFImgInfo(ewf_handle)
+        else:
+            return pytsk3.Img_Info(self.image_path)
+
+
+    def list_files(self, extensions=None):
+        files_list = []
+
+        img_info = self.open_image()
+        try:
+            volume_info = pytsk3.Volume_Info(img_info)
+            for partition in volume_info:
+                if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
+                    self.process_partition(img_info, partition.start * SECTOR_SIZE, files_list, extensions)
+        except IOError:
+            self.process_partition(img_info, 0, files_list, extensions)
+
+        return files_list
+
+    def process_partition(self, img_info, offset, files_list, extensions):
+        fs_info = pytsk3.FS_Info(img_info, offset=offset)
+        self.recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions)
+
+    def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions):
+        for entry in directory:
+            if entry.info.name.name in [b".", b".."]:
+                continue
+
+            file_name = entry.info.name.name.decode("utf-8")
+            file_extension = os.path.splitext(file_name)[1].lower()
+
+            if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+                try:
+                    sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
+                    self.recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name), files_list,
+                                               extensions)
+                except IOError as e:
+                    print(f"Unable to open directory: {e}")
+            elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and \
+                    (extensions is None or file_extension in extensions or '' in extensions):
+                file_info = self.get_file_metadata(entry, parent_path)
+                files_list.append(file_info)
+
+    def get_file_metadata(self, entry, parent_path):
+        def safe_datetime(timestamp):
+            if timestamp is None:
+                return "N/A"
+            try:
+                return datetime.datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                return "N/A"
+
+        file_name = entry.info.name.name.decode("utf-8")
+        return {
+            "name": file_name,
+            "path": os.path.join(parent_path, file_name),
+            "size": entry.info.meta.size,
+            "accessed": safe_datetime(entry.info.meta.atime),
+            "modified": safe_datetime(entry.info.meta.mtime),
+            "created": safe_datetime(entry.info.meta.crtime) if hasattr(entry.info.meta, 'crtime') else "N/A",
+            "changed": safe_datetime(entry.info.meta.ctime)
+        }
+
+
 
     # def get_all_registry_hives(self, start_offset):
     #     fs_info = self.get_fs_info(start_offset)
