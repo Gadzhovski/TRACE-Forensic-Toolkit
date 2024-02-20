@@ -83,17 +83,12 @@ class MainWindow(QMainWindow):
         normal_screen_action.triggered.connect(self.showNormal)
         view_menu.addAction(normal_screen_action)
 
-
-
         tools_menu = QMenu('Tools', self)
 
         verify_image_action = QAction("Verify Image", self)
-        #verify_image_action.triggered.connect(lambda: VerificationW(self.image_handler).exec_())
         verify_image_action.triggered.connect(self.verify_image)
 
         tools_menu.addAction(verify_image_action)
-
-
 
         help_menu = QMenu('Help', self)
         help_menu.addAction("About")
@@ -105,10 +100,45 @@ class MainWindow(QMainWindow):
 
         self.setMenuBar(menu_bar)
 
-        main_toolbar = QToolBar('Main Toolbar', self)
-        main_toolbar.setToolTip("Main Toolbar")
+        self.main_toolbar = QToolBar('Main Toolbar', self)
+        self.main_toolbar.setToolTip("Main Toolbar")
 
-        self.addToolBar(Qt.TopToolBarArea, main_toolbar)
+        # add load image button to the toolbar
+        load_image_action = QAction(QIcon('Icons/icons8-evidence-48.png'), "Load Image", self)
+        load_image_action.triggered.connect(self.load_image_evidence)
+        self.main_toolbar.addAction(load_image_action)
+
+        # add remove image button to the toolbar
+        remove_image_action = QAction(QIcon('Icons/icons8-evidence-96.png'), "Remove Image", self)
+        remove_image_action.triggered.connect(self.remove_image_evidence)
+        self.main_toolbar.addAction(remove_image_action)
+
+        #add the separator
+        self.main_toolbar.addSeparator()
+
+        # Initialize and add the verify image action
+        self.verify_image_button = QAction(QIcon('Icons/icons8-verify-blue.png'), "Verify Image", self)
+        self.verify_image_button.triggered.connect(self.verify_image)
+        self.main_toolbar.addAction(self.verify_image_button)
+
+        #add the separator
+        self.main_toolbar.addSeparator()
+
+
+        #if os is windows, add the mount and unmount actions to the toolbar
+        if os.name == 'nt':
+            # Initialize and add the mount image action
+            self.mount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48.png'), "Mount Image", self)
+            self.mount_image_button.triggered.connect(self.image_manager.mount_image)
+            self.main_toolbar.addAction(self.mount_image_button)
+
+            # Initialize and add the unmount image action
+            self.unmount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48_red.png'), "Unmount Image", self)
+            self.unmount_image_button.triggered.connect(self.image_manager.dismount_image)
+            self.main_toolbar.addAction(self.unmount_image_button)
+
+
+        self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
         self.tree_viewer = QTreeWidget(self)
         self.tree_viewer.setIconSize(QSize(16, 16))
@@ -192,6 +222,11 @@ class MainWindow(QMainWindow):
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
 
+        # #add tab for displaying all files chosen by user
+        # self.all_files_widget = AllFilesWidget(self.image_handler)
+        # self.result_viewer.addTab(self.all_files_widget, 'All Files')
+
+
         self.viewer_tab = QTabWidget(self)
 
         self.hex_viewer = HexViewer(self)
@@ -231,8 +266,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
             return
 
+        # Show the verification widget (assuming it handles its own verification logic)
         self.verification_widget = VerificationWidget(self.image_handler)
         self.verification_widget.show()
+
+        # After verification, check if the image is verified and update the action icon accordingly
+        # This is a placeholder condition; adjust according to your actual verification logic
+        if self.verification_widget.is_verified:
+            self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-48_gren.png'))
+        else:
+            self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-blue.png'))
 
     # function to disable and enable all tabs
     def enable_tabs(self, state):
@@ -353,6 +396,10 @@ class MainWindow(QMainWindow):
         if not self.evidence_files:
             self.clear_ui()
             self.deleted_files_widget.clear()
+            # disable all tabs
+            self.enable_tabs(False)
+            # set the icon back to the original
+            self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-blue.png'))
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()
@@ -616,7 +663,6 @@ class MainWindow(QMainWindow):
         self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(modified)))
         self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
 
-
     def on_listing_table_item_clicked(self, item):
         row = item.row()
         column = item.column()
@@ -641,8 +687,6 @@ class MainWindow(QMainWindow):
 
         # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
-
-
 
     def open_listing_context_menu(self, position):
         # Get the selected item

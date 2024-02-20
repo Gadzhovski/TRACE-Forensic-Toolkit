@@ -27,7 +27,7 @@ class ImageManager(QThread):
                 subprocess.run(['tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe', '--dismount'], check=True)
                 self.operationCompleted.emit(True, f"Image was dismounted successfully.")
             except subprocess.CalledProcessError:
-                self.operationCompleted.emit(False, "Failed to dismount the image.")
+                self.operationCompleted.emit(False, "There is no image mounted.")
 
     def mount_image(self):
         """Attempt to mount an image after prompting the user to select one."""

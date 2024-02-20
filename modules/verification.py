@@ -17,84 +17,6 @@ class HashCalculationThread(QThread):
         self.hashCalculated.emit(hash_results)
 
 
-# class VerificationWidget(QWidget):
-#     def __init__(self, image_handler, parent=None):
-#         super().__init__(parent)
-#
-#         self.image_handler = image_handler
-#
-#         self.setWindowTitle("Trace - Image Verification")
-#         self.setWindowIcon(QIcon('Icons/logo.png'))
-#         self.setGeometry(100, 100, 600, 400)  # Adjust size for better layout
-#
-#         layout = QVBoxLayout(self)
-#         layout.setContentsMargins(20, 20, 20, 20)
-#
-#         # Software Information
-#         self.software_info = QLabel("Trace - Forensic Analysis Tool", self)
-#         self.software_info.setStyleSheet("font-size: 14pt; font-weight: bold; color: #333;")
-#         layout.addWidget(self.software_info)
-#
-#         # Subtitle
-#         self.subtitle = QLabel("Image Hash Verification", self)
-#         self.subtitle.setStyleSheet("font-size: 12pt; color: #666;")
-#         layout.addWidget(self.subtitle)
-#
-#         # Hash Display
-#         self.hash_label = QTextEdit("Calculating hashes...")
-#         self.hash_label.setReadOnly(True)
-#         self.hash_label.setStyleSheet("font-size: 10pt; padding: 10px; background-color: #f0f0f0; border: 1px solid #ccc;")
-#         layout.addWidget(self.hash_label)
-#
-#         # Progress Bar Container
-#         progress_bar_container = QHBoxLayout()
-#         progress_bar_container.addStretch()  # Center alignment
-#
-#         self.progress_bar = QProgressBar()
-#         self.progress_bar.setMaximum(0)  # Indeterminate mode
-#         self.progress_bar.setFixedWidth(400)
-#         self.progress_bar.setAlignment(Qt.AlignCenter)
-#         self.progress_bar.setStyleSheet("""
-#                    QProgressBar {
-#                        border: 2px solid grey;
-#                        border-radius: 5px;
-#                        text-align: center;
-#                    }
-#                    QProgressBar::chunk {
-#                        background-color: #05B8CC;
-#                        width: 20px;
-#                    }
-#                """)
-#         progress_bar_container.addWidget(self.progress_bar)
-#
-#         progress_bar_container.addStretch()  # Center alignment
-#
-#         layout.addLayout(progress_bar_container)
-#
-#         # Button Layout
-#         button_layout = QHBoxLayout()
-#
-#         self.save_button = QPushButton("Save to Text File", self)
-#         self.save_button.setFixedWidth(150)
-#         self.save_button.clicked.connect(self.save_hash)
-#         self.save_button.setEnabled(False)
-#         button_layout.addWidget(self.save_button)
-#
-#         self.copy_button = QPushButton("Copy", self)
-#         self.copy_button.setFixedWidth(150)
-#         self.copy_button.clicked.connect(self.copy_hash)
-#         self.copy_button.setEnabled(False)
-#         button_layout.addWidget(self.copy_button)
-#
-#         self.close_button = QPushButton("Close", self)
-#         self.close_button.setFixedWidth(150)
-#         self.close_button.clicked.connect(self.close)
-#         button_layout.addWidget(self.close_button)
-#
-#         layout.addLayout(button_layout)
-#
-#         self.start_hash_calculation()
-
 class VerificationWidget(QWidget):
     def __init__(self, image_handler, parent=None):
         super().__init__(parent)
@@ -215,3 +137,8 @@ class VerificationWidget(QWidget):
     def copy_hash(self):
         clipboard = QApplication.clipboard()
         clipboard.setText(self.hash_label.toPlainText())
+
+    def is_verified(self):
+        # return True if the hash is verified
+        return True if "Match" in self.hash_label.toPlainText() else False
+
