@@ -1,7 +1,9 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QVBoxLayout, QTableWidget, QTableWidgetItem, QWidget, QHeaderView, \
     QGroupBox, QCheckBox, QGridLayout, QScrollArea, QHBoxLayout, QLabel, QSizePolicy, QToolBar, QLineEdit
+
+from modules.hex_tab import HexViewer
 
 
 class SizeTableWidgetItem(QTableWidgetItem):
@@ -9,9 +11,10 @@ class SizeTableWidgetItem(QTableWidgetItem):
         return self.data(Qt.UserRole) < other.data(Qt.UserRole)
 
 
-class AllFilesWidget(QWidget):
+class FileSearchWidget(QWidget):
+
     def __init__(self, image_handler):
-        super(AllFilesWidget, self).__init__()
+        super(FileSearchWidget, self).__init__()
         self.image_handler = image_handler
         self.initUI()
 
@@ -27,11 +30,11 @@ class AllFilesWidget(QWidget):
 
         # Add icon and title to the toolbar
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QPixmap('Icons/icons8-drag-50.png'))  # Update the path to your icon
+        self.icon_label.setPixmap(QPixmap('Icons/icons8-piece-of-evidence-50.png'))  # Update the path to your icon
         self.icon_label.setFixedSize(48, 48)
         self.toolbar.addWidget(self.icon_label)
 
-        self.title_label = QLabel("All Files")
+        self.title_label = QLabel("File Search")
         self.title_label.setStyleSheet("""
             QLabel {
                 font-size: 20px;
@@ -42,8 +45,14 @@ class AllFilesWidget(QWidget):
         """)
         self.toolbar.addWidget(self.title_label)
 
+        #add spacer to the toolbar
+        spacer = QWidget()
+        spacer.setFixedWidth(50)
+        self.toolbar.addWidget(spacer)
+
+
         #add the checkboxes to the toolbar
-        self.extensionGroupBox = QGroupBox("Select file types")
+        self.extensionGroupBox = QGroupBox()
         self.extensionLayout = QGridLayout()  # Use QGridLayout for checkboxes
 
         # Define file types
@@ -66,8 +75,14 @@ class AllFilesWidget(QWidget):
         self.extensionGroupBox.setLayout(self.extensionLayout)
         self.toolbar.addWidget(self.extensionGroupBox)
 
+        # Add a spacer to the toolbar
+        spacer = QWidget()
+        spacer.setFixedWidth(50)
+        self.toolbar.addWidget(spacer)
+
         # add search bar to search for files by file name or only file extension using '*.jpg' for example
         self.searchBar = QLineEdit()
+        self.searchBar.setFixedWidth(250)
         self.searchBar.setPlaceholderText("Search for files by name or extension")
         self.searchBar.textChanged.connect(self.onSearchBarTextChanged)
         self.toolbar.addWidget(self.searchBar)
@@ -92,10 +107,20 @@ class AllFilesWidget(QWidget):
 
 
     def onSearchBarTextChanged(self):
-        searchText = self.searchBar.text()
-        if searchText.startswith('*'):
-            searchText = searchText[1:]  # Remove '*' if searching by file extension
-        self.list_files(searchText)
+        search_query = self.searchBar.text().strip()
+        if search_query:
+            # Call the search_files method with the search query
+            self.search_files(search_query)
+        else:
+            # If the search bar is empty, list files based on the selected checkboxes
+            self.onFileTypeSelected()
+
+    def search_files(self, search_query):
+        # Clear the table before displaying new results
+        self.clear()
+        files = self.image_handler.search_files(search_query)
+        for file in files:
+            self.populate_table_row(file)
 
 
     def onFileTypeSelected(self):
@@ -107,6 +132,28 @@ class AllFilesWidget(QWidget):
         # Otherwise, pass the list of selected extensions.
         self.list_files(None if '' in selectedExtensions else ([] if not selectedExtensions else selectedExtensions))
 
+
+    def create_table_item(self, value, user_role=None):
+        item = QTableWidgetItem(value)
+        if user_role is not None:
+            item.setData(Qt.UserRole, user_role)
+        return item
+
+    def insert_table_row(self):
+        row_pos = self.filesTable.rowCount()
+        self.filesTable.insertRow(row_pos)
+        return row_pos
+
+    def populate_table_row(self, file):
+        row_pos = self.insert_table_row()
+        self.filesTable.setItem(row_pos, 0, self.create_table_item(file['name']))
+        self.filesTable.setItem(row_pos, 1, self.create_table_item(file['path']))
+        self.filesTable.setItem(row_pos, 2, self.create_table_item(self.format_size(file['size']), file['size']))
+        self.filesTable.setItem(row_pos, 3, self.create_table_item(file['accessed']))
+        self.filesTable.setItem(row_pos, 4, self.create_table_item(file['modified']))
+        self.filesTable.setItem(row_pos, 5, self.create_table_item(file['created']))
+        self.filesTable.setItem(row_pos, 6, self.create_table_item(file['changed']))
+
     def list_files(self, extension):
         self.clear()
 
@@ -115,24 +162,7 @@ class AllFilesWidget(QWidget):
 
         files = self.image_handler.list_files(extension)
         for file in files:
-            row_pos = self.filesTable.rowCount()
-            self.filesTable.insertRow(row_pos)
-
-            name_item = QTableWidgetItem(file['name'])
-            self.filesTable.setItem(row_pos, 0, name_item)
-
-            path_item = QTableWidgetItem(file['path'])
-            self.filesTable.setItem(row_pos, 1, path_item)
-
-            # Create a QTableWidgetItem for size and set its data for sorting to be the byte value
-            size_item = SizeTableWidgetItem(self.format_size(file['size']))
-            size_item.setData(Qt.UserRole, file['size'])
-
-            self.filesTable.setItem(row_pos, 2, size_item)
-            self.filesTable.setItem(row_pos, 5, QTableWidgetItem(file['created']))
-            self.filesTable.setItem(row_pos, 3, QTableWidgetItem(file['accessed']))
-            self.filesTable.setItem(row_pos, 4, QTableWidgetItem(file['modified']))
-            self.filesTable.setItem(row_pos, 6, QTableWidgetItem(file['changed']))
+            self.populate_table_row(file)
 
         self.filesTable.setSortingEnabled(True)
 
@@ -148,3 +178,50 @@ class AllFilesWidget(QWidget):
     def clear(self):
         self.filesTable.setRowCount(0)
         self.filesTable.clearContents()
+
+
+    #function to pass the file content to hex viewer when a file is clicked
+
+
+###################
+
+    # def list_files(self, extension):
+    #     self.clear()
+    #
+    #     if extension is not None and not extension:  # If extension is an empty list, do not list any files
+    #         return
+    #
+    #     files = self.image_handler.list_files(extension)
+    #     for file in files:
+    #         row_pos = self.filesTable.rowCount()
+    #         self.filesTable.insertRow(row_pos)
+    #
+    #         name_item = QTableWidgetItem(file['name'])
+    #         self.filesTable.setItem(row_pos, 0, name_item)
+    #
+    #         path_item = QTableWidgetItem(file['path'])
+    #         self.filesTable.setItem(row_pos, 1, path_item)
+    #         size_item = SizeTableWidgetItem(self.format_size(file['size']))
+    #         size_item.setData(Qt.UserRole, file['size'])
+    #         self.filesTable.setItem(row_pos, 2, size_item)
+    #         self.filesTable.setItem(row_pos, 5, QTableWidgetItem(file['created']))
+    #         self.filesTable.setItem(row_pos, 3, QTableWidgetItem(file['accessed']))
+    #         self.filesTable.setItem(row_pos, 4, QTableWidgetItem(file['modified']))
+    #         self.filesTable.setItem(row_pos, 6, QTableWidgetItem(file['changed']))
+    #
+    #     self.filesTable.setSortingEnabled(True)
+
+
+    # Refactor the code that populates the table into a separate method
+    # def populate_table_row(self, file):
+    #     row_pos = self.filesTable.rowCount()
+    #     self.filesTable.insertRow(row_pos)
+    #     self.filesTable.setItem(row_pos, 0, QTableWidgetItem(file['name']))
+    #     self.filesTable.setItem(row_pos, 1, QTableWidgetItem(file['path']))
+    #     size_item = SizeTableWidgetItem(self.format_size(file['size']))
+    #     size_item.setData(Qt.UserRole, file['size'])
+    #     self.filesTable.setItem(row_pos, 2, size_item)
+    #     self.filesTable.setItem(row_pos, 3, QTableWidgetItem(file['accessed']))
+    #     self.filesTable.setItem(row_pos, 4, QTableWidgetItem(file['modified']))
+    #     self.filesTable.setItem(row_pos, 5, QTableWidgetItem(file['created']))
+    #     self.filesTable.setItem(row_pos, 6, QTableWidgetItem(file['changed']))

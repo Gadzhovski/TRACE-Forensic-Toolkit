@@ -20,7 +20,7 @@ from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
-from modules.all_files import AllFilesWidget
+from modules.all_files import FileSearchWidget
 
 SECTOR_SIZE = 512
 
@@ -37,6 +37,8 @@ class MainWindow(QMainWindow):
         self.image_manager = ImageManager()
         self.db_manager = DatabaseManager('new_database_mappings.db')
         self.current_selected_data = None
+
+
 
         self.evidence_files = []
 
@@ -224,8 +226,11 @@ class MainWindow(QMainWindow):
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
 
         # #add tab for displaying all files chosen by user
-        self.all_files_widget = AllFilesWidget(self.image_handler)
-        self.result_viewer.addTab(self.all_files_widget, 'All Files')
+        self.file_search_widget = FileSearchWidget(self.image_handler)
+        self.result_viewer.addTab(self.file_search_widget, 'File Search')
+
+
+
 
 
         self.viewer_tab = QTabWidget(self)
@@ -261,6 +266,11 @@ class MainWindow(QMainWindow):
 
         # disable all tabs before loading an image file
         self.enable_tabs(False)
+
+
+
+
+
 
     def verify_image(self):
         if self.image_handler is None:
@@ -317,7 +327,7 @@ class MainWindow(QMainWindow):
         self.current_image_path = None
         self.current_offset = None
         self.image_mounted = False
-        self.all_files_widget.clear()
+        self.file_search_widget.clear()
         self.evidence_files.clear()
         self.deleted_files_widget.clear()
 
@@ -364,7 +374,7 @@ class MainWindow(QMainWindow):
             # pass the image handler to the registry extractor widget
             self.registry_extractor_widget.image_handler = self.image_handler
 
-            self.all_files_widget.image_handler = self.image_handler
+            self.file_search_widget.image_handler = self.image_handler
 
             self.enable_tabs(True)
 
@@ -523,25 +533,25 @@ class MainWindow(QMainWindow):
         else:  # It's a directory
             self.populate_contents(item, data, data.get("inode_number"))
 
-    def get_file_content(self, inode_number, offset):
-        fs = self.image_handler.get_fs_info(offset)
-        if not fs:
-            return None, None
-
-        try:
-            file_obj = fs.open_meta(inode=inode_number)
-            if file_obj.info.meta.size == 0:
-                print("File has no content or is a special metafile!")
-                return None, None
-
-            content = file_obj.read_random(0, file_obj.info.meta.size)
-            metadata = file_obj.info.meta  # Collect the metadata
-
-            return content, metadata
-
-        except Exception as e:
-            print(f"Error reading file: {e}")
-            return None, None
+    # def get_file_content(self, inode_number, offset):
+    #     fs = self.image_handler.get_fs_info(offset)
+    #     if not fs:
+    #         return None, None
+    #
+    #     try:
+    #         file_obj = fs.open_meta(inode=inode_number)
+    #         if file_obj.info.meta.size == 0:
+    #             print("File has no content or is a special metafile!")
+    #             return None, None
+    #
+    #         content = file_obj.read_random(0, file_obj.info.meta.size)
+    #         metadata = file_obj.info.meta  # Collect the metadata
+    #
+    #         return content, metadata
+    #
+    #     except Exception as e:
+    #         print(f"Error reading file: {e}")
+    #         return None, None
 
     def on_item_clicked(self, item, column):
         self.clear_viewers()
@@ -564,7 +574,8 @@ class MainWindow(QMainWindow):
             self.populate_listing_table(entries, data["start_offset"])
         elif data.get("inode_number") is not None:
             # Handle files
-            file_content, metadata = self.get_file_content(data["inode_number"], data["start_offset"])
+            #file_content, metadata = self.get_file_content(data["inode_number"], data["start_offset"])
+            file_content, metadata = self.image_handler.get_file_content(data["inode_number"], data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata, data)
             else:
@@ -586,7 +597,8 @@ class MainWindow(QMainWindow):
         offset = self.current_selected_data.get("start_offset", self.current_offset)
 
         if inode_number:
-            file_content, metadata = self.get_file_content(inode_number, offset)
+            #file_content, metadata = self.get_file_content(inode_number, offset)
+            file_content, metadata = self.image_handler.get_file_content(inode_number, offset)
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata,
                                                      self.current_selected_data)  # Use the stored data
@@ -687,7 +699,8 @@ class MainWindow(QMainWindow):
             # self.parent_folder = data["start_offset"]
 
         else:
-            file_content, metadata = self.get_file_content(inode_number, data["start_offset"])
+            #file_content, metadata = self.get_file_content(inode_number, data["start_offset"])
+            file_content, metadata = self.image_handler.get_file_content(inode_number, data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata, data)
 
@@ -759,7 +772,8 @@ class MainWindow(QMainWindow):
                 self.export_file(entry["inode_number"], offset, new_dest_dir, entry_name)
 
     def export_file(self, inode_number, offset, dest_dir, file_name):
-        file_content, _ = self.get_file_content(inode_number, offset)
+        #file_content, _ = self.get_file_content(inode_number, offset)
+        file_content = self.image_handler.get_file_content(inode_number, offset)
         if file_content:
             file_path = os.path.join(dest_dir, file_name)
             with open(file_path, 'wb') as f:

@@ -379,10 +379,33 @@ class ImageHandler:
         return files_list
 
     def process_partition(self, img_info, offset, files_list, extensions):
-        fs_info = pytsk3.FS_Info(img_info, offset=offset)
-        self.recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions)
+        try:
+            fs_info = pytsk3.FS_Info(img_info, offset=offset)
+            self.recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions)
+        except IOError as e:
+            print(f"Unable to open filesystem at offset {offset}: {e}")
 
-    def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions):
+    # def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions):
+    #     for entry in directory:
+    #         if entry.info.name.name in [b".", b".."]:
+    #             continue
+    #
+    #         file_name = entry.info.name.name.decode("utf-8")
+    #         file_extension = os.path.splitext(file_name)[1].lower()
+    #
+    #         if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+    #             try:
+    #                 sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
+    #                 self.recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name), files_list,
+    #                                            extensions)
+    #             except IOError as e:
+    #                 print(f"Unable to open directory: {e}")
+    #         elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and \
+    #                 (extensions is None or file_extension in extensions or '' in extensions):
+    #             file_info = self.get_file_metadata(entry, parent_path)
+    #             files_list.append(file_info)
+
+    def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None):
         for entry in directory:
             if entry.info.name.name in [b".", b".."]:
                 continue
@@ -390,15 +413,28 @@ class ImageHandler:
             file_name = entry.info.name.name.decode("utf-8")
             file_extension = os.path.splitext(file_name)[1].lower()
 
+            if search_query:
+                # If there's a search query, check if the file name contains the query
+                # This can be adjusted to match the start of the file name or just an extension
+                if search_query.startswith('.'):
+                    # If the search query is an extension (e.g., '.jpg')
+                    query_matches = file_extension == search_query.lower()
+                else:
+                    # If the search query is a file name or part of it
+                    query_matches = search_query.lower() in file_name.lower()
+            else:
+                # If no search query, handle as before based on extensions
+                query_matches = extensions is None or file_extension in extensions or '' in extensions
+
             if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                 try:
                     sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
                     self.recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name), files_list,
-                                               extensions)
+                                               extensions, search_query)
                 except IOError as e:
                     print(f"Unable to open directory: {e}")
-            elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and \
-                    (extensions is None or file_extension in extensions or '' in extensions):
+
+            elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and query_matches:
                 file_info = self.get_file_metadata(entry, parent_path)
                 files_list.append(file_info)
 
@@ -421,6 +457,53 @@ class ImageHandler:
             "created": safe_datetime(entry.info.meta.crtime) if hasattr(entry.info.meta, 'crtime') else "N/A",
             "changed": safe_datetime(entry.info.meta.ctime)
         }
+
+
+
+    def search_files(self, search_query=None):
+        files_list = []
+        img_info = self.open_image()
+
+        try:
+            volume_info = pytsk3.Volume_Info(img_info)
+            for partition in volume_info:
+                if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
+                    self.process_partition_search(img_info, partition.start * SECTOR_SIZE, files_list, search_query)
+        except IOError:
+            # No volume information, attempt to read as a single filesystem
+            self.process_partition_search(img_info, 0, files_list, search_query)
+
+        return files_list
+
+    def process_partition_search(self, img_info, offset, files_list, search_query):
+        try:
+            fs_info = pytsk3.FS_Info(img_info, offset=offset)
+            self.recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query)
+        except IOError as e:
+            print(f"Unable to open file system for search: {e}")
+
+
+
+    def get_file_content(self, inode_number, offset):
+        fs = self.get_fs_info(offset)
+        if not fs:
+            return None, None
+
+        try:
+            file_obj = fs.open_meta(inode=inode_number)
+            if file_obj.info.meta.size == 0:
+                print("File has no content or is a special metafile!")
+                return None, None
+
+            content = file_obj.read_random(0, file_obj.info.meta.size)
+            metadata = file_obj.info.meta  # Collect the metadata
+
+            return content, metadata
+
+        except Exception as e:
+            print(f"Error reading file: {e}")
+            return None, None
+
 
 
 
