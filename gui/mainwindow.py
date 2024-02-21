@@ -38,8 +38,6 @@ class MainWindow(QMainWindow):
         self.db_manager = DatabaseManager('new_database_mappings.db')
         self.current_selected_data = None
 
-
-
         self.evidence_files = []
 
         self.image_manager.operationCompleted.connect(
@@ -116,7 +114,7 @@ class MainWindow(QMainWindow):
         remove_image_action.triggered.connect(self.remove_image_evidence)
         self.main_toolbar.addAction(remove_image_action)
 
-        #add the separator
+        # add the separator
         self.main_toolbar.addSeparator()
 
         # Initialize and add the verify image action
@@ -124,11 +122,10 @@ class MainWindow(QMainWindow):
         self.verify_image_button.triggered.connect(self.verify_image)
         self.main_toolbar.addAction(self.verify_image_button)
 
-        #add the separator
+        # add the separator
         self.main_toolbar.addSeparator()
 
-
-        #if os is windows, add the mount and unmount actions to the toolbar
+        # if os is windows, add the mount and unmount actions to the toolbar
         if os.name == 'nt':
             # Initialize and add the mount image action
             self.mount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48.png'), "Mount Image", self)
@@ -136,10 +133,10 @@ class MainWindow(QMainWindow):
             self.main_toolbar.addAction(self.mount_image_button)
 
             # Initialize and add the unmount image action
-            self.unmount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48_red.png'), "Unmount Image", self)
+            self.unmount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48_red.png'), "Unmount Image",
+                                                self)
             self.unmount_image_button.triggered.connect(self.image_manager.dismount_image)
             self.main_toolbar.addAction(self.unmount_image_button)
-
 
         self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
@@ -229,10 +226,6 @@ class MainWindow(QMainWindow):
         self.file_search_widget = FileSearchWidget(self.image_handler)
         self.result_viewer.addTab(self.file_search_widget, 'File Search')
 
-
-
-
-
         self.viewer_tab = QTabWidget(self)
 
         self.hex_viewer = HexViewer(self)
@@ -267,11 +260,6 @@ class MainWindow(QMainWindow):
         # disable all tabs before loading an image file
         self.enable_tabs(False)
 
-
-
-
-
-
     def verify_image(self):
         if self.image_handler is None:
             QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
@@ -281,14 +269,11 @@ class MainWindow(QMainWindow):
         self.verification_widget = VerificationWidget(self.image_handler)
         self.verification_widget.show()
 
-        # After verification, check if the image is verified and update the action icon accordingly
-        # This is a placeholder condition; adjust according to your actual verification logic
         if self.verification_widget.is_verified:
             self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-48_gren.png'))
         else:
             self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-blue.png'))
 
-    # function to disable and enable all tabs
     def enable_tabs(self, state):
         self.result_viewer.setEnabled(state)
         self.viewer_tab.setEnabled(state)
@@ -378,12 +363,6 @@ class MainWindow(QMainWindow):
 
             self.enable_tabs(True)
 
-            # partitions = self.image_handler.get_partitions() #og
-            # for part in partitions:
-            #     partition_desc = part[1].decode('utf-8')
-            #     if "Basic data partition" in partition_desc or "NTFS" in partition_desc or "FAT" in partition_desc or "exFAT" in partition_desc:
-            #         os_version = self.image_handler.get_windows_version(part[2])  # part[2] is the start offset
-
     def remove_image_evidence(self):
         if not self.evidence_files:
             QMessageBox.warning(self, "Remove Evidence", "No evidence is currently loaded.")
@@ -399,7 +378,6 @@ class MainWindow(QMainWindow):
             if selected_option == "Remove All":
                 # Remove all evidence files
                 self.tree_viewer.invisibleRootItem().takeChildren()  # Remove all children from the tree viewer
-                #self.evidence_files.clear()  # Clear evidence files list
                 self.clear_ui()  # Clear the UI
                 QMessageBox.information(self, "Remove Evidence", "All evidence files have been removed.")
             else:
@@ -411,7 +389,6 @@ class MainWindow(QMainWindow):
         # clear all tabs if there are no evidence files loaded
         if not self.evidence_files:
             self.clear_ui()
-            #self.deleted_files_widget.clear()
             # disable all tabs
             self.enable_tabs(False)
             # set the icon back to the original
@@ -441,7 +418,7 @@ class MainWindow(QMainWindow):
             else:
                 # Entire image is considered as unallocated space
                 size_in_bytes = self.image_handler.get_size()
-                readable_size = self.get_readable_size(size_in_bytes)
+                readable_size = self.image_handler.get_readable_size(size_in_bytes)
                 unallocated_item_text = f"Unallocated Space: Size: {readable_size}"
                 self.create_tree_item(root_item_tree, unallocated_item_text,
                                       self.db_manager.get_icon_path('file', 'unknown'),
@@ -452,7 +429,7 @@ class MainWindow(QMainWindow):
         for addr, desc, start, length in partitions:
             end = start + length - 1
             size_in_bytes = length * SECTOR_SIZE
-            readable_size = self.get_readable_size(size_in_bytes)
+            readable_size = self.image_handler.get_readable_size(size_in_bytes)
             fs_type = self.image_handler.get_fs_type(start)
             desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
             item_text = f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
@@ -533,26 +510,6 @@ class MainWindow(QMainWindow):
         else:  # It's a directory
             self.populate_contents(item, data, data.get("inode_number"))
 
-    # def get_file_content(self, inode_number, offset):
-    #     fs = self.image_handler.get_fs_info(offset)
-    #     if not fs:
-    #         return None, None
-    #
-    #     try:
-    #         file_obj = fs.open_meta(inode=inode_number)
-    #         if file_obj.info.meta.size == 0:
-    #             print("File has no content or is a special metafile!")
-    #             return None, None
-    #
-    #         content = file_obj.read_random(0, file_obj.info.meta.size)
-    #         metadata = file_obj.info.meta  # Collect the metadata
-    #
-    #         return content, metadata
-    #
-    #     except Exception as e:
-    #         print(f"Error reading file: {e}")
-    #         return None, None
-
     def on_item_clicked(self, item, column):
         self.clear_viewers()
 
@@ -563,7 +520,6 @@ class MainWindow(QMainWindow):
             # Handle unallocated space
             unallocated_space = self.image_handler.read_unallocated_space(data["start_offset"], data["end_offset"])
             if unallocated_space is not None:
-                # self.hex_viewer.display_hex_content(unallocated_space)
                 # use the update_viewer_with_file_content method to display the unallocated space for hex and text tabs
                 self.update_viewer_with_file_content(unallocated_space, None, data)
             else:
@@ -574,7 +530,6 @@ class MainWindow(QMainWindow):
             self.populate_listing_table(entries, data["start_offset"])
         elif data.get("inode_number") is not None:
             # Handle files
-            #file_content, metadata = self.get_file_content(data["inode_number"], data["start_offset"])
             file_content, metadata = self.image_handler.get_file_content(data["inode_number"], data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata, data)
@@ -597,7 +552,6 @@ class MainWindow(QMainWindow):
         offset = self.current_selected_data.get("start_offset", self.current_offset)
 
         if inode_number:
-            #file_content, metadata = self.get_file_content(inode_number, offset)
             file_content, metadata = self.image_handler.get_file_content(inode_number, offset)
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata,
@@ -611,7 +565,7 @@ class MainWindow(QMainWindow):
             self.text_viewer.display_text_content(file_content)
         elif index == 2:  # Application tab
             full_file_path = data.get("name", "")  # Retrieve the name from the data dictionary
-            self.display_application_content(file_content, full_file_path)
+            self.application_viewer.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
             self.metadata_viewer.display_metadata(metadata, data, file_content)
         elif index == 4:  # Exif Data tab
@@ -621,21 +575,6 @@ class MainWindow(QMainWindow):
             self.virus_total_api.set_file_hash(file_hash)
             self.virus_total_api.set_file_content(file_content, data.get("name", ""))
 
-    def display_application_content(self, file_content, full_file_path):
-        file_extension = os.path.splitext(full_file_path)[-1].lower()
-        file_type = "text"  # default
-
-        audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
-        video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
-
-        if file_extension in audio_extensions:
-            file_type = "audio"
-        elif file_extension in video_extensions:
-            file_type = "video"
-        # self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
-        # pass the file name to the application viewer
-        self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
-
     def populate_listing_table(self, entries, offset):
         self.listing_table.setRowCount(0)
 
@@ -644,7 +583,8 @@ class MainWindow(QMainWindow):
             inode_number = entry["inode_number"]
             description = "Directory" if entry["is_directory"] else "File"
             size_in_bytes = entry["size"] if "size" in entry else 0
-            readable_size = self.get_readable_size(size_in_bytes)
+            # readable_size = self.get_readable_size(size_in_bytes)
+            readable_size = self.image_handler.get_readable_size(size_in_bytes)
             created = entry["created"] if "created" in entry else None
             accessed = entry["accessed"] if "accessed" in entry else None
             modified = entry["modified"] if "modified" in entry else None
@@ -694,12 +634,7 @@ class MainWindow(QMainWindow):
         if data.get("type") == "directory":
             entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
             self.populate_listing_table(entries, data["start_offset"])
-
-            # self.current_selected_folder = data["name"]
-            # self.parent_folder = data["start_offset"]
-
         else:
-            #file_content, metadata = self.get_file_content(inode_number, data["start_offset"])
             file_content, metadata = self.image_handler.get_file_content(inode_number, data["start_offset"])
             if file_content:
                 self.update_viewer_with_file_content(file_content, metadata, data)
@@ -772,7 +707,6 @@ class MainWindow(QMainWindow):
                 self.export_file(entry["inode_number"], offset, new_dest_dir, entry_name)
 
     def export_file(self, inode_number, offset, dest_dir, file_name):
-        #file_content, _ = self.get_file_content(inode_number, offset)
         file_content = self.image_handler.get_file_content(inode_number, offset)
         if file_content:
             file_path = os.path.join(dest_dir, file_name)
@@ -832,11 +766,3 @@ class MainWindow(QMainWindow):
         layout.addWidget(buttonBox)
 
         dialog.exec_()
-
-    @staticmethod
-    def get_readable_size(size_in_bytes):
-        """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size_in_bytes < 1024.0:
-                return f"{size_in_bytes:.2f} {unit}"
-            size_in_bytes /= 1024.0

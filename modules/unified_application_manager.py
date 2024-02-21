@@ -71,6 +71,23 @@ class UnifiedViewer(QWidget):
                 # Make sure to display the correct viewer and pass the file path
             self.audio_video_viewer.display(temp_file_path)
 
+
+    def display_application_content(self, file_content, full_file_path):
+        file_extension = os.path.splitext(full_file_path)[-1].lower()
+        file_type = "text"  # default
+
+        audio_extensions = ['.mp3', '.wav', '.aac', '.ogg', '.m4a']
+        video_extensions = ['.mp4', '.mkv', '.flv', '.avi', '.mov']
+
+        if file_extension in audio_extensions:
+            file_type = "audio"
+        elif file_extension in video_extensions:
+            file_type = "video"
+        # self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
+        # pass the file name to the application viewer
+        self.load(file_content, file_type=file_type, file_extension=file_extension)
+
+
     def clear(self):
         self.pdf_viewer.clear()
         self.picture_viewer.clear()

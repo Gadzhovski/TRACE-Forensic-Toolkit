@@ -385,25 +385,6 @@ class ImageHandler:
         except IOError as e:
             print(f"Unable to open filesystem at offset {offset}: {e}")
 
-    # def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions):
-    #     for entry in directory:
-    #         if entry.info.name.name in [b".", b".."]:
-    #             continue
-    #
-    #         file_name = entry.info.name.name.decode("utf-8")
-    #         file_extension = os.path.splitext(file_name)[1].lower()
-    #
-    #         if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
-    #             try:
-    #                 sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
-    #                 self.recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name), files_list,
-    #                                            extensions)
-    #             except IOError as e:
-    #                 print(f"Unable to open directory: {e}")
-    #         elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and \
-    #                 (extensions is None or file_extension in extensions or '' in extensions):
-    #             file_info = self.get_file_metadata(entry, parent_path)
-    #             files_list.append(file_info)
 
     def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None):
         for entry in directory:
@@ -458,8 +439,6 @@ class ImageHandler:
             "changed": safe_datetime(entry.info.meta.ctime)
         }
 
-
-
     def search_files(self, search_query=None):
         files_list = []
         img_info = self.open_image()
@@ -483,7 +462,6 @@ class ImageHandler:
             print(f"Unable to open file system for search: {e}")
 
 
-
     def get_file_content(self, inode_number, offset):
         fs = self.get_fs_info(offset)
         if not fs:
@@ -504,62 +482,10 @@ class ImageHandler:
             print(f"Error reading file: {e}")
             return None, None
 
-
-
-
-    # def get_all_registry_hives(self, start_offset):
-    #     fs_info = self.get_fs_info(start_offset)
-    #     if not fs_info or self.get_fs_type(start_offset) != "NTFS":
-    #         return None
-    #
-    #     hive_paths = {
-    #         "SOFTWARE": "/Windows/System32/config/SOFTWARE",
-    #         # "SYSTEM": "/Windows/System32/config/SYSTEM",
-    #         # "SAM": "/Windows/System32/config/SAM",
-    #         # "SECURITY": "/Windows/System32/config/SECURITY"
-    #     }
-    #
-    #     hives_data = {}
-    #     for hive_name, hive_path in hive_paths.items():
-    #         hive_data = self.get_registry_hive(fs_info, hive_path)
-    #         if hive_data:
-    #             # Temporarily save the hive data to a file
-    #             with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
-    #                 temp_hive.write(hive_data)
-    #                 temp_hive_path = temp_hive.name
-    #
-    #             # Open the temporary file as a registry hive and get the root key
-    #             with open(temp_hive_path, "rb") as hive_file:
-    #                 reg = Registry.Registry(hive_file)
-    #                 hives_data[hive_name] = reg.root()  # Store the root key instead of the whole registry
-    #
-    #             os.remove(temp_hive_path)
-    #
-    #     return hives_data
-
-    # def load_image(self): #og
-    #     image_type = self.get_image_type()  # ewf or raw
-    #     if image_type == "ewf":
-    #         filenames = pyewf.glob(self.image_path)
-    #         ewf_handle = pyewf.handle()
-    #         ewf_handle.open(filenames)
-    #         self.img_info = EWFImgInfo(ewf_handle)  # instance of EWFImgInfo class to work with
-    #     elif image_type == "raw":
-    #         self.img_info = pytsk3.Img_Info(self.image_path)  # instance of Img_Info class to work with
-    #     else:
-    #         raise ValueError(f"Unsupported image type: {image_type}")
-    #     try:
-    #         self.volume_info = pytsk3.Volume_Info(self.img_info)  # instance of Volume_Info class to work with
-    #     except Exception as e:
-    #         self.volume_info = None
-    #         print(f"Error loading volume info: {e}")
-
-    # def get_partitions(self):  #og
-    #     """Retrieve partitions from the loaded image."""
-    #     partitions = []
-    #     if self.volume_info:
-    #         for partition in self.volume_info:
-    #             if not partition.desc:
-    #                 continue
-    #             partitions.append((partition.addr, partition.desc, partition.start, partition.len))
-    #     return partitions
+    @staticmethod
+    def get_readable_size(size_in_bytes):
+        """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_in_bytes < 1024.0:
+                return f"{size_in_bytes:.2f} {unit}"
+            size_in_bytes /= 1024.0
