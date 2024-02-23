@@ -453,6 +453,7 @@ class HexViewer(QWidget):
         with open(file_name, "w") as html_file:
             html_file.write(html_content)
 
+
     def parse_hex_line(self, line):
         if ":" not in line:
             return None, None, None

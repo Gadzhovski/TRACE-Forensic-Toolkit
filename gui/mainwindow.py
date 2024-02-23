@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView)
+                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QWidget)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
@@ -23,7 +23,6 @@ from modules.verification import VerificationWidget
 from modules.all_files import FileSearchWidget
 
 SECTOR_SIZE = 512
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -148,7 +147,7 @@ class MainWindow(QMainWindow):
         self.tree_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_viewer.customContextMenuRequested.connect(self.open_tree_context_menu)
 
-        tree_dock = QDockWidget('Tree Viewer', self)
+        tree_dock = QDockWidget('Tree View', self)
 
         tree_dock.setWidget(self.tree_viewer)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
@@ -157,6 +156,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.result_viewer)
 
         self.listing_table = QTableWidget()
+        # allow sorting
+        self.listing_table.setSortingEnabled(True)
 
         self.listing_table.setStyleSheet("""
             QTableWidget {
@@ -239,8 +240,9 @@ class MainWindow(QMainWindow):
         self.application_viewer.layout.setSpacing(0)
         self.viewer_tab.addTab(self.application_viewer, 'Application')
 
-        self.metadata_viewer = MetadataViewer(self)
-        self.viewer_tab.addTab(self.metadata_viewer.get_widget(), 'File Metadata')
+        self.metadata_viewer = MetadataViewer(self.image_handler)
+        self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
+
 
         self.exif_viewer = ExifViewer(self)
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
@@ -248,7 +250,7 @@ class MainWindow(QMainWindow):
         self.virus_total_api = VirusTotal()
         self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
 
-        self.viewer_dock = QDockWidget('Viewer', self)
+        self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setWidget(self.viewer_tab)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
 
@@ -354,12 +356,12 @@ class MainWindow(QMainWindow):
             self.evidence_files.append(image_path)
             self.current_image_path = image_path  # ensure this line is present
             self.load_partitions_into_tree(image_path)
+
+            # pass the image handler to the widgets
             self.deleted_files_widget.set_image_handler(self.image_handler)
-
-            # pass the image handler to the registry extractor widget
             self.registry_extractor_widget.image_handler = self.image_handler
-
             self.file_search_widget.image_handler = self.image_handler
+            self.metadata_viewer.image_handler = self.image_handler
 
             self.enable_tabs(True)
 
@@ -530,9 +532,9 @@ class MainWindow(QMainWindow):
             self.populate_listing_table(entries, data["start_offset"])
         elif data.get("inode_number") is not None:
             # Handle files
-            file_content, metadata = self.image_handler.get_file_content(data["inode_number"], data["start_offset"])
+            file_content, _ = self.image_handler.get_file_content(data["inode_number"], data["start_offset"])##################################
             if file_content:
-                self.update_viewer_with_file_content(file_content, metadata, data)
+                self.update_viewer_with_file_content(file_content, data)
             else:
                 print("Unable to read file content.")
         elif data.get("start_offset") is not None:
@@ -544,6 +546,7 @@ class MainWindow(QMainWindow):
 
         self.display_content_for_active_tab()
 
+
     def display_content_for_active_tab(self):
         if not self.current_selected_data:
             return
@@ -552,12 +555,11 @@ class MainWindow(QMainWindow):
         offset = self.current_selected_data.get("start_offset", self.current_offset)
 
         if inode_number:
-            file_content, metadata = self.image_handler.get_file_content(inode_number, offset)
+            file_content, _ = self.image_handler.get_file_content(inode_number, offset)
             if file_content:
-                self.update_viewer_with_file_content(file_content, metadata,
-                                                     self.current_selected_data)  # Use the stored data
+                self.update_viewer_with_file_content(file_content, self.current_selected_data)  # Use the stored data
 
-    def update_viewer_with_file_content(self, file_content, metadata, data):  # Add the data parameter here
+    def update_viewer_with_file_content(self, file_content, data):
         index = self.viewer_tab.currentIndex()
         if index == 0:  # Hex tab
             self.hex_viewer.display_hex_content(file_content)
@@ -567,7 +569,7 @@ class MainWindow(QMainWindow):
             full_file_path = data.get("name", "")  # Retrieve the name from the data dictionary
             self.application_viewer.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
-            self.metadata_viewer.display_metadata(metadata, data, file_content)
+            self.metadata_viewer.display_metadata(data)
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
@@ -637,10 +639,11 @@ class MainWindow(QMainWindow):
         else:
             file_content, metadata = self.image_handler.get_file_content(inode_number, data["start_offset"])
             if file_content:
-                self.update_viewer_with_file_content(file_content, metadata, data)
+                self.update_viewer_with_file_content(file_content, data)
 
         # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
+
 
     def open_listing_context_menu(self, position):
         # Get the selected item

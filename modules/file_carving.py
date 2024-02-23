@@ -1,10 +1,10 @@
 import datetime
 import io
 import os
-from concurrent.futures import ThreadPoolExecutor
-
 import olefile
 import xlrd
+
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, UnidentifiedImageError
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
@@ -12,10 +12,27 @@ from PySide6.QtCore import QSize, QUrl
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal, Slot
 from PySide6.QtGui import QIcon, QAction, QDesktopServices, QPixmap
-from PySide6.QtWidgets import QListWidget, QListWidgetItem, QStyle, QToolBar, QSizePolicy, QHBoxLayout, \
-    QCheckBox
+from PySide6.QtWidgets import QListWidget, QListWidgetItem, QToolBar, QSizePolicy, QHBoxLayout, \
+    QCheckBox, QHeaderView
 from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
+from moviepy.editor import VideoFileClip
+from pdf2image import convert_from_path
+
+
+class NumericTableWidgetItem(QTableWidgetItem):
+    def __lt__(self, other):
+        self_value = self.text().split()[0]  # Extract numeric part of the text
+        other_value = other.text().split()[0]  # Extract numeric part of the text
+        self_unit = self.text().split()[1]  # Extract unit part of the text
+        other_unit = other.text().split()[1]  # Extract unit part of the text
+        units = {'B': 0, 'KB': 1, 'MB': 2, 'GB': 3, 'TB': 4}
+
+        # Convert to bytes for comparison
+        self_bytes = float(self_value) * (1024 ** units[self_unit])
+        other_bytes = float(other_value) * (1024 ** units[other_unit])
+
+        return self_bytes < other_bytes
 
 
 class FileCarvingWidget(QWidget):
@@ -94,6 +111,11 @@ class FileCarvingWidget(QWidget):
         table_widget = QTableWidget()
 
         table_widget.setColumnCount(5)
+        table_widget.setSelectionBehavior(QTableWidget.SelectRows)
+        table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
+        table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        table_widget.setSortingEnabled(True)
+
         table_widget.setHorizontalHeaderLabels(['Name', 'Size', 'Type', 'Modification Date', 'File Path'])
         table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         table_widget.customContextMenuRequested.connect(self.open_context_menu)
@@ -104,14 +126,67 @@ class FileCarvingWidget(QWidget):
 
     def create_list_widget(self):
         list_widget = QListWidget()
+        # remove space between items
         list_widget.setViewMode(QListWidget.IconMode)
 
         list_widget.setIconSize(QSize(100, 100))
+        list_widget.setResizeMode(QListWidget.Adjust)
         list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         list_widget.customContextMenuRequested.connect(self.open_context_menu)
 
-        self.tab_widget.addTab(list_widget, "Thumbnails")
+        toolbar = QToolBar()
+
+        # Define actions
+        action_small_size = (QAction("Small Size", self))
+        action_small_size.setIcon(QIcon('Icons/icons8-small-icons-50.png'))
+
+        action_medium_size = (QAction("Medium Size", self))
+        action_medium_size.setIcon(QIcon('Icons/icons8-medium-icons-50.png'))
+
+        action_large_size = (QAction("Large Size", self))
+        action_large_size.setIcon(QIcon('Icons/icons8-large-icons-50.png'))
+
+        # Set icons
+
+        # Connect actions to new slot methods
+        action_small_size.triggered.connect(self.set_small_size)
+        action_medium_size.triggered.connect(self.set_medium_size)
+        action_large_size.triggered.connect(self.set_large_size)
+
+        # Add actions to the toolbar
+        toolbar.addAction(action_small_size)
+        toolbar.addAction(action_medium_size)
+        toolbar.addAction(action_large_size)
+
+        # Create a layout and add the toolbar and the list widget to it
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(toolbar)
+        layout.addWidget(list_widget)
+
+        # Create a new widget, set its layout and add it to the tab widget
+        widget = QWidget()
+        widget.setLayout(layout)
+        self.tab_widget.addTab(widget, "Thumbnails")
+
+        # self.tab_widget.addTab(list_widget, "Thumbnails")
         return list_widget
+
+    def set_icon_size(self, size):
+        self.list_widget.setIconSize(QSize(size, size))
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            item.setSizeHint(QSize(size + 20, size + 20))  # Provide some padding around the icon
+
+    def set_small_size(self):
+        self.set_icon_size(50)
+
+    def set_medium_size(self):
+        self.set_icon_size(100)
+
+    def set_large_size(self):
+        self.set_icon_size(200)
 
     def start_carving(self):
         self.start_button.setEnabled(False)
@@ -140,8 +215,26 @@ class FileCarvingWidget(QWidget):
         open_location_action = QAction("Open File Location")
         open_location_action.triggered.connect(self.open_file_location)
 
+        open_image_action = QAction("Open Image")
+        open_image_action.triggered.connect(self.open_image)
+
         menu.addAction(open_location_action)
+        menu.addAction(open_image_action)
         menu.exec_(self.table_widget.viewport().mapToGlobal(position))
+
+    def open_image(self):
+        if self.tab_widget.currentIndex() == 0:  # If the table tab is active
+            current_item = self.table_widget.currentItem()
+        else:  # If the thumbnail tab is active
+            current_item = self.list_widget.currentItem()
+
+        if current_item:
+            file_name = current_item.text()
+            for file_info in self.carved_files:
+                if file_info[0] == file_name:
+                    file_path = file_info[3]  # The file path is now at index 3
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
+                    break
 
     def open_file_location(self):
         current_item = self.list_widget.currentItem()
@@ -221,7 +314,7 @@ class FileCarvingWidget(QWidget):
             print(f"Unexpected error validating XLS file: {str(e)}")
             return False
 
-    def carve_pdf_files(self, chunk):
+    def carve_pdf_files(self, chunk, global_offset):
         pdf_start_signature = b'%PDF-'
         pdf_end_signature = b'%%EOF'
         offset = 0
@@ -239,9 +332,7 @@ class FileCarvingWidget(QWidget):
                 pdf_content = chunk[start_index:end_index]
 
                 if self.is_valid_file(pdf_content, 'pdf'):
-                    file_name = f"carved_{start_index}.pdf"
-                    file_path = os.path.join("carved_files", file_name)
-                    self.save_file(pdf_content, 'pdf', file_path)
+                    self.save_file(pdf_content, 'pdf', 'carved_files', start_index + global_offset)
 
                 # Update offset to search for the next PDF file after this EOF
                 offset = end_index
@@ -250,7 +341,7 @@ class FileCarvingWidget(QWidget):
                 # This simplistic approach may need refinement for handling files spanning chunks
                 offset = start_index + 1
 
-    def carve_wav_files(self, chunk):
+    def carve_wav_files(self, chunk, offset):
         wav_start_signature = b'RIFF'
         offset = 0
         while offset < len(chunk):
@@ -273,9 +364,8 @@ class FileCarvingWidget(QWidget):
                 offset = start_index + file_size
 
             if self.is_valid_file(wav_content, 'wav'):
-                file_name = f"carved_{offset + start_index}.wav"
-                file_path = os.path.join("carved_files", file_name)
-                self.save_file(wav_content, 'wav', file_path)
+
+                self.save_file(wav_content, 'wav', 'carved_files', start_index)
 
     def carve_mov_files(self, chunk, offset):
         mov_signatures = [
@@ -322,9 +412,10 @@ class FileCarvingWidget(QWidget):
             offset += atom_size
 
         if mov_file_found and mov_data:
-            file_name = f"carved_{mov_file_offset}.mov"
-            file_path = os.path.join("carved_files", file_name)
-            self.save_file(mov_data, 'mov', file_path)
+            # file_name = f"carved_{mov_file_offset}.mov"
+            # file_path = os.path.join("carved_files", file_name)
+            # self.save_file(mov_data, 'mov', file_path)
+            self.save_file(mov_data, 'mov', 'carved_files', mov_file_offset)
 
     def carve_xls_files(self, chunk, global_offset):
         xls_header = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
@@ -348,13 +439,12 @@ class FileCarvingWidget(QWidget):
             xls_data = chunk[start_index:end_index]
 
             if self.is_valid_file(xls_data, 'xls'):
-                file_name = f"carved_{global_offset + start_index}.xls"
-                file_path = os.path.join("carved_files", file_name)
-                self.save_file(xls_data, 'xls', file_path)
+
+                self.save_file(xls_data, 'xls', 'carved_files', start_index + global_offset)
 
             offset = end_index
 
-    def carve_jpg_files(self, chunk):
+    def carve_jpg_files(self, chunk, offset):
         jpg_start_signature = b'\xFF\xD8\xFF'
         jpg_end_signature = b'\xFF\xD9'
         offset = 0
@@ -369,15 +459,14 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid JPG file
                 if self.is_valid_file(jpg_content, 'jpg'):
-                    file_name = f"carved_{offset + start_index}.jpg"
-                    file_path = os.path.join("carved_files", file_name)
-                    self.save_file(jpg_content, 'jpg', file_path)
+
+                    self.save_file(jpg_content, 'jpg', 'carved_files', start_index)
 
                 offset = end_index + len(jpg_end_signature)
             else:
                 offset = start_index + 1  # Continue searching
 
-    def carve_gif_files(self, chunk):
+    def carve_gif_files(self, chunk, offset):
         gif_start_signature = b'\x47\x49\x46\x38'
         gif_end_signature = b'\x00\x3B'
         offset = 0
@@ -392,15 +481,14 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid GIF file
                 if self.is_valid_file(gif_content, 'gif'):
-                    file_name = f"carved_{offset + start_index}.gif"
-                    file_path = os.path.join("carved_files", file_name)
-                    self.save_file(gif_content, 'gif', file_path)
+
+                    self.save_file(gif_content, 'gif', 'carved_files', start_index)
 
                 offset = end_index + len(gif_end_signature)
             else:
                 offset = start_index + 1
 
-    def carve_png_files(self, chunk):
+    def carve_png_files(self, chunk, offset):
         png_start_signature = b'\x89\x50\x4E\x47\x0D\x0A\x1A\x0A'
         png_end_signature = b'\x49\x45\x4E\x44\xAE\x42\x60\x82'
         offset = 0
@@ -415,9 +503,8 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid PNG file
                 if self.is_valid_file(png_content, 'png'):
-                    file_name = f"carved_{offset + start_index}.png"
-                    file_path = os.path.join("carved_files", file_name)
-                    self.save_file(png_content, 'png', file_path)
+
+                    self.save_file(png_content, 'png', 'carved_files', start_index)
 
                 offset = end_index + len(png_end_signature)
             else:
@@ -443,54 +530,56 @@ class FileCarvingWidget(QWidget):
                 # Call the carve function for each selected file type
                 for file_type in selected_file_types:
                     if file_type == 'all':
-                        self.carve_wav_files(chunk)
+                        self.carve_wav_files(chunk, offset)
                         self.carve_mov_files(chunk, offset)
-                        self.carve_pdf_files(chunk)
+                        self.carve_pdf_files(chunk, offset)
                         self.carve_xls_files(chunk, offset)
-                        self.carve_jpg_files(chunk)
-                        self.carve_gif_files(chunk)
-                        self.carve_png_files(chunk)
+                        self.carve_jpg_files(chunk, offset)
+                        self.carve_gif_files(chunk, offset)
+                        self.carve_png_files(chunk, offset)
                     elif file_type == 'wav':
-                        self.carve_wav_files(chunk)
+                        self.carve_wav_files(chunk, offset)
                     elif file_type == 'mov':
                         self.carve_mov_files(chunk, offset)
                     elif file_type == 'pdf':
-                        self.carve_pdf_files(chunk)
+                        self.carve_pdf_files(chunk, offset)
                     elif file_type == 'xls':
                         self.carve_xls_files(chunk, offset)
                     elif file_type == 'jpg':
-                        self.carve_jpg_files(chunk)
+                        self.carve_jpg_files(chunk, offset)
                     elif file_type == 'gif':
-                        self.carve_gif_files(chunk)
+                        self.carve_gif_files(chunk, offset)
                     elif file_type == 'png':
-                        self.carve_png_files(chunk)
+                        self.carve_png_files(chunk, offset)
 
                 offset += chunk_size
         finally:
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
 
-    def save_file(self, file_content, file_type, file_path):
-        file_name = os.path.basename(file_path)
+    def save_file(self, file_content, file_type, file_path, offset):
+        # Use hex representation of the offset for a shorter name.
+        offset_hex = format(offset, 'x')
+        file_name = f"{offset_hex}.{file_type}"
+        file_path = os.path.join("carved_files", file_name)
+        with open(file_path, "wb") as f:
+            f.write(file_content)
 
-        # Check if file has already been carved and displayed
-        if file_name not in self.carved_file_names:
-            with open(file_path, "wb") as f:
-                f.write(file_content)
+        modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        file_size = str(len(file_content))
 
-            modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            file_size = str(len(file_content))
+        self.carved_files.append((file_name, file_size, file_type, file_path, modification_date))
+        self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
+        self.carved_file_names.add(file_name)
 
-            self.carved_files.append((file_name, file_size, file_type, file_path))
-            self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
-            self.carved_file_names.add(file_name)  # Add to the set of carved file names
 
     @Slot(str, str, str, str, str)
     def display_carved_file(self, name, size, type_, modification_date, file_path):
         row = self.table_widget.rowCount()
+        readable_size = self.image_handler.get_readable_size(int(size))
         self.table_widget.insertRow(row)
         self.table_widget.setItem(row, 0, QTableWidgetItem(name))
-        self.table_widget.setItem(row, 1, QTableWidgetItem(size))
+        self.table_widget.setItem(row, 1, NumericTableWidgetItem(readable_size))
         self.table_widget.setItem(row, 2, QTableWidgetItem(type_))
         self.table_widget.setItem(row, 3, QTableWidgetItem(modification_date))
         self.table_widget.setItem(row, 4, QTableWidgetItem(file_path))
@@ -498,16 +587,39 @@ class FileCarvingWidget(QWidget):
         self.table_widget.setColumnWidth(1, 100)
         self.table_widget.setColumnWidth(2, 90)
         self.table_widget.setColumnWidth(3, 150)
-        self.table_widget.setColumnWidth(4, 300)
+        self.table_widget.setColumnWidth(4, 317)
 
-        file_full_path = os.path.join("carved_files", name)
-        icon = QIcon(file_full_path) if os.path.exists(file_full_path) else self.style().standardIcon(
-            QStyle.SP_FileIcon)
-        item = QListWidgetItem(icon, name)
-        self.list_widget.addItem(item)
+        # Only proceed if the file type is one of the supported image or video formats
+        if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf']:
+            file_full_path = os.path.join("carved_files", name)
+            # Handle MOV and PDF thumbnails
+            if type_.lower() == 'mov':
+                # Extract a frame from the video as a thumbnail
+                clip = VideoFileClip(file_full_path)
+                file_full_path = file_full_path.replace('.mov', '.png')
+                clip.save_frame(file_full_path, t=0.5)  # save frame at 0.5 seconds
+            elif type_.lower() == 'pdf':
+                # Convert the first page of the PDF to a thumbnail
+                images = convert_from_path(file_full_path)
+                file_full_path = file_full_path.replace('.pdf', '.png')
+                images[0].save(file_full_path, 'PNG')
 
-        total_files = self.table_widget.rowCount()
-        # self.info_label.setText(f"Latest Carved File: {name}, Total Files: {total_files}")
+            # Create the QPixmap from the full path
+            pixmap = QPixmap(file_full_path)
+            # Scale the pixmap to the icon size while maintaining aspect ratio
+            pixmap = pixmap.scaled(QSize(150, 150), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon = QIcon(pixmap)
+
+            # Create a QListWidgetItem, set its icon, and provide a size hint to ensure the text is visible
+            item = QListWidgetItem(icon, name)
+            # Set a fixed size for the QListWidgetItem with some extra space for the text
+            item.setSizeHint(QSize(200, 200))  # Adjust the width as necessary to fit the text
+
+            # Set the item flags to not be movable and to be selectable
+            item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled & ~Qt.ItemIsDropEnabled)
+
+            # Add the QListWidgetItem to the list widget
+            self.list_widget.addItem(item)
 
     def clear(self):
         self.table_widget.setRowCount(0)

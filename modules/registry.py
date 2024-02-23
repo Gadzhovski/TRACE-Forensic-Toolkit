@@ -84,33 +84,14 @@ class RegistryExtractor(QWidget):
         self.tableWidget = QTableWidget()
 
         # set the header to be hidden
-        self.tableWidget.horizontalHeader().hide()
+        #self.tableWidget.horizontalHeader().hide()
         self.tableWidget.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tableWidget.setSelectionBehavior(QTableWidget.SelectRows)
         # Your existing setup code
         self.tableWidget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tableWidget.customContextMenuRequested.connect(self.onCustomContextMenuRequested)
 
         self.tableWidget.verticalHeader().setVisible(False)
-        self.tableWidget.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #d7d7d7;  /* Light border for subtle separation */
-                background-color: #ffffff;  /* White background for the sections */
-                gridline-color: #d7d7d7;  /* Light gridlines */
-            }
-            QTableWidget::item {
-                padding: 5px;  /* Padding inside each cell */
-            }
-            QTableWidget::item:selected {
-                background-color: #e7e7e7;  /* Light gray background for selected items */
-                color: black;  /* Set the text color to black */
-            }
-            QHeaderView::section {
-                background-color: #e7e7e7;  /* gray background for the headers */
-                color: black;  /* Set the text color to white */
-                padding: 5px;  /* Add some padding */
-                border: 1px solid #d7d7d7;  /* Light border for subtle separation */
-            }
-        """)
 
         self.detailsSplitter.addWidget(self.tableWidget)
 
@@ -204,11 +185,10 @@ class RegistryExtractor(QWidget):
 
         # Start with an HTML structure for styling
         details = '<html><head/><body>'
-        details += '<p style="font-size:16px; "><b>Metadata Information</b></p>'
+        details += '<p style="font-size:14px; font-family: Courier New; "><b>Metadata Information</b></p>'
 
-        # Iterate through metadata to add each item with styling
         for key, value in metadata.items():
-            details += f'<p style="margin-left: 10px;"><b>{key}:</b> {value}</p>'
+            details += f'<p style="margin-left: 10px; font-size: 12px; font-family: Courier New;"><b>{key}:</b> {value}</p>'
 
         details += '</body></html>'
 
@@ -229,6 +209,7 @@ class RegistryExtractor(QWidget):
             self.tableWidget.setItem(i, 2, QTableWidgetItem(str(value.value())))
 
         self.tableWidget.resizeColumnToContents(2)
+
 
     def display_values_in_table(self, values):
         self.setup_table(values)

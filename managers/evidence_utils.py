@@ -482,6 +482,7 @@ class ImageHandler:
             print(f"Error reading file: {e}")
             return None, None
 
+
     @staticmethod
     def get_readable_size(size_in_bytes):
         """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
