@@ -21,6 +21,7 @@ from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
 from modules.all_files import FileSearchWidget
+from modules.converter import ConversionWidget
 
 SECTOR_SIZE = 512
 
@@ -87,8 +88,17 @@ class MainWindow(QMainWindow):
 
         verify_image_action = QAction("Verify Image", self)
         verify_image_action.triggered.connect(self.verify_image)
-
         tools_menu.addAction(verify_image_action)
+
+        # # Inside your MainWindow.__init__ or setup method where you define your menu actions
+        # conversion_action = QAction("Convert E01 to DD/RAW", self)
+        # conversion_action.triggered.connect(lambda: ConversionWidget().exec_())
+        # tools_menu.addAction(conversion_action)
+
+        conversion_action = QAction("Convert E01 to DD/RAW", self)
+        conversion_action.triggered.connect(self.show_conversion_widget)
+        tools_menu.addAction(conversion_action)
+
 
         help_menu = QMenu('Help', self)
         help_menu.addAction("About")
@@ -261,6 +271,13 @@ class MainWindow(QMainWindow):
 
         # disable all tabs before loading an image file
         self.enable_tabs(False)
+
+    # Inside your MainWindow class
+    def show_conversion_widget(self):
+        self.conversion_widget = ConversionWidget()
+        self.conversion_widget.show()
+
+
 
     def verify_image(self):
         if self.image_handler is None:
@@ -523,7 +540,8 @@ class MainWindow(QMainWindow):
             unallocated_space = self.image_handler.read_unallocated_space(data["start_offset"], data["end_offset"])
             if unallocated_space is not None:
                 # use the update_viewer_with_file_content method to display the unallocated space for hex and text tabs
-                self.update_viewer_with_file_content(unallocated_space, None, data)
+                #self.update_viewer_with_file_content(unallocated_space, None, data)
+                self.update_viewer_with_file_content(unallocated_space, data)######
             else:
                 print("Invalid size for unallocated space or unable to read.")
         elif data.get("type") == "directory":
@@ -558,6 +576,8 @@ class MainWindow(QMainWindow):
             file_content, _ = self.image_handler.get_file_content(inode_number, offset)
             if file_content:
                 self.update_viewer_with_file_content(file_content, self.current_selected_data)  # Use the stored data
+
+
 
     def update_viewer_with_file_content(self, file_content, data):
         index = self.viewer_tab.currentIndex()

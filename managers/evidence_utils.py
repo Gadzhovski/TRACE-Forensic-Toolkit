@@ -436,7 +436,8 @@ class ImageHandler:
             "accessed": safe_datetime(entry.info.meta.atime),
             "modified": safe_datetime(entry.info.meta.mtime),
             "created": safe_datetime(entry.info.meta.crtime) if hasattr(entry.info.meta, 'crtime') else "N/A",
-            "changed": safe_datetime(entry.info.meta.ctime)
+            "changed": safe_datetime(entry.info.meta.ctime),
+            "inode_item": str(entry.info.meta.addr),
         }
 
     def search_files(self, search_query=None):
