@@ -3,6 +3,7 @@ import io
 import os
 import olefile
 import xlrd
+import struct
 
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image, UnidentifiedImageError
@@ -552,6 +553,7 @@ class FileCarvingWidget(QWidget):
                     elif file_type == 'png':
                         self.carve_png_files(chunk, offset)
 
+
                 offset += chunk_size
         finally:
             self.start_button.setEnabled(True)
@@ -631,3 +633,4 @@ class FileCarvingWidget(QWidget):
     def clear_ui(self):
         self.table_widget.setRowCount(0)
         self.list_widget.clear()
+

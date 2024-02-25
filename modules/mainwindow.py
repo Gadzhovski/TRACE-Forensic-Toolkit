@@ -21,7 +21,7 @@ from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
 from modules.all_files import FileSearchWidget
-from modules.converter import ConversionWidget
+from modules.converter import Main
 
 SECTOR_SIZE = 512
 
@@ -89,11 +89,6 @@ class MainWindow(QMainWindow):
         verify_image_action = QAction("Verify Image", self)
         verify_image_action.triggered.connect(self.verify_image)
         tools_menu.addAction(verify_image_action)
-
-        # # Inside your MainWindow.__init__ or setup method where you define your menu actions
-        # conversion_action = QAction("Convert E01 to DD/RAW", self)
-        # conversion_action.triggered.connect(lambda: ConversionWidget().exec_())
-        # tools_menu.addAction(conversion_action)
 
         conversion_action = QAction("Convert E01 to DD/RAW", self)
         conversion_action.triggered.connect(self.show_conversion_widget)
@@ -274,9 +269,8 @@ class MainWindow(QMainWindow):
 
     # Inside your MainWindow class
     def show_conversion_widget(self):
-        self.conversion_widget = ConversionWidget()
-        self.conversion_widget.show()
-
+        self.select_dialog = Main()
+        self.select_dialog.show()
 
 
     def verify_image(self):
