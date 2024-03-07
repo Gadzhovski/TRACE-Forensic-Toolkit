@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from managers.image_manager import ImageManager
-from modules.about_tab import AboutDialog
+from modules.about import AboutDialog
 from modules.exif_tab import ExifViewer
 from modules.file_carving import FileCarvingWidget
 from modules.hex_tab import HexViewer
@@ -20,7 +20,7 @@ from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
-from modules.all_files import FileSearchWidget
+from modules.list_files import FileSearchWidget
 from modules.converter import Main
 
 SECTOR_SIZE = 512
