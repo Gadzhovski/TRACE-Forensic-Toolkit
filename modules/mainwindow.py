@@ -22,6 +22,7 @@ from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
 from modules.list_files import FileSearchWidget
 from modules.converter import Main
+from modules.veriphone_api import VeriphoneWidget
 
 SECTOR_SIZE = 512
 
@@ -254,6 +255,9 @@ class MainWindow(QMainWindow):
 
         self.virus_total_api = VirusTotal()
         self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
+
+        self.veriphone_api = VeriphoneWidget()
+        self.viewer_tab.addTab(self.veriphone_api, 'Veriphone API')
 
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setWidget(self.viewer_tab)
