@@ -366,8 +366,7 @@ class HexViewer(QWidget):
         font = QFont("Courier")
         font.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         self.hex_table.setFont(font)
-        self.hex_table.setColumnCount(18)
-        # self.hex_table.horizontalHeader().setStyleSheet("QHeaderView::section { color: green; }")
+        self.hex_table.setColumnCount(18)  # 16 bytes + 1 address + 1 ASCII
         self.hex_table.horizontalHeader().setStyleSheet("""
             QHeaderView::section {
             border-radius: 2px;

@@ -53,9 +53,9 @@ class ImageManager(QThread):
         self.image_path = os.path.normpath(image_path)
         self.file_name = os.path.basename(self.image_path)
         self.operation = 'mount'
-        self.start()  # This will invoke the run method
+        self.start()
 
     def dismount_image(self):
         """Attempt to dismount the currently mounted image."""
         self.operation = 'dismount'
-        self.start()  # This will invoke the run method
+        self.start()

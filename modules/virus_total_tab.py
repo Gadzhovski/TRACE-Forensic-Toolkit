@@ -211,7 +211,7 @@ class VirusTotal(QWidget):
         current_time = time()
         if current_time - self.last_request_time < 60:
             self.requests_made_last_minute += 1
-            if self.requests_made_last_minute > 3:  # Adjusted based on your requirement
+            if self.requests_made_last_minute > 3:
                 # Inform the user about the rate limit with enhanced formatting
                 self.info_text_edit.setHtml(
                     '<div style="text-align: center; padding: 20px;">'

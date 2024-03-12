@@ -224,7 +224,6 @@ class RegistryExtractor(QWidget):
 
         elif isinstance(registry_object, RegistryValue):
             # If a value is clicked, you might want to do something specific
-            # For this example, let's clear the table and show just this value
             self.setup_table([registry_object])
 
     # clear the window

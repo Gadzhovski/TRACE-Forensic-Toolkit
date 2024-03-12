@@ -6,7 +6,7 @@ import pyewf
 import pytsk3
 import tempfile
 
-SECTOR_SIZE = 512  # 512 bytes
+SECTOR_SIZE = 512  # 512 bytes per sector
 
 
 # Class to handle EWF images
@@ -71,6 +71,7 @@ class ImageHandler:
             raise ValueError(f"Unsupported image type: {extension}")
 
     def calculate_hashes(self):
+        """Calculate the MD5, SHA1, and SHA256 hashes for the image."""
         hash_md5 = hashlib.md5()
         hash_sha1 = hashlib.sha1()
         hash_sha256 = hashlib.sha256()
@@ -118,11 +119,10 @@ class ImageHandler:
             'stored_sha1': stored_sha1
         }
 
-        # Optionally, you can add logic here to compare the computed and stored hashes
-
         return hashes
 
     def load_image(self):
+        """Load the image and retrieve volume and filesystem information."""
         image_type = self.get_image_type()
         if image_type == "ewf":
             filenames = pyewf.glob(self.image_path)
@@ -164,10 +164,10 @@ class ImageHandler:
                 partitions.append((partition.addr, partition.desc, partition.start, partition.len))
         elif self.is_wiped():
             # For a wiped image with no partitions, return a placeholder for unallocated space
-            # This is a simplified representation. You might need to adjust based on how you handle sizes and offsets.
+            # This is a simplified representation.
             # total_size = self.get_size()
             # partitions.append((0, "Unallocated Space", 0, total_size // SECTOR_SIZE))
-            # dont do nothing
+            # don't do nothing
             pass
         return partitions
 
@@ -396,7 +396,6 @@ class ImageHandler:
 
             if search_query:
                 # If there's a search query, check if the file name contains the query
-                # This can be adjusted to match the start of the file name or just an extension
                 if search_query.startswith('.'):
                     # If the search query is an extension (e.g., '.jpg')
                     query_matches = file_extension == search_query.lower()

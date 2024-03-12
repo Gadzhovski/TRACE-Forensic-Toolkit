@@ -285,7 +285,6 @@ class FileCarvingWidget(QWidget):
             elif file_type == 'mov':
                 return True  # For now, we'll assume all MOV files are valid
             else:
-                # For file types not specifically validated, you might choose to return True or implement additional checks
                 return True
             return True
         except (IOError, UnidentifiedImageError, PdfReadError, ValueError) as e:
@@ -339,7 +338,6 @@ class FileCarvingWidget(QWidget):
                 offset = end_index
             else:
                 # If we don't find an EOF, move to the next byte and try again
-                # This simplistic approach may need refinement for handling files spanning chunks
                 offset = start_index + 1
 
     def carve_wav_files(self, chunk, offset):
