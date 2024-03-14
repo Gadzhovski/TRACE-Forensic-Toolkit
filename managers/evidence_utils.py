@@ -63,7 +63,7 @@ class ImageHandler:
         extension = extension.lower()
 
         ewf = [".e01", ".s01", ".l01"]
-        raw = [".raw", ".img", ".dd", ".iso"]
+        raw = [".raw", ".img", ".dd", ".iso", ".ad1"]
 
         if extension in ewf:
             return "ewf"

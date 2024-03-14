@@ -53,7 +53,8 @@ class MainWindow(QMainWindow):
 
     def initialize_ui(self):
         self.setWindowTitle('Trace 1.0.0')
-        self.setWindowIcon(QIcon('Icons/logo.png'))
+        self.setWindowIcon(QIcon('Icons/logo_prev_ui.png'))
+
 
         if os.name == 'nt':
             import ctypes
@@ -374,7 +375,7 @@ class MainWindow(QMainWindow):
     def load_image_evidence(self):
         """Open an image."""
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "",
-                                                    "Supported Image Files (*.e01 *.s01 *.l01 *.raw *.img *.dd *.iso)")
+                                                    "Supported Image Files (*.e01 *.s01 *.l01 *.raw *.img *.dd *.iso *.ad1)")
         if image_path:
             image_path = os.path.normpath(image_path)
             self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
