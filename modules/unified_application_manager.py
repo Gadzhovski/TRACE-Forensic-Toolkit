@@ -1,3 +1,6 @@
+# Description: This file contains the implementation of the UnifiedViewer class, which is a QWidget that contains three different viewers: PDFViewer, PictureViewer, and AudioVideoViewer. The UnifiedViewer class is responsible for displaying the appropriate viewer based on the file type and content passed to it.
+
+
 import tempfile
 from ctypes import cast, POINTER
 

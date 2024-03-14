@@ -1,3 +1,5 @@
+# Description: This file contains the implementation of the RegistryExtractor class, which is a QWidget that
+
 import os
 import tempfile
 

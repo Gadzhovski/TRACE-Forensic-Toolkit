@@ -1,3 +1,5 @@
+#Description: This file contains the ImageManager class, which is a subclass of QThread. This class is responsible for mounting and dismounting disk images using Arsenal Image Mounter. It also emits signals to indicate the completion of an operation and to show messages to the user.
+
 import os
 import subprocess
 from PySide6.QtCore import QThread, Signal

@@ -96,6 +96,11 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(conversion_action)
 
 
+        veriphone_api_action = QAction("Veriphone API", self)
+        veriphone_api_action.triggered.connect(self.show_veriphone_widget)
+        tools_menu.addAction(veriphone_api_action)
+
+
         help_menu = QMenu('Help', self)
         help_menu.addAction("About")
         help_menu.triggered.connect(lambda: AboutDialog(self).exec_())
@@ -256,8 +261,8 @@ class MainWindow(QMainWindow):
         self.virus_total_api = VirusTotal()
         self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
 
-        self.veriphone_api = VeriphoneWidget()
-        self.viewer_tab.addTab(self.veriphone_api, 'Veriphone API')
+        # self.veriphone_api = VeriphoneWidget()
+        # self.viewer_tab.addTab(self.veriphone_api, 'Veriphone API')
 
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setWidget(self.viewer_tab)
@@ -271,11 +276,16 @@ class MainWindow(QMainWindow):
         # disable all tabs before loading an image file
         self.enable_tabs(False)
 
-    # Inside your MainWindow class
+
     def show_conversion_widget(self):
+        # Show the conversion widget
         self.select_dialog = Main()
         self.select_dialog.show()
 
+    def show_veriphone_widget(self):
+        # Show the Veriphone API widget
+        self.veriphone_widget = VeriphoneWidget()
+        self.veriphone_widget.show()
 
     def verify_image(self):
         if self.image_handler is None:
@@ -787,3 +797,5 @@ class MainWindow(QMainWindow):
         layout.addWidget(buttonBox)
 
         dialog.exec_()
+
+

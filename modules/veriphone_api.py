@@ -1,7 +1,8 @@
+
 import requests
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTextBrowser, QLineEdit, QLabel, QComboBox, QToolBar,
+from PySide6.QtGui import QPixmap, QIcon
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTextBrowser, QLineEdit, QLabel, QToolBar,
                                QSizePolicy)
 
 
@@ -16,6 +17,15 @@ class VeriphoneWidget(QWidget):
         self.layout.setSpacing(0)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
+        # set widget size but make it resizable
+        self.setFixedSize(600, 400)
+
+        # set window title
+        self.setWindowTitle("Veriphone Phone Number Verification")
+
+        # add icon to the window
+        self.setWindowIcon(QIcon('Icons/logo.png'))
+
         # Toolbar setup
         self.toolbar = QToolBar("Veriphone Toolbar", self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
@@ -25,24 +35,11 @@ class VeriphoneWidget(QWidget):
         # Phone input field
         self.phone_input = QLineEdit(self)
         # size of the input field
-        self.phone_input.setFixedSize(200, 30)
-        self.phone_input.setPlaceholderText("Enter phone number")
+        self.phone_input.setFixedSize(300, 30)
+        self.phone_input.setPlaceholderText("Enter phone number with country code")
         self.toolbar.addWidget(self.phone_input)
-
-        # spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(10, 10)
-        self.toolbar.addWidget(spacer)
-
-        # Default country combo box
-        self.default_country_combo = QComboBox(self)
-        self.default_country_combo.addItem("Auto", "")
-        # Example countries, add more as needed
-        self.default_country_combo.addItem("United States", "US")
-        self.default_country_combo.addItem("Canada", "CA")
-        self.default_country_combo.addItem("Germany", "DE")
-        self.toolbar.addWidget(QLabel("Country:"))
-        self.toolbar.addWidget(self.default_country_combo)
+        # Connect returnPressed signal to verify_phone_number method
+        self.phone_input.returnPressed.connect(self.verify_phone_number)
 
         # spacer
         spacer = QWidget(self)
@@ -73,21 +70,18 @@ class VeriphoneWidget(QWidget):
 
     def verify_phone_number(self):
         phone_number = self.phone_input.text()
-        default_country_code = self.default_country_combo.currentData()
-        self.update_veriphone_info(phone_number, default_country_code)
+        self.update_veriphone_info(phone_number)
 
-    def update_veriphone_info(self, phone_number, default_country):
-        data = self.verify_phone_with_veriphone(phone_number, default_country)
+    def update_veriphone_info(self, phone_number):
+        data = self.verify_phone_with_veriphone(phone_number)
         if data.get('status') == 'success':
             info_text = self.format_data_as_html(data)
             self.info_text_edit.setHtml(info_text)
         else:
             self.info_text_edit.setText("Failed to fetch data or phone number is invalid.")
 
-    def verify_phone_with_veriphone(self, phone_number, default_country):
+    def verify_phone_with_veriphone(self, phone_number):
         url = f"https://api.veriphone.io/v2/verify?phone={phone_number}&key={self.api_key}"
-        if default_country:
-            url += f"&default_country={default_country}"
         response = requests.get(url)
         if response.status_code == 200:
             return response.json()

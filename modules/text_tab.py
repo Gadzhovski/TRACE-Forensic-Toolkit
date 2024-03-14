@@ -1,3 +1,5 @@
+# This file contains the implementation of the TextViewerManager and TextViewer classes.
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QSizePolicy, QComboBox, QLabel, \
     QMessageBox
 from PySide6.QtGui import QAction, QIcon, QTextCursor, QTextCharFormat, QColor

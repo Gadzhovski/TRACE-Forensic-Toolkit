@@ -1,3 +1,5 @@
+# Description: This file contains the VirusTotal class which is a QWidget that contains the VirusTotal tab.
+
 import io
 import zipfile
 from datetime import date

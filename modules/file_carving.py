@@ -1,6 +1,9 @@
+
 import datetime
 import io
 import os
+
+
 import olefile
 import xlrd
 import struct
@@ -201,11 +204,13 @@ class FileCarvingWidget(QWidget):
                                checkbox.isChecked()]
         self.executor.submit(self.carve_files, selected_file_types)
 
+
     def stop_carving(self):
-        # Code to stop the carving process...
         self.executor.shutdown(wait=True)  # Properly shutdown the executor
         self.start_button.setEnabled(True)  # Re-enable the start button
         self.stop_button.setEnabled(False)  # Disable the stop button
+
+
 
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler

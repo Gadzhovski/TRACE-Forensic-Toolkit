@@ -1,3 +1,5 @@
+# Description: This file contains the MetadataViewer class, which is a QWidget that displays metadata for a file.
+
 import os
 import datetime
 from PySide6.QtWidgets import QTextEdit, QSizePolicy, QWidget, QVBoxLayout
