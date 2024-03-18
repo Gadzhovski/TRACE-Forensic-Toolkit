@@ -372,10 +372,57 @@ class MainWindow(QMainWindow):
         else:
             event.ignore()
 
+    # OG
+    # def load_image_evidence(self):
+    #     """Open an image."""
+    #     image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "",
+    #                                                 "Supported Image Files (*.e01 *.s01 *.l01 *.raw *.img *.dd *.iso *.ad1)")
+    #     if image_path:
+    #         image_path = os.path.normpath(image_path)
+    #         self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
+    #         self.evidence_files.append(image_path)
+    #         self.current_image_path = image_path  # ensure this line is present
+    #         self.load_partitions_into_tree(image_path)
+
+    #         # pass the image handler to the widgets
+    #         self.deleted_files_widget.set_image_handler(self.image_handler)
+    #         self.registry_extractor_widget.image_handler = self.image_handler
+    #         self.file_search_widget.image_handler = self.image_handler
+    #         self.metadata_viewer.image_handler = self.image_handler
+
+    #         self.enable_tabs(True)
+
+    # all files for linux
+    # def load_image_evidence(self):
+    #     """Open an image."""
+    #     image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "")
+    #     if image_path:
+    #         image_path = os.path.normpath(image_path)
+    #         self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
+    #         self.evidence_files.append(image_path)
+    #         self.current_image_path = image_path  # ensure this line is present
+    #         self.load_partitions_into_tree(image_path)
+
+    #         # pass the image handler to the widgets
+    #         self.deleted_files_widget.set_image_handler(self.image_handler)
+    #         self.registry_extractor_widget.image_handler = self.image_handler
+    #         self.file_search_widget.image_handler = self.image_handler
+    #         self.metadata_viewer.image_handler = self.image_handler
+
+    #         self.enable_tabs(True)
+
     def load_image_evidence(self):
-        """Open an image."""
-        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "",
-                                                    "Supported Image Files (*.e01 *.s01 *.l01 *.raw *.img *.dd *.iso *.ad1)")
+        """Open an image with a specific filter on Kali Linux."""
+        # Define the supported image file extensions, including both lowercase and uppercase variants
+        supported_image_extensions = ["*.e01", "*.E01", "*.s01", "*.S01", "*.l01", "*.L01", "*.raw", "*.RAW",
+                                      "*.img", "*.IMG", "*.dd", "*.DD", "*.iso", "*.ISO", "*.ad1", "*.AD1"]
+
+        # Construct the file filter string with both uppercase and lowercase extensions
+        file_filter = "Supported Image Files ({})".format(" ".join(supported_image_extensions))
+
+        # Open file dialog with the specified file filter
+        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", file_filter)
+
         if image_path:
             image_path = os.path.normpath(image_path)
             self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
@@ -383,7 +430,7 @@ class MainWindow(QMainWindow):
             self.current_image_path = image_path  # ensure this line is present
             self.load_partitions_into_tree(image_path)
 
-            # pass the image handler to the widgets
+            # Pass the image handler to the widgets
             self.deleted_files_widget.set_image_handler(self.image_handler)
             self.registry_extractor_widget.image_handler = self.image_handler
             self.file_search_widget.image_handler = self.image_handler
