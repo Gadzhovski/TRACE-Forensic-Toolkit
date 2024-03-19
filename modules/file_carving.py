@@ -1,14 +1,10 @@
-
 import datetime
 import io
 import os
-
-
-import olefile
-import xlrd
 import struct
-
 from concurrent.futures import ThreadPoolExecutor
+
+import cv2
 from PIL import Image, UnidentifiedImageError
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
@@ -85,9 +81,9 @@ class FileCarvingWidget(QWidget):
 
         self.fileTypeLayout = QHBoxLayout()
         self.fileTypes = {"All": QCheckBox("All"), "PDF": QCheckBox("PDF"), "JPG": QCheckBox("JPG"),
-                          "PNG": QCheckBox("PNG"),
-                          "GIF": QCheckBox("GIF"), "XLS": QCheckBox("XLS"), "WAV": QCheckBox("WAV"),
-                          "MOV": QCheckBox("MOV")}
+                          "PNG": QCheckBox("PNG"), "GIF": QCheckBox("GIF"), "WAV": QCheckBox("WAV"),
+                          "MOV": QCheckBox("MOV"), "WMV": QCheckBox("WMV"), "ZIP": QCheckBox("ZIP"),
+                          'BMP': QCheckBox("BMP")}
 
         for fileType, checkBox in self.fileTypes.items():
             self.fileTypeLayout.addWidget(checkBox)
@@ -204,13 +200,10 @@ class FileCarvingWidget(QWidget):
                                checkbox.isChecked()]
         self.executor.submit(self.carve_files, selected_file_types)
 
-
     def stop_carving(self):
         self.executor.shutdown(wait=True)  # Properly shutdown the executor
         self.start_button.setEnabled(True)  # Re-enable the start button
         self.stop_button.setEnabled(False)  # Disable the stop button
-
-
 
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler
@@ -278,8 +271,6 @@ class FileCarvingWidget(QWidget):
                 # Validate images by attempting to open them with PIL
                 image = Image.open(io.BytesIO(data))
                 image.verify()  # This will not load the image but only parse it
-            elif file_type == 'xls':
-                return self.is_valid_xls(data)
             elif file_type == 'bmp':
                 return True
             elif file_type == 'wav':
@@ -296,53 +287,64 @@ class FileCarvingWidget(QWidget):
             print(f"Error validating file of type {file_type}: {str(e)}")
             return False
 
-    def is_valid_xls(self, data):
-        try:
-            # First, check if it's an OLE file
-            if not olefile.isOleFile(io.BytesIO(data)):
-                return False
-
-            # Attempt to open the workbook with xlrd
-            workbook = xlrd.open_workbook(file_contents=data)
-
-            # Basic checks: Can we access sheet names?
-            if workbook.nsheets > 0 and workbook.sheet_names():
-                # Potentially, further checks here: Accessing cell values, etc.
-                return True
-            else:
-                return False
-        except xlrd.XLRDError as e:
-            print(f"XLRD Error: {str(e)}")
-            return False
-        except Exception as e:
-            # Generic catch-all for unexpected errors
-            print(f"Unexpected error validating XLS file: {str(e)}")
-            return False
-
+    # def carve_pdf_files(self, chunk, global_offset):
+    #     pdf_start_signature = b'%PDF-'
+    #     pdf_end_signature = b'%%EOF'
+    #     offset = 0
+    #     while offset < len(chunk):
+    #         start_index = chunk.find(pdf_start_signature, offset)
+    #
+    #         if start_index == -1:  # No more PDF start signature in the chunk
+    #             break
+    #
+    #         # Look for the end signature starting from the current start index
+    #         end_index = chunk.find(pdf_end_signature, start_index)
+    #         if end_index != -1:
+    #             # Adjust end_index to capture the end of the EOF marker
+    #             end_index += len(pdf_end_signature)
+    #             pdf_content = chunk[start_index:end_index]
+    #
+    #             if self.is_valid_file(pdf_content, 'pdf'):
+    #                 self.save_file(pdf_content, 'pdf', 'carved_files', start_index + global_offset)
+    #
+    #             # Update offset to search for the next PDF file after this EOF
+    #             offset = end_index
+    #         else:
+    #             # If we don't find an EOF, move to the next byte and try again
+    #             offset = start_index + 1
     def carve_pdf_files(self, chunk, global_offset):
         pdf_start_signature = b'%PDF-'
+        pdf_linearization_signature = b'/Linearized'
         pdf_end_signature = b'%%EOF'
         offset = 0
         while offset < len(chunk):
             start_index = chunk.find(pdf_start_signature, offset)
-
-            if start_index == -1:  # No more PDF start signature in the chunk
+            if start_index == -1:
                 break
-
-            # Look for the end signature starting from the current start index
+            linearization_index = chunk.find(pdf_linearization_signature, start_index, start_index + 1024)
+            if linearization_index != -1:
+                file_size_start = chunk.find(b'/L ', linearization_index, linearization_index + 1024) + 3
+                file_size_end = chunk.find(b'/', file_size_start)
+                if file_size_end == -1:
+                    file_size_end = chunk.find(b' ', file_size_start)
+                if file_size_end != -1:
+                    try:
+                        file_size = int(chunk[file_size_start:file_size_end].split()[0])
+                        pdf_content = chunk[start_index:start_index + file_size]
+                        if self.is_valid_file(pdf_content, 'pdf'):
+                            self.save_file(pdf_content, 'pdf', global_offset + start_index, file_size)
+                            offset = start_index + file_size
+                            continue
+                    except ValueError:
+                        pass
             end_index = chunk.find(pdf_end_signature, start_index)
             if end_index != -1:
-                # Adjust end_index to capture the end of the EOF marker
                 end_index += len(pdf_end_signature)
                 pdf_content = chunk[start_index:end_index]
-
                 if self.is_valid_file(pdf_content, 'pdf'):
-                    self.save_file(pdf_content, 'pdf', 'carved_files', start_index + global_offset)
-
-                # Update offset to search for the next PDF file after this EOF
+                    self.save_file(pdf_content, 'pdf', global_offset + start_index, end_index - start_index)
                 offset = end_index
             else:
-                # If we don't find an EOF, move to the next byte and try again
                 offset = start_index + 1
 
     def carve_wav_files(self, chunk, offset):
@@ -368,7 +370,6 @@ class FileCarvingWidget(QWidget):
                 offset = start_index + file_size
 
             if self.is_valid_file(wav_content, 'wav'):
-
                 self.save_file(wav_content, 'wav', 'carved_files', start_index)
 
     def carve_mov_files(self, chunk, offset):
@@ -421,33 +422,6 @@ class FileCarvingWidget(QWidget):
             # self.save_file(mov_data, 'mov', file_path)
             self.save_file(mov_data, 'mov', 'carved_files', mov_file_offset)
 
-    def carve_xls_files(self, chunk, global_offset):
-        xls_header = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
-        pattern_hex = "44006F00630075006D0065006E007400530075006D006D0061007200790049006E0066006F0072006D006100740069006F006E00"
-        pattern_bytes = bytes.fromhex(pattern_hex)
-
-        offset = 0
-        while offset < len(chunk):
-            start_index = chunk.find(xls_header, offset)
-            if start_index == -1:
-                break
-
-            pattern_index = chunk.find(pattern_bytes, start_index)
-            if pattern_index == -1:
-                offset += len(chunk)
-                continue
-
-            end_index = pattern_index + len(pattern_bytes) + 74
-            end_index = min(end_index, len(chunk))
-
-            xls_data = chunk[start_index:end_index]
-
-            if self.is_valid_file(xls_data, 'xls'):
-
-                self.save_file(xls_data, 'xls', 'carved_files', start_index + global_offset)
-
-            offset = end_index
-
     def carve_jpg_files(self, chunk, offset):
         jpg_start_signature = b'\xFF\xD8\xFF'
         jpg_end_signature = b'\xFF\xD9'
@@ -463,7 +437,6 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid JPG file
                 if self.is_valid_file(jpg_content, 'jpg'):
-
                     self.save_file(jpg_content, 'jpg', 'carved_files', start_index)
 
                 offset = end_index + len(jpg_end_signature)
@@ -485,7 +458,6 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid GIF file
                 if self.is_valid_file(gif_content, 'gif'):
-
                     self.save_file(gif_content, 'gif', 'carved_files', start_index)
 
                 offset = end_index + len(gif_end_signature)
@@ -507,12 +479,134 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid PNG file
                 if self.is_valid_file(png_content, 'png'):
-
                     self.save_file(png_content, 'png', 'carved_files', start_index)
 
                 offset = end_index + len(png_end_signature)
             else:
                 offset = start_index + 1
+
+    def carve_wmv_files(self, chunk, offset):
+        # Define ASF header signature
+        asf_header_signature = b'\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C'
+
+        current_offset = 0
+
+        while current_offset < len(chunk):
+            # Search for ASF header
+            start_index = chunk.find(asf_header_signature, current_offset)
+            if start_index == -1:
+                break
+
+            # Find the file properties object header within the first 512 bytes of the file
+            max_search_size = min(start_index + 512, len(chunk))
+            file_properties_header = b'\xA1\xDC\xAB\x8C\x47\xA9\xCF\x11\x8E\xE4\x00\xC0\x0C\x20\x53\x65'
+            file_properties_index = chunk.find(file_properties_header, start_index, max_search_size)
+            if file_properties_index == -1:
+                current_offset = start_index + 1
+                continue
+
+            # Extract the file size located at offset 40 within the object
+            file_size_offset = file_properties_index + 40
+            file_size_bytes = chunk[file_size_offset:file_size_offset + 8]
+            file_size = int.from_bytes(file_size_bytes, byteorder='little')
+
+            # Calculate end index based on file size
+            end_index = start_index + file_size
+
+            # Extract WMV content
+            wmv_content = chunk[start_index:end_index]
+
+            # Save the WMV content directly into the carved_files directory
+            self.save_file(wmv_content, 'wmv', 'carved_files', start_index + offset)
+            current_offset = end_index
+
+    def carve_zip_files(self, chunk, global_offset):
+        # Define ZIP header signatures
+        local_file_header_signature = b'\x50\x4b\x03\x04'
+        end_of_central_dir_signature = b'\x50\x4b\x05\x06'
+
+        current_pos = 0
+        zip_file_parts = []  # List to hold all parts of the ZIP file
+
+        while current_pos < len(chunk):
+            # Search for local file header
+            local_header_index = chunk.find(local_file_header_signature, current_pos)
+            if local_header_index == -1:
+                break
+
+            # Extract compressed size from local file header
+            compressed_size = struct.unpack("<I", chunk[local_header_index + 18:local_header_index + 22])[0]
+
+            # Calculate next local file header index
+            next_local_header_index = local_header_index + 30 + compressed_size
+
+            # Extract file content
+            file_content = chunk[local_header_index:next_local_header_index]
+            zip_file_parts.append(file_content)  # Add the file content to the ZIP parts list
+
+            # Move to next local file header
+            current_pos = next_local_header_index
+
+        # Now, find and append the Central Directory and End of Central Directory Record
+        end_central_dir_index = chunk.find(end_of_central_dir_signature, current_pos)
+        if end_central_dir_index != -1:
+            # Extract comment length and calculate the total end of the ZIP file structure
+            comment_length = struct.unpack("<H", chunk[end_central_dir_index + 20:end_central_dir_index + 22])[0]
+            zip_end = end_central_dir_index + 22 + comment_length
+
+            # Extract the Central Directory and End of Central Directory Record
+            zip_file_structure = chunk[current_pos:zip_end]
+            zip_file_parts.append(zip_file_structure)  # Add this to the ZIP parts list
+
+        # Combine all parts into a single ZIP file content
+        if zip_file_parts:
+            complete_zip_file_content = b''.join(zip_file_parts)
+            self.save_file(complete_zip_file_content, 'zip', 'carved_files', global_offset)
+
+        return None
+
+    def carve_bmp_files(self, chunk, offset):
+        bmp_start_signature = b'BM'  # BMP files start with 'BM'
+        header_size = 14  # The static header size for BMP files
+
+        current_offset = 0
+        while current_offset < len(chunk) - header_size:
+            # Look for the BMP signature
+            start_index = chunk.find(bmp_start_signature, current_offset)
+            if start_index == -1:
+                break  # No more BMP files found
+
+            # Verify there's enough chunk left to read the BMP size
+            if start_index + header_size > len(chunk) - 4:
+                break  # Not enough data for size
+
+            # Read file size directly from header
+            bmp_file_size = int.from_bytes(chunk[start_index + 2:start_index + 6], byteorder='little')
+
+            # Sanity check for BMP size (adjust max and min size as per your need)
+            if bmp_file_size < 100 or bmp_file_size > 5000000:
+                current_offset = start_index + 2
+                continue  # Not a valid BMP size, skip to next possible start
+
+            # Read and check dimensions for further validation
+            bmp_width = int.from_bytes(chunk[start_index + 18:start_index + 22], byteorder='little')
+            bmp_height = int.from_bytes(chunk[start_index + 22:start_index + 26], byteorder='little')
+
+            # Reasonable dimensions check (adjust max width/height as per your need)
+            if bmp_width <= 0 or bmp_width > 10000 or bmp_height <= 0 or bmp_height > 10000:
+                current_offset = start_index + 2
+                continue  # Unreasonable dimensions, likely not a BMP
+
+            # Extract the BMP file if it's entirely within the chunk
+            if start_index + bmp_file_size <= len(chunk):
+                bmp_content = chunk[start_index:start_index + bmp_file_size]
+                self.save_file(bmp_content, 'bmp', 'carved_files', start_index + offset)
+                current_offset = start_index + bmp_file_size  # Move past this BMP file
+            else:
+                break  # The BMP file exceeds the chunk boundary, stop processing
+
+        # Return if more data is needed or if processing is complete
+        return None
 
     def carve_files(self, selected_file_types):
         try:
@@ -537,25 +631,30 @@ class FileCarvingWidget(QWidget):
                         self.carve_wav_files(chunk, offset)
                         self.carve_mov_files(chunk, offset)
                         self.carve_pdf_files(chunk, offset)
-                        self.carve_xls_files(chunk, offset)
                         self.carve_jpg_files(chunk, offset)
                         self.carve_gif_files(chunk, offset)
                         self.carve_png_files(chunk, offset)
+                        self.carve_wmv_files(chunk, offset)
+                        self.carve_zip_files(chunk, offset)
+                        self.carve_bmp_files(chunk, offset)
                     elif file_type == 'wav':
                         self.carve_wav_files(chunk, offset)
                     elif file_type == 'mov':
                         self.carve_mov_files(chunk, offset)
                     elif file_type == 'pdf':
                         self.carve_pdf_files(chunk, offset)
-                    elif file_type == 'xls':
-                        self.carve_xls_files(chunk, offset)
                     elif file_type == 'jpg':
                         self.carve_jpg_files(chunk, offset)
                     elif file_type == 'gif':
                         self.carve_gif_files(chunk, offset)
                     elif file_type == 'png':
                         self.carve_png_files(chunk, offset)
-
+                    elif file_type == 'wmv':
+                        self.carve_wmv_files(chunk, offset)
+                    elif file_type == 'zip':
+                        self.carve_zip_files(chunk, offset)
+                    elif file_type == 'bmp':
+                        self.carve_bmp_files(chunk, offset)
 
                 offset += chunk_size
         finally:
@@ -577,7 +676,6 @@ class FileCarvingWidget(QWidget):
         self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
         self.carved_file_names.add(file_name)
 
-
     @Slot(str, str, str, str, str)
     def display_carved_file(self, name, size, type_, modification_date, file_path):
         row = self.table_widget.rowCount()
@@ -595,22 +693,60 @@ class FileCarvingWidget(QWidget):
         self.table_widget.setColumnWidth(4, 317)
 
         # Only proceed if the file type is one of the supported image or video formats
-        if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf']:
+        if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp']:
             file_full_path = os.path.join("carved_files", name)
+            thumbnail_folder = os.path.join("carved_files", "thumbnails")  # Folder to save thumbnails
+
+            if not os.path.exists(thumbnail_folder):
+                os.makedirs(thumbnail_folder)  # Create the thumbnail folder if it doesn't exist
+
             # Handle MOV and PDF thumbnails
+            # if type_.lower() == 'mov':
+            #     # Extract a frame from the video as a thumbnail
+            #     clip = VideoFileClip(file_full_path)
+            #     thumbnail_path = os.path.join(thumbnail_folder, name.replace('.mov', '.png'))
+            #     clip.save_frame(thumbnail_path, t=0.5)  # save frame at 0.5 seconds
+            #     # Create the QPixmap from the full path
+            #     pixmap = QPixmap(thumbnail_path)
             if type_.lower() == 'mov':
-                # Extract a frame from the video as a thumbnail
-                clip = VideoFileClip(file_full_path)
-                file_full_path = file_full_path.replace('.mov', '.png')
-                clip.save_frame(file_full_path, t=0.5)  # save frame at 0.5 seconds
+                thumbnail_path = os.path.join(thumbnail_folder, name.replace('.mov', '.png'))
+                with VideoFileClip(file_full_path) as clip:
+                    clip.save_frame(thumbnail_path, t=0.5)  # save frame at 0.5 seconds
+                pixmap = QPixmap(thumbnail_path)
+
             elif type_.lower() == 'pdf':
                 # Convert the first page of the PDF to a thumbnail
                 images = convert_from_path(file_full_path)
-                file_full_path = file_full_path.replace('.pdf', '.png')
-                images[0].save(file_full_path, 'PNG')
+                thumbnail_path = os.path.join(thumbnail_folder, name.replace('.pdf', '.png'))
+                images[0].save(thumbnail_path, 'PNG')
+                # Create the QPixmap from the full path
+                pixmap = QPixmap(thumbnail_path)
 
-            # Create the QPixmap from the full path
-            pixmap = QPixmap(file_full_path)
+            # elif type_.lower() == 'wmv':
+            #     # Attempt to extract a frame from the video as a thumbnail using OpenCV
+            #     capture = cv2.VideoCapture(file_full_path)
+            #     success, image = capture.read()
+            #     if success:
+            #         thumbnail_path = os.path.join(thumbnail_folder, name.replace('.wmv', '.png'))
+            #         cv2.imwrite(thumbnail_path, image)
+            #         # Create the QPixmap from the full path
+            #         pixmap = QPixmap(thumbnail_path)
+            elif type_.lower() == 'wmv':
+                capture = cv2.VideoCapture(file_full_path)
+                success, image = capture.read()
+                capture.release()  # Release the capture object explicitly
+                if success:
+                    thumbnail_path = os.path.join(thumbnail_folder, name.replace('.wmv', '.png'))
+                    cv2.imwrite(thumbnail_path, image)
+                    pixmap = QPixmap(thumbnail_path)
+                else:
+                    print("Failed to extract thumbnail from WMV file")
+
+            else:
+                # For image files, use the original file path
+                thumbnail_path = file_full_path
+                pixmap = QPixmap(thumbnail_path)
+
             # Scale the pixmap to the icon size while maintaining aspect ratio
             pixmap = pixmap.scaled(QSize(150, 150), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             icon = QIcon(pixmap)
@@ -636,4 +772,3 @@ class FileCarvingWidget(QWidget):
     def clear_ui(self):
         self.table_widget.setRowCount(0)
         self.list_widget.clear()
-
