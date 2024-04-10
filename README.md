@@ -7,36 +7,42 @@ Trace is a digital forensic tool designed to provide an intuitive interface for 
 It offers a range of functionalities to assist forensic examiners in extracting and viewing the contents of various image file formats.
 
 <p align="">
-  <img src="Icons/logo.png" alt="TRACE Logo" width="200"/>
+  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="200"/>
 </p>
 
-## Preview
+## Preview 👀
+<br/><br/>
 <img src="Icons/Preview.png" alt="TRACE Logo" width="1300"/>
 
 
+## Features 🌟
+
+✅ **Image Mounting & Dismounting**: Seamlessly mount and dismount forensic disk images for analysis.\
+✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
+✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
+✅ **EXIF Data Extraction**: Extract and display EXIF metadata from image files.\
+✅ **Registry Viewer**: View and analyze Windows registry files.\
+✅ **Basic File Carving**: Recover deleted files from disk images.\
+✅ **Virus Total API Integration**: Check files for malware using the Virus Total API.\
+✅ **E01 Image Verification**: Verify the integrity of E01 disk images.\
+✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
+✅ **Message Decoding**: Decode messages from base64, binary, and other encodings, revealing hidden information within your investigations.
 
 
-## Features
 
-- [x] **Image Mounting & Dismounting**: Seamlessly mount and dismount forensic disk images for analysis.
-- [x] **Tree Viewer**: Navigate through the disk image structure, including partitions and files.
-- [x] **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.
-- [x] **EXIF Data Extraction**: Extract and display EXIF metadata from image files.
-- [x] **Registry Viewer**: View and analyze Windows registry files.
-- [x] **Basic File Carving**: Recover deleted files from disk images.
-- [x] **Virus Total Api Integration**: Check files for malware using the Virus Total API.
-- [x] **E01 Image Verification**: Verify the integrity of E01 disk images.
-- [x] **Convert E01 to Raw**: Convert E01 disk images to raw format.
+## Supported Image Formats 💾
 
-## Supported Image Formats
-- E01
-- raw
-- dd
-- iso
-- ad1
+| Image Format                                   | Extensions                     | Split   |  Unsplit |
+|------------------------------------------------|--------------------------------|---------|----------|
+| EnCase® Image File (EVF / Expert Witness Format)| `*.e01`                       | ✔️      | ✔️       |
+| SMART/Expert Witness Image File                | `*.s01`                        | ✔️      | ✔️       |
+| Single Image Unix / Linux DD / Raw             | `*.dd`, `*.img`, `*.raw`       | ✔️      | ✔️       |
+| ISO Image File                                 | `*.iso`                        |         | ✔️       |
+| AccessData Image File                          | `*.ad1`                        | ✔️       | ✔️        |
 
 
-## Getting Started
+## Getting Started 🚀
+
 
 ### Prerequisites
 
@@ -52,14 +58,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
-## Built With
+## Built With 🧱
 
 - [pytsk3](https://pypi.org/project/pytsk3/) - Python bindings for the SleuthKit
 - [libewf-python](https://github.com/libyal/libewf) - Library to access the Expert Witness Compression Format (EWF)
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
-## Author
+## Author 👨‍💻
 
 **Radoslav Gadzhovski**
 - [LinkedIn Profile](https://www.linkedin.com/in/radoslav-gadzhovski/)

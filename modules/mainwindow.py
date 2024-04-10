@@ -410,8 +410,10 @@ class MainWindow(QMainWindow):
     def load_image_evidence(self):
         """Open an image with a specific filter on Kali Linux."""
         # Define the supported image file extensions, including both lowercase and uppercase variants
-        supported_image_extensions = ["*.e01", "*.E01", "*.s01", "*.S01", "*.l01", "*.L01", "*.raw", "*.RAW",
-                                      "*.img", "*.IMG", "*.dd", "*.DD", "*.iso", "*.ISO", "*.ad1", "*.AD1"]
+        supported_image_extensions = ["*.e01", "*.E01", "*.s01", "*.S01",
+                                      "*.l01", "*.L01", "*.raw", "*.RAW",
+                                      "*.img", "*.IMG", "*.dd", "*.DD",
+                                      "*.iso", "*.ISO", "*.ad1", "*.AD1", "*.001", "*.s01"]
 
         # Construct the file filter string with both uppercase and lowercase extensions
         file_filter = "Supported Image Files ({})".format(" ".join(supported_image_extensions))
