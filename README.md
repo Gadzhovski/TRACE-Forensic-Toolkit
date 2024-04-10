@@ -26,8 +26,7 @@ It offers a range of functionalities to assist forensic examiners in extracting 
 ✅ **Virus Total API Integration**: Check files for malware using the Virus Total API.\
 ✅ **E01 Image Verification**: Verify the integrity of E01 disk images.\
 ✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
-✅ **Message Decoding**: Decode messages from base64, binary, and other encodings, revealing hidden information within your investigations.
-
+✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
 
 
 ## Supported Image Formats 💾
