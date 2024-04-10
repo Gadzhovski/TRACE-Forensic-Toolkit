@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
         self.current_image_path = None
         self.image_handler = None
         self.image_manager = ImageManager()
-        self.db_manager = DatabaseManager('new_database_mappings.db')
+        self.db_manager = DatabaseManager('tools/new_database_mappings.db')
         self.current_selected_data = None
 
         self.evidence_files = []
