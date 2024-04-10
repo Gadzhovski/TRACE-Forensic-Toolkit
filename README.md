@@ -11,8 +11,11 @@
 
 
 ## Preview 👀
-<img src="Icons/Preview.png" alt="TRACE Logo" width="1300"/>
-
+<p align="center">
+  <br/>
+  <img src="Icons/Preview.png" alt="TRACE Preview" width="80%"/>
+  <br/>
+</p>
 
 ## Features 🌟
 
