@@ -13,7 +13,7 @@
 ## Preview 👀
 <p align="center">
   <br/>
-  <img src="Icons/Preview.png" alt="TRACE Preview" width="80%"/>
+  <img src="Icons/Preview.png" alt="TRACE Preview" width="90%"/>
   <br/>
 </p>
 
@@ -66,15 +66,12 @@ python main.py
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
-## Author 👨‍💻
-
-**Radoslav Gadzhovski**
-- [LinkedIn Profile](https://www.linkedin.com/in/radoslav-gadzhovski/)
+## Socials 👨‍💻
 
 
-## License
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
 
-This project is licensed under the MIT License - see the `LICENSE` file for details.
+<br>
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
