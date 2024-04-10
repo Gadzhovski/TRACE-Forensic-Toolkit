@@ -10,6 +10,12 @@ It offers a range of functionalities to assist forensic examiners in extracting 
   <img src="Icons/logo.png" alt="TRACE Logo" width="200"/>
 </p>
 
+## Preview
+<img src="Icons/Preview.png" alt="TRACE Logo" width="1300"/>
+
+
+
+
 ## Features
 
 - [x] **Image Mounting & Dismounting**: Seamlessly mount and dismount forensic disk images for analysis.
@@ -27,23 +33,18 @@ It offers a range of functionalities to assist forensic examiners in extracting 
 - raw
 - dd
 - iso
-
-## Preview
-<img src="Icons/Preview.png" alt="TRACE Logo" width="1300"/>
-
+- ad1
 
 
 ## Getting Started
 
 ### Prerequisites
 
-- Ensure you have all the necessary Python libraries installed. Check `requirements.txt` for the list of libraries.
+- Ensure you have all the necessary Python libraries installed.
 
 ```bash
 pip install -r requirements.txt
   ```
-  
-
 
 ### Running the Tool
 
