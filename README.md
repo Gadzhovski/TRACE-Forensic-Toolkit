@@ -60,8 +60,7 @@ python main.py
 
 ## Author
 
-**Radoslav Gadzhovski**  
-- [GitHub Profile](https://github.com/Gadzhovski)
+**Radoslav Gadzhovski**
 - [LinkedIn Profile](https://www.linkedin.com/in/radoslav-gadzhovski/)
 
 
