@@ -1,22 +1,16 @@
-# This file contains the implementation of the TextViewerManager and TextViewer classes.
-import asyncio
-import hashlib
-import os
+import base64
+import html
+import re
 import sqlite3
 import urllib
-import base64
 import urllib.parse
-import html
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from enum import Enum
 from functools import partial
 
-from PySide6.QtCore import QObject, QRunnable, Signal, QThreadPool, Slot
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QSizePolicy, QComboBox, QLabel, \
-    QMessageBox, QToolTip, QInputDialog
-from PySide6.QtGui import QAction, QIcon, QTextCursor, QTextCharFormat, QColor
-from enum import Enum
 import chardet
-import re
+from PySide6.QtGui import QAction, QIcon, QTextCursor, QTextCharFormat, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QSizePolicy, QComboBox, QLabel, \
+    QMessageBox, QToolTip
 
 
 class SearchDirection(Enum):
@@ -180,11 +174,10 @@ class TextViewer(QWidget):
             action.triggered.connect(handler)
             self.toolbar.addAction(action)
 
-        #add spacer
+        # add spacer
         spacer = QWidget(self)
-        spacer.setFixedSize(50,0)
+        spacer.setFixedSize(50, 0)
         self.toolbar.addWidget(spacer)
-
 
         self.toolbar.addWidget(QLabel("Font Size: "))
         self.font_size_combobox = QComboBox(self)
@@ -205,10 +198,6 @@ class TextViewer(QWidget):
 
         self.layout.addWidget(self.toolbar)
 
-    # def setup_text_edit(self):
-    #     self.text_edit = QTextEdit(self)
-    #     self.text_edit.setReadOnly(True)
-    #     self.layout.addWidget(self.text_edit)
     def setup_text_edit(self):
         self.text_edit = CustomTextEdit(self)
         self.text_edit.setReadOnly(True)
@@ -272,16 +261,12 @@ class TextViewer(QWidget):
         self.total_pages_label.setText(f" of {total_pages}")
 
 
-
-
 class CustomTextEdit(QTextEdit):
     def __init__(self, *args, **kwargs):
         super(CustomTextEdit, self).__init__(*args, **kwargs)
         self.setMouseTracking(True)
         self.db_connection = sqlite3.connect("tools/text_hashes.db")
         self.db_cursor = self.db_connection.cursor()
-
-
 
     def contextMenuEvent(self, event):
         menu = self.createStandardContextMenu()
@@ -322,8 +307,6 @@ class CustomTextEdit(QTextEdit):
     def decodeBinary(self):
         self.decodeSelectedText('binary')
 
-
-
     def decodeSelectedText(self, encoding_type):
         selected_text = self.textCursor().selectedText()
         try:
@@ -347,7 +330,6 @@ class CustomTextEdit(QTextEdit):
                 decoded_text = ''.join(chr(int(i, 2)) for i in selected_text.split())
                 QToolTip.showText(self.mapToGlobal(self.cursorRect().topLeft()), decoded_text)
                 return
-
 
             if encoding_type in ['base64', 'hex']:
                 decoded_text = decoded_bytes.decode('utf-8')
@@ -425,28 +407,27 @@ class CustomTextEdit(QTextEdit):
         else:
             QToolTip.hideText()  # Hide any existing tooltip if there's no selection
 
-
     def reverseHash(self):
-            selected_text = self.textCursor().selectedText().strip()
-            if not selected_text:
-                return
+        selected_text = self.textCursor().selectedText().strip()
+        if not selected_text:
+            return
 
-            # Check if the selected text matches the length of MD5, SHA-1, or SHA-256 hash
-            hash_lengths = {32: 'MD5', 40: 'SHA1', 64: 'SHA256'}
-            if len(selected_text) not in hash_lengths:
-                QToolTip.showText(self.mapToGlobal(self.cursorRect().topLeft()), "Invalid hash length")
-                return
+        # Check if the selected text matches the length of MD5, SHA-1, or SHA-256 hash
+        hash_lengths = {32: 'MD5', 40: 'SHA1', 64: 'SHA256'}
+        if len(selected_text) not in hash_lengths:
+            QToolTip.showText(self.mapToGlobal(self.cursorRect().topLeft()), "Invalid hash length")
+            return
 
-            # Identify the hash type
-            hash_type = hash_lengths[len(selected_text)]
+        # Identify the hash type
+        hash_type = hash_lengths[len(selected_text)]
 
-            # Query the database for the plaintext
-            plaintext = self.queryDatabase(selected_text, hash_type)
+        # Query the database for the plaintext
+        plaintext = self.queryDatabase(selected_text, hash_type)
 
-            if plaintext:
-                QMessageBox.information(self, "Hash Reversed", f"Plaintext: {plaintext}")
-            else:
-                QMessageBox.information(self, "Hash Reversed", "Plaintext not found in the database.")
+        if plaintext:
+            QMessageBox.information(self, "Hash Reversed", f"Plaintext: {plaintext}")
+        else:
+            QMessageBox.information(self, "Hash Reversed", "Plaintext not found in the database.")
 
     def queryDatabase(self, hash_value, hash_type):
         query = f"SELECT text FROM TextHashes WHERE {hash_type.lower()} = ?"
@@ -456,11 +437,6 @@ class CustomTextEdit(QTextEdit):
             return result[0]
         else:
             return None
-
-
-
-
-
 
 ##### new implementation with problems #####
 # class TextViewerManager:

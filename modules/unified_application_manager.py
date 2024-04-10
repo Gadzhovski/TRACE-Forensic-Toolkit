@@ -1,17 +1,14 @@
-# Description: This file contains the implementation of the UnifiedViewer class, which is a QWidget that contains three different viewers: PDFViewer, PictureViewer, and AudioVideoViewer. The UnifiedViewer class is responsible for displaying the appropriate viewer based on the file type and content passed to it.
-
-
 import tempfile
 from ctypes import cast, POINTER
 
 from PySide6.QtCore import Qt, QUrl, Slot, QSize
-from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout, QPalette
+from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout
 from PySide6.QtGui import QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QFileDialog)
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QStyle, QLabel, QHBoxLayout, QComboBox, \
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel, QHBoxLayout, QComboBox, \
     QSpacerItem, QSizePolicy
 # from comtypes import CLSCTX_ALL
 from fitz import open as fitz_open, Matrix
@@ -74,7 +71,6 @@ class UnifiedViewer(QWidget):
                 # Make sure to display the correct viewer and pass the file path
             self.audio_video_viewer.display(temp_file_path)
 
-
     def display_application_content(self, file_content, full_file_path):
         file_extension = os.path.splitext(full_file_path)[-1].lower()
         file_type = "text"  # default
@@ -89,7 +85,6 @@ class UnifiedViewer(QWidget):
         # self.application_viewer.load(file_content, file_type=file_type, file_extension=file_extension)
         # pass the file name to the application viewer
         self.load(file_content, file_type=file_type, file_extension=file_extension)
-
 
     def clear(self):
         self.pdf_viewer.clear()
@@ -302,7 +297,7 @@ class PDFViewer(QWidget):
         self.last_action.triggered.connect(self.show_last_page)
         self.toolbar.addAction(self.last_action)
 
-        #add separator
+        # add separator
         self.toolbar.addSeparator()
 
         # Zoom actions
@@ -328,7 +323,7 @@ class PDFViewer(QWidget):
         self.reset_zoom_action.triggered.connect(self.reset_zoom)
         self.toolbar.addAction(self.reset_zoom_action)
 
-        #add separator
+        # add separator
         self.toolbar.addSeparator()
 
         # Fit in window
@@ -343,7 +338,7 @@ class PDFViewer(QWidget):
         self.fit_width_action.triggered.connect(self.fit_width)
         self.toolbar.addAction(self.fit_width_action)
 
-        #add separator
+        # add separator
         self.toolbar.addSeparator()
 
         # Rotate left
@@ -358,7 +353,7 @@ class PDFViewer(QWidget):
         self.rotate_right_action.triggered.connect(self.rotate_right)
         self.toolbar.addAction(self.rotate_right_action)
 
-        #add separator
+        # add separator
         self.toolbar.addSeparator()
 
         # Pan tool button
@@ -368,7 +363,7 @@ class PDFViewer(QWidget):
         self.pan_tool_action.toggled.connect(self.toggle_pan_mode)
         self.toolbar.addAction(self.pan_tool_action)
 
-        #add separator
+        # add separator
         self.toolbar.addSeparator()
 
         # Print button

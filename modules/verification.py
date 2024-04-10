@@ -1,5 +1,3 @@
-# Description: This file contains the code for the verification widget. This widget is used to verify the hash of an image
-
 from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
                                QFileDialog, QTextEdit)
@@ -162,4 +160,3 @@ class VerificationWidget(QWidget):
     def is_verified(self):
         # return True if the hash is verified
         return True if "Match" in self.hash_label.toPlainText() else False
-

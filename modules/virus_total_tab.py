@@ -1,5 +1,3 @@
-# Description: This file contains the VirusTotal class which is a QWidget that contains the VirusTotal tab.
-
 import io
 import zipfile
 from datetime import date
@@ -51,7 +49,6 @@ class VirusTotal(QWidget):
         buttonLayout.setAlignment(Qt.AlignCenter)  # Align the buttons to the center
 
         self.pass_hash_button = QPushButton("Pass Hash")
-        # self.pass_hash_button.clicked.connect(self.pass_hash)
         self.pass_hash_button.clicked.connect(self.pass_hash)
         self.pass_hash_button.setFixedSize(120, 40)  # Set fixed size for a modern look
 
@@ -59,8 +56,6 @@ class VirusTotal(QWidget):
 
         # Upload File Button
         self.upload_file_button = QPushButton("Upload File")
-        # self.upload_file_button.clicked.connect(
-        # lambda: self.zip_file(self.current_file_content, self.current_file_name))
         self.upload_file_button.clicked.connect(self.upload_file)
         self.upload_file_button.setFixedSize(120, 40)  # Set fixed size for a modern look
 

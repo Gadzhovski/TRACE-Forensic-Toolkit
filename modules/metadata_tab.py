@@ -1,5 +1,3 @@
-# Description: This file contains the MetadataViewer class, which is a QWidget that displays metadata for a file.
-
 import os
 import datetime
 from PySide6.QtWidgets import QTextEdit, QSizePolicy, QWidget, QVBoxLayout
@@ -7,12 +5,12 @@ import hashlib
 from magic import Magic
 import re
 
+
 class MetadataViewer(QWidget):
     def __init__(self, image_handler):
         super(MetadataViewer, self).__init__()
         self.image_handler = image_handler
         self.init_ui()
-
 
     def init_ui(self):
         # Add the text edit to the layout
@@ -26,7 +24,6 @@ class MetadataViewer(QWidget):
 
         layout.addWidget(self.metadata_text_edit)
 
-
     def display_metadata(self, data):
         inode_number = data.get('inode_number')
         offset = data.get('start_offset')
@@ -38,11 +35,18 @@ class MetadataViewer(QWidget):
             return
 
         # Safe time formatting function
+        # def format_time(timestamp):
+        #     try:
+        #         return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+        #     except (OverflowError, OSError, ValueError):
+        #         return "Invalid timestamp"
         def format_time(timestamp):
+            if timestamp is None or timestamp == 0:
+                return "N/A"
             try:
-                return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-            except (OverflowError, OSError, ValueError):
-                return "Invalid timestamp"
+                return datetime.datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') + " UTC"
+            except Exception:
+                return "N/A"
 
         created_time = format_time(metadata.crtime) if hasattr(metadata, 'crtime') else 'N/A'
         modified_time = format_time(metadata.mtime) if hasattr(metadata, 'mtime') else 'N/A'
@@ -63,7 +67,7 @@ class MetadataViewer(QWidget):
         else:
             size = self.image_handler.get_readable_size(size)  # Convert size to a readable format
 
-        #extended_metadata = f"<b>Metadata</b>"
+        # extended_metadata = f"<b>Metadata</b>"
         extended_metadata = f"<b style='font-size: 20px; font-family: Courier New;'>Metadata</b>"
         extended_metadata += f"<table style='margin-left: 10px; font-family: Courier New;'>"
         extended_metadata += f"<tr><th style='text-align: left;'>Name:</th><td style='padding-left: 20px;'>{data.get('name', 'N/A')}</td></tr>"
@@ -89,7 +93,6 @@ class MetadataViewer(QWidget):
             extended_metadata += (f"</div>")
 
         self.metadata_text_edit.setHtml(extended_metadata)
-
 
     def run_istat(self, offset, inode_number, image_path):
         import subprocess
@@ -122,7 +125,6 @@ class MetadataViewer(QWidget):
             metadata_content = metadata_content[:end_index]
 
         return metadata_content
-
 
     def clear(self):
         self.metadata_text_edit.clear()

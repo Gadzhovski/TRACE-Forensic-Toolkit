@@ -5,26 +5,27 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QWidget)
+                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from managers.image_manager import ImageManager
 from modules.about import AboutDialog
+from modules.converter import Main
 from modules.exif_tab import ExifViewer
 from modules.file_carving import FileCarvingWidget
 from modules.hex_tab import HexViewer
+from modules.list_files import FileSearchWidget
 from modules.metadata_tab import MetadataViewer
 from modules.registry import RegistryExtractor
 from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
-from modules.virus_total_tab import VirusTotal
 from modules.verification import VerificationWidget
-from modules.list_files import FileSearchWidget
-from modules.converter import Main
 from modules.veriphone_api import VeriphoneWidget
+from modules.virus_total_tab import VirusTotal
 
 SECTOR_SIZE = 512
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -54,7 +55,6 @@ class MainWindow(QMainWindow):
     def initialize_ui(self):
         self.setWindowTitle('Trace 1.0.0')
         self.setWindowIcon(QIcon('Icons/logo_prev_ui.png'))
-
 
         if os.name == 'nt':
             import ctypes
@@ -96,11 +96,9 @@ class MainWindow(QMainWindow):
         conversion_action.triggered.connect(self.show_conversion_widget)
         tools_menu.addAction(conversion_action)
 
-
         veriphone_api_action = QAction("Veriphone API", self)
         veriphone_api_action.triggered.connect(self.show_veriphone_widget)
         tools_menu.addAction(veriphone_api_action)
-
 
         help_menu = QMenu('Help', self)
         help_menu.addAction("About")
@@ -255,7 +253,6 @@ class MainWindow(QMainWindow):
         self.metadata_viewer = MetadataViewer(self.image_handler)
         self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
 
-
         self.exif_viewer = ExifViewer(self)
         self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
 
@@ -276,7 +273,6 @@ class MainWindow(QMainWindow):
 
         # disable all tabs before loading an image file
         self.enable_tabs(False)
-
 
     def show_conversion_widget(self):
         # Show the conversion widget
@@ -596,8 +592,8 @@ class MainWindow(QMainWindow):
             unallocated_space = self.image_handler.read_unallocated_space(data["start_offset"], data["end_offset"])
             if unallocated_space is not None:
                 # use the update_viewer_with_file_content method to display the unallocated space for hex and text tabs
-                #self.update_viewer_with_file_content(unallocated_space, None, data)
-                self.update_viewer_with_file_content(unallocated_space, data)######
+                # self.update_viewer_with_file_content(unallocated_space, None, data)
+                self.update_viewer_with_file_content(unallocated_space, data)  ######
             else:
                 print("Invalid size for unallocated space or unable to read.")
         elif data.get("type") == "directory":
@@ -606,7 +602,8 @@ class MainWindow(QMainWindow):
             self.populate_listing_table(entries, data["start_offset"])
         elif data.get("inode_number") is not None:
             # Handle files
-            file_content, _ = self.image_handler.get_file_content(data["inode_number"], data["start_offset"])##################################
+            file_content, _ = self.image_handler.get_file_content(data["inode_number"], data[
+                "start_offset"])  ##################################
             if file_content:
                 self.update_viewer_with_file_content(file_content, data)
             else:
@@ -620,7 +617,6 @@ class MainWindow(QMainWindow):
 
         self.display_content_for_active_tab()
 
-
     def display_content_for_active_tab(self):
         if not self.current_selected_data:
             return
@@ -632,8 +628,6 @@ class MainWindow(QMainWindow):
             file_content, _ = self.image_handler.get_file_content(inode_number, offset)
             if file_content:
                 self.update_viewer_with_file_content(file_content, self.current_selected_data)  # Use the stored data
-
-
 
     def update_viewer_with_file_content(self, file_content, data):
         index = self.viewer_tab.currentIndex()
@@ -719,7 +713,6 @@ class MainWindow(QMainWindow):
 
         # Call this to make sure the content is displayed based on the active tab
         self.display_content_for_active_tab()
-
 
     def open_listing_context_menu(self, position):
         # Get the selected item
@@ -845,5 +838,3 @@ class MainWindow(QMainWindow):
         layout.addWidget(buttonBox)
 
         dialog.exec_()
-
-

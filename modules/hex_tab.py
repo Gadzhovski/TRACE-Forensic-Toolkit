@@ -1,4 +1,3 @@
-
 import os
 from functools import lru_cache
 
@@ -268,11 +267,10 @@ class HexViewer(QWidget):
         self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
         self.toolbar.addWidget(self.font_size_combobox)
 
-        #add spacer
+        # add spacer
         spacer = QWidget(self)
-        spacer.setFixedSize(50,0)
+        spacer.setFixedSize(50, 0)
         self.toolbar.addWidget(spacer)
-
 
         self.export_button = QToolButton(self)
 
@@ -452,7 +450,6 @@ class HexViewer(QWidget):
 
         with open(file_name, "w") as html_file:
             html_file.write(html_content)
-
 
     def parse_hex_line(self, line):
         if ":" not in line:

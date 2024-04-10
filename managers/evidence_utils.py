@@ -242,10 +242,17 @@ class ImageHandler:
                             is_directory = True
 
                         # Define a function to safely get datetime string or None
+                        # def safe_datetime(timestamp):
+                        #     try:
+                        #         return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+                        #     except (OverflowError, OSError, ValueError):
+                        #         return "N/A"
                         def safe_datetime(timestamp):
+                            if timestamp is None or timestamp == 0:
+                                return "N/A"
                             try:
-                                return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                            except (OverflowError, OSError, ValueError):
+                                return datetime.datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') + " UTC"
+                            except Exception:
                                 return "N/A"
 
                         entries.append({

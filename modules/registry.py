@@ -1,5 +1,3 @@
-# Description: This file contains the implementation of the RegistryExtractor class, which is a QWidget that
-
 import os
 import tempfile
 
@@ -86,7 +84,7 @@ class RegistryExtractor(QWidget):
         self.tableWidget = QTableWidget()
 
         # set the header to be hidden
-        #self.tableWidget.horizontalHeader().hide()
+        # self.tableWidget.horizontalHeader().hide()
         self.tableWidget.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tableWidget.setSelectionBehavior(QTableWidget.SelectRows)
         # Your existing setup code
@@ -211,7 +209,6 @@ class RegistryExtractor(QWidget):
             self.tableWidget.setItem(i, 2, QTableWidgetItem(str(value.value())))
 
         self.tableWidget.resizeColumnToContents(2)
-
 
     def display_values_in_table(self, values):
         self.setup_table(values)

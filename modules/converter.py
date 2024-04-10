@@ -1,4 +1,3 @@
-
 import os
 import subprocess
 
@@ -7,7 +6,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QLabel, QFileDialog, QComboBox,
-    QLineEdit, QSizePolicy, QHBoxLayout, QFormLayout
+    QLineEdit, QHBoxLayout, QFormLayout
 )
 from PySide6.QtWidgets import (
     QMainWindow, QPushButton, QWidget, QRadioButton,
@@ -44,8 +43,6 @@ class Main(QMainWindow):
         self.setCentralWidget(self.stacked_widget)
 
         self.init_ui()
-
-
 
     def init_ui(self):
         self.select_source_dialog = SelectSourceDialog(self)
@@ -177,8 +174,6 @@ class ConversionWidget(QWidget):
         self.format_combo_box = QComboBox()
         self.format_combo_box.addItems(["DD", "RAW"])
 
-
-
         self.output_line_edit = QLineEdit()
         output_dir_button = QPushButton("Select Output Directory...")
         output_dir_button.clicked.connect(self.select_output_dir)
@@ -203,7 +198,6 @@ class ConversionWidget(QWidget):
         buttons_layout.addWidget(convert_button)
 
         layout.addLayout(buttons_layout)
-
 
     def on_back_clicked(self):
         main_window = self.parent().parent()
@@ -256,4 +250,3 @@ class ConversionWidget(QWidget):
                     break
                 output_file.write(data)
         ewf_handle.close()
-

@@ -1,4 +1,3 @@
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont, QPalette, QColor
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
@@ -34,13 +33,6 @@ class AboutDialog(QDialog):
         author_label = QLabel("Author: Radoslav Gadzhovski")
         author_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(author_label)
-
-        # # Copyright information
-        # copyright_label = QLabel("Copyright © 2024 Radoslav Gadzhovski. All rights reserved.")
-        # copyright_label.setAlignment(Qt.AlignCenter)
-        # copyright_label.setFont(QFont('Arial', 14))  # Set the font and size
-        # copyright_label.setPalette(QPalette(QColor('red')))  # Set the text color
-        # layout.addWidget(copyright_label)
 
         # Add a button to close the dialog
         button_layout = QHBoxLayout()
