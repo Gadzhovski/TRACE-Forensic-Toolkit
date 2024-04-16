@@ -363,6 +363,7 @@ class ImageHandler:
             print(f"Error reading unallocated space: {e}")
             return None
 
+    # Open the image file and return the image info object
     def open_image(self):
         if self.get_image_type() == "ewf":
             filenames = pyewf.glob(self.image_path)
@@ -372,7 +373,7 @@ class ImageHandler:
         else:
             return pytsk3.Img_Info(self.image_path)
 
-
+    # List files in the image
     def list_files(self, extensions=None):
         files_list = []
 
@@ -387,6 +388,7 @@ class ImageHandler:
 
         return files_list
 
+    # Process a partition to list files
     def process_partition(self, img_info, offset, files_list, extensions):
         try:
             fs_info = pytsk3.FS_Info(img_info, offset=offset)
@@ -394,7 +396,7 @@ class ImageHandler:
         except IOError as e:
             print(f"Unable to open filesystem at offset {offset}: {e}")
 
-
+    # Recursive search for files in a directory and its subdirectories
     def recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None):
         for entry in directory:
             if entry.info.name.name in [b".", b".."]:
@@ -427,6 +429,7 @@ class ImageHandler:
                 file_info = self.get_file_metadata(entry, parent_path)
                 files_list.append(file_info)
 
+    # Get metadata for a file entry
     def get_file_metadata(self, entry, parent_path):
         def safe_datetime(timestamp):
             if timestamp is None:
@@ -448,6 +451,7 @@ class ImageHandler:
             "inode_item": str(entry.info.meta.addr),
         }
 
+    # Search for files in the image
     def search_files(self, search_query=None):
         files_list = []
         img_info = self.open_image()
@@ -463,6 +467,8 @@ class ImageHandler:
 
         return files_list
 
+
+    # Process a partition to search for files
     def process_partition_search(self, img_info, offset, files_list, search_query):
         try:
             fs_info = pytsk3.FS_Info(img_info, offset=offset)
@@ -471,6 +477,7 @@ class ImageHandler:
             print(f"Unable to open file system for search: {e}")
 
 
+    # Get the content of a file
     def get_file_content(self, inode_number, offset):
         fs = self.get_fs_info(offset)
         if not fs:
