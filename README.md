@@ -9,13 +9,17 @@
   <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="200"/>
 </p>
 
+[//]: # (## Preview 👀)
 
-## Preview 👀
-<p align="center">
-  <br/>
-  <img src="Icons/Preview.png" alt="TRACE Preview" width="90%"/>
-  <br/>
-</p>
+[//]: # (<p align="center">)
+
+[//]: # (  <br/>)
+
+[//]: # (  <img src="Icons/Preview.png" alt="TRACE Preview" width="90%"/>)
+
+[//]: # (  <br/>)
+
+[//]: # (</p>)
 
 ## Features 🌟
 
@@ -66,12 +70,14 @@ python main.py
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
-## Socials 👨‍💻
+[//]: # (## Socials 👨‍💻)
 
+[//]: # ()
+[//]: # ()
+[//]: # ([![LinkedIn]&#40;https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white&#41;]&#40;https://linkedin.com/in/radoslav-gadzhovski&#41;)
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
-
-<br>
+[//]: # ()
+[//]: # (<br>)
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
