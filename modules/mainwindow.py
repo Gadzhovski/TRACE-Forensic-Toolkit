@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
 from managers.image_manager import ImageManager
+
 from modules.about import AboutDialog
 from modules.converter import Main
 from modules.exif_tab import ExifViewer
@@ -275,7 +276,7 @@ class MainWindow(QMainWindow):
         self.enable_tabs(False)
 
     def show_conversion_widget(self):
-        # Show the conversion widget
+        # Show the conversion widget to convert E01 to DD/RAW
         self.select_dialog = Main()
         self.select_dialog.show()
 
@@ -285,6 +286,7 @@ class MainWindow(QMainWindow):
         self.veriphone_widget.show()
 
     def verify_image(self):
+        # Verify the image using the VerificationWidget
         if self.image_handler is None:
             QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
             return
@@ -299,6 +301,7 @@ class MainWindow(QMainWindow):
             self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-blue.png'))
 
     def enable_tabs(self, state):
+        # Enable or disable all tabs based on the state
         self.result_viewer.setEnabled(state)
         self.viewer_tab.setEnabled(state)
         self.listing_table.setEnabled(state)
@@ -306,6 +309,7 @@ class MainWindow(QMainWindow):
         self.registry_extractor_widget.setEnabled(state)
 
     def create_menu(self, menu_bar, menu_name, actions):
+        #
         menu = QMenu(menu_name, self)
         for action_name, action_function in actions.items():
             action = menu.addAction(action_name)
@@ -315,6 +319,7 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def create_tree_item(parent, text, icon_path, data):
+        # Create a tree item with the specified text, icon, and data
         item = QTreeWidgetItem(parent)
         item.setText(0, text)
         item.setIcon(0, QIcon(icon_path))
@@ -330,6 +335,7 @@ class MainWindow(QMainWindow):
             self.viewer_dock.setMaximumSize(1200, current_height)
 
     def clear_ui(self):
+        # Clear the UI when the evidence file is removed
         self.listing_table.clearContents()
         self.listing_table.setRowCount(0)
         self.clear_viewers()
@@ -341,6 +347,7 @@ class MainWindow(QMainWindow):
         self.deleted_files_widget.clear()
 
     def clear_viewers(self):
+        """Clear all viewers"""
         self.hex_viewer.clear_content()
         self.text_viewer.clear_content()
         self.application_viewer.clear()
@@ -349,6 +356,7 @@ class MainWindow(QMainWindow):
         self.registry_extractor_widget.clear()
 
     def closeEvent(self, event):
+        """Handle the close event"""
         reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
@@ -388,24 +396,6 @@ class MainWindow(QMainWindow):
 
     #         self.enable_tabs(True)
 
-    # all files for linux
-    # def load_image_evidence(self):
-    #     """Open an image."""
-    #     image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "")
-    #     if image_path:
-    #         image_path = os.path.normpath(image_path)
-    #         self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
-    #         self.evidence_files.append(image_path)
-    #         self.current_image_path = image_path  # ensure this line is present
-    #         self.load_partitions_into_tree(image_path)
-
-    #         # pass the image handler to the widgets
-    #         self.deleted_files_widget.set_image_handler(self.image_handler)
-    #         self.registry_extractor_widget.image_handler = self.image_handler
-    #         self.file_search_widget.image_handler = self.image_handler
-    #         self.metadata_viewer.image_handler = self.image_handler
-
-    #         self.enable_tabs(True)
 
     def load_image_evidence(self):
         """Open an image with a specific filter on Kali Linux."""
@@ -781,7 +771,9 @@ class MainWindow(QMainWindow):
                 self.export_file(entry["inode_number"], offset, new_dest_dir, entry_name)
 
     def export_file(self, inode_number, offset, dest_dir, file_name):
-        file_content = self.image_handler.get_file_content(inode_number, offset)
+        #file_content = self.image_handler.get_file_content(inode_number, offset)
+        file_content, metadata = self.image_handler.get_file_content(inode_number, offset)  # Unpack the tuple
+
         if file_content:
             file_path = os.path.join(dest_dir, file_name)
             with open(file_path, 'wb') as f:

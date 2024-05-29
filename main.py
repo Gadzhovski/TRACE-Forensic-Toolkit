@@ -6,6 +6,6 @@ if __name__ == '__main__':
     app = QApplication([]) # Create the application
     app.setStyleSheet(open('styles/global.qss').read()) # Load the global stylesheet
 
-    window = MainWindow() # Create the main window
+    window = MainWindow() # Create the main window by instantiating the MainWindow class
     window.show() # Show the main window
     app.exec() # Execute the application

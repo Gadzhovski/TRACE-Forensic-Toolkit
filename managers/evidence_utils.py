@@ -72,56 +72,7 @@ class ImageHandler:
         else:
             raise ValueError(f"Unsupported image type: {extension}")
 
-    def calculate_hashes(self):
-        """Calculate the MD5, SHA1, and SHA256 hashes for the image."""
-        hash_md5 = hashlib.md5()
-        hash_sha1 = hashlib.sha1()
-        hash_sha256 = hashlib.sha256()
-        size = 0
-        stored_md5, stored_sha1 = None, None
 
-        image_type = self.get_image_type()
-        if image_type == "ewf":
-            filenames = pyewf.glob(self.image_path)
-            ewf_handle = pyewf.handle()
-            ewf_handle.open(filenames)
-            try:
-                # Attempt to retrieve the stored hash values
-                stored_md5 = ewf_handle.get_hash_value("MD5")
-                stored_sha1 = ewf_handle.get_hash_value("SHA1")
-            except Exception as e:
-                print(f"Unable to retrieve stored hash values: {e}")
-
-            # Calculate the hash values by reading the image file
-            while True:
-                chunk = ewf_handle.read(4096)
-                if not chunk:
-                    break
-                hash_md5.update(chunk)
-                hash_sha1.update(chunk)
-                hash_sha256.update(chunk)
-                size += len(chunk)
-            ewf_handle.close()
-        elif image_type == "raw":
-            with open(self.image_path, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    hash_md5.update(chunk)
-                    hash_sha1.update(chunk)
-                    hash_sha256.update(chunk)
-                    size += len(chunk)
-
-        # Compile the computed and stored hashes in a dictionary
-        hashes = {
-            'computed_md5': hash_md5.hexdigest(),
-            'computed_sha1': hash_sha1.hexdigest(),
-            'computed_sha256': hash_sha256.hexdigest(),
-            'size': size,
-            'path': self.image_path,
-            'stored_md5': stored_md5,
-            'stored_sha1': stored_sha1
-        }
-
-        return hashes
 
     def load_image(self):
         """Load the image and retrieve volume and filesystem information."""
@@ -363,8 +314,9 @@ class ImageHandler:
             print(f"Error reading unallocated space: {e}")
             return None
 
-    # Open the image file and return the image info object
+
     def open_image(self):
+        # Open the image file and return the image info object
         if self.get_image_type() == "ewf":
             filenames = pyewf.glob(self.image_path)
             ewf_handle = pyewf.handle()
@@ -373,8 +325,9 @@ class ImageHandler:
         else:
             return pytsk3.Img_Info(self.image_path)
 
-    # List files in the image
+
     def list_files(self, extensions=None):
+        # List files in the image
         files_list = []
 
         img_info = self.open_image()
@@ -388,8 +341,9 @@ class ImageHandler:
 
         return files_list
 
-    # Process a partition to list files
+
     def process_partition(self, img_info, offset, files_list, extensions):
+        # Process a partition to list files
         try:
             fs_info = pytsk3.FS_Info(img_info, offset=offset)
             self.recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions)
@@ -498,6 +452,57 @@ class ImageHandler:
             print(f"Error reading file: {e}")
             return None, None
 
+
+    def calculate_hashes(self):
+        """Calculate the MD5, SHA1, and SHA256 hashes for the image."""
+        hash_md5 = hashlib.md5()
+        hash_sha1 = hashlib.sha1()
+        hash_sha256 = hashlib.sha256()
+        size = 0
+        stored_md5, stored_sha1 = None, None
+
+        image_type = self.get_image_type()
+        if image_type == "ewf":
+            filenames = pyewf.glob(self.image_path)
+            ewf_handle = pyewf.handle()
+            ewf_handle.open(filenames)
+            try:
+                # Attempt to retrieve the stored hash values
+                stored_md5 = ewf_handle.get_hash_value("MD5")
+                stored_sha1 = ewf_handle.get_hash_value("SHA1")
+            except Exception as e:
+                print(f"Unable to retrieve stored hash values: {e}")
+
+            # Calculate the hash values by reading the image file
+            while True:
+                chunk = ewf_handle.read(4096)
+                if not chunk:
+                    break
+                hash_md5.update(chunk)
+                hash_sha1.update(chunk)
+                hash_sha256.update(chunk)
+                size += len(chunk)
+            ewf_handle.close()
+        elif image_type == "raw":
+            with open(self.image_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hash_md5.update(chunk)
+                    hash_sha1.update(chunk)
+                    hash_sha256.update(chunk)
+                    size += len(chunk)
+
+        # Compile the computed and stored hashes in a dictionary
+        hashes = {
+            'computed_md5': hash_md5.hexdigest(),
+            'computed_sha1': hash_sha1.hexdigest(),
+            'computed_sha256': hash_sha256.hexdigest(),
+            'size': size,
+            'path': self.image_path,
+            'stored_md5': stored_md5,
+            'stored_sha1': stored_sha1
+        }
+
+        return hashes
 
     @staticmethod
     def get_readable_size(size_in_bytes):
