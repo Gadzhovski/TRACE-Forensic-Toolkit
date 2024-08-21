@@ -1,8 +1,7 @@
 <h1 align="center">Toolkit for Retrieval and Analysis of Cyber Evidence (TRACE)</h1>
 
 <p align="center">
-  Trace is a digital forensic tool designed to provide an intuitive interface for analyzing disk images. 
-  It offers a range of functionalities to assist forensic examiners in extracting and viewing the contents of various image file formats.
+  TRACE is a digital forensic tool I developed as my final year project. It provides an intuitive interface for analyzing disk images and includes a range of functionalities to assist forensic examiners in extracting and viewing the contents of various image file formats.
 </p>
 
 <p align="center">
