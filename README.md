@@ -17,7 +17,7 @@
   <br/>
 </p>
 
-
+<br>
 
 ## Features 🌟
 
@@ -32,7 +32,7 @@
 ✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
 ✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
 
-
+<br>
 
 ## Screenshots 📸
 
@@ -67,7 +67,7 @@
   <em>Figure 3: Verifying the integrity of E01 disk images.</em>
 </p>
 
-
+<br>
 
 
 ## Supported Image Formats 💾
@@ -80,7 +80,7 @@
 | ISO Image File                                 | `*.iso`                        |         | ✔️       |
 | AccessData Image File                          | `*.ad1`                        | ✔️       | ✔️        |
 
-
+<br>
 
 ## Getting Started 🚀
 
@@ -98,7 +98,7 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
-
+<br>
 
 ## Built With 🧱
 
