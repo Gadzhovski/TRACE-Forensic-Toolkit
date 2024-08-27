@@ -5,19 +5,19 @@
 </p>
 
 <p align="center">
-  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="300"/>
+  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="400"/>
 </p>
 
-<hr>
+
 
 ## Preview 👀
 <p>
   <br/>
-  <img src="Icons/readme/Preview.png" alt="TRACE Preview" width="90%"/>
+  <img src="Icons/readme/Preview.png" alt="TRACE Preview" width="100%"/>
   <br/>
 </p>
 
-<hr>
+
 
 ## Features 🌟
 
@@ -32,7 +32,7 @@
 ✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
 ✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
 
-<hr>
+
 
 ## Screenshots 📸
 
@@ -40,7 +40,7 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/registry.png" alt="Registry Browser" width="70%"/>
+  <img src="Icons/readme/registry.png" alt="Registry Browser" width="80%"/>
   <br/>
   <em>Figure 1: Viewing and analyzing Windows registry files.</em>
 </p>
@@ -51,7 +51,7 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/carving.png" alt="File Carving" width="70%"/>
+  <img src="Icons/readme/carving.png" alt="File Carving" width="80%"/>
   <br/>
   <em>Figure 2: Recovering deleted files from disk images.</em>
 </p>
@@ -62,13 +62,13 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="50%"/>
+  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="60%"/>
   <br/>
   <em>Figure 3: Verifying the integrity of E01 disk images.</em>
 </p>
 
 
-<hr>
+
 
 ## Supported Image Formats 💾
 
@@ -80,7 +80,7 @@
 | ISO Image File                                 | `*.iso`                        |         | ✔️       |
 | AccessData Image File                          | `*.ad1`                        | ✔️       | ✔️        |
 
-<hr>
+
 
 ## Getting Started 🚀
 
@@ -99,7 +99,6 @@ pip install -r requirements.txt
 python main.py
 ```
 
-<hr>
 
 ## Built With 🧱
 
@@ -108,7 +107,7 @@ python main.py
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
-<hr>
+
 
 ## Socials 👨‍💻
 
@@ -116,7 +115,7 @@ python main.py
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
 
 <br>
-<hr>
+
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
