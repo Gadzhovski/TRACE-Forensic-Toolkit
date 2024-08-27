@@ -40,7 +40,7 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/registry.png" alt="Registry Browser" width="80%"/>
+  <img src="Icons/readme/registry.png" alt="Registry Browser" width="90%"/>
   <br/>
 </p>
 
@@ -49,14 +49,14 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/carving.png" alt="File Carving" width="80%"/>
+  <img src="Icons/readme/carving.png" alt="File Carving" width="90%"/>
   <br/>
 </p>
 
 ### File Search 🔍
 <p>
   <br/>
-  <img src="Icons/readme/file_search.png" alt="Image Verification" width="70%"/>
+  <img src="Icons/readme/file_search.png" alt="Image Verification" width="80%"/>
   <br/>
 </p>
 
@@ -64,7 +64,7 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="60%"/>
+  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="70%"/>
   <br/>
 </p>
 
