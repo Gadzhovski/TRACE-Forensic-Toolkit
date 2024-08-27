@@ -90,8 +90,8 @@
 | Operating System       | Screenshot                                                                                                                     |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | **macOS Sonoma** 🍏    | <a href="Icons/readme/macos.png"><img src="Icons/readme/macos.png" alt="macOS Screenshot" width="900"/></a>                    |
-| **Kali Linux 2024** 🐧 | <a href="Icons/readme/kali_screenshot.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>      |
-| **Windows 10** 🗔     | <a href="Icons/readme/windows_screenshot.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
+| **Kali Linux 2024** 🐧 | <a href="Icons/readme/kali.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>      |
+| **Windows 10** 🗔     | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
 
 
 ## Getting Started 🚀
