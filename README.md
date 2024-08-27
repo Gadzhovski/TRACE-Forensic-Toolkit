@@ -5,14 +5,14 @@
 </p>
 
 <p align="center">
-  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="200"/>
+  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="300"/>
 </p>
 
 
 ## Preview 👀
-<p align="center">
+<p>
   <br/>
-  <img src="Icons/Preview.png" alt="TRACE Preview" width="90%"/>
+  <img src="Icons/readme/Preview.png" alt="TRACE Preview" width="90%"/>
   <br/>
 </p>
 
@@ -28,6 +28,23 @@
 ✅ **E01 Image Verification**: Verify the integrity of E01 disk images.\
 ✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
 ✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
+
+## Screenshots 📸
+
+Here are some screenshots demonstrating the key functionalities of TRACE:
+
+### Registry Browser 🗂️
+
+![Registry Browser](Icons/readme/registry.png)
+
+### File Carving 🔪
+
+![File Carving](Icons/readme/carving.png)
+
+
+### Image Verification ✅
+
+![Image Verification](Icons/readme/trace_verify.png)
 
 
 ## Supported Image Formats 💾
