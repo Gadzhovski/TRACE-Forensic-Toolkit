@@ -42,9 +42,7 @@
   <br/>
   <img src="Icons/readme/registry.png" alt="Registry Browser" width="80%"/>
   <br/>
-  <em>Figure 1: Viewing and analyzing Windows registry files.</em>
 </p>
-
 
 
 ### File Carving 🔪
@@ -53,10 +51,14 @@
   <br/>
   <img src="Icons/readme/carving.png" alt="File Carving" width="80%"/>
   <br/>
-  <em>Figure 2: Recovering deleted files from disk images.</em>
 </p>
 
-
+### File Search 🔍
+<p>
+  <br/>
+  <img src="Icons/readme/file_search.png" alt="Image Verification" width="70%"/>
+  <br/>
+</p>
 
 ### Image Verification ✅
 
@@ -64,10 +66,10 @@
   <br/>
   <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="60%"/>
   <br/>
-  <em>Figure 3: Verifying the integrity of E01 disk images.</em>
 </p>
 
 <br>
+
 
 
 ## Supported Image Formats 💾
@@ -81,6 +83,16 @@
 | AccessData Image File                          | `*.ad1`                        | ✔️       | ✔️        |
 
 <br>
+
+
+## Cross-Platform Compatibility 🖥️💻
+
+| Operating System       | Screenshot                                                                                                                     |
+|------------------------|--------------------------------------------------------------------------------------------------------------------------------|
+| **macOS Sonoma** 🍏    | <a href="Icons/readme/macos.png"><img src="Icons/readme/macos.png" alt="macOS Screenshot" width="900"/></a>                    |
+| **Kali Linux 2024** 🐧 | <a href="Icons/readme/kali_screenshot.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>      |
+| **Windows 10** 🗔     | <a href="Icons/readme/windows_screenshot.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
+
 
 ## Getting Started 🚀
 
