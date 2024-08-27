@@ -8,6 +8,7 @@
   <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="300"/>
 </p>
 
+<hr>
 
 ## Preview 👀
 <p>
@@ -15,6 +16,8 @@
   <img src="Icons/readme/Preview.png" alt="TRACE Preview" width="90%"/>
   <br/>
 </p>
+
+<hr>
 
 ## Features 🌟
 
@@ -29,23 +32,43 @@
 ✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
 ✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
 
-## Screenshots 📸
+<hr>
 
-Here are some screenshots demonstrating the key functionalities of TRACE:
+## Screenshots 📸
 
 ### Registry Browser 🗂️
 
-![Registry Browser](Icons/readme/registry.png)
+<p>
+  <br/>
+  <img src="Icons/readme/registry.png" alt="Registry Browser" width="70%"/>
+  <br/>
+  <em>Figure 1: Viewing and analyzing Windows registry files.</em>
+</p>
+
+
 
 ### File Carving 🔪
 
-![File Carving](Icons/readme/carving.png)
+<p>
+  <br/>
+  <img src="Icons/readme/carving.png" alt="File Carving" width="70%"/>
+  <br/>
+  <em>Figure 2: Recovering deleted files from disk images.</em>
+</p>
+
 
 
 ### Image Verification ✅
 
-![Image Verification](Icons/readme/trace_verify.png)
+<p>
+  <br/>
+  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="50%"/>
+  <br/>
+  <em>Figure 3: Verifying the integrity of E01 disk images.</em>
+</p>
 
+
+<hr>
 
 ## Supported Image Formats 💾
 
@@ -57,6 +80,7 @@ Here are some screenshots demonstrating the key functionalities of TRACE:
 | ISO Image File                                 | `*.iso`                        |         | ✔️       |
 | AccessData Image File                          | `*.ad1`                        | ✔️       | ✔️        |
 
+<hr>
 
 ## Getting Started 🚀
 
@@ -75,6 +99,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+<hr>
+
 ## Built With 🧱
 
 - [pytsk3](https://pypi.org/project/pytsk3/) - Python bindings for the SleuthKit
@@ -82,12 +108,15 @@ python main.py
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
+<hr>
+
 ## Socials 👨‍💻
 
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
 
 <br>
+<hr>
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
