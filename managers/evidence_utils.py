@@ -62,7 +62,7 @@ class ImageHandler:
         _, extension = os.path.splitext(self.image_path)
         extension = extension.lower()
 
-        ewf = [".e01", ".s01", ".l01"]
+        ewf = [".e01", ".s01", ".l01", ".ex01"]
         raw = [".raw", ".img", ".dd", ".iso", ".ad1", ".001"]
 
         if extension in ewf:

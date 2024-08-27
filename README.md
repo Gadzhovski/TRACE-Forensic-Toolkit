@@ -74,13 +74,13 @@
 
 ## Supported Image Formats 💾
 
-| Image Format                                   | Extensions                     | Split   |  Unsplit |
-|------------------------------------------------|--------------------------------|---------|----------|
-| EnCase® Image File (EVF / Expert Witness Format)| `*.e01`                       | ✔️      | ✔️       |
-| SMART/Expert Witness Image File                | `*.s01`                        | ✔️      | ✔️       |
-| Single Image Unix / Linux DD / Raw             | `*.dd`, `*.img`, `*.raw`       | ✔️      | ✔️       |
-| ISO Image File                                 | `*.iso`                        |         | ✔️       |
-| AccessData Image File                          | `*.ad1`                        | ✔️       | ✔️        |
+| Image Format                                   | Extensions             | Split   |  Unsplit |
+|------------------------------------------------|------------------------|---------|----------|
+| EnCase® Image File (EVF / Expert Witness Format)| `*.E01` `*.Ex01`       | ✔️      | ✔️       |
+| SMART/Expert Witness Image File                | `*.s01`                | ✔️      | ✔️       |
+| Single Image Unix / Linux DD / Raw             | `*.dd`, `*.img`, `*.raw` | ✔️      | ✔️       |
+| ISO Image File                                 | `*.iso`                |         | ✔️       |
+| AccessData Image File                          | `*.ad1`                | ✔️       | ✔️        |
 
 <br>
 
