@@ -40,7 +40,7 @@
 ✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
 ✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
 ✅ **EXIF Data Extraction**: Extract and display EXIF metadata from image files.\
-✅ **Registry Viewer**: View and analyze Windows registry files.\
+✅ **Registry Viewer**: View and examine Windows registry files.\
 ✅ **Basic File Carving**: Recover deleted files from disk images.\
 ✅ **Virus Total API Integration**: Check files for malware using the Virus Total API.\
 ✅ **E01 Image Verification**: Verify the integrity of E01 disk images.\
