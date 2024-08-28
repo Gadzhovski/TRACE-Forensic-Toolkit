@@ -101,7 +101,7 @@
 <br>
 
 
-## Cross-Platform Compatibility 🖥️💻
+## Cross-Platform Compatibility 💻🖥️
 
 | Operating System       | Screenshot                                                                                                                     |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------|
@@ -113,7 +113,7 @@
 
 ## Getting Started 🚀
 
-### Prerequisites 🛠️
+### Prerequisites 🔧
 - Ensure you have all the necessary Python libraries installed.
 
 ```bash
@@ -143,7 +143,7 @@ python main.py
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
 
-## Work in Progress 🛠️
+## Work in Progress 🧑‍🔧
 
 - **Direct Video/Audio Playback**: Currently, the video and audio player saves files temporarily before playing them, which can cause delays. The goal is to enable direct playback for faster performance.
 - **Integrated File Search and Viewer**: The file search functionality is not yet connected to the "Viewer Tab," which displays HEX, text, application-specific views, metadata, and other details. This integration needs to be implemented.
