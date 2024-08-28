@@ -36,7 +36,7 @@
 
 ## Features 🌟
 
-✅ **Image Mounting**: Mount forensic disk images.\
+✅ ***Image Mounting**: Mount forensic disk images. (Windows only) \
 ✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
 ✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
 ✅ **EXIF Data Extraction**: Extract and display EXIF metadata from photos.\
