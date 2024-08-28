@@ -16,7 +16,7 @@
 - [Supported Image Formats 💾](#supported-image-formats-)
 - [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
 - [Getting Started 🚀](#getting-started-)
-  - [Prerequisites](#prerequisites)
+  - [Prerequisites 🛠️](#prerequisites)
   - [Configuration ⚙️](#configuration-)
   - [Running the Tool ▶️](#running-the-tool-)
 - [Built With 🧱](#built-with-)
@@ -24,6 +24,7 @@
 - [Testing & Feedback 🧪](#testing--feedback-)
 - [Contributing 🤝](#contributing-)
 - [Socials 👨‍💻](#socials-)
+
 
 ## Preview 👀
 <p>
@@ -112,7 +113,7 @@
 ## Getting Started 🚀
 
 
-### Prerequisites
+### Prerequisites 🛠️
 
 - Ensure you have all the necessary Python libraries installed.
 
