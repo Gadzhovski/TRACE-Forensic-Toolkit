@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTextBrowser, 
 class VeriphoneWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.api_key = "992B162500F143DD86625474928A5764"
+        self.api_key = "992B162500F143DD86625474928A5764"   # Might have expired
         self.init_ui()
 
     def init_ui(self):

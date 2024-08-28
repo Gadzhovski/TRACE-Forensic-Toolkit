@@ -19,7 +19,7 @@ class VirusTotal(QWidget):
         self.requests_made_last_minute = 0
         self.daily_requests_made = 0
         self.current_date = date.today()
-        self.api_key = "18d61b0c781eff583dbf678c3bbe5d724ed61cc09e68c3eb2a64179c07f82990"  # Might be expired
+        self.api_key = "18d61b0c781eff583dbf678c3bbe5d724ed61cc09e68c3eb2a64179c07f82990"  # Might have expired
         self.current_file_hash = None
         self.current_file_content = None
         self.current_file_name = None

@@ -8,7 +8,21 @@
   <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="400"/>
 </p>
 
+## Navigation 🧭
 
+- [Preview 👀](#preview-)
+- [Features 🌟](#features-)
+- [Screenshots 📸](#screenshots-)
+- [Supported Image Formats 💾](#supported-image-formats-)
+- [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
+- [Getting Started 🚀](#getting-started-)
+  - [Prerequisites](#prerequisites)
+  - [Configuration ⚙️](#configuration-)
+  - [Running the Tool ▶️](#running-the-tool-)
+- [Built With 🧱](#built-with-)
+- [Work in Progress 🛠️](#work-in-progress-)
+- [Testing & Feedback 🧪](#testing--feedback-)
+- [Socials 👨‍💻](#socials-)
 
 ## Preview 👀
 <p>
@@ -105,7 +119,16 @@
 pip install -r requirements.txt
   ```
 
-### Running the Tool
+### Configuration ⚙️
+
+- **API Keys Configuration**: The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. Update the API keys in the following files:
+
+  - For VirusTotal: Update the API key in `modules/virus_total_tab.py`
+  - For Veriphone: Update the API key in `modules/veriphone_api.py`
+
+
+### Running the Tool ▶️
+
 
 ```bash
 python main.py
@@ -119,6 +142,20 @@ python main.py
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
+
+
+## Work in Progress 🛠️
+
+- **Direct Video/Audio Playback**: Currently, the video and audio player saves files temporarily before playing them, which can cause delays. The goal is to enable direct playback for faster performance.
+- **Integrated File Search and Viewer**: The file search functionality is not yet connected to the "Viewer Tab," which displays HEX, text, application-specific views, metadata, and other details. This integration needs to be implemented.
+- **Cross-Platform Image Mounting**: Image mounting currently works only on Windows using the Arsenal Image Mounter executable. The aim is to make this feature work across all platforms without relying on external executables.
+- **File Carving and Viewer Integration**: The file carving functionality is not yet connected to the "Viewer Tab," where users can view HEX, text, application-specific views, and metadata. Additionally, the current file carving process does not distinguish between deleted and non-deleted files; it will "carve" all files of the selected type from the disk image.
+
+## Testing & Feedback 🧪
+
+- **Tested Formats**: The tool has primarily been tested with `dd` and `E01` files. While these formats are well-supported, additional testing with other formats, such as `Ex01`, `Lx01`, `s01`, and others, is needed.
+- **Call for Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool's compatibility and robustness.
+- **Feedback Welcome**: Please report any issues or unexpected behavior to help improve the tool. Contributions and testing feedback are encouraged and welcomed.
 
 
 ## Socials 👨‍💻
