@@ -16,7 +16,7 @@
 - [Supported Image Formats 💾](#supported-image-formats-)
 - [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
 - [Getting Started 🚀](#getting-started-)
-  - [Prerequisites 🛠️](#prerequisites)
+  - [Prerequisites 🛠️](#prerequisites-)
   - [Configuration ⚙️](#configuration-)
   - [Running the Tool ▶️](#running-the-tool-)
 - [Built With 🧱](#built-with-)
@@ -110,17 +110,15 @@
 | **Windows 10** 🗔     | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
 
 
+
 ## Getting Started 🚀
 
-
 ### Prerequisites 🛠️
-
 - Ensure you have all the necessary Python libraries installed.
 
 ```bash
 pip install -r requirements.txt
   ```
-
 ### Configuration ⚙️
 
 - **API Keys Configuration**: The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. Update the API keys in the following files:
@@ -143,7 +141,6 @@ python main.py
 - [libewf-python](https://github.com/libyal/libewf) - Library to access the Expert Witness Compression Format (EWF)
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
-
 
 
 ## Work in Progress 🛠️
