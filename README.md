@@ -177,7 +177,6 @@ I welcome contributions from the community to help improve TRACE! If you're inte
 
 <br>
 
-
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
