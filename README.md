@@ -22,6 +22,7 @@
 - [Built With 🧱](#built-with-)
 - [Work in Progress 🛠️](#work-in-progress-)
 - [Testing & Feedback 🧪](#testing--feedback-)
+- [Contributing 🤝](#contributing-)
 - [Socials 👨‍💻](#socials-)
 
 ## Preview 👀
@@ -156,6 +157,17 @@ python main.py
 - **Tested Formats**: The tool has primarily been tested with `dd` and `E01` files. While these formats are well-supported, additional testing with other formats, such as `Ex01`, `Lx01`, `s01`, and others, is needed.
 - **Call for Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool's compatibility and robustness.
 - **Feedback Welcome**: Please report any issues or unexpected behavior to help improve the tool. Contributions and testing feedback are encouraged and welcomed.
+
+## Contributing 🤝
+
+I welcome contributions from the community to help improve TRACE! If you're interested in contributing, here’s how you can get involved:
+
+### How to Contribute
+
+1. **Report Issues**: If you find any bugs or have suggestions for improvements, please [open an issue](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/issues) on GitHub. Provide as much detail as possible to help address the issue effectively.
+2. **Submit a Pull Request**: If you have a fix or feature you’d like to contribute, please [fork the repository](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/fork), make your changes, and submit a pull request. Ensure your code adheres to the coding standards and includes tests where applicable.
+3. **Provide Testing Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool’s compatibility and robustness. You can share these samples by [contacting me](https://gadzhovski.com/).
+4. **Review and Feedback**: Review the changes submitted by others and provide feedback to help refine and enhance the tool.
 
 
 ## Socials 👨‍💻
