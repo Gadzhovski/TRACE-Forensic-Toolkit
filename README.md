@@ -36,10 +36,10 @@
 
 ## Features 🌟
 
-✅ **Image Mounting & Dismounting**: Seamlessly mount and dismount forensic disk images for analysis.\
+✅ **Image Mounting**: Mount forensic disk images.\
 ✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
 ✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
-✅ **EXIF Data Extraction**: Extract and display EXIF metadata from image files.\
+✅ **EXIF Data Extraction**: Extract and display EXIF metadata from photos.\
 ✅ **Registry Viewer**: View and examine Windows registry files.\
 ✅ **Basic File Carving**: Recover deleted files from disk images.\
 ✅ **Virus Total API Integration**: Check files for malware using the Virus Total API.\
@@ -151,13 +151,13 @@ python main.py
 - **Integrated File Search and Viewer**: The file search functionality is not yet connected to the "Viewer Tab," which displays HEX, text, application-specific views, metadata, and other details. This integration needs to be implemented.
 - **Cross-Platform Image Mounting**: Image mounting currently works only on Windows using the Arsenal Image Mounter executable. The aim is to make this feature work across all platforms without relying on external executables.
 - **File Carving and Viewer Integration**: The file carving functionality is not yet connected to the "Viewer Tab," where users can view HEX, text, application-specific views, and metadata. Additionally, the current file carving process does not distinguish between deleted and non-deleted files; it will "carve" all files of the selected type from the disk image.
-- **Color Issues in Dark Mode**: The software currently has some color display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
+- **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
 
 ## Testing & Feedback 🧪
 
 - **Tested Formats**: The tool has primarily been tested with `dd` and `E01` files. While these formats are well-supported, additional testing with other formats, such as `Ex01`, `Lx01`, `s01`, and others, is needed.
 - **Call for Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool's compatibility and robustness.
-- **Feedback Welcome**: Please report any issues or unexpected behavior to help improve the tool. Contributions and testing feedback are encouraged and welcomed.
+- **Feedback Welcome**: Please report any issues or unexpected behaviour to help improve the tool. Contributions and testing feedback are encouraged and welcomed.
 
 ## Contributing 🤝
 
