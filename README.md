@@ -14,6 +14,7 @@
 - [Features 🌟](#features-)
 - [Screenshots 📸](#screenshots-)
 - [Supported Image Formats 💾](#supported-image-formats-)
+- [Tested File Systems 🗂️](#tested-file-systems-)
 - [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
 - [Getting Started 🚀](#getting-started-)
   - [Prerequisites 🛠️](#prerequisites-)
@@ -97,6 +98,19 @@
 | Single Image Unix / Linux DD / Raw             | `*.dd`, `*.img`, `*.raw` | ✔️      | ✔️       |
 | ISO Image File                                 | `*.iso`                |         | ✔️       |
 | AccessData Image File                          | `*.ad1`                | ✔️       | ✔️        |
+
+<br>
+
+## Tested File Systems 🗂️
+
+| File System | Tested |
+|-------------|--------|
+| NTFS        | ✔️     |
+| FAT32       |        |
+| exFAT       |        |
+| HFS+        |        |
+| APFS        |        |
+| EXT2,3,4    |        |
 
 <br>
 
