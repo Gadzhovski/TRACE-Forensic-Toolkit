@@ -18,7 +18,7 @@
 - [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-%EF%B8%8F)
 - [Getting Started 🚀](#getting-started-)
   - [Prerequisites 🛠️](#prerequisites-)
-  - [Configuration ⚙️](#configuration-gear)
+  - [Configuration ⚙️](#configuration-%EF%B8%8F)
   - [Running the Tool ▶️](#running-the-tool-%EF%B8%8F)
 - [Built With 🧱](#built-with-)
 - [Work in Progress 🛠️](#work-in-progress-)
