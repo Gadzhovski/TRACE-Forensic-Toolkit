@@ -14,20 +14,16 @@
 - [Features 🌟](#features-)
 - [Screenshots 📸](#screenshots-)
 - [Supported Image Formats 💾](#supported-image-formats-)
-- [Tested File Systems 🗂️](#tested-file-systems-)
 - [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
 - [Getting Started 🚀](#getting-started-)
-  - [Prerequisites 🛠️](#prerequisites)
-  - [Configuration ⚙️](#configuration-)
+  - [Prerequisites 🛠️](#prerequisites-)
+  - [Configuration :gear:](#configuration-)
   - [Running the Tool ▶️](#running-the-tool-)
 - [Built With 🧱](#built-with-)
 - [Work in Progress 🛠️](#work-in-progress-)
 - [Testing & Feedback 🧪](#testing--feedback-)
 - [Contributing 🤝](#contributing-)
 - [Socials 👨‍💻](#socials-)
-
-
-<br>
 
 
 ## Preview 👀
@@ -104,20 +100,8 @@
 
 <br>
 
-## Tested File Systems 🗂️
 
-| File System | Tested |
-|-------------|--------|
-| NTFS        | ✔️     |
-| FAT32       |        |
-| exFAT       |        |
-| HFS+        |        |
-| APFS        |        |
-| EXT4,3,2    |        |
-
-<br>
-
-## Cross-Platform Compatibility 🖥️💻
+## Cross-Platform Compatibility 💻🖥️
 
 | Operating System       | Screenshot                                                                                                                     |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------|
@@ -125,21 +109,17 @@
 | **Kali Linux 2024** 🐧 | <a href="Icons/readme/kali.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>      |
 | **Windows 10** 🗔     | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
 
-<br>
 
 
 ## Getting Started 🚀
 
-
-### Prerequisites 🛠️
-
+### Prerequisites 🔧
 - Ensure you have all the necessary Python libraries installed.
 
 ```bash
 pip install -r requirements.txt
   ```
-
-### Configuration ⚙️
+### Configuration :gear:
 
 - **API Keys Configuration**: The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. Update the API keys in the following files:
 
@@ -162,9 +142,8 @@ python main.py
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
-<br>
 
-## Work in Progress 🛠️
+## Work in Progress 🧑‍🔧
 
 - **Direct Video/Audio Playback**: Currently, the video and audio player saves files temporarily before playing them, which can cause delays. The goal is to enable direct playback for faster performance.
 - **Integrated File Search and Viewer**: The file search functionality is not yet connected to the "Viewer Tab," which displays HEX, text, application-specific views, metadata, and other details. This integration needs to be implemented.
@@ -172,15 +151,11 @@ python main.py
 - **File Carving and Viewer Integration**: The file carving functionality is not yet connected to the "Viewer Tab," where users can view HEX, text, application-specific views, and metadata. Additionally, the current file carving process does not distinguish between deleted and non-deleted files; it will "carve" all files of the selected type from the disk image.
 - **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
 
-<br>
-
 ## Testing & Feedback 🧪
 
 - **Tested Formats**: The tool has primarily been tested with `dd` and `E01` files. While these formats are well-supported, additional testing with other formats, such as `Ex01`, `Lx01`, `s01`, and others, is needed.
 - **Call for Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool's compatibility and robustness.
 - **Feedback Welcome**: Please report any issues or unexpected behaviour to help improve the tool. Contributions and testing feedback are encouraged and welcomed.
-
-<br>
 
 ## Contributing 🤝
 
@@ -193,7 +168,6 @@ I welcome contributions from the community to help improve TRACE! If you're inte
 3. **Provide Testing Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool’s compatibility and robustness. You can share these samples by [contacting me](https://gadzhovski.com/).
 4. **Review and Feedback**: Review the changes submitted by others and provide feedback to help refine and enhance the tool.
 
-<br>
 
 ## Socials 👨‍💻
 
