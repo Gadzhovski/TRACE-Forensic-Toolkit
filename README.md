@@ -14,7 +14,7 @@
 - [Features 🌟](#features-)
 - [Screenshots 📸](#screenshots-)
 - [Supported Image Formats 💾](#supported-image-formats-)
-- [Tested File Systems 🗂️](#tested-file-systems-)
+- [Tested File Systems 🗂️](#tested-file-systems-%EF%B8%8F)
 - [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
 - [Getting Started 🚀](#getting-started-)
   - [Prerequisites 🛠️](#prerequisites-)
