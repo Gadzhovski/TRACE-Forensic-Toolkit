@@ -15,11 +15,11 @@
 - [Screenshots 📸](#screenshots-)
 - [Supported Image Formats 💾](#supported-image-formats-)
 - [Tested File Systems 🗂️](#tested-file-systems-%EF%B8%8F)
-- [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-)
+- [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-%EF%B8%8F)
 - [Getting Started 🚀](#getting-started-)
   - [Prerequisites 🛠️](#prerequisites-)
-  - [Configuration :gear:](#configuration-)
-  - [Running the Tool ▶️](#running-the-tool-)
+  - [Configuration ⚙️](#configuration-gear)
+  - [Running the Tool ▶️](#running-the-tool-%EF%B8%8F)
 - [Built With 🧱](#built-with-)
 - [Work in Progress 🛠️](#work-in-progress-)
 - [Testing & Feedback 🧪](#testing--feedback-)
@@ -133,7 +133,7 @@
 ```bash
 pip install -r requirements.txt
   ```
-### Configuration :gear:
+### Configuration ⚙️
 
 - **API Keys Configuration**: The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. Update the API keys in the following files:
 
