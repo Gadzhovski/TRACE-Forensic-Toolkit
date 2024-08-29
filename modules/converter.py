@@ -123,9 +123,9 @@ class SelectSourceDialog(QWidget):
         # Existing options
         self.image_file_radio = QRadioButton("Image File")
         # New source options
-        self.physical_drive_radio = QRadioButton("Physical Drive")
-        self.logical_drive_radio = QRadioButton("Logical Drive")
-        self.contents_of_folder_radio = QRadioButton("Contents of a Folder")
+        self.physical_drive_radio = QRadioButton("Physical Drive (not implemented)")
+        self.logical_drive_radio = QRadioButton("Logical Drive (not implemented)")
+        self.contents_of_folder_radio = QRadioButton("Contents of a Folder (not implemented)")
 
         # Add the radio buttons to the layout
         self.radio_buttons_layout.addWidget(self.image_file_radio)
