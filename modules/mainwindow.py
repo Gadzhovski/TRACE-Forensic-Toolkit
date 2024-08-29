@@ -780,8 +780,16 @@ class MainWindow(QMainWindow):
             else:
                 self.export_file(entry["inode_number"], offset, new_dest_dir, entry_name)
 
+    # def export_file(self, inode_number, offset, dest_dir, file_name):
+    #     file_content = self.image_handler.get_file_content(inode_number, offset)
+    #     if file_content:
+    #         file_path = os.path.join(dest_dir, file_name)
+    #         with open(file_path, 'wb') as f:
+    #             f.write(file_content)
+
+    # Fixed the unpacking of the tuple
     def export_file(self, inode_number, offset, dest_dir, file_name):
-        file_content = self.image_handler.get_file_content(inode_number, offset)
+        file_content, _ = self.image_handler.get_file_content(inode_number, offset)
         if file_content:
             file_path = os.path.join(dest_dir, file_name)
             with open(file_path, 'wb') as f:
