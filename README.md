@@ -8,7 +8,7 @@
   <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="400"/>
 </p>
 
-## Navigation 🧭
+## Navigation 🧭 
 
 - [Preview 👀](#preview-)
 - [Features 🌟](#features-)
@@ -27,7 +27,8 @@
 - [Socials 👨‍💻](#socials-)
 
 
-## Preview 👀
+## Preview 👀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+
 <p>
   <br/>
   <img src="Icons/readme/Preview.png" alt="TRACE Preview" width="100%"/>
@@ -36,7 +37,7 @@
 
 <br>
 
-## Features 🌟
+## Features 🌟 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 ✅ ***Image Mounting**: Mount forensic disk images. (Windows only) \
 ✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
@@ -51,7 +52,7 @@
 
 <br>
 
-## Screenshots 📸
+## Screenshots 📸 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 ### Registry Browser 🗂️
 
@@ -89,7 +90,7 @@
 
 
 
-## Supported Image Formats 💾
+## Supported Image Formats 💾 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 | Image Format                                   | Extensions             | Split   |  Unsplit |
 |------------------------------------------------|------------------------|---------|----------|
@@ -101,7 +102,7 @@
 
 <br>
 
-## Tested File Systems 🗂️
+## Tested File Systems 🗂️ &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 | File System | Tested |
 |-------------|--------|
@@ -115,7 +116,7 @@
 <br>
 
 
-## Cross-Platform Compatibility 💻🖥️
+## Cross-Platform Compatibility 💻🖥️  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 | Operating System       | Screenshot                                                                                                                     |
 |------------------------|--------------------------------------------------------------------------------------------------------------------------------|
@@ -125,7 +126,7 @@
 
 
 
-## Getting Started 🚀
+## Getting Started 🚀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 ### Prerequisites 🔧
 - Ensure you have all the necessary Python libraries installed.
@@ -149,7 +150,7 @@ python main.py
 ```
 <br>
 
-## Built With 🧱
+## Built With 🧱  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 - [pytsk3](https://pypi.org/project/pytsk3/) - Python bindings for the SleuthKit
 - [libewf-python](https://github.com/libyal/libewf) - Library to access the Expert Witness Compression Format (EWF)
@@ -157,7 +158,7 @@ python main.py
 - [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
 
-## Work in Progress 🧑‍🔧
+## Work in Progress 🧑‍🔧  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 - **Direct Video/Audio Playback**: Currently, the video and audio player saves files temporarily before playing them, which can cause delays. The goal is to enable direct playback for faster performance.
 - **Integrated File Search and Viewer**: The file search functionality is not yet connected to the "Viewer Tab," which displays HEX, text, application-specific views, metadata, and other details. This integration needs to be implemented.
@@ -165,13 +166,14 @@ python main.py
 - **File Carving and Viewer Integration**: The file carving functionality is not yet connected to the "Viewer Tab," where users can view HEX, text, application-specific views, and metadata. Additionally, the current file carving process does not distinguish between deleted and non-deleted files; it will "carve" all files of the selected type from the disk image.
 - **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
 
-## Testing & Feedback 🧪
+## Testing & Feedback 🧪  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 - **Tested Formats**: The tool has primarily been tested with `dd` and `E01` files. While these formats are well-supported, additional testing with other formats, such as `Ex01`, `Lx01`, `s01`, and others, is needed.
+- **Tested File Systems**: Currently, the tool has only been tested on the NTFS file system. Testing on additional file systems like FAT32, exFAT, HFS+, APFS, EXT4, and others is needed to ensure broader compatibility.
 - **Call for Samples**: If you have disk images in formats that are less tested (`Ex01`, `Lx01`, `s01`, etc.), your contributions would be greatly appreciated to help improve the tool's compatibility and robustness.
 - **Feedback Welcome**: Please report any issues or unexpected behaviour to help improve the tool. Contributions and testing feedback are encouraged and welcomed.
 
-## Contributing 🤝
+## Contributing 🤝 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 I welcome contributions from the community to help improve TRACE! If you're interested in contributing, here’s how you can get involved:
 
@@ -183,7 +185,7 @@ I welcome contributions from the community to help improve TRACE! If you're inte
 4. **Review and Feedback**: Review the changes submitted by others and provide feedback to help refine and enhance the tool.
 
 
-## Socials 👨‍💻
+## Socials 👨‍💻 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
