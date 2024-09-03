@@ -135,17 +135,17 @@ class MainWindow(QMainWindow):
         self.main_toolbar.addSeparator()
 
         # if os is windows, add the mount and unmount actions to the toolbar
-        if os.name == 'nt':
+        # if os.name == 'nt':
             # Initialize and add the mount image action
-            self.mount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48.png'), "Mount Image", self)
-            self.mount_image_button.triggered.connect(self.image_manager.mount_image)
-            self.main_toolbar.addAction(self.mount_image_button)
+        self.mount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48.png'), "Mount Image", self)
+        self.mount_image_button.triggered.connect(self.image_manager.mount_image)
+        self.main_toolbar.addAction(self.mount_image_button)
 
-            # Initialize and add the unmount image action
-            self.unmount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48_red.png'), "Unmount Image",
-                                                self)
-            self.unmount_image_button.triggered.connect(self.image_manager.dismount_image)
-            self.main_toolbar.addAction(self.unmount_image_button)
+        # Initialize and add the unmount image action
+        self.unmount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48_red.png'), "Unmount Image",
+                                            self)
+        self.unmount_image_button.triggered.connect(self.image_manager.dismount_image)
+        self.main_toolbar.addAction(self.unmount_image_button)
 
         self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 

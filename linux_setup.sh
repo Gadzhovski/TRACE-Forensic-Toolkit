@@ -15,7 +15,8 @@ sudo pip3 install -r requirements.txt
 
 # Install additional system dependencies
 sudo apt install libxcb-cursor0
-sudo apt-get install libva-dev libva-drm2
+sudo apt install libva-dev libva-drm2
+sudo apt install ewf-tools
 
 # Install individual Python packages
 pip3 install PySide6
