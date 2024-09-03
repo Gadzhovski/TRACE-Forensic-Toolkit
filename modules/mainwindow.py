@@ -642,6 +642,7 @@ class MainWindow(QMainWindow):
             self.application_viewer.display_application_content(file_content, full_file_path)
         elif index == 3:  # File Metadata tab
             self.metadata_viewer.display_metadata(data)
+
         elif index == 4:  # Exif Data tab
             self.exif_viewer.load_and_display_exif_data(file_content)
         elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)

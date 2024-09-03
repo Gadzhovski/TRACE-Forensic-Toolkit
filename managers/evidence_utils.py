@@ -448,6 +448,7 @@ class ImageHandler:
             "inode_item": str(entry.info.meta.addr),
         }
 
+
     def search_files(self, search_query=None):
         files_list = []
         img_info = self.open_image()
@@ -487,9 +488,11 @@ class ImageHandler:
 
             return content, metadata
 
+
         except Exception as e:
             print(f"Error reading file: {e}")
             return None, None
+
 
 
     @staticmethod

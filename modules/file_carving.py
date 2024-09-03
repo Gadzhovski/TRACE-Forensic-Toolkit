@@ -188,13 +188,31 @@ class FileCarvingWidget(QWidget):
     def set_large_size(self):
         self.set_icon_size(200)
 
+    # def start_carving(self):
+    #     self.start_button.setEnabled(False)
+    #     self.stop_button.setEnabled(True)
+    #     # Clear internal tracking and UI components to start fresh
+    #     self.clear_ui()
+    #     self.carved_files.clear()
+    #     self.carved_file_names.clear()
+    #
+    #     selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
+    #                            checkbox.isChecked()]
+    #     self.executor.submit(self.carve_files, selected_file_types)
+
     def start_carving(self):
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        # Clear internal tracking and UI components to start fresh
         self.clear_ui()
         self.carved_files.clear()
         self.carved_file_names.clear()
+
+        # Ensure the 'carved_files' and 'thumbnails' directories exist
+        if not os.path.exists("carved_files"):
+            os.makedirs("carved_files")
+        thumbnail_folder = os.path.join("carved_files", "thumbnails")
+        if not os.path.exists(thumbnail_folder):
+            os.makedirs(thumbnail_folder)
 
         selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
                                checkbox.isChecked()]
@@ -661,17 +679,33 @@ class FileCarvingWidget(QWidget):
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
 
+    # def save_file(self, file_content, file_type, file_path, offset):
+    #     # Use hex representation of the offset for a shorter name.
+    #     offset_hex = format(offset, 'x')
+    #     file_name = f"{offset_hex}.{file_type}"
+    #     file_path = os.path.join("carved_files", file_name)
+    #     with open(file_path, "wb") as f:
+    #         f.write(file_content)
+    #
+    #     modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    #     file_size = str(len(file_content))
+    #
+    #     self.carved_files.append((file_name, file_size, file_type, file_path, modification_date))
+    #     self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
+    #     self.carved_file_names.add(file_name)
+
     def save_file(self, file_content, file_type, file_path, offset):
-        # Use hex representation of the offset for a shorter name.
+        # Ensure the 'carved_files' directory exists
+        if not os.path.exists("carved_files"):
+            os.makedirs("carved_files")
+
         offset_hex = format(offset, 'x')
         file_name = f"{offset_hex}.{file_type}"
         file_path = os.path.join("carved_files", file_name)
         with open(file_path, "wb") as f:
             f.write(file_content)
-
         modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_size = str(len(file_content))
-
         self.carved_files.append((file_name, file_size, file_type, file_path, modification_date))
         self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
         self.carved_file_names.add(file_name)

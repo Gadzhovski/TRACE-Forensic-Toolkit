@@ -129,11 +129,29 @@
 ## Getting Started 🚀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 ### Prerequisites 🔧
-- Ensure you have all the necessary Python libraries installed.
+
+
+#### For Windows:
 
 ```bash
 pip install -r requirements.txt
   ```
+
+<br>
+
+#### For macOS - Apple Silicon:
+```bash
+chmod +x install_macos_silicon.sh
+ ```
+
+```bash
+./install_macos_silicon.sh
+ ```
+**This script will:**
+- Check if Homebrew is installed and offer to install it if it’s not.
+- Install necessary system dependencies (ffmpeg and poppler) using Homebrew.
+- Install all Python dependencies specified in requirements_macos_silicon.txt using pip.
+
 ### Configuration ⚙️
 
 - **API Keys Configuration**: The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. Update the API keys in the following files:
