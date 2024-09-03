@@ -1,9 +1,6 @@
 #!/bin/bash
 
 
-#Might need to run this script if requirements.txt does not install all dependencies
-
-
 # Update package lists
 sudo apt update
 
