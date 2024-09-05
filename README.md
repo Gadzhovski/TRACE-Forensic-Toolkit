@@ -118,11 +118,12 @@
 
 ## Cross-Platform Compatibility 💻🖥️  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
-| Operating System       | Screenshot                                                                                                                     |
-|------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| **macOS Sonoma** 🍏    | <a href="Icons/readme/macos.png"><img src="Icons/readme/macos.png" alt="macOS Screenshot" width="900"/></a>                    |
-| **Kali Linux 2024** 🐧 | <a href="Icons/readme/kali.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>      |
-| **Windows 10** 🗔     | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
+| Operating System                   | Screenshot                                                                                                           |
+|------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| **macOS Sonoma** 🍏                | <a href="Icons/readme/macos.png"><img src="Icons/readme/macos.png" alt="macOS Screenshot" width="900"/></a>          |
+| **Kali Linux 2024** 🐧             | <a href="Icons/readme/kali.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>       |
+| **\*WSL2 - Ubuntu 22.04.3 LTS** 🐧 | <a href="Icons/readme/wsl3.png"><img src="Icons/readme/wsl3.png" alt="Kali Linux Screenshot" width="900"/></a>        |
+| **Windows 10** 🗔                  | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
 
 
 
@@ -137,7 +138,6 @@
 pip install -r requirements.txt
   ```
 
-<br>
 
 #### For macOS - Apple Silicon:
 ```bash
@@ -151,6 +151,22 @@ chmod +x install_macos_silicon.sh
 - Check if Homebrew is installed and offer to install it if it’s not.
 - Install necessary system dependencies (ffmpeg and poppler) using Homebrew.
 - Install all Python dependencies specified in requirements_macos_silicon.txt using pip.
+
+
+#### For Ubuntu on WSL:
+```bash
+chmod +x WSL_Ubuntu_install.sh
+```
+
+```bash
+./WSL_Ubuntu_install.sh
+```
+
+**This script will:**
+
+- Update package lists and install necessary system packages including graphics libraries and sound management tools.
+- Install necessary Python dependencies from requirements_macos_silicon.txt (same requirements for Ubuntu).
+
 
 ### Configuration ⚙️
 
