@@ -133,7 +133,17 @@
 
 
 #### For Windows:
+*There's a compatibility issue with Python 3.12. Please install Python 3.11 from the official Python website: https://www.python.org/downloads/release/python-3110/
+<br>
 
+If you don't already have Microsoft C++ Build Tools installed, you'll need to install them to compile required packages like libewf-python and pytsk3.
+
+Step 1: Download and Install Microsoft C++ Build Tools - https://visualstudio.microsoft.com/visual-cpp-build-tools/
+During the installation, make sure to select the following workloads:
+  - Desktop development with C++
+  - C++ build tools
+  
+Step 2: Install the Dependencies
 ```bash
 pip install -r requirements.txt
   ```
