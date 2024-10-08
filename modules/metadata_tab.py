@@ -102,7 +102,7 @@ class MetadataViewer(QWidget):
         if inode_number is None:
             raise ValueError("Inode number value is None!")
 
-        metadata_cmd = ["tools/sleuthkit-4.12.0-win32/bin/istat.exe"]
+        metadata_cmd = ["tools/sleuthkit-4.12.1-win32/bin/istat.exe"]
 
         if offset is not None:
             metadata_cmd.extend(["-o", str(offset)])
