@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QToolBar, QWidgetAction, QSizePolicy, QTextBrowser, QPushButton, \
-    QHBoxLayout
+    QHBoxLayout, QMessageBox
 from requests import post as requests_post
 from requests.exceptions import RequestException
 
@@ -19,7 +19,7 @@ class VirusTotal(QWidget):
         self.requests_made_last_minute = 0
         self.daily_requests_made = 0
         self.current_date = date.today()
-        self.api_key = "18d61b0c781eff583dbf678c3bbe5d724ed61cc09e68c3eb2a64179c07f82990"  # Might have expired
+        self.api_key = None
         self.current_file_hash = None
         self.current_file_content = None
         self.current_file_name = None
@@ -66,6 +66,13 @@ class VirusTotal(QWidget):
         self.info_text_edit.setReadOnly(True)
         self.info_text_edit.setVisible(False)
         self.layout.addWidget(self.info_text_edit)
+
+    def set_api_key(self, key):
+        self.api_key = key
+
+    def use_api_key(self):
+        if not self.api_key:
+            raise ValueError("API key not set")
 
     def spacer(self, policy1, policy2):
         spacer = QWidget(self)
@@ -126,6 +133,11 @@ class VirusTotal(QWidget):
 
     def upload_file(self):
         """Prepares the file content and name for upload."""
+        if not self.api_key:
+            QMessageBox.warning(self, "API Key Not Set",
+                                "Please set the API key in the Options menu before uploading a file.")
+            return
+
         if self.current_file_content and self.current_file_name:
             # Assuming current_file_content is the content of the file to upload,
             # and current_file_name is the name of the file.
@@ -172,6 +184,11 @@ class VirusTotal(QWidget):
         self.view_in_browser_action.setVisible(False)
 
     def pass_hash(self):
+        if not self.api_key:
+            QMessageBox.warning(self, "API Key Not Set",
+                                "Please set the API key in the Options menu before passing a hash.")
+            return
+
         if not self.current_file_hash:
             self.info_text_edit.setText("No hash provided.")
             self.info_text_edit.setVisible(True)

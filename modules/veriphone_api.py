@@ -2,13 +2,13 @@ import requests
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QTextBrowser, QLineEdit, QLabel, QToolBar,
-                               QSizePolicy)
+                               QSizePolicy, QMessageBox)
 
 
 class VeriphoneWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.api_key = "992B162500F143DD86625474928A5764"   # Might have expired
+        self.api_key = None
         self.init_ui()
 
     def init_ui(self):
@@ -67,9 +67,24 @@ class VeriphoneWidget(QWidget):
         self.info_text_edit.setReadOnly(True)
         self.layout.addWidget(self.info_text_edit)
 
+    def set_api_key(self, key):
+        self.api_key = key
+
+    def use_api_key(self):
+        if not self.api_key:
+            raise ValueError("API key not set")
+
     def verify_phone_number(self):
+        if not self.api_key:
+            QMessageBox.warning(self, "API Key Not Set",
+                                "Please set the API key in the Options menu before verifying a phone number.")
+            return
+
         phone_number = self.phone_input.text()
-        self.update_veriphone_info(phone_number)
+        if phone_number:
+            self.update_veriphone_info(phone_number)
+        else:
+            QMessageBox.warning(self, "Input Error", "Please enter a phone number to verify.")
 
     def update_veriphone_info(self, phone_number):
         data = self.verify_phone_with_veriphone(phone_number)

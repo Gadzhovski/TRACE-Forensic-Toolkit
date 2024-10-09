@@ -1,3 +1,4 @@
+import configparser
 import hashlib
 import os
 
@@ -5,7 +6,8 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView)
+                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
+                               QFormLayout)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
@@ -49,6 +51,10 @@ class MainWindow(QMainWindow):
                                                                                                                "Operation",
                                                                                                                message),
                 setattr(self, "image_mounted", not self.image_mounted) if success else None)[1])
+
+        # # Load existing API keys
+        self.api_keys = configparser.ConfigParser()
+        self.api_keys.read('config.ini')
 
         self.initialize_ui()
 
@@ -104,9 +110,17 @@ class MainWindow(QMainWindow):
         help_menu.addAction("About")
         help_menu.triggered.connect(lambda: AboutDialog(self).exec_())
 
+        # Add "Options" menu for API key configuration
+        options_menu = QMenu('Options', self)
+        api_key_action = QAction("API Keys", self)
+        api_key_action.triggered.connect(self.show_api_key_dialog)
+        options_menu.addAction(api_key_action)
+
+
         menu_bar.addMenu(view_menu)
         menu_bar.addMenu(tools_menu)
         menu_bar.addMenu(help_menu)
+        menu_bar.addMenu(options_menu)
 
         self.setMenuBar(menu_bar)
 
@@ -259,6 +273,12 @@ class MainWindow(QMainWindow):
         self.virus_total_api = VirusTotal()
         self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
 
+        # Set the API key if it exists
+        virus_total_key = self.api_keys.get('API_KEYS', 'virustotal', fallback='')
+        self.virus_total_api.set_api_key(virus_total_key)
+
+
+
         # self.veriphone_api = VeriphoneWidget()
         # self.viewer_tab.addTab(self.veriphone_api, 'Veriphone API')
 
@@ -274,14 +294,82 @@ class MainWindow(QMainWindow):
         # disable all tabs before loading an image file
         self.enable_tabs(False)
 
+
+
+    def show_api_key_dialog(self):
+        # Create a dialog to get API keys from the user
+        dialog = QDialog(self)
+        dialog.setWindowTitle("API Key Configuration")
+        dialog.setFixedWidth(600)  # Set a fixed width to accommodate longer API keys
+
+        # Set layout as a form layout for better presentation
+        layout = QFormLayout()
+        layout.setSpacing(10)  # Add some spacing between fields
+        layout.setContentsMargins(15, 15, 15, 15)  # Set content margins for better visual aesthetics
+
+        # VirusTotal API Key
+        virus_total_label = QLabel("VirusTotal API Key:")
+        virus_total_input = QLineEdit()
+        virus_total_input.setText(self.api_keys.get('API_KEYS', 'virustotal', fallback=''))
+        virus_total_input.setMinimumWidth(400)  # Set a minimum width for the input field
+        layout.addRow(virus_total_label, virus_total_input)
+
+        # Veriphone API Key
+        veriphone_label = QLabel("Veriphone API Key:")
+        veriphone_input = QLineEdit()
+        veriphone_input.setText(self.api_keys.get('API_KEYS', 'veriphone', fallback=''))
+        veriphone_input.setMinimumWidth(400)  # Set a minimum width for the input field
+        layout.addRow(veriphone_label, veriphone_input)
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(
+            lambda: self.save_api_keys(virus_total_input.text(), veriphone_input.text(), dialog))
+        button_box.rejected.connect(dialog.reject)
+        layout.addRow(button_box)
+
+        # Set layout and execute dialog
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+    def save_api_keys(self, virus_total_key, veriphone_key, dialog):
+        # Save the API keys in a configuration file
+        if not self.api_keys.has_section('API_KEYS'):
+            self.api_keys.add_section('API_KEYS')
+
+        self.api_keys.set('API_KEYS', 'virustotal', virus_total_key)
+        self.api_keys.set('API_KEYS', 'veriphone', veriphone_key)
+
+        with open('config.ini', 'w') as config_file:
+            self.api_keys.write(config_file)
+
+        dialog.accept()
+
+        # Pass the updated API keys to the appropriate modules
+        self.virus_total_api.set_api_key(virus_total_key)
+
+        # Set Veriphone API key only if the widget is created
+        if hasattr(self, 'veriphone_widget'):
+            self.veriphone_widget.set_api_key(veriphone_key)
+
     def show_conversion_widget(self):
         # Show the conversion widget
         self.select_dialog = Main()
         self.select_dialog.show()
 
+    # def show_veriphone_widget(self):
+    #     # Create the VeriphoneWidget only if it hasn't been created yet
+    #     if not hasattr(self, 'veriphone_widget'):
+    #         self.veriphone_widget = VeriphoneWidget()
+    #     self.veriphone_widget.show()
+
     def show_veriphone_widget(self):
-        # Show the Veriphone API widget
-        self.veriphone_widget = VeriphoneWidget()
+        # Create the VeriphoneWidget only if it hasn't been created yet
+        if not hasattr(self, 'veriphone_widget'):
+            self.veriphone_widget = VeriphoneWidget()
+            # Set the API key after creating the widget
+            veriphone_key = self.api_keys.get('API_KEYS', 'veriphone', fallback='')
+            self.veriphone_widget.set_api_key(veriphone_key)
         self.veriphone_widget.show()
 
     def verify_image(self):
