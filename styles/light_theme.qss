@@ -239,6 +239,12 @@ QTabWidget {
     border-radius: 2px;
     background-color: #ffffff;
 }
+
+QTabWidget::pane {
+    border-top: 1px solid #C2C7CB;  /* Light gray color, good for white mode */
+}
+
+
 QTabBar::tab {
     background: #f5f5f5;
     border: 1px solid #d7d7d7;
@@ -283,6 +289,7 @@ QLineEdit:hover, QTextEdit:hover {
 QLineEdit:focus {
     border: 1px solid #56CCF2;
 }
+
 QTreeWidget {
     border: 1px solid #d7d7d7;
     border-radius: 2px;
@@ -308,4 +315,137 @@ QAction:pressed {
 
 QGroupBox {
     border-radius: 4px;
+}
+
+
+#exportButton {
+    border: 1px solid #ced4da;
+    border-radius: 2px;
+    padding: 5px 30px 5px 5px; /* Adjust right padding to push text more to the left */
+    background-color: #ffffff;
+    width: 60px; /* Adjust width as necessary to fit text and menu arrow */
+}
+
+#exportButton::menu-button {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 25px;
+    border-left-width: 1px;
+    border-left-color: #ced4da;
+    border-left-style: solid;
+    border-top-right-radius: 2px;
+    border-bottom-right-radius: 2px;
+}
+
+#exportButton::menu-button:hover {
+    background-color: #ced4da;
+}
+
+#exportButton::menu-arrow {
+    image: url('Icons/icons8-dropdown-48.png');
+    width: 16px;  /* Adjust the width of the image */
+    height: 16px;  /* Adjust the height of the image */
+}
+
+
+
+
+/* General styles for all QTableWidgets, QTreeWidgets, and QListWidgets in light theme */
+QTableWidget, QTreeWidget, QListWidget {
+    gridline-color: #D3D3D3;  /* Light gridline color */
+    font-size: 12px;
+    background-color: #F5F5F5;  /* Light background for tables */
+    color: #000000;  /* Dark text color */
+}
+
+/* Table items */
+QTableWidget::item, QTreeWidget::item, QListWidget::item {
+    padding: 5px;
+    color: #000000;  /* Dark text color */
+    background-color: #FFFFFF;  /* White background for table rows */
+}
+
+QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
+    background-color: #CCE8FF;  /* Light blue highlight for selected items */
+}
+
+/* Header styles for all tables and trees */
+QHeaderView::section {
+    background-color: #E0E0E0;  /* Light gray header background */
+    color: #000000;  /* Dark text color */
+    padding: 5px;
+    border-style: none;
+    border-bottom: 1px solid #D3D3D3;
+    border-right: 1px solid #D3D3D3;
+}
+
+QHeaderView::section:horizontal {
+    border-top: 1px solid #D3D3D3;
+}
+
+QHeaderView::section:vertical {
+    border-left: 1px solid #D3D3D3;
+}
+
+/* Set the alternating row colors for better visibility */
+QTableWidget, QTreeWidget, QListWidget {
+    alternate-background-color: #F0F0F0;  /* Light gray for alternating rows */
+}
+
+/* Vertical header (row numbers) */
+QHeaderView::section:vertical {
+    background-color: #F5F5F5;  /* Same color as table background */
+    color: #000000;  /* Dark text color */
+}
+
+/* Styles for scrollbars in light theme */
+QScrollBar:vertical, QScrollBar:horizontal {
+    background: #E0E0E0;  /* Light background for scrollbars */
+    width: 10px;
+    height: 10px;
+}
+
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: #B0B0B0;  /* Scroll handle color */
+    border-radius: 5px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    background: none;
+    height: 0px;
+    width: 0px;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+/* Vertical header style for row numbers */
+QHeaderView::section:vertical {
+    background-color: #F5F5F5;  /* Match the table background */
+}
+
+/* Styles specifically for lists and tree items in light theme */
+QListWidget, QTreeWidget::item {
+    background-color: #FFFFFF;  /* White background for rows */
+    color: #000000;  /* Dark text color */
+}
+
+QListWidget::item:selected, QTreeWidget::item:selected {
+    background-color: #CCE8FF;  /* Light blue highlight for selected items */
+}
+
+#softwareInfoLabel {
+    font-size: 16pt;             /* Slightly larger font for the main title */
+    font-weight: bold;
+    color: #333333;              /* Dark text color */
+    padding: 10px 0;             /* Add some vertical padding */
+}
+
+#subtitleLabel {
+    font-size: 12pt;
+    color: #666666;              /* Medium gray for the subtitle */
+    padding: 5px 0;              /* Add a little space around the subtitle */
 }

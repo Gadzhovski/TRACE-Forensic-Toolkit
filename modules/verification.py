@@ -28,11 +28,11 @@ class VerificationWidget(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
 
         self.software_info = QLabel("Trace - Forensic Analysis Tool", self)
-        self.software_info.setStyleSheet("font-size: 14pt; font-weight: bold; color: #333;")
+        self.software_info.setObjectName("softwareInfoLabel")
         layout.addWidget(self.software_info)
 
         self.subtitle = QLabel("Image Hash Verification", self)
-        self.subtitle.setStyleSheet("font-size: 12pt; color: #666;")
+        self.subtitle.setObjectName("subtitleLabel")
         layout.addWidget(self.subtitle)
 
         self.hash_label = QTextEdit("Calculating hashes...")

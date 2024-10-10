@@ -192,6 +192,7 @@ class TextViewer(QWidget):
         self.search_input = QLineEdit(self)
         self.search_input.setPlaceholderText("Search...")
         self.search_input.setMaximumWidth(200)
+        self.search_input.setFixedHeight(35)
         self.search_input.setContentsMargins(10, 0, 10, 0)
         self.search_input.returnPressed.connect(self.search_next)
         self.toolbar.addWidget(self.search_input)
@@ -265,8 +266,6 @@ class CustomTextEdit(QTextEdit):
     def __init__(self, *args, **kwargs):
         super(CustomTextEdit, self).__init__(*args, **kwargs)
         self.setMouseTracking(True)
-        self.db_connection = sqlite3.connect("tools/text_hashes.db")
-        self.db_cursor = self.db_connection.cursor()
 
     def contextMenuEvent(self, event):
         menu = self.createStandardContextMenu()
@@ -280,7 +279,6 @@ class CustomTextEdit(QTextEdit):
             "Decode HTML": self.decodeHTML,
             "Decode Octal": self.decodeOctal,
             "Decode Binary": self.decodeBinary,
-            "Reverse Hash": self.reverseHash
         }
 
         for action_text, method in decoding_actions.items():
@@ -407,36 +405,9 @@ class CustomTextEdit(QTextEdit):
         else:
             QToolTip.hideText()  # Hide any existing tooltip if there's no selection
 
-    def reverseHash(self):
-        selected_text = self.textCursor().selectedText().strip()
-        if not selected_text:
-            return
 
-        # Check if the selected text matches the length of MD5, SHA-1, or SHA-256 hash
-        hash_lengths = {32: 'MD5', 40: 'SHA1', 64: 'SHA256'}
-        if len(selected_text) not in hash_lengths:
-            QToolTip.showText(self.mapToGlobal(self.cursorRect().topLeft()), "Invalid hash length")
-            return
 
-        # Identify the hash type
-        hash_type = hash_lengths[len(selected_text)]
 
-        # Query the database for the plaintext
-        plaintext = self.queryDatabase(selected_text, hash_type)
-
-        if plaintext:
-            QMessageBox.information(self, "Hash Reversed", f"Plaintext: {plaintext}")
-        else:
-            QMessageBox.information(self, "Hash Reversed", "Plaintext not found in the database.")
-
-    def queryDatabase(self, hash_value, hash_type):
-        query = f"SELECT text FROM TextHashes WHERE {hash_type.lower()} = ?"
-        self.db_cursor.execute(query, (hash_value,))
-        result = self.db_cursor.fetchone()
-        if result:
-            return result[0]
-        else:
-            return None
 
 ##### new implementation with problems #####
 # class TextViewerManager:

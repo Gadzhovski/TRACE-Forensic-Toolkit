@@ -47,7 +47,6 @@ class FileCarvingWidget(QWidget):
         self.init_ui()
 
     def init_ui(self):
-
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)  # Set the spacing to zero
@@ -77,6 +76,9 @@ class FileCarvingWidget(QWidget):
         self.toolbar.addWidget(self.spacer)
 
         self.table_widget = self.create_table_widget()
+        self.table_widget.verticalHeader().setVisible(False)
+        self.table_widget.resizeEvent = self.handle_resize_event
+
         self.list_widget = self.create_list_widget()
 
         self.fileTypeLayout = QHBoxLayout()
@@ -109,14 +111,14 @@ class FileCarvingWidget(QWidget):
 
     def create_table_widget(self):
         table_widget = QTableWidget()
-
-        table_widget.setColumnCount(5)
+        table_widget.setColumnCount(6)  # Updated to include the 'Id' column
         table_widget.setSelectionBehavior(QTableWidget.SelectRows)
         table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
         table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         table_widget.setSortingEnabled(True)
 
-        table_widget.setHorizontalHeaderLabels(['Name', 'Size', 'Type', 'Modification Date', 'File Path'])
+        # Include 'Id' as the first header
+        table_widget.setHorizontalHeaderLabels(['Id', 'Name', 'Size', 'Type', 'Modification Date', 'File Path'])
         table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         table_widget.customContextMenuRequested.connect(self.open_context_menu)
 
@@ -187,18 +189,6 @@ class FileCarvingWidget(QWidget):
 
     def set_large_size(self):
         self.set_icon_size(200)
-
-    # def start_carving(self):
-    #     self.start_button.setEnabled(False)
-    #     self.stop_button.setEnabled(True)
-    #     # Clear internal tracking and UI components to start fresh
-    #     self.clear_ui()
-    #     self.carved_files.clear()
-    #     self.carved_file_names.clear()
-    #
-    #     selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
-    #                            checkbox.isChecked()]
-    #     self.executor.submit(self.carve_files, selected_file_types)
 
     def start_carving(self):
         self.start_button.setEnabled(False)
@@ -305,31 +295,6 @@ class FileCarvingWidget(QWidget):
             print(f"Error validating file of type {file_type}: {str(e)}")
             return False
 
-    # def carve_pdf_files(self, chunk, global_offset):
-    #     pdf_start_signature = b'%PDF-'
-    #     pdf_end_signature = b'%%EOF'
-    #     offset = 0
-    #     while offset < len(chunk):
-    #         start_index = chunk.find(pdf_start_signature, offset)
-    #
-    #         if start_index == -1:  # No more PDF start signature in the chunk
-    #             break
-    #
-    #         # Look for the end signature starting from the current start index
-    #         end_index = chunk.find(pdf_end_signature, start_index)
-    #         if end_index != -1:
-    #             # Adjust end_index to capture the end of the EOF marker
-    #             end_index += len(pdf_end_signature)
-    #             pdf_content = chunk[start_index:end_index]
-    #
-    #             if self.is_valid_file(pdf_content, 'pdf'):
-    #                 self.save_file(pdf_content, 'pdf', 'carved_files', start_index + global_offset)
-    #
-    #             # Update offset to search for the next PDF file after this EOF
-    #             offset = end_index
-    #         else:
-    #             # If we don't find an EOF, move to the next byte and try again
-    #             offset = start_index + 1
     def carve_pdf_files(self, chunk, global_offset):
         pdf_start_signature = b'%PDF-'
         pdf_linearization_signature = b'/Linearized'
@@ -679,21 +644,6 @@ class FileCarvingWidget(QWidget):
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
 
-    # def save_file(self, file_content, file_type, file_path, offset):
-    #     # Use hex representation of the offset for a shorter name.
-    #     offset_hex = format(offset, 'x')
-    #     file_name = f"{offset_hex}.{file_type}"
-    #     file_path = os.path.join("carved_files", file_name)
-    #     with open(file_path, "wb") as f:
-    #         f.write(file_content)
-    #
-    #     modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    #     file_size = str(len(file_content))
-    #
-    #     self.carved_files.append((file_name, file_size, file_type, file_path, modification_date))
-    #     self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
-    #     self.carved_file_names.add(file_name)
-
     def save_file(self, file_content, file_type, file_path, offset):
         # Ensure the 'carved_files' directory exists
         if not os.path.exists("carved_files"):
@@ -715,16 +665,29 @@ class FileCarvingWidget(QWidget):
         row = self.table_widget.rowCount()
         readable_size = self.image_handler.get_readable_size(int(size))
         self.table_widget.insertRow(row)
-        self.table_widget.setItem(row, 0, QTableWidgetItem(name))
-        self.table_widget.setItem(row, 1, NumericTableWidgetItem(readable_size))
-        self.table_widget.setItem(row, 2, QTableWidgetItem(type_))
-        self.table_widget.setItem(row, 3, QTableWidgetItem(modification_date))
-        self.table_widget.setItem(row, 4, QTableWidgetItem(file_path))
-        self.table_widget.setColumnWidth(0, 250)
-        self.table_widget.setColumnWidth(1, 100)
-        self.table_widget.setColumnWidth(2, 90)
-        self.table_widget.setColumnWidth(3, 150)
-        self.table_widget.setColumnWidth(4, 317)
+
+        # Set Id column manually
+        self.table_widget.setItem(row, 0, QTableWidgetItem(str(row + 1)))  # Setting the 'Id' field
+        self.table_widget.setItem(row, 1, QTableWidgetItem(name))
+        self.table_widget.setItem(row, 2, NumericTableWidgetItem(readable_size))
+        self.table_widget.setItem(row, 3, QTableWidgetItem(type_))
+        self.table_widget.setItem(row, 4, QTableWidgetItem(modification_date))
+        self.table_widget.setItem(row, 5, QTableWidgetItem(file_path))
+
+        # Set column resize modes
+        header = self.table_widget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Id column fixed width
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Name column stretches dynamically
+        header.setSectionResizeMode(2, QHeaderView.Fixed)  # Size column fixed width
+        header.setSectionResizeMode(3, QHeaderView.Fixed)  # Type column fixed width
+        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Modification Date column fixed width
+        header.setSectionResizeMode(5, QHeaderView.Stretch)  # File Path column stretches dynamically
+
+        # Set fixed widths for non-stretch columns
+        self.table_widget.setColumnWidth(0, 30)  # Id column width
+        self.table_widget.setColumnWidth(2, 70)  # Size column width
+        self.table_widget.setColumnWidth(3, 50)  # Type column width
+        self.table_widget.setColumnWidth(4, 130)  # Modification Date column width
 
         # Only proceed if the file type is one of the supported image or video formats
         if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp']:
@@ -734,14 +697,6 @@ class FileCarvingWidget(QWidget):
             if not os.path.exists(thumbnail_folder):
                 os.makedirs(thumbnail_folder)  # Create the thumbnail folder if it doesn't exist
 
-            # Handle MOV and PDF thumbnails
-            # if type_.lower() == 'mov':
-            #     # Extract a frame from the video as a thumbnail
-            #     clip = VideoFileClip(file_full_path)
-            #     thumbnail_path = os.path.join(thumbnail_folder, name.replace('.mov', '.png'))
-            #     clip.save_frame(thumbnail_path, t=0.5)  # save frame at 0.5 seconds
-            #     # Create the QPixmap from the full path
-            #     pixmap = QPixmap(thumbnail_path)
             if type_.lower() == 'mov':
                 thumbnail_path = os.path.join(thumbnail_folder, name.replace('.mov', '.png'))
                 with VideoFileClip(file_full_path) as clip:
@@ -756,15 +711,6 @@ class FileCarvingWidget(QWidget):
                 # Create the QPixmap from the full path
                 pixmap = QPixmap(thumbnail_path)
 
-            # elif type_.lower() == 'wmv':
-            #     # Attempt to extract a frame from the video as a thumbnail using OpenCV
-            #     capture = cv2.VideoCapture(file_full_path)
-            #     success, image = capture.read()
-            #     if success:
-            #         thumbnail_path = os.path.join(thumbnail_folder, name.replace('.wmv', '.png'))
-            #         cv2.imwrite(thumbnail_path, image)
-            #         # Create the QPixmap from the full path
-            #         pixmap = QPixmap(thumbnail_path)
             elif type_.lower() == 'wmv':
                 capture = cv2.VideoCapture(file_full_path)
                 success, image = capture.read()
@@ -806,3 +752,22 @@ class FileCarvingWidget(QWidget):
     def clear_ui(self):
         self.table_widget.setRowCount(0)
         self.list_widget.clear()
+
+    def handle_resize_event(self, event):
+        # Calculate total width of the table
+        total_width = self.table_widget.width()
+
+        # Fixed columns: Id, Size, Type, Modification Date
+        fixed_width = (self.table_widget.columnWidth(0) +  # Id
+                       self.table_widget.columnWidth(2) +  # Size
+                       self.table_widget.columnWidth(3) +  # Type
+                       self.table_widget.columnWidth(4))  # Modification Date
+
+        # Remaining space for dynamic columns
+        remaining_width = total_width - fixed_width
+
+        # Allocate remaining space proportionally
+        self.table_widget.setColumnWidth(1, remaining_width // 2)  # Name column
+        self.table_widget.setColumnWidth(5, remaining_width // 2)  # File Path column
+
+        super(QTableWidget, self.table_widget).resizeEvent(event)

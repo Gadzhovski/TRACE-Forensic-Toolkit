@@ -5,8 +5,8 @@ from PySide6.QtCore import Qt, QObject, Signal, QThread
 from PySide6.QtGui import QAction, QIcon, QFont
 from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayout,
                                QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QListWidget,
-                               QSizePolicy, QHBoxLayout, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
-                               QToolButton, QComboBox)
+                               QSizePolicy, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
+                               QToolButton, QComboBox, QSplitter)
 
 
 class SearchWorker(QObject):
@@ -182,41 +182,48 @@ class HexViewer(QWidget):
         self.setup_toolbar()
         self.layout.addWidget(self.toolbar)
 
-        # Create a horizontal layout for the hex table and search results
-        self.horizontal_layout = QHBoxLayout()
+        # Create a QSplitter to manage dynamic resizing
+        self.splitter = QSplitter(Qt.Horizontal, self)  # Horizontal splitter for hex_table and search_results_frame
 
+        # Setup Hex Table
         self.setup_hex_table()
-        self.horizontal_layout.addWidget(self.hex_table)
+        self.hex_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # Make hex table expandable
+
+        # Add the hex table to the splitter
+        self.splitter.addWidget(self.hex_table)
 
         # Create a QVBoxLayout for the search results and its title
         self.search_results_layout = QVBoxLayout()
 
         self.search_results_frame = QFrame(self)  # This frame will contain the title and the search results
-        self.search_results_frame.setMaximumWidth(200)
-        self.search_results_frame.setStyleSheet("border: 1px solid gray; border-radius: 5px; padding: 5px;")
+        self.search_results_frame.setMaximumWidth(210)
+        self.search_results_frame.setStyleSheet(" border-radius: 2px; padding: 2px;")
+        self.search_results_frame.setSizePolicy(QSizePolicy.Fixed,
+                                                QSizePolicy.Expanding)  # Fixed width, expandable height
 
         self.search_results_title = QLabel("Search Results", self.search_results_frame)
         self.search_results_title.setAlignment(Qt.AlignCenter)
-
-        self.search_results_title.setStyleSheet("font-weight: bold;")  # Optional: make it bold
         self.search_results_layout.addWidget(self.search_results_title)
+
         self.search_results_widget = QListWidget(self.search_results_frame)
-        # hide the scroll bar
-        self.search_results_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.search_results_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # Show scroll bar when needed
         self.search_results_widget.itemClicked.connect(self.search_result_clicked)
 
-        self.search_results_widget.setMaximumWidth(200)
+        self.search_results_widget.setMaximumWidth(180)  # Adjust the width of the search results
         self.search_results_layout.addWidget(self.search_results_widget)
 
         self.search_results_frame.setLayout(self.search_results_layout)
-        self.horizontal_layout.addWidget(self.search_results_frame)
 
-        # Initially hide the entire frame
-        self.search_results_frame.setVisible(False)
+        # Add the search results frame to the splitter
+        self.splitter.addWidget(self.search_results_frame)
 
-        # Add the horizontal layout to the main layout
-        self.layout.addLayout(self.horizontal_layout)
+        # Adjust initial sizes: 75% for hex_table and 25% for search_results_frame
+        self.splitter.setSizes([int(self.width() * 0.75), int(self.width() * 0.25)])
 
+        # Add the splitter to the main layout
+        self.layout.addWidget(self.splitter)
+
+        # Set the main layout
         self.setLayout(self.layout)
 
     def setup_toolbar(self):
@@ -273,39 +280,8 @@ class HexViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         self.export_button = QToolButton(self)
-
-        export_button_stylesheet = """
-            QToolButton {
-                border: 1px solid #ced4da;
-                border-radius: 2px;
-                padding: 5px 30px 5px 5px; /* Adjust right padding to push text more to the left */
-                background-color: #ffffff;
-                width: 60px; /* Adjust width as necessary to fit text and menu arrow */
-            }
-
-            QToolButton::menu-button {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 25px;
-                border-left-width: 1px;
-                border-left-color: #ced4da;
-                border-left-style: solid;
-                border-top-right-radius: 2px;
-                border-bottom-right-radius: 2px;
-            }
-
-            QToolButton::menu-button:hover {
-                background-color: #ced4da;
-            }
-
-            QToolButton::menu-arrow {
-                image: url('Icons/icons8-dropdown-48.png');
-                width: 16px;  /* Adjust the width of the image */
-                height: 16px;  /* Adjust the height of the image */
-            }
-        """
+        self.export_button.setObjectName("exportButton")  # Assign a unique object name
         self.export_button.setText("Export")
-        self.export_button.setStyleSheet(export_button_stylesheet)
         self.export_button.setPopupMode(QToolButton.MenuButtonPopup)  # Set the popup mode
 
         # Add format options to the menu
@@ -330,51 +306,77 @@ class HexViewer(QWidget):
         # Search bar components
         self.search_bar = QLineEdit(self)
         self.search_bar.setMaximumWidth(200)  # Adjust the number as per your needs
+        self.search_bar.setFixedHeight(35)
         self.search_bar.setContentsMargins(10, 0, 10, 0)
         self.search_bar.setPlaceholderText("Search...")
         self.search_bar.returnPressed.connect(self.trigger_search)
         self.toolbar.addWidget(self.search_bar)
 
     def update_font_size(self):
-        # Get the current font
-        current_font = self.hex_table.font()
-
-        # Set the font size to the selected size
+        # Get the current font size from the combobox
         selected_size = int(self.font_size_combobox.currentText())
-        current_font.setPointSize(selected_size)
 
-        # Set the new font to the hex_table
+        # Set the new font size to the hex_table
+        current_font = self.hex_table.font()
+        current_font.setPointSize(selected_size)
         self.hex_table.setFont(current_font)
 
-        # Adjust the column width based on the font size
-        for i in range(self.hex_table.columnCount()):
-            self.hex_table.setColumnWidth(i, selected_size * 6)  # Adjust the multiplier as needed
+        # Dynamically adjust column widths based on the font size
+        address_width = selected_size * 10  # Proportional width for Address column
+        byte_width = selected_size * 3  # Proportional width for each byte column
+        ascii_width = selected_size * 8  # Proportional width for ASCII column
 
-        # Get the font of the horizontal header
+        # Set column widths dynamically
+        self.hex_table.setColumnWidth(0, address_width)  # Address column
+        for i in range(1, 17):  # Set uniform width for each byte column
+            self.hex_table.setColumnWidth(i, byte_width)
+        self.hex_table.setColumnWidth(17, ascii_width)  # ASCII column
+
+        # Update the font size for the headers as well
         header_font = self.hex_table.horizontalHeader().font()
-
-        # Set the font size to the selected size
         header_font.setPointSize(selected_size)
-
-        # Set the new font to the horizontal header
         self.hex_table.horizontalHeader().setFont(header_font)
+
+        # Adjust the horizontal scrollbar policy if needed
+        if self.hex_table.horizontalHeader().length() > self.hex_table.viewport().width():
+            self.hex_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        else:
+            self.hex_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     def setup_hex_table(self):
         self.hex_table = QTableWidget()
+
         # Set the font of the hex_table
         font = QFont("Courier")
         font.setLetterSpacing(QFont.AbsoluteSpacing, 2)
         self.hex_table.setFont(font)
+
+        # Configure the columns and headers
         self.hex_table.setColumnCount(18)  # 16 bytes + 1 address + 1 ASCII
-        self.hex_table.horizontalHeader().setStyleSheet("""
-            QHeaderView::section {
-            border-radius: 2px;
-            background-color: #d7d7d7;
-            }
-        """)
         self.hex_table.setHorizontalHeaderLabels(['Address'] + [f'{i:02X}' for i in range(16)] + ['ASCII'])
         self.hex_table.verticalHeader().setVisible(False)
-        self.hex_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+
+        # Set resizing policies for the header
+        header = self.hex_table.horizontalHeader()
+
+        # Address column - Resize based on content
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+
+        # Byte columns - Fixed width for each byte column
+        for i in range(1, 17):  # 00 to 0F columns
+            header.setSectionResizeMode(i, QHeaderView.Fixed)
+            self.hex_table.setColumnWidth(i, 35)  # Adjust the byte column width based on readability
+
+        # ASCII column - Stretch to fill remaining space
+        header.setSectionResizeMode(17, QHeaderView.Stretch)
+
+        # Adjust for remaining space in the ASCII column
+        header.setStretchLastSection(True)
+
+        # Set the initial column widths
+        self.hex_table.setColumnWidth(0, 150)  # Address column initial width
+        self.hex_table.setColumnWidth(17, 250)  # ASCII column initial width
+
         self.hex_table.setShowGrid(False)
         self.hex_table.setAlternatingRowColors(True)
         self.hex_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -605,20 +607,14 @@ class HexViewer(QWidget):
                 address = f"0x{match * 16:08x}"  # Calculate the address from line number
                 self.search_results_widget.addItem(f"Address: {address}")
 
-            # Show the search results frame
+            # Show the search results frame and resize the splitter to allocate more space to results
             self.search_results_frame.setVisible(True)
+            self.splitter.setSizes([self.width() * 0.6, self.width() * 0.4])  # Adjust sizes dynamically
 
         else:
             QMessageBox.warning(self, "Search Result", "No matches found.")
-            # Hide the search results frame if no matches
-            self.search_results_frame.setVisible(False)
-
-        # Cleanup after processing results
-        if hasattr(self, 'search_thread') and self.search_thread.isRunning():
-            self.search_thread.quit()
-            self.search_thread.wait()
-            self.search_worker.deleteLater()
-            self.search_thread.deleteLater()
+            # Even if no matches are found, the search results frame will still be shown
+            self.splitter.setSizes([self.width() * 0.75, self.width() * 0.25])
 
     def navigate_to_address(self, address):
         try:

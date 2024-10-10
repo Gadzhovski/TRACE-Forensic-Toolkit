@@ -4,9 +4,10 @@ import tempfile
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QTextEdit, QToolBar, QLabel, \
-    QSplitter, QTableWidget, QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication
+    QSplitter, QTableWidget, QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
+
 
 
 class RegistryExtractor(QWidget):
@@ -19,10 +20,9 @@ class RegistryExtractor(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        main_layout = QVBoxLayout()  # Main layout is vertical
-        main_layout.setContentsMargins(0, 0, 0, 0)  # Set the margins to 0
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
         self.setLayout(main_layout)
 
         self.toolbar = QToolBar("Toolbar")
@@ -48,20 +48,16 @@ class RegistryExtractor(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
 
-        # Inside your RegistryExtractor's init_ui method
         self.hiveSelector = QComboBox()
-        self.hiveSelector.addItems(
-            ["SOFTWARE", "SYSTEM", "SAM", "SECURITY", "DEFAULT", "COMPONENTS"])  # Add more hives as needed
-
+        self.hiveSelector.addItems(["SOFTWARE", "SYSTEM", "SAM", "SECURITY", "DEFAULT", "COMPONENTS"])
         self.toolbar.addWidget(self.hiveSelector)
 
         self.loadHiveButton = QPushButton("Load")
         self.loadHiveButton.clicked.connect(self.load_selected_hive)
-
         self.toolbar.addWidget(self.loadHiveButton)
 
-        # Splitter setup for resizable tree and details panels
-        self.splitter = QSplitter(Qt.Horizontal)  # Horizontal splitter for side-by-side layout
+        # Splitter setup
+        self.splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(self.splitter)
 
         # Tree Widget Setup
@@ -69,37 +65,28 @@ class RegistryExtractor(QWidget):
         self.treeWidget.header().hide()
         self.splitter.addWidget(self.treeWidget)
 
-        # Details Panel and Table Setup within a Vertical Splitter
+        # Details Panel and Table Setup
         self.detailsSplitter = QSplitter(Qt.Vertical)
         self.splitter.addWidget(self.detailsSplitter)
 
-        # Details Panel Setup
+        # Metadata Panel Setup
         self.metadataPanel = QTextEdit()
-        # hide the name of the text box
-
         self.metadataPanel.setReadOnly(True)
         self.detailsSplitter.addWidget(self.metadataPanel)
 
         # Table Setup for displaying values
         self.tableWidget = QTableWidget()
-
-        # set the header to be hidden
-        # self.tableWidget.horizontalHeader().hide()
         self.tableWidget.setEditTriggers(QTableWidget.NoEditTriggers)
         self.tableWidget.setSelectionBehavior(QTableWidget.SelectRows)
-        # Your existing setup code
-        self.tableWidget.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.tableWidget.customContextMenuRequested.connect(self.onCustomContextMenuRequested)
-
         self.tableWidget.verticalHeader().setVisible(False)
-
         self.detailsSplitter.addWidget(self.tableWidget)
 
-        # Set the initial stretch factors for splitter panels if needed
-        self.detailsSplitter.setStretchFactor(0, 1)  # Set the initial stretch factor for the details panel
-        self.detailsSplitter.setStretchFactor(1, 1)  # Set the initial stretch factor for the table widget
+        # Adjust proportions
+        self.splitter.setSizes([300, 700])  # Allocate space for the tree and details
+        self.detailsSplitter.setStretchFactor(0, 1)  # Metadata panel
+        self.detailsSplitter.setStretchFactor(1, 1)  # Table panel
 
-        # Connect treeview selection change to the slot
+        # Connect the click event
         self.treeWidget.itemClicked.connect(self.on_item_clicked)
 
     def onCustomContextMenuRequested(self, position):
@@ -195,26 +182,33 @@ class RegistryExtractor(QWidget):
         self.metadataPanel.setHtml(details)
 
     def setup_table(self, values):
-        self.tableWidget.clear()  # Clear previous content
-        self.tableWidget.setRowCount(len(values))  # Set row count based on the number of values
-        self.tableWidget.setColumnCount(3)  # Name and Data columns
+        # Reset and set up table
+        self.tableWidget.clear()
+        self.tableWidget.setRowCount(len(values))
+        self.tableWidget.setColumnCount(3)
         self.tableWidget.setHorizontalHeaderLabels(["Name", "Type", "Value"])
-        self.tableWidget.horizontalHeader().show()
-        self.tableWidget.setColumnWidth(0, 150)  # Set the width of the first column to 200 pixels
-        self.tableWidget.setColumnWidth(1, 100)  # Set the width of the second column to 100 pixels
 
+        # Set initial widths to balance out based on common sizes
+        self.tableWidget.setColumnWidth(0, 150)  # Name
+        self.tableWidget.setColumnWidth(1, 150)  # Type
+        self.tableWidget.setColumnWidth(2, 450)  # Value
+
+        # Set dynamic resizing behavior
+        header = self.tableWidget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name column to stretch based on content
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Type column adjusts to fit the content
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Value column stretches with window resize
+
+        # Populate table rows
         for i, value in enumerate(values):
             self.tableWidget.setItem(i, 0, QTableWidgetItem(value.name()))
             self.tableWidget.setItem(i, 1, QTableWidgetItem(str(value.value_type_str())))
             self.tableWidget.setItem(i, 2, QTableWidgetItem(str(value.value())))
 
-        self.tableWidget.resizeColumnToContents(2)
-
     def display_values_in_table(self, values):
         self.setup_table(values)
 
     def on_item_clicked(self, item, column):
-        # Retrieve the stored RegistryKey or RegistryValue object
         registry_object = item.data(0, Qt.UserRole)
 
         if isinstance(registry_object, RegistryKey):
@@ -222,7 +216,6 @@ class RegistryExtractor(QWidget):
             self.display_values_in_table(registry_object.values())
 
         elif isinstance(registry_object, RegistryValue):
-            # If a value is clicked, you might want to do something specific
             self.setup_table([registry_object])
 
     # clear the window

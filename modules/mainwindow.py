@@ -3,11 +3,11 @@ import hashlib
 import os
 
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction
+from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
                                QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
-                               QFormLayout)
+                               QFormLayout, QApplication)
 
 from managers.database_manager import DatabaseManager
 from managers.evidence_utils import ImageHandler
@@ -75,6 +75,7 @@ class MainWindow(QMainWindow):
             'Remove Evidence File': self.remove_image_evidence,
             'Image Mounting': self.image_manager.mount_image,
             'Image Unmounting': self.image_manager.dismount_image,
+            'separator': None,  # This will add a separator
             'Exit': self.close
         }
 
@@ -91,6 +92,35 @@ class MainWindow(QMainWindow):
         normal_screen_action = QAction("Normal Screen", self)
         normal_screen_action.triggered.connect(self.showNormal)
         view_menu.addAction(normal_screen_action)
+
+        # Add a separator
+        view_menu.addSeparator()
+
+        # **Add Theme Selection Actions**
+        # Create an action group for themes
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)  # Only one theme can be selected at a time
+
+        # Light Theme Action
+        light_theme_action = QAction("Light Mode", self)
+        light_theme_action.setCheckable(True)
+        light_theme_action.setChecked(True)  # Set Light Theme as default
+        light_theme_action.triggered.connect(lambda: self.apply_stylesheet('light'))
+        theme_group.addAction(light_theme_action)
+        view_menu.addAction(light_theme_action)
+
+        # Dark Theme Action
+        dark_theme_action = QAction("Dark Mode", self)
+        dark_theme_action.setCheckable(True)
+        dark_theme_action.triggered.connect(lambda: self.apply_stylesheet('dark'))
+        theme_group.addAction(dark_theme_action)
+        view_menu.addAction(dark_theme_action)
+
+        # Add the view menu to the menu bar
+        menu_bar.addMenu(view_menu)
+
+        # **Apply the default stylesheet**
+        self.apply_stylesheet('light')
 
         tools_menu = QMenu('Tools', self)
 
@@ -115,7 +145,6 @@ class MainWindow(QMainWindow):
         api_key_action = QAction("API Keys", self)
         api_key_action.triggered.connect(self.show_api_key_dialog)
         options_menu.addAction(api_key_action)
-
 
         menu_bar.addMenu(view_menu)
         menu_bar.addMenu(tools_menu)
@@ -148,9 +177,7 @@ class MainWindow(QMainWindow):
         # add the separator
         self.main_toolbar.addSeparator()
 
-        # if os is windows, add the mount and unmount actions to the toolbar
-        # if os.name == 'nt':
-            # Initialize and add the mount image action
+        # Initialize and add the mount image action
         self.mount_image_button = QAction(QIcon('Icons/devices/icons8-hard-disk-48.png'), "Mount Image", self)
         self.mount_image_button.triggered.connect(self.image_manager.mount_image)
         self.main_toolbar.addAction(self.mount_image_button)
@@ -180,37 +207,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.result_viewer)
 
         self.listing_table = QTableWidget()
-        # allow sorting
         self.listing_table.setSortingEnabled(True)
-
-        self.listing_table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: #D3D3D3;
-                font-size: 12px;
-            }
-            QTableWidget::item {
-                padding: 5px;
-                color: #000000;
-                background-color: #F5F5F5;
-            }
-            QTableWidget::item:selected {
-                background-color: #D3D3D3;
-            }
-            QHeaderView::section {
-                background-color: #D3D3D3;
-                color: #000000;
-                padding: 5px;
-                border-style: none;
-                border-bottom: 1px solid #F5F5F5;
-                border-right: 1px solid #F5F5F5;
-            }
-            QHeaderView::section:horizontal {
-                border-top: 1px solid #F5F5F5;
-            }
-            QHeaderView::section:vertical {
-                border-left: 1px solid #F5F5F5;
-            }
-        """)
         self.listing_table.verticalHeader().setVisible(False)
 
         # Use alternate row colors
@@ -218,24 +215,33 @@ class MainWindow(QMainWindow):
         self.listing_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.listing_table.setIconSize(QSize(24, 24))
         self.listing_table.setColumnCount(8)
-        self.listing_table.setColumnWidth(0, 250)  # Name
-        self.listing_table.setColumnWidth(1, 50)  # Inode
-        self.listing_table.setColumnWidth(2, 50)  # Description
-        self.listing_table.setColumnWidth(3, 70)  # Size
-        self.listing_table.setColumnWidth(4, 150)  # Created Date
-        self.listing_table.setColumnWidth(5, 150)  # Accessed Date
-        self.listing_table.setColumnWidth(6, 150)  # Modified Date
-        self.listing_table.setColumnWidth(7, 150)  # Changed Date
+
+        # Set the horizontal header with dynamic resizing
+        header = self.listing_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name column stretches dynamically
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Inode column resizes based on content
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Type column resizes based on content
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Size column resizes based on content
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Created Date column stretches dynamically
+        header.setSectionResizeMode(5, QHeaderView.Stretch)  # Accessed Date column stretches dynamically
+        header.setSectionResizeMode(6, QHeaderView.Stretch)  # Modified Date column stretches dynamically
+        header.setSectionResizeMode(7, QHeaderView.Stretch)  # Changed Date column stretches dynamically
+
+        # Set the header labels
         self.listing_table.setHorizontalHeaderLabels(
-            ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date', 'Modified Date', 'Changed Date'])
+            ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date', 'Modified Date', 'Changed Date']
+        )
+
         self.listing_table.itemDoubleClicked.connect(self.on_listing_table_item_clicked)
         self.listing_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.listing_table.customContextMenuRequested.connect(self.open_listing_context_menu)
         self.listing_table.setSelectionBehavior(QTableWidget.SelectRows)
+
         # Set the color of the selected row
         palette = self.listing_table.palette()
-        palette.setBrush(QPalette.Highlight, QBrush(Qt.lightGray))  # Change Qt.red to the color you want
+        palette.setBrush(QPalette.Highlight, QBrush(Qt.lightGray))  # Change Qt.lightGray to your preferred color
         self.listing_table.setPalette(palette)
+
         header = self.listing_table.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignLeft)
 
@@ -277,11 +283,6 @@ class MainWindow(QMainWindow):
         virus_total_key = self.api_keys.get('API_KEYS', 'virustotal', fallback='')
         self.virus_total_api.set_api_key(virus_total_key)
 
-
-
-        # self.veriphone_api = VeriphoneWidget()
-        # self.viewer_tab.addTab(self.veriphone_api, 'Veriphone API')
-
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setWidget(self.viewer_tab)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
@@ -294,7 +295,18 @@ class MainWindow(QMainWindow):
         # disable all tabs before loading an image file
         self.enable_tabs(False)
 
+    def apply_stylesheet(self, theme='light'):
+        if theme == 'dark':
+            qss_file = 'styles/dark_theme.qss'
+        else:
+            qss_file = 'styles/light_theme.qss'  # Ensure your existing QSS file is named 'light_theme.qss'
 
+        try:
+            with open(qss_file, 'r') as f:
+                stylesheet = f.read()
+            QApplication.instance().setStyleSheet(stylesheet)
+        except Exception as e:
+            print(f"Error loading stylesheet {qss_file}: {e}")
 
     def show_api_key_dialog(self):
         # Create a dialog to get API keys from the user
@@ -357,12 +369,6 @@ class MainWindow(QMainWindow):
         self.select_dialog = Main()
         self.select_dialog.show()
 
-    # def show_veriphone_widget(self):
-    #     # Create the VeriphoneWidget only if it hasn't been created yet
-    #     if not hasattr(self, 'veriphone_widget'):
-    #         self.veriphone_widget = VeriphoneWidget()
-    #     self.veriphone_widget.show()
-
     def show_veriphone_widget(self):
         # Create the VeriphoneWidget only if it hasn't been created yet
         if not hasattr(self, 'veriphone_widget'):
@@ -393,11 +399,21 @@ class MainWindow(QMainWindow):
         self.deleted_files_widget.setEnabled(state)
         self.registry_extractor_widget.setEnabled(state)
 
+    # def create_menu(self, menu_bar, menu_name, actions):
+    #     menu = QMenu(menu_name, self)
+    #     for action_name, action_function in actions.items():
+    #         action = menu.addAction(action_name)
+    #         action.triggered.connect(action_function)
+    #     menu_bar.addMenu(menu)
+    #     return menu
     def create_menu(self, menu_bar, menu_name, actions):
         menu = QMenu(menu_name, self)
         for action_name, action_function in actions.items():
-            action = menu.addAction(action_name)
-            action.triggered.connect(action_function)
+            if action_name == 'separator':
+                menu.addSeparator()
+            else:
+                action = menu.addAction(action_name)
+                action.triggered.connect(action_function)
         menu_bar.addMenu(menu)
         return menu
 
@@ -455,45 +471,6 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore()
-
-    # OG
-    # def load_image_evidence(self):
-    #     """Open an image."""
-    #     image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "",
-    #                                                 "Supported Image Files (*.e01 *.s01 *.l01 *.raw *.img *.dd *.iso *.ad1)")
-    #     if image_path:
-    #         image_path = os.path.normpath(image_path)
-    #         self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
-    #         self.evidence_files.append(image_path)
-    #         self.current_image_path = image_path  # ensure this line is present
-    #         self.load_partitions_into_tree(image_path)
-
-    #         # pass the image handler to the widgets
-    #         self.deleted_files_widget.set_image_handler(self.image_handler)
-    #         self.registry_extractor_widget.image_handler = self.image_handler
-    #         self.file_search_widget.image_handler = self.image_handler
-    #         self.metadata_viewer.image_handler = self.image_handler
-
-    #         self.enable_tabs(True)
-
-    # all files for linux
-    # def load_image_evidence(self):
-    #     """Open an image."""
-    #     image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "")
-    #     if image_path:
-    #         image_path = os.path.normpath(image_path)
-    #         self.image_handler = ImageHandler(image_path)  # Create or update the ImageHandler instance
-    #         self.evidence_files.append(image_path)
-    #         self.current_image_path = image_path  # ensure this line is present
-    #         self.load_partitions_into_tree(image_path)
-
-    #         # pass the image handler to the widgets
-    #         self.deleted_files_widget.set_image_handler(self.image_handler)
-    #         self.registry_extractor_widget.image_handler = self.image_handler
-    #         self.file_search_widget.image_handler = self.image_handler
-    #         self.metadata_viewer.image_handler = self.image_handler
-
-    #         self.enable_tabs(True)
 
     def load_image_evidence(self):
         """Open an image with a specific filter on Kali Linux."""
@@ -869,14 +846,6 @@ class MainWindow(QMainWindow):
             else:
                 self.export_file(entry["inode_number"], offset, new_dest_dir, entry_name)
 
-    # def export_file(self, inode_number, offset, dest_dir, file_name):
-    #     file_content = self.image_handler.get_file_content(inode_number, offset)
-    #     if file_content:
-    #         file_path = os.path.join(dest_dir, file_name)
-    #         with open(file_path, 'wb') as f:
-    #             f.write(file_content)
-
-    # Fixed the unpacking of the tuple
     def export_file(self, inode_number, offset, dest_dir, file_name):
         file_content, _ = self.image_handler.get_file_content(inode_number, offset)
         if file_content:
