@@ -1,31 +1,16 @@
-/2020JimmyWilson.E01
-/tools/db_builder.py
-/Op Archway AXA-1.E01
-/temp_media_file
-/flash.E01
-/9-fat-label.dd
-/qodana.yaml
-/temp/temp_media_file.avi
-/temp/temp_media_file.mp3
-/temp/temp_media_file.mp4
-/gui/Eleven-Dark/
-/gui/Eleven/16/
-/gui/Eleven/32/
-/gui/Eleven/48/
-/gui/Eleven/64/
-/gui/Eleven/24/actions/
-/11-carve-fat.dd
-/bogus.raw
-/image.raw
-/setup.py
-/try.py
-/tsk_volume_system.raw
-/carved_files/
-/12-carve-ext2.dd
-/old_stuff/old_initialize_ui.py
-/test/
-/old_stuff/
-/tools/text_hashes.db
+# Ignore E01, dd, and raw image files in the root directory
+/*.E01
+/*.dd
+/*.raw
+
+# Ignore IDE-specific folders and files
 .idea/
-/.idea/
+
+# Ignore config files
 /config.ini
+
+# Ignore the carved_files directory
+/carved_files/
+
+# Ignore virtual environment folders
+/venv/
