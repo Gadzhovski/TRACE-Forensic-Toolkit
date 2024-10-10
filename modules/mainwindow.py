@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
         self.initialize_ui()
 
     def initialize_ui(self):
-        self.setWindowTitle('Trace 1.0.0')
+        self.setWindowTitle('Trace 1.0.1')
         self.setWindowIcon(QIcon('Icons/logo_prev_ui.png'))
 
         if os.name == 'nt':
