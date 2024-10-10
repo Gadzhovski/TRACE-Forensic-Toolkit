@@ -31,7 +31,7 @@
 
 <p>
   <br/>
-  <img src="Icons/readme/Preview.png" alt="TRACE Preview" width="100%"/>
+  <img src="Icons/readme/Preview_Dark.png" alt="TRACE Preview" width="100%"/>
   <br/>
 </p>
 
