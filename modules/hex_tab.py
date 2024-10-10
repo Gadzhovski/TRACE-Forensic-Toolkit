@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 
 from PySide6.QtCore import Qt, QObject, Signal, QThread
-from PySide6.QtGui import QAction, QIcon, QFont
+from PySide6.QtGui import QAction, QIcon, QFont, QResizeEvent
 from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayout,
                                QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QListWidget,
                                QSizePolicy, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
@@ -182,7 +182,7 @@ class HexViewer(QWidget):
         self.setup_toolbar()
         self.layout.addWidget(self.toolbar)
 
-        # Create a QSplitter to manage dynamic resizing
+        # Create a QSplitter for dynamic resizing
         self.splitter = QSplitter(Qt.Horizontal, self)  # Horizontal splitter for hex_table and search_results_frame
 
         # Setup Hex Table
@@ -217,14 +217,26 @@ class HexViewer(QWidget):
         # Add the search results frame to the splitter
         self.splitter.addWidget(self.search_results_frame)
 
-        # Adjust initial sizes: 75% for hex_table and 25% for search_results_frame
-        self.splitter.setSizes([int(self.width() * 0.75), int(self.width() * 0.25)])
+        # Set both widgets to expand in both directions
+        self.splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         # Add the splitter to the main layout
         self.layout.addWidget(self.splitter)
 
         # Set the main layout
         self.setLayout(self.layout)
+
+    def resizeEvent(self, event: QResizeEvent):
+        """Handle window resizing to update layout."""
+        # Adjust splitter sizes dynamically based on new window dimensions
+        total_width = event.size().width()
+        total_height = event.size().height()
+
+        # Set sizes for horizontal splitter: 75% for hex_table and 25% for search_results_frame
+        self.splitter.setSizes([int(total_width * 0.75), int(total_width * 0.25)])
+
+        super().resizeEvent(event)
+
 
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
