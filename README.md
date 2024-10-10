@@ -180,10 +180,8 @@ chmod +x WSL_Ubuntu_install.sh
 
 ### Configuration ⚙️
 
-- **API Keys Configuration**: The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. Update the API keys in the following files:
+**API Keys Configuration**:The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. To update the API keys, go to the Options menu and select API Keys submenu.
 
-  - For VirusTotal: Update the API key in `modules/virus_total_tab.py`
-  - For Veriphone: Update the API key in `modules/veriphone_api.py`
 
 
 ### Running the Tool ▶️
