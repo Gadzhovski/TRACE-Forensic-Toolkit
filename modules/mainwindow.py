@@ -399,13 +399,6 @@ class MainWindow(QMainWindow):
         self.deleted_files_widget.setEnabled(state)
         self.registry_extractor_widget.setEnabled(state)
 
-    # def create_menu(self, menu_bar, menu_name, actions):
-    #     menu = QMenu(menu_name, self)
-    #     for action_name, action_function in actions.items():
-    #         action = menu.addAction(action_name)
-    #         action.triggered.connect(action_function)
-    #     menu_bar.addMenu(menu)
-    #     return menu
     def create_menu(self, menu_bar, menu_name, actions):
         menu = QMenu(menu_name, self)
         for action_name, action_function in actions.items():
@@ -478,7 +471,9 @@ class MainWindow(QMainWindow):
         supported_image_extensions = ["*.e01", "*.E01", "*.s01", "*.S01",
                                       "*.l01", "*.L01", "*.raw", "*.RAW",
                                       "*.img", "*.IMG", "*.dd", "*.DD",
-                                      "*.iso", "*.ISO", "*.ad1", "*.AD1", "*.001", "*.s01", "*.ex01"]
+                                      "*.iso", "*.ISO", "*.ad1", "*.AD1",
+                                      "*.001", "*.s01", "*.ex01", "*.dmg",
+                                      "*.sparse", "*.sparseimage"]
 
         # Construct the file filter string with both uppercase and lowercase extensions
         file_filter = "Supported Image Files ({})".format(" ".join(supported_image_extensions))

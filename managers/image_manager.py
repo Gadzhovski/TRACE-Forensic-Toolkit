@@ -1,11 +1,9 @@
-
 import os
 import time
 import subprocess
 import platform
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
-
 
 
 class ImageManager(QThread):
@@ -196,8 +194,6 @@ class ImageManager(QThread):
             self.operationCompleted.emit(False, f"Failed to dismount the image on macOS. Error: {e.output.decode()}")
         except Exception as e:
             self.operationCompleted.emit(False, f"Failed to dismount the image on macOS. Error: {str(e)}")
-
-
 
     def _dismount_image_windows(self):
         """Dismount image on Windows using Arsenal Image Mounter."""
