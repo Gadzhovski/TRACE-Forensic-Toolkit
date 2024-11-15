@@ -25,7 +25,7 @@ echo "Updating Homebrew..."
 brew update
 
 echo "Installing system dependencies (ffmpeg and poppler)..."
-brew install ffmpeg poppler
+brew install ffmpeg poppler libmagic
 
 echo "System dependencies installed successfully."
 

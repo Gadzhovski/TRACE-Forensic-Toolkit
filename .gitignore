@@ -14,3 +14,6 @@
 
 # Ignore virtual environment folders
 /venv/
+
+# Ignore Python cache
+__pycache__

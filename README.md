@@ -150,6 +150,14 @@ pip install -r requirements.txt
 
 
 #### For macOS - Apple Silicon:
+
+Create a virtual environment with python 3.11
+
+```bash
+python3.11 -m venv venv
+source venv/bin/activate
+```
+
 ```bash
 chmod +x install_macos_silicon.sh
  ```
