@@ -1,0 +1,164 @@
+# Function to display the header of an email
+
+display_header() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Email Header:"
+    echo "-------------"
+    sed -n '/^From:/,/^$/p' "$1"
+    echo ""
+}
+
+# Function to extract the sender's email address
+extract_sender() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Sender's Email Address:"
+    echo "-----------------------"
+    grep -i '^From:' "$1" | sed -e 's/^From: //' -e 's/.*<\(.*\)>.*/\1/'
+    echo ""
+}
+
+# Function to extract the recipient's email address
+extract_recipient() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Recipient's Email Address:"
+    echo "--------------------------"
+    grep -i '^To:' "$1" | sed -e 's/^To: //' -e 's/.*<\(.*\)>.*/\1/'
+    echo ""
+}
+
+# Function to extract the subject of the email
+extract_subject() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Subject:"
+    echo "--------"
+    grep -i '^Subject:' "$1" | sed 's/^Subject: //'
+    echo ""
+}
+
+# Function to extract the date and time of the email
+extract_date() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Date and Time:"
+    echo "--------------"
+    grep -i '^Date:' "$1" | sed 's/^Date: //'
+    echo ""
+}
+
+# Function to extract the IP address of the sender
+extract_ip() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Sender's IP Address:"
+    echo "--------------------"
+    grep -i 'Received: from' "$1" | head -n 1 | sed -e 's/.*\[\(.*\)\].*/\1/'
+    echo ""
+}
+
+# Function to extract the mail server path
+extract_mail_path() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Mail Server Path:"
+    echo "-----------------"
+    grep -i 'Received: from' "$1" | sed -e 's/Received: from //' -e 's/\[.*\]//'
+    echo ""
+}
+
+# Function to analyze the email for potential phishing
+analyze_phishing() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Phishing Analysis:"
+    echo "------------------"
+    if grep -i 'http' "$1" | grep -i 'phish'; then
+        echo "Potential phishing links detected!"
+    else
+        echo "No obvious phishing links detected."
+    fi
+    echo ""
+}
+
+# Function to display the full email content
+display_full_email() {
+    if [ -z "$1" ]; then
+        echo "Please provide an email file."
+        return
+    fi
+
+    echo "Full Email Content:"
+    echo "-------------------"
+    cat "$1"
+    echo ""
+}
+
+# Main menu
+main_menu() {
+    echo "Email Forensics Tool"
+    echo "===================="
+    echo "1. Display Email Header"
+    echo "2. Extract Sender's Email Address"
+    echo "3. Extract Recipient's Email Address"
+    echo "4. Extract Subject"
+    echo "5. Extract Date and Time"
+    echo "6. Extract Sender's IP Address"
+    echo "7. Extract Mail Server Path"
+    echo "8. Analyze for Phishing"
+    echo "9. Display Full Email Content"
+    echo "10. Exit"
+    echo ""
+    read -p "Enter your choice: " choice
+
+    case $choice in
+        1) display_header "$1" ;;
+        2) extract_sender "$1" ;;
+        3) extract_recipient "$1" ;;
+        4) extract_subject "$1" ;;
+        5) extract_date "$1" ;;
+        6) extract_ip "$1" ;;
+        7) extract_mail_path "$1" ;;
+        8) analyze_phishing "$1" ;;
+        9) display_full_email "$1" ;;
+        10) exit 0 ;;
+        *) echo "Invalid choice. Please try again." ;;
+    esac
+
+    main_menu "$1"
+}
+
+# Check if an email file is provided
+if [ -z "$1" ]; then
+    echo "Usage: $0 <email_file>"
+    exit 1
+fi
+
+# Start the main menu
+main_menu "$1"
