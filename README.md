@@ -138,15 +138,36 @@
 
 If you don't already have Microsoft C++ Build Tools installed, you'll need to install them to compile required packages like libewf-python and pytsk3.
 
-Step 1: Download and Install Microsoft C++ Build Tools - https://visualstudio.microsoft.com/visual-cpp-build-tools/
+Here’s the updated `README.md` with the original text and adjustments for Windows:
+
+# Installation Guide
+
+## Step 1: Download and Install Microsoft C++ Build Tools
+
+Download the Microsoft C++ Build Tools from the following link:
+[Download Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+
 During the installation, make sure to select the following workloads:
-  - Desktop development with C++
-  - C++ build tools
-  
-Step 2: Install the Dependencies
-```bash
+- Desktop development with C++
+- C++ build tools
+
+## Step 2: Install the Required Dependencies
+
+Run the following command to install the necessary Visual Studio components:
+
+```
+vs_buildtools.exe --norestart --passive --downloadThenInstall --includeRecommended --add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.MSBuildTools
+```
+
+This command will automatically download and install the required workloads and tools for building C++ projects.
+
+After the installation completes, you can proceed with installing Python dependencies by running:
+
+```
 pip install -r requirements.txt
-  ```
+```
+
+This version avoids any bash-specific commands and keeps the original style. Let me know if this looks good!
 
 
 #### For macOS - Apple Silicon:
