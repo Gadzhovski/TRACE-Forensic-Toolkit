@@ -408,6 +408,7 @@ class FileCarvingWidget(QWidget):
     def carve_jpg_files(self, chunk, offset):
         jpg_start_signature = b'\xFF\xD8\xFF'
         jpg_end_signature = b'\xFF\xD9'
+        sos_marker = b'\xFF\xDA'
         offset = 0
         while offset < len(chunk):
             start_index = chunk.find(jpg_start_signature, offset)
@@ -420,7 +421,9 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid JPG file
                 if self.is_valid_file(jpg_content, 'jpg'):
-                    self.save_file(jpg_content, 'jpg', 'carved_files', start_index)
+                    # Check for the SOS marker within the JPEG content
+                    if sos_index != -1:
+                        self.save_file(jpg_content, 'jpg', 'carved_files', start_index)
 
                 offset = end_index + len(jpg_end_signature)
             else:
