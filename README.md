@@ -138,6 +138,13 @@
 
 If you don't already have Microsoft C++ Build Tools installed, you'll need to install them to compile required packages like libewf-python and pytsk3.
 
+```bash
+*If you encounter this error while installing dependencies:
+
+"Microsoft Visual C++ 14.0 or greater is required"
+It means your C++ Build Tools are missing or outdated, please follow the steps below to install the latest version of "C++ Build Tools".
+```
+
 Step 1: Download and Install Microsoft C++ Build Tools - https://visualstudio.microsoft.com/visual-cpp-build-tools/
 During the installation, make sure to select the following workloads:
   - Desktop development with C++
