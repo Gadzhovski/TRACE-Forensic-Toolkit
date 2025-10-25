@@ -1,0 +1,19 @@
+# Ignore E01, dd, and raw image files in the root directory
+/*.E01
+/*.dd
+/*.raw
+
+# Ignore IDE-specific folders and files
+.idea/
+
+# Ignore config files
+/config.ini
+
+# Ignore the carved_files directory
+/carved_files/
+
+# Ignore virtual environment folders
+/venv/
+
+# Ignore Python cache
+__pycache__

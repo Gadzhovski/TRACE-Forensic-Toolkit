@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="24"
+   height="24"
+   viewBox="0 0 24 24.000001"
+   version="1.1"
+   id="svg5"
+   inkscape:version="1.2.1 (9c6d41e410, 2022-07-14, custom)"
+   sodipodi:docname="code-oss.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="px"
+     showgrid="false"
+     inkscape:zoom="33.416667"
+     inkscape:cx="11.985037"
+     inkscape:cy="12"
+     inkscape:window-width="1920"
+     inkscape:window-height="1011"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg5" />
+  <defs
+     id="defs2">
+    <linearGradient
+       inkscape:collect="always"
+       id="linearGradient2687">
+      <stop
+         style="stop-color:#2861ad;stop-opacity:1;"
+         offset="0"
+         id="stop2683" />
+      <stop
+         style="stop-color:#548bbf;stop-opacity:1;"
+         offset="1"
+         id="stop2685" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient2687"
+       id="linearGradient2689"
+       x1="16"
+       y1="15.109246"
+       x2="8"
+       y2="2.385673"
+       gradientUnits="userSpaceOnUse"
+       gradientTransform="matrix(1.25,0,0,1.414697,2,-0.3750044)" />
+    <linearGradient
+       inkscape:collect="always"
+       id="linearGradient3143">
+      <stop
+         style="stop-color:#d2d2d2;stop-opacity:1;"
+         offset="0"
+         id="stop3139" />
+      <stop
+         style="stop-color:#ffffff;stop-opacity:1"
+         offset="1"
+         id="stop3141" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient3143"
+       id="linearGradient8657"
+       x1="8"
+       y1="22"
+       x2="6"
+       y2="2"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#linearGradient3143"
+       id="linearGradient8666"
+       x1="20"
+       y1="19"
+       x2="10"
+       y2="5"
+       gradientUnits="userSpaceOnUse" />
+  </defs>
+  <rect
+     style="fill:url(#linearGradient2689);fill-opacity:1;stroke-width:1.3298;stroke-linecap:round;stroke-linejoin:round"
+     id="rect234"
+     width="20"
+     height="18"
+     x="2"
+     y="3"
+     ry="1" />
+  <path
+     id="rect5831"
+     style="fill:url(#linearGradient8666);fill-opacity:1;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"
+     d="M 11 5 C 10.446001 5 10 5.4460006 10 6 C 10 6.5539994 10.446001 7 11 7 L 17 7 C 17.553999 7 18 6.5539994 18 6 C 18 5.4460006 17.553999 5 17 5 L 11 5 z M 13 9 C 12.446001 9 12 9.4460006 12 10 C 12 10.553999 12.446001 11 13 11 L 19 11 C 19.553999 11 20 10.553999 20 10 C 20 9.4460006 19.553999 9 19 9 L 13 9 z M 13 13 C 12.446001 13 12 13.446001 12 14 C 12 14.553999 12.446001 15 13 15 L 19 15 C 19.553999 15 20 14.553999 20 14 C 20 13.446001 19.553999 13 19 13 L 13 13 z M 11 17 C 10.446001 17 10 17.446001 10 18 C 10 18.553999 10.446001 19 11 19 L 17 19 C 17.553999 19 18 18.553999 18 18 C 18 17.446001 17.553999 17 17 17 L 11 17 z " />
+  <rect
+     style="opacity:0.2;fill:#000000;fill-opacity:1;stroke-width:1.13389;stroke-linecap:round;stroke-linejoin:round"
+     id="rect9469"
+     width="5"
+     height="18"
+     x="2"
+     y="3"
+     ry="1" />
+  <rect
+     style="fill:url(#linearGradient8657);fill-opacity:1;stroke-width:1.82574;stroke-linecap:round;stroke-linejoin:round"
+     id="rect5829"
+     width="2"
+     height="20"
+     x="6"
+     y="2"
+     ry="1" />
+</svg>
