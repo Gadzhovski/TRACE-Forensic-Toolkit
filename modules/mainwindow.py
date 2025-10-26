@@ -7,6 +7,8 @@ import pytsk3
 import tempfile
 import gc
 import time
+import logging
+from typing import Optional, Dict, Any, List, Tuple
 from Registry import Registry
 from sqlite3 import connect as sqlite3_connect
 import subprocess
@@ -14,18 +16,18 @@ import platform
 from contextlib import contextmanager
 from functools import lru_cache
 from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer
-from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup
+from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup, QPixmap
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
                                QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
-                               QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
+                               QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy, QGroupBox,
+                               QCheckBox, QGridLayout)
 
 from modules.about import AboutDialog
 from modules.converter import Main
 from modules.exif_tab import ExifViewer
 from modules.file_carving import FileCarvingWidget
 from modules.hex_tab import HexViewer
-from modules.list_files import FileSearchWidget
 from modules.metadata_tab import MetadataViewer
 from modules.registry import RegistryExtractor
 from modules.text_tab import TextViewer
@@ -37,6 +39,65 @@ from modules.virus_total_tab import VirusTotal
 SECTOR_SIZE = 512
 CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks for processing
 FILE_BUFFER_SIZE = 4096  # 4KB for file operations
+
+# ==================== CONFIGURATION CONSTANTS ====================
+# Logger setup
+logger = logging.getLogger('TRACE.MainWindow')
+
+# Window dimensions
+DEFAULT_WINDOW_WIDTH = 1200
+DEFAULT_WINDOW_HEIGHT = 800
+DEFAULT_WINDOW_X = 100
+DEFAULT_WINDOW_Y = 100
+
+# Dock sizes
+VIEWER_DOCK_MIN_HEIGHT = 222
+VIEWER_DOCK_MAX_WIDTH = 1200
+VIEWER_DOCK_MAX_SIZE = 16777215  # Qt maximum size value
+
+# Column widths for listing table
+COLUMN_WIDTHS = {
+    'name': 200,
+    'inode': 60,
+    'type': 100,
+    'size': 80,
+    'created': 150,
+    'accessed': 150,
+    'modified': 150,
+    'changed': 150,
+    'path': 200
+}
+
+# Progress dialog settings
+PROGRESS_DIALOG_WIDTH = 300
+CLEANUP_STEPS = 10
+CLEANUP_STEP_DELAY = 0.1  # seconds
+
+# Timeouts (in seconds)
+MOUNT_TIMEOUT = 30
+INFO_TIMEOUT = 10
+PROCESS_TIMEOUT = 30
+THREAD_SLEEP_MS = 1000  # milliseconds
+
+# Minimum duration for progress dialog (milliseconds)
+PROGRESS_MIN_DURATION = 500
+
+# Icon size
+TREE_ICON_SIZE = 16
+TABLE_ICON_SIZE = 24
+TOOLBAR_ICON_SIZE = 16
+
+# Table settings
+TABLE_COLUMN_COUNT = 9
+TABLE_BATCH_SIZE = 200  # Number of rows to process before updating UI
+
+# Input field settings
+INPUT_FIELD_MIN_WIDTH = 400
+API_DIALOG_WIDTH = 600
+
+# Qt maximum size constant
+QT_MAX_SIZE = 16777215
+# ================================================================
 
 
 # Define a utility function for safe datetime conversion
@@ -192,7 +253,7 @@ class ImageHandler:
                         stored_md5 = ewf_handle.get_hash_value("MD5")
                         stored_sha1 = ewf_handle.get_hash_value("SHA1")
                     except Exception as e:
-                        print(f"Unable to retrieve stored hash values: {e}")
+                        logger.warning(f"Unable to retrieve stored hash values: {e}")
 
                     # Calculate hashes in chunks
                     while True:
@@ -210,7 +271,7 @@ class ImageHandler:
                             try:
                                 progress_callback(size, total_size)
                             except Exception as e:
-                                print(f"Progress callback error: {e}")
+                                logger.error(f"Progress callback error: {e}")
                 finally:
                     ewf_handle.close()
 
@@ -233,9 +294,9 @@ class ImageHandler:
                                 try:
                                     progress_callback(size, total_size)
                                 except Exception as e:
-                                    print(f"Progress callback error: {e}")
+                                    logger.error(f"Progress callback error: {e}")
                 except Exception as e:
-                    print(f"Error reading raw image: {e}")
+                    logger.error(f"Error reading raw image: {e}")
 
             # Compile the computed and stored hashes in a dictionary
             hashes = {
@@ -250,7 +311,7 @@ class ImageHandler:
 
             return hashes
         except Exception as e:
-            print(f"Error calculating hashes: {e}")
+            logger.error(f"Error calculating hashes: {e}")
             return {
                 'computed_md5': 'Error',
                 'computed_sha1': 'Error',
@@ -289,7 +350,7 @@ class ImageHandler:
                     # If no volume info and no filesystem, mark as wiped
                     self.is_wiped_image = True
         except Exception as e:
-            print(f"Error loading image: {e}")
+            logger.error(f"Error loading image: {e}")
             self.img_info = None
             self.volume_info = None
             self.fs_info = None
@@ -416,7 +477,7 @@ class ImageHandler:
 
             except Exception as e:
                 # Log the exception for debugging purposes
-                print(f"Error in get_directory_contents: {e}")
+                logger.error(f"Error in get_directory_contents: {e}")
                 return []
         return []
 
@@ -427,7 +488,7 @@ class ImageHandler:
             hive_data = registry_file.read_random(0, registry_file.info.meta.size)
             return hive_data
         except Exception as e:
-            print(f"Error reading registry hive: {e}")
+            logger.error(f"Error reading registry hive: {e}")
             return None
 
     def get_windows_version(self, start_offset):
@@ -472,7 +533,7 @@ class ImageHandler:
                 return f"{product_name} Version {current_version}\nBuild {current_build} {csd_version}\nOwner: {registered_owner}\nProduct ID: {product_id}"
 
             except Exception as e:
-                print(f"Error parsing SOFTWARE hive: {e}")
+                logger.error(f"Error parsing SOFTWARE hive: {e}")
                 return "Error in parsing OS version"
 
     def read_unallocated_space(self, start_offset, end_offset):
@@ -482,7 +543,7 @@ class ImageHandler:
             size_in_bytes = end_byte_offset - start_byte_offset + 1  # Ensuring at least some data is read
 
             if size_in_bytes <= 0:
-                print("Invalid size for unallocated space, adjusting to read at least one sector.")
+                logger.warning("Invalid size for unallocated space, adjusting to read at least one sector.")
                 size_in_bytes = SECTOR_SIZE  # Adjust to read at least one sector
 
             # For large blocks, read in chunks instead of all at once
@@ -502,12 +563,12 @@ class ImageHandler:
             else:
                 unallocated_space = self.img_info.read(start_byte_offset, size_in_bytes)
                 if unallocated_space is None or len(unallocated_space) == 0:
-                    print(f"Failed to read unallocated space from offset {start_byte_offset} to {end_byte_offset}")
+                    logger.error(f"Failed to read unallocated space from offset {start_byte_offset} to {end_byte_offset}")
                     return None
                 return unallocated_space
 
         except Exception as e:
-            print(f"Error reading unallocated space: {e}")
+            logger.error(f"Error reading unallocated space: {e}")
             return None
 
     def open_image(self):
@@ -528,20 +589,23 @@ class ImageHandler:
             volume_info = pytsk3.Volume_Info(img_info)
             for partition in volume_info:
                 if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
-                    self.process_partition(img_info, partition.start * SECTOR_SIZE, files_list, extensions)
+                    # Store offset in SECTORS (not bytes)
+                    self.process_partition(img_info, partition.start, files_list, extensions)
         except IOError:
             self.process_partition(img_info, 0, files_list, extensions)
 
         return files_list
 
-    def process_partition(self, img_info, offset, files_list, extensions):
+    def process_partition(self, img_info, offset_sectors, files_list, extensions):
+        """Process partition listing - offset_sectors is in sectors, not bytes."""
         try:
-            fs_info = pytsk3.FS_Info(img_info, offset=offset)
-            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions)
+            fs_info = pytsk3.FS_Info(img_info, offset=offset_sectors * SECTOR_SIZE)
+            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions, None, offset_sectors)
         except IOError as e:
-            print(f"Unable to open filesystem at offset {offset}: {e}")
+            logger.error(f"Unable to open filesystem at offset {offset_sectors}: {e}")
 
-    def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None):
+    def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None, start_offset=0):
+        """Recursively search for files in a directory."""
         for entry in directory:
             if entry.info.name.name in [b".", b".."]:
                 continue
@@ -567,19 +631,21 @@ class ImageHandler:
                         sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
                         self._recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name),
                                                     files_list,
-                                                    extensions, search_query)
+                                                    extensions, search_query, start_offset)
                     except IOError as e:
-                        print(f"Unable to open directory: {e}")
+                        logger.error(f"Unable to open directory: {e}")
 
                 elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and query_matches:
-                    file_info = self._get_file_metadata(entry, parent_path)
+                    file_info = self._get_file_metadata(entry, parent_path, start_offset)
                     files_list.append(file_info)
             except UnicodeDecodeError:
                 continue  # Skip entries with encoding issues
 
-    def _get_file_metadata(self, entry, parent_path):
+    def _get_file_metadata(self, entry, parent_path, start_offset=0):
+        """Get file metadata including all fields needed for viewing."""
         try:
             file_name = entry.info.name.name.decode("utf-8", errors='replace')
+            inode_number = entry.info.meta.addr if entry.info.meta else 0
             return {
                 "name": file_name,
                 "path": os.path.join(parent_path, file_name),
@@ -588,10 +654,14 @@ class ImageHandler:
                 "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
                 "created": safe_datetime(entry.info.meta.crtime if hasattr(entry.info.meta, 'crtime') else None),
                 "changed": safe_datetime(entry.info.meta.ctime if entry.info.meta else None),
-                "inode_item": str(entry.info.meta.addr if entry.info.meta else 0),
+                "inode_item": str(inode_number),  # For display compatibility
+                "inode_number": inode_number,  # For file content retrieval
+                "start_offset": start_offset,  # Partition offset needed for retrieval
+                "is_directory": False,  # This method only called for files
+                "type": "file"  # For compatibility with viewer logic
             }
         except Exception as e:
-            print(f"Error getting file metadata: {e}")
+            logger.error(f"Error getting file metadata: {e}")
             # Return basic info when we encounter errors
             return {
                 "name": "Error reading file",
@@ -602,6 +672,10 @@ class ImageHandler:
                 "created": "N/A",
                 "changed": "N/A",
                 "inode_item": "0",
+                "inode_number": 0,
+                "start_offset": start_offset,
+                "is_directory": False,
+                "type": "file"
             }
 
     def search_files(self, search_query=None):
@@ -612,19 +686,21 @@ class ImageHandler:
             volume_info = pytsk3.Volume_Info(img_info)
             for partition in volume_info:
                 if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
-                    self.process_partition_search(img_info, partition.start * SECTOR_SIZE, files_list, search_query)
+                    # Store offset in SECTORS (not bytes) - get_fs_info will multiply by 512
+                    self.process_partition_search(img_info, partition.start, files_list, search_query)
         except IOError:
             # No volume information, attempt to read as a single filesystem
             self.process_partition_search(img_info, 0, files_list, search_query)
 
         return files_list
 
-    def process_partition_search(self, img_info, offset, files_list, search_query):
+    def process_partition_search(self, img_info, offset_sectors, files_list, search_query):
+        """Process partition search - offset_sectors is in sectors, not bytes."""
         try:
-            fs_info = pytsk3.FS_Info(img_info, offset=offset)
-            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query)
+            fs_info = pytsk3.FS_Info(img_info, offset=offset_sectors * SECTOR_SIZE)
+            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset_sectors)
         except IOError as e:
-            print(f"Unable to open file system for search: {e}")
+            logger.error(f"Unable to open file system for search: {e}")
 
     def get_file_content(self, inode_number, offset):
         fs = self.get_fs_info(offset)
@@ -634,7 +710,7 @@ class ImageHandler:
         try:
             file_obj = fs.open_meta(inode=inode_number)
             if file_obj.info.meta.size == 0:
-                print("File has no content or is a special metafile!")
+                logger.info("File has no content or is a special metafile!")
                 return None, None
 
             # For large files, read in chunks
@@ -656,7 +732,7 @@ class ImageHandler:
             return content, metadata
 
         except Exception as e:
-            print(f"Error reading file: {e}")
+            logger.error(f"Error reading file: {e}")
             return None, None
 
     # Replace static method assignment with an actual instance method
@@ -680,7 +756,7 @@ class DatabaseManager:
             # Enable foreign keys
             self.db_conn.execute("PRAGMA foreign_keys = ON")
         except Exception as e:
-            print(f"Error connecting to database: {e}")
+            logger.error(f"Error connecting to database: {e}")
             self.db_conn = None
 
     def __del__(self):
@@ -694,7 +770,7 @@ class DatabaseManager:
                 self.db_conn.close()
                 self.db_conn = None
             except Exception as e:
-                print(f"Error closing database connection: {e}")
+                logger.error(f"Error closing database connection: {e}")
 
     def get_icon_path(self, icon_type, identifier):
         """Get icon path with caching for performance."""
@@ -740,7 +816,7 @@ class DatabaseManager:
             return default_path
 
         except Exception as e:
-            print(f"Error fetching icon: {e}")
+            logger.error(f"Error fetching icon: {e}")
             return 'Icons/mimetypes/application-x-zerosize.svg'
         finally:
             if 'c' in locals():
@@ -826,7 +902,7 @@ class ImageManager(QThread):
 
             # Wait for the process to complete or timeout after 30 seconds
             try:
-                stdout, stderr = self._process.communicate(timeout=30)
+                stdout, stderr = self._process.communicate(timeout=MOUNT_TIMEOUT)
                 if self._process.returncode != 0:
                     error_msg = stderr.decode('utf-8', errors='replace')
                     self.operationCompleted.emit(False, f"Failed to mount the image: {error_msg}")
@@ -859,7 +935,7 @@ class ImageManager(QThread):
 
             # Wait with timeout
             try:
-                attach_output, _ = attach_process.communicate(timeout=30)
+                attach_output, _ = attach_process.communicate(timeout=MOUNT_TIMEOUT)
                 if attach_process.returncode != 0:
                     self.operationCompleted.emit(False, f"Failed to attach image: {attach_output.decode()}")
                     return
@@ -871,7 +947,7 @@ class ImageManager(QThread):
             attach_output = attach_output.decode().strip()
 
             # Step 2: Add a short delay to ensure the system has time to process the attachment
-            QThread.msleep(1000)  # More reliable than time.sleep in a QThread
+            QThread.msleep(THREAD_SLEEP_MS)  # More reliable than time.sleep in a QThread
 
             # Step 3: Extract the disk identifier from the output
             lines = attach_output.splitlines()
@@ -895,7 +971,7 @@ class ImageManager(QThread):
             )
 
             try:
-                mount_output, _ = mount_process.communicate(timeout=30)
+                mount_output, _ = mount_process.communicate(timeout=MOUNT_TIMEOUT)
                 if mount_process.returncode != 0:
                     self.operationCompleted.emit(False, f"Failed to mount disk: {mount_output.decode()}")
                     return
@@ -1006,13 +1082,13 @@ class ImageManager(QThread):
                 # Try to unmount disk image
                 subprocess.run(disk_cmd, check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
-                print(f"Warning: Could not unmount disk image: {e.stderr}")
+                logger.warning(f"Could not unmount disk image: {e.stderr}")
 
             try:
                 # Try to unmount EWF
                 subprocess.run(ewf_cmd, check=True, capture_output=True, text=True)
             except subprocess.CalledProcessError as e:
-                print(f"Warning: Could not unmount EWF: {e.stderr}")
+                logger.warning(f"Could not unmount EWF: {e.stderr}")
 
             self.operationCompleted.emit(True, "Image was dismounted successfully.")
         except Exception as e:
@@ -1030,7 +1106,7 @@ class ImageManager(QThread):
             )
 
             try:
-                info_output, _ = info_process.communicate(timeout=10)
+                info_output, _ = info_process.communicate(timeout=INFO_TIMEOUT)
                 if info_process.returncode != 0:
                     self.operationCompleted.emit(False, f"Failed to get mounted disks: {info_output.decode()}")
                     return
@@ -1167,7 +1243,250 @@ class ImageManager(QThread):
         self.start()
 
 
+# ==================== FILE SEARCH WIDGET CLASSES ====================
+class SizeTableWidgetItem(QTableWidgetItem):
+    """Custom table widget item for proper size sorting."""
+    def __lt__(self, other):
+        return int(self.data(Qt.UserRole)) < int(other.data(Qt.UserRole))
+
+
+class FileSearchWidget(QWidget):
+    """Widget for searching and displaying files from disk image."""
+    # Signal emitted when a file is selected for viewing
+    file_selected = Signal(dict)
+
+    def __init__(self, image_handler):
+        super(FileSearchWidget, self).__init__()
+        self.image_handler = image_handler
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Create the toolbar
+        self.toolbar = QToolBar()
+        self.toolbar.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.toolbar)
+
+        # Add icon and title to the toolbar
+        self.icon_label = QLabel()
+        self.icon_label.setPixmap(QPixmap('Icons/icons8-piece-of-evidence-50.png'))
+        self.icon_label.setFixedSize(48, 48)
+        self.toolbar.addWidget(self.icon_label)
+
+        self.title_label = QLabel("File Search")
+        self.title_label.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                color: #37c6d0;
+                font-weight: bold;
+                margin-left: 8px;
+            }
+        """)
+        self.toolbar.addWidget(self.title_label)
+
+        # Add spacer to push remaining widgets to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(spacer)
+
+        # Add the checkboxes to the toolbar
+        self.extensionGroupBox = QGroupBox()
+        self.extensionLayout = QGridLayout()
+
+        # Define file types
+        self.fileTypes = ['', '.txt', '.jpg', '.jpeg', '.png', '.pdf', '.doc',
+                          '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
+        self.checkBoxes = {}
+
+        row = 0
+        col = 0
+        for fileType in self.fileTypes:
+            checkBox = QCheckBox(fileType if fileType else 'All')
+            checkBox.stateChanged.connect(self.on_file_type_selected)
+            self.extensionLayout.addWidget(checkBox, row, col)
+            self.checkBoxes[fileType] = checkBox
+            col += 1
+            if col >= 6:
+                row += 1
+                col = 0
+
+        self.extensionGroupBox.setLayout(self.extensionLayout)
+        self.toolbar.addWidget(self.extensionGroupBox)
+
+        # Add a small spacer between checkboxes and search field
+        small_spacer = QWidget()
+        small_spacer.setFixedWidth(50)
+        self.toolbar.addWidget(small_spacer)
+
+        # Add search bar to the right side of the toolbar
+        self.searchBar = QLineEdit()
+        self.searchBar.setPlaceholderText("Search files by name or ext.")
+        self.searchBar.textChanged.connect(self.on_search_bar_selected)
+        self.searchBar.setFixedHeight(35)
+        self.searchBar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.toolbar.addWidget(self.searchBar)
+
+        # Increase the size of the spacer after the search bar
+        end_spacer = QWidget()
+        end_spacer.setFixedWidth(10)
+        self.toolbar.addWidget(end_spacer)
+
+        # Files table setup
+        self.filesTable = QTableWidget()
+        self.filesTable.verticalHeader().setVisible(False)
+        self.filesTable.setSelectionBehavior(QTableWidget.SelectRows)
+        self.filesTable.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        # Set column count to 8
+        self.filesTable.setColumnCount(8)
+        self.filesTable.setHorizontalHeaderLabels(
+            ['Id', 'Name', 'Path', 'Size', 'Created', 'Accessed', 'Modified', 'Changed'])
+
+        # Set up the initial column structure and dynamic resizing behavior
+        header = self.filesTable.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Id column
+        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Name column
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Path column
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size column
+        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Created Date
+        header.setSectionResizeMode(5, QHeaderView.Interactive)  # Accessed Date
+        header.setSectionResizeMode(6, QHeaderView.Interactive)  # Modified Date
+        header.setSectionResizeMode(7, QHeaderView.Interactive)  # Changed Date
+
+        # Set initial column widths for the interactive columns
+        self.filesTable.setColumnWidth(0, 30)  # Id column
+        self.filesTable.setColumnWidth(3, 70)  # Size
+        self.filesTable.setColumnWidth(4, 130)  # Created Date
+        self.filesTable.setColumnWidth(5, 130)  # Accessed Date
+        self.filesTable.setColumnWidth(6, 130)  # Modified Date
+        self.filesTable.setColumnWidth(7, 130)  # Changed Date
+
+        # Connect double-click to file selection handler
+        self.filesTable.itemDoubleClicked.connect(self.on_file_double_clicked)
+
+        layout.addWidget(self.filesTable)
+
+        # Connect the table resize event
+        self.filesTable.resizeEvent = self.handle_resize_event
+
+    def handle_resize_event(self, event):
+        """Automatically adjust the column widths when the table is resized."""
+        total_width = self.filesTable.width()
+        remaining_width = total_width - (self.filesTable.columnWidth(0) +
+                                         self.filesTable.columnWidth(3) +
+                                         self.filesTable.columnWidth(4) +
+                                         self.filesTable.columnWidth(5) +
+                                         self.filesTable.columnWidth(6) +
+                                         self.filesTable.columnWidth(7))
+
+        # Dynamically resize the "Name" and "Path" columns
+        self.filesTable.setColumnWidth(1, remaining_width // 2)
+        self.filesTable.setColumnWidth(2, remaining_width // 2)
+
+        super(QTableWidget, self.filesTable).resizeEvent(event)
+
+    def on_file_double_clicked(self, item):
+        """Handle double-click on a file to display its content."""
+        row = item.row()
+        # Get the full file metadata from the Name column (column 1)
+        name_item = self.filesTable.item(row, 1)
+        if not name_item:
+            return
+
+        file_data = name_item.data(Qt.UserRole)
+        if not file_data:
+            logger.warning("No file metadata found for selected item")
+            return
+
+        # Only emit signal for files, not directories
+        if not file_data.get('is_directory', False):
+            logger.info(f"File selected: {file_data.get('name', 'unknown')}")
+            self.file_selected.emit(file_data)
+        else:
+            logger.info(f"Directory clicked: {file_data.get('name', 'unknown')} - ignoring")
+
+    def on_search_bar_selected(self):
+        """Handle search bar text changes."""
+        search_query = self.searchBar.text().strip()
+        if search_query:
+            self.search_files(search_query)
+        else:
+            self.on_file_type_selected()
+
+    def search_files(self, search_query):
+        """Search for files matching the query."""
+        self.clear()
+        files = self.image_handler.search_files(search_query)
+        for file in files:
+            self.populate_table_row(file)
+
+    def on_file_type_selected(self):
+        """Handle file type filter selection."""
+        selectedExtensions = [ext for ext, cb in self.checkBoxes.items() if cb.isChecked()]
+        self.list_files(None if '' in selectedExtensions else ([] if not selectedExtensions else selectedExtensions))
+
+    def populate_table_row(self, file):
+        """Populate a single row in the table with file data and metadata."""
+        row_pos = self.filesTable.rowCount()
+        self.filesTable.insertRow(row_pos)
+
+        # Create table items
+        id_item = QTableWidgetItem(str(row_pos + 1))
+        name_item = QTableWidgetItem(file['name'])
+        path_item = QTableWidgetItem(file['path'])
+
+        # Size item with custom sorting
+        size_item = SizeTableWidgetItem(self.image_handler.get_readable_size(file['size']))
+        size_item.setData(Qt.UserRole, file['size'])
+
+        created_item = QTableWidgetItem(file['created'])
+        accessed_item = QTableWidgetItem(file['accessed'])
+        modified_item = QTableWidgetItem(file['modified'])
+        changed_item = QTableWidgetItem(file['changed'])
+
+        # Store complete file metadata in Name column for retrieval
+        # This includes all data needed for content viewing
+        name_item.setData(Qt.UserRole, file)
+
+        # Set items in table
+        self.filesTable.setItem(row_pos, 0, id_item)
+        self.filesTable.setItem(row_pos, 1, name_item)
+        self.filesTable.setItem(row_pos, 2, path_item)
+        self.filesTable.setItem(row_pos, 3, size_item)
+        self.filesTable.setItem(row_pos, 4, created_item)
+        self.filesTable.setItem(row_pos, 5, accessed_item)
+        self.filesTable.setItem(row_pos, 6, modified_item)
+        self.filesTable.setItem(row_pos, 7, changed_item)
+
+    def list_files(self, extension):
+        """List files filtered by extension."""
+        self.filesTable.setSortingEnabled(False)
+        self.filesTable.setRowCount(0)
+        self.filesTable.clearContents()
+        if extension is not None and not extension:
+            return
+        files = self.image_handler.list_files(extension)
+        for file in files:
+            self.populate_table_row(file)
+        self.filesTable.setSortingEnabled(True)
+
+    def clear(self):
+        """Clear the table and reset checkboxes."""
+        self.filesTable.setRowCount(0)
+        self.filesTable.clearContents()
+        for checkBox in self.checkBoxes.values():
+            checkBox.setChecked(False)
+
+# ==================== END FILE SEARCH WIDGET ====================
+
+
 class MainWindow(QMainWindow):
+    # Class variable for icon caching
+    _icon_cache = {}
+
     def __init__(self):
         super().__init__()
 
@@ -1186,7 +1505,7 @@ class MainWindow(QMainWindow):
         try:
             self.api_keys.read('config.ini')
         except Exception as e:
-            print(f"Error loading configuration: {e}")
+            logger.error(f"Error loading configuration: {e}")
 
         # Initialize instance attributes
         self.image_mounted = False
@@ -1197,15 +1516,184 @@ class MainWindow(QMainWindow):
 
         self.evidence_files = []
 
-        self.image_manager.operationCompleted.connect(
-            lambda success, message: (
-                QMessageBox.information(self, "Image Operation", message) if success else QMessageBox.critical(self,
-                                                                                                               "Image "
-                                                                                                               "Operation",
-                                                                                                               message),
-                setattr(self, "image_mounted", not self.image_mounted) if success else None)[1])
+        # Connect to named method instead of complex lambda
+        self.image_manager.operationCompleted.connect(self._handle_mount_operation_complete)
 
         self.initialize_ui()
+
+    # ==================== HELPER METHODS ====================
+
+    def _handle_mount_operation_complete(self, success: bool, message: str) -> None:
+        """Handle completion of mount/dismount operation."""
+        if success:
+            QMessageBox.information(self, "Image Operation", message)
+            self.image_mounted = not self.image_mounted
+        else:
+            QMessageBox.critical(self, "Image Operation", message)
+
+    def _get_file_icon(self, file_extension: str) -> QIcon:
+        """Get icon for file extension with caching."""
+        if file_extension not in self._icon_cache:
+            icon_path = self.db_manager.get_icon_path('file', file_extension)
+            self._icon_cache[file_extension] = QIcon(icon_path)
+        return self._icon_cache[file_extension]
+
+    def _format_partition_text(self, addr: int, desc: bytes, start: int, end: int, length: int, fs_type: str) -> str:
+        """Format partition display text."""
+        size_in_bytes = length * SECTOR_SIZE
+        readable_size = self.image_handler.get_readable_size(size_in_bytes)
+        desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+        return f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
+
+    def _confirm_exit(self) -> bool:
+        """Ask user to confirm exit."""
+        reply = QMessageBox.question(
+            self, 'Exit Confirmation',
+            'Are you sure you want to exit?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _handle_dismount_if_needed(self) -> None:
+        """Dismount image if mounted and user confirms."""
+        if not self.image_mounted:
+            return
+
+        reply = QMessageBox.question(
+            self, 'Dismount Image',
+            'Do you want to dismount the mounted image before exiting?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.image_manager.dismount_image()
+
+    def _create_cleanup_progress_dialog(self) -> QProgressDialog:
+        """Create and configure cleanup progress dialog."""
+        progress = QProgressDialog("Cleaning up resources...", None, 0, 100, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButton(None)
+        progress.setWindowTitle("Shutting Down")
+        progress.setMinimumWidth(PROGRESS_DIALOG_WIDTH)
+
+        # Apply styling
+        progress.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid grey;
+                border-radius: 5px;
+                text-align: center;
+                height: 20px;
+                margin: 0px 10px;
+            }
+            QProgressBar::chunk {
+                background-color: #05B8CC;
+                width: 10px;
+            }
+            QLabel {
+                margin-bottom: 5px;
+                font-size: 12px;
+            }
+        """)
+
+        # Center on parent
+        progress.setGeometry(
+            self.geometry().center().x() - PROGRESS_DIALOG_WIDTH // 2,
+            self.geometry().center().y() - progress.height() // 2,
+            PROGRESS_DIALOG_WIDTH,
+            progress.height()
+        )
+
+        progress.show()
+        QApplication.processEvents()
+        return progress
+
+    def _animate_cleanup_progress(self, progress: QProgressDialog) -> None:
+        """Animate progress bar during cleanup."""
+        for i in range(CLEANUP_STEPS + 1):
+            progress.setValue(i * (100 // CLEANUP_STEPS))
+            QApplication.processEvents()
+            time.sleep(CLEANUP_STEP_DELAY)
+
+    def _create_tree_item_for_entry(self, parent_item: QTreeWidgetItem, entry: Dict[str, Any],
+                                    start_offset: int) -> QTreeWidgetItem:
+        """Create tree item for a directory entry."""
+        child_item = QTreeWidgetItem(parent_item)
+        child_item.setText(0, entry["name"])
+
+        if entry["is_directory"]:
+            self._setup_directory_tree_item(child_item, entry, start_offset)
+        else:
+            self._setup_file_tree_item(child_item, entry, start_offset)
+
+        return child_item
+
+    def _setup_directory_tree_item(self, item: QTreeWidgetItem, entry: Dict[str, Any],
+                                   start_offset: int) -> None:
+        """Configure tree item for a directory entry."""
+        # Check if directory has children
+        sub_entries = self.image_handler.get_directory_contents(start_offset, entry["inode_number"])
+        has_sub_entries = bool(sub_entries)
+
+        # Set directory icon and data
+        icon_path = self.db_manager.get_icon_path('folder', 'folder')
+        item.setIcon(0, QIcon(icon_path))
+        item.setData(0, Qt.UserRole, {
+            "inode_number": entry["inode_number"],
+            "type": 'directory',
+            "start_offset": start_offset,
+            "name": entry["name"]
+        })
+
+        # Set child indicator
+        item.setChildIndicatorPolicy(
+            QTreeWidgetItem.ShowIndicator if has_sub_entries
+            else QTreeWidgetItem.DontShowIndicatorWhenChildless
+        )
+
+    def _setup_file_tree_item(self, item: QTreeWidgetItem, entry: Dict[str, Any],
+                             start_offset: int) -> None:
+        """Configure tree item for a file entry."""
+        # Get file extension for icon
+        file_extension = entry["name"].split('.')[-1].lower() if '.' in entry["name"] else 'unknown'
+
+        # Use cached icon lookup
+        icon = self._get_file_icon(file_extension)
+        item.setIcon(0, icon)
+        item.setData(0, Qt.UserRole, {
+            "inode_number": entry["inode_number"],
+            "type": 'file',
+            "start_offset": start_offset,
+            "name": entry["name"]
+        })
+
+    def _populate_table_entry(self, row_position: int, entry: Dict[str, Any], offset: int) -> None:
+        """Populate a single table row with entry data."""
+        entry_name = entry.get("name", "")
+        inode_number = entry.get("inode_number", 0)
+        is_directory = entry.get("is_directory", False)
+        description = "Directory" if is_directory else "File"
+        size_in_bytes = entry.get("size", 0)
+        readable_size = self.image_handler.get_readable_size(size_in_bytes)
+        created = entry.get("created", "N/A")
+        accessed = entry.get("accessed", "N/A")
+        modified = entry.get("modified", "N/A")
+        changed = entry.get("changed", "N/A")
+
+        icon_type = 'folder' if is_directory else 'file'
+        icon_name = 'folder' if is_directory else (
+            entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown')
+
+        parent_inode = self.current_selected_data.get("inode_number") if self.current_selected_data else None
+
+        self.listing_table.insertRow(row_position)
+        self.insert_row_into_listing_table(entry_name, inode_number, description,
+                                          icon_name, icon_type, offset,
+                                          readable_size, created, accessed,
+                                          modified, changed, parent_inode)
+
+    # ==================== END HELPER METHODS ====================
 
     def initialize_ui(self):
         self.setWindowTitle('Trace 1.1.0')
@@ -1223,7 +1711,7 @@ class MainWindow(QMainWindow):
             # For macOS and Linux, setting the app icon at application level
             QApplication.instance().setWindowIcon(app_icon)
 
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
 
         menu_bar = QMenuBar(self)
         file_actions = {
@@ -1384,15 +1872,15 @@ class MainWindow(QMainWindow):
         header = self.listing_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # Make all columns interactively resizable
         # Set default widths for columns to have sensible starting sizes
-        self.listing_table.setColumnWidth(0, 200)  # Name column
-        self.listing_table.setColumnWidth(1, 60)  # Inode column
-        self.listing_table.setColumnWidth(2, 100)  # Type column
-        self.listing_table.setColumnWidth(3, 80)  # Size column
-        self.listing_table.setColumnWidth(4, 150)  # Created Date column
-        self.listing_table.setColumnWidth(5, 150)  # Accessed Date column
-        self.listing_table.setColumnWidth(6, 150)  # Modified Date column
-        self.listing_table.setColumnWidth(7, 150)  # Changed Date column
-        self.listing_table.setColumnWidth(8, 200)  # Path column
+        self.listing_table.setColumnWidth(0, COLUMN_WIDTHS['name'])  # Name column
+        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode column
+        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type column
+        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size column
+        self.listing_table.setColumnWidth(4, COLUMN_WIDTHS['created'])  # Created Date column
+        self.listing_table.setColumnWidth(5, COLUMN_WIDTHS['accessed'])  # Accessed Date column
+        self.listing_table.setColumnWidth(6, COLUMN_WIDTHS['modified'])  # Modified Date column
+        self.listing_table.setColumnWidth(7, COLUMN_WIDTHS['changed'])  # Changed Date column
+        self.listing_table.setColumnWidth(8, COLUMN_WIDTHS['path'])  # Path column
 
         # Remove any extra space in the header
         header.setStyleSheet("QHeaderView::section { margin-top: 0px; padding-top: 2px; }")
@@ -1427,6 +1915,8 @@ class MainWindow(QMainWindow):
         # #add tab for displaying all files chosen by user
         self.file_search_widget = FileSearchWidget(self.image_handler)
         self.result_viewer.addTab(self.file_search_widget, 'File Search')
+        # Connect file selection signal to handler
+        self.file_search_widget.file_selected.connect(self.on_search_file_selected)
 
         self.viewer_tab = QTabWidget(self)
 
@@ -1458,8 +1948,8 @@ class MainWindow(QMainWindow):
         self.viewer_dock.setWidget(self.viewer_tab)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
 
-        self.viewer_dock.setMinimumSize(1200, 222)
-        self.viewer_dock.setMaximumSize(1200, 222)
+        self.viewer_dock.setMinimumSize(VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
+        self.viewer_dock.setMaximumSize(VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
         self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
         self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
 
@@ -1477,13 +1967,13 @@ class MainWindow(QMainWindow):
                 stylesheet = f.read()
             QApplication.instance().setStyleSheet(stylesheet)
         except Exception as e:
-            print(f"Error loading stylesheet {qss_file}: {e}")
+            logger.error(f"Error loading stylesheet {qss_file}: {e}")
 
     def show_api_key_dialog(self):
         # Create a dialog to get API keys from the user
         dialog = QDialog(self)
         dialog.setWindowTitle("API Key Configuration")
-        dialog.setFixedWidth(600)  # Set a fixed width to accommodate longer API keys
+        dialog.setFixedWidth(API_DIALOG_WIDTH)  # Set a fixed width to accommodate longer API keys
 
         # Set layout as a form layout for better presentation
         layout = QFormLayout()
@@ -1494,14 +1984,14 @@ class MainWindow(QMainWindow):
         virus_total_label = QLabel("VirusTotal API Key:")
         virus_total_input = QLineEdit()
         virus_total_input.setText(self.api_keys.get('API_KEYS', 'virustotal', fallback=''))
-        virus_total_input.setMinimumWidth(400)  # Set a minimum width for the input field
+        virus_total_input.setMinimumWidth(INPUT_FIELD_MIN_WIDTH)  # Set a minimum width for the input field
         layout.addRow(virus_total_label, virus_total_input)
 
         # Veriphone API Key
         veriphone_label = QLabel("Veriphone API Key:")
         veriphone_input = QLineEdit()
         veriphone_input.setText(self.api_keys.get('API_KEYS', 'veriphone', fallback=''))
-        veriphone_input.setMinimumWidth(400)  # Set a minimum width for the input field
+        veriphone_input.setMinimumWidth(INPUT_FIELD_MIN_WIDTH)  # Set a minimum width for the input field
         layout.addRow(veriphone_label, veriphone_input)
 
         # Buttons
@@ -1603,11 +2093,11 @@ class MainWindow(QMainWindow):
 
     def on_viewer_dock_focus(self, visible):
         if visible:  # If the QDockWidget is focused/visible
-            self.viewer_dock.setMaximumSize(16777215, 16777215)  # Remove size constraints
+            self.viewer_dock.setMaximumSize(QT_MAX_SIZE, QT_MAX_SIZE)  # Remove size constraints
         else:  # If the QDockWidget loses focus
             current_height = self.viewer_dock.size().height()  # Get the current height
-            self.viewer_dock.setMinimumSize(1200, current_height)
-            self.viewer_dock.setMaximumSize(1200, current_height)
+            self.viewer_dock.setMinimumSize(VIEWER_DOCK_MAX_WIDTH, current_height)
+            self.viewer_dock.setMaximumSize(VIEWER_DOCK_MAX_WIDTH, current_height)
 
     def clear_ui(self):
         self.listing_table.clearContents()
@@ -1632,87 +2122,21 @@ class MainWindow(QMainWindow):
         self.registry_extractor_widget.clear()
 
     def closeEvent(self, event):
-        reply = QMessageBox.question(self, 'Exit Confirmation', 'Are you sure you want to exit?',
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
-
-        if reply == QMessageBox.StandardButton.Yes:
-            if self.image_mounted:
-                dismount_reply = QMessageBox.question(self, 'Dismount Image',
-                                                      'Do you want to dismount the mounted image before exiting?',
-                                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                                      QMessageBox.StandardButton.Yes)
-
-                if dismount_reply == QMessageBox.StandardButton.Yes:
-                    # Dismount the image
-                    self.image_manager.dismount_image()
-
-            # Show a progress dialog during cleanup
-            progress = QProgressDialog("Cleaning up resources...", None, 0, 100, self)
-            progress.setWindowModality(Qt.WindowModal)
-            progress.setCancelButton(None)  # No cancel button
-            progress.setWindowTitle("Shutting Down")
-
-            # Set a determinate range so the progress bar shows properly
-            progress.setRange(0, 100)
-            progress.setValue(0)
-
-            # Set a more compact width
-            progress.setMinimumWidth(300)
-
-            # Set a fixed size that's more compact
-            dialog_width = 300
-            progress.resize(dialog_width, progress.height())
-
-            # Improve the progress bar appearance with CSS
-            progress.setStyleSheet("""
-                QProgressBar {
-                    border: 2px solid grey;
-                    border-radius: 5px;
-                    text-align: center;
-                    height: 20px;
-                    margin: 0px 10px;  /* Reduced horizontal margin */
-                }
-
-                QProgressBar::chunk {
-                    background-color: #05B8CC;
-                    width: 10px;  /* Minimum chunk width */
-                }
-
-                QLabel {
-                    margin-bottom: 5px;
-                    font-size: 12px;
-                }
-            """)
-
-            # Center the progress dialog on the parent window
-            progress.setGeometry(
-                self.geometry().center().x() - dialog_width // 2,
-                self.geometry().center().y() - progress.height() // 2,
-                dialog_width,
-                progress.height()
-            )
-
-            progress.show()
-            QApplication.processEvents()
-
-            # Clean up resources properly before exiting
-            self.cleanup_resources()
-
-            # Give resources time to properly clean up and update progress
-            total_steps = 10
-            for i in range(total_steps + 1):
-                progress.setValue(i * (100 // total_steps))
-                QApplication.processEvents()
-                time.sleep(0.1)
-
-            progress.close()
-
-            # Final processing before exit
-            QApplication.processEvents()
-            event.accept()
-        else:
+        """Handle application close event."""
+        if not self._confirm_exit():
             event.ignore()
+            return
+
+        self._handle_dismount_if_needed()
+
+        # Show progress and cleanup
+        progress = self._create_cleanup_progress_dialog()
+        self.cleanup_resources()
+        self._animate_cleanup_progress(progress)
+
+        progress.close()
+        QApplication.processEvents()
+        event.accept()
 
     def cleanup_resources(self):
         """Clean up all resources when closing the application."""
@@ -1724,7 +2148,7 @@ class MainWindow(QMainWindow):
                 else:
                     self.application_viewer.clear()
         except Exception as e:
-            print(f"Error shutting down application viewer: {e}")
+            logger.error(f"Error shutting down application viewer: {e}")
 
         # Stop any running background operations
         for attr_name in dir(self):
@@ -1740,21 +2164,21 @@ class MainWindow(QMainWindow):
                     if attr.isRunning():
                         attr.terminate()
                 except Exception as e:
-                    print(f"Error stopping thread {attr_name}: {str(e)}")
+                    logger.error(f"Error stopping thread {attr_name}: {str(e)}")
 
         # Clean up image handler resources
         if self.image_handler:
             try:
                 self.image_handler.close_resources()
             except Exception as e:
-                print(f"Error closing image handler: {str(e)}")
+                logger.error(f"Error closing image handler: {str(e)}")
 
         # Close database connection
         if hasattr(self, 'db_manager') and self.db_manager:
             try:
                 self.db_manager.close()
             except Exception as e:
-                print(f"Error closing database connection: {str(e)}")
+                logger.error(f"Error closing database connection: {str(e)}")
 
         # Clean up temp files
         temp_dir = tempfile.gettempdir()
@@ -1770,9 +2194,9 @@ class MainWindow(QMainWindow):
                             import shutil
                             shutil.rmtree(item_path)
                     except Exception as e:
-                        print(f"Error removing temp file {item_path}: {str(e)}")
+                        logger.error(f"Error removing temp file {item_path}: {str(e)}")
         except Exception as e:
-            print(f"Error cleaning up temp files: {str(e)}")
+            logger.error(f"Error cleaning up temp files: {str(e)}")
 
         # Release any other resources
         gc.collect()  # Encourage garbage collection
@@ -1801,7 +2225,7 @@ class MainWindow(QMainWindow):
                 progress = QProgressDialog("Loading image...", "Cancel", 0, 100, self)
                 progress.setWindowTitle("Loading Evidence")
                 progress.setWindowModality(Qt.WindowModal)
-                progress.setMinimumDuration(500)  # Show dialog only if operation takes more than 500ms
+                progress.setMinimumDuration(PROGRESS_MIN_DURATION)  # Show dialog only if operation takes more than threshold
                 progress.setValue(10)
 
                 # Clean up any existing ImageHandler resources
@@ -1940,45 +2364,15 @@ class MainWindow(QMainWindow):
                 else:
                     item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
 
-    def populate_contents(self, item, data, inode=None):
+    def populate_contents(self, item: QTreeWidgetItem, data: Dict[str, Any], inode: Optional[int] = None) -> None:
+        """Populate tree widget item with directory contents."""
         if self.current_image_path is None:
             return
 
         entries = self.image_handler.get_directory_contents(data["start_offset"], inode)
 
         for entry in entries:
-            child_item = QTreeWidgetItem(item)
-            child_item.setText(0, entry["name"])
-
-            if entry["is_directory"]:
-                sub_entries = self.image_handler.get_directory_contents(data["start_offset"], entry["inode_number"])
-                has_sub_entries = bool(sub_entries)
-
-                self.populate_item(child_item, entry["name"], entry["inode_number"], data["start_offset"],
-                                   is_directory=True)
-                child_item.setChildIndicatorPolicy(
-                    QTreeWidgetItem.ShowIndicator if has_sub_entries else QTreeWidgetItem.DontShowIndicatorWhenChildless)
-            else:
-                self.populate_item(child_item, entry["name"], entry["inode_number"], data["start_offset"],
-                                   is_directory=False)
-
-    def populate_item(self, child_item, entry_name, inode_number, start_offset, is_directory):
-        if is_directory:
-            icon_key = 'folder'
-        else:
-            # For files, determine the icon based on the file extension
-            file_extension = entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown'
-            icon_key = file_extension
-
-        icon_path = self.db_manager.get_icon_path('folder' if is_directory else 'file', icon_key)
-
-        child_item.setIcon(0, QIcon(icon_path))
-        child_item.setData(0, Qt.UserRole, {
-            "inode_number": inode_number,
-            "type": 'directory' if is_directory else 'file',
-            "start_offset": start_offset,
-            "name": entry_name
-        })
+            self._create_tree_item_for_entry(item, entry, data["start_offset"])
 
     def on_item_expanded(self, item):
         # Check if the item already has children; if so, don't repopulate
@@ -2279,7 +2673,7 @@ class MainWindow(QMainWindow):
         # Not found
         return None
 
-    def populate_listing_table(self, entries, offset):
+    def populate_listing_table(self, entries: List[Dict[str, Any]], offset: int) -> None:
         """Populate the listing table with directory entries in batches for better performance."""
         # Clear existing content
         self.listing_table.setRowCount(0)
@@ -2290,81 +2684,31 @@ class MainWindow(QMainWindow):
         # Enable/disable the up button based on whether we're in the root directory
         self.update_directory_up_button()
 
-        # Avoid excessive processing for small directories
-        if len(entries) < 500:
-            # For smaller directories, populate directly for simplicity and reliability
-            for entry in entries:
-                row_position = self.listing_table.rowCount()
-                self.listing_table.insertRow(row_position)
+        # Disable sorting and updates for better performance during bulk population
+        self.listing_table.setSortingEnabled(False)
+        self.listing_table.setUpdatesEnabled(False)
 
-                entry_name = entry.get("name", "")
-                inode_number = entry.get("inode_number", 0)
-                is_directory = entry.get("is_directory", False)
-                description = "Directory" if is_directory else "File"
-                size_in_bytes = entry.get("size", 0)
-                readable_size = self.image_handler.get_readable_size(size_in_bytes)
-                created = entry.get("created", "N/A")
-                accessed = entry.get("accessed", "N/A")
-                modified = entry.get("modified", "N/A")
-                changed = entry.get("changed", "N/A")
+        try:
+            total_entries = len(entries)
 
-                icon_type = 'folder' if is_directory else 'file'
-                icon_name = 'folder' if is_directory else (
-                    entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown')
+            # Process in batches to keep UI responsive
+            for batch_start in range(0, total_entries, TABLE_BATCH_SIZE):
+                batch_end = min(batch_start + TABLE_BATCH_SIZE, total_entries)
+                batch = entries[batch_start:batch_end]
 
-                parent_inode = self.current_selected_data.get("inode_number") if self.current_selected_data else None
+                # Populate the batch
+                for entry in batch:
+                    row_position = self.listing_table.rowCount()
+                    self._populate_table_entry(row_position, entry, offset)
 
-                self.insert_row_into_listing_table(entry_name, inode_number, description,
-                                                   icon_name, icon_type, offset,
-                                                   readable_size, created, accessed,
-                                                   modified, changed, parent_inode)
+                # Process events periodically to keep UI responsive
+                if batch_end < total_entries:
+                    QApplication.processEvents()
 
-            # Process events to keep UI responsive
-            QApplication.processEvents()
-            return
-
-        # For very large directories, batch processing improves UI responsiveness
-        BATCH_SIZE = 200
-
-        # Sort entries by name for predictable ordering and better UX
-        sorted_entries = sorted(entries, key=lambda e: e.get("name", "").lower())
-        total_entries = len(sorted_entries)
-
-        # Process in batches to keep UI responsive
-        for batch_start in range(0, total_entries, BATCH_SIZE):
-            # Get the current batch of entries
-            batch_end = min(batch_start + BATCH_SIZE, total_entries)
-            batch = sorted_entries[batch_start:batch_end]
-
-            # Populate the batch
-            for entry in batch:
-                row_position = self.listing_table.rowCount()
-                self.listing_table.insertRow(row_position)
-
-                entry_name = entry.get("name", "")
-                inode_number = entry.get("inode_number", 0)
-                is_directory = entry.get("is_directory", False)
-                description = "Directory" if is_directory else "File"
-                size_in_bytes = entry.get("size", 0)
-                readable_size = self.image_handler.get_readable_size(size_in_bytes)
-                created = entry.get("created", "N/A")
-                accessed = entry.get("accessed", "N/A")
-                modified = entry.get("modified", "N/A")
-                changed = entry.get("changed", "N/A")
-
-                icon_type = 'folder' if is_directory else 'file'
-                icon_name = 'folder' if is_directory else (
-                    entry_name.split('.')[-1].lower() if '.' in entry_name else 'unknown')
-
-                parent_inode = self.current_selected_data.get("inode_number") if self.current_selected_data else None
-
-                self.insert_row_into_listing_table(entry_name, inode_number, description,
-                                                   icon_name, icon_type, offset,
-                                                   readable_size, created, accessed,
-                                                   modified, changed, parent_inode)
-
-            # Process events to keep UI responsive during batch loading
-            QApplication.processEvents()
+        finally:
+            # Re-enable updates and sorting
+            self.listing_table.setUpdatesEnabled(True)
+            self.listing_table.setSortingEnabled(True)
 
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
                                       created, accessed, modified, changed, parent_inode=None):
@@ -2531,7 +2875,7 @@ class MainWindow(QMainWindow):
 
     def log_error(self, message):
         """Log an error message to the console and potentially to a log file."""
-        print(f"Error: {message}")
+        logger.error(f"Error: {message}")
         # Could also log to a file or status bar here
 
     def open_tree_context_menu(self, position):
@@ -2633,7 +2977,7 @@ class MainWindow(QMainWindow):
             return 5
 
         except Exception as e:
-            print(f"Error finding grandparent inode: {str(e)}")
+            logger.error(f"Error finding grandparent inode: {str(e)}")
             return None
 
     def on_listing_table_item_clicked(self, item):
@@ -2692,6 +3036,49 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.log_error(f"Error processing listing table click: {str(e)}")
+            statusbar.clearMessage()
+
+    def on_search_file_selected(self, file_data: Dict[str, Any]) -> None:
+        """Handle file selection from the File Search widget.
+
+        This method is called when a user double-clicks a file in the File Search tab.
+        It retrieves the file content and displays it in the appropriate viewer tab.
+
+        Args:
+            file_data: Dictionary containing file metadata (inode_number, start_offset, name, etc.)
+        """
+        if not file_data:
+            logger.warning("No file data provided to search file handler")
+            return
+
+        statusbar = self.statusBar()
+        statusbar.showMessage(f"Loading {file_data.get('name', 'file')}...")
+
+        try:
+            # Store as current selection for viewer tab switching
+            self.current_selected_data = file_data
+
+            # Get required metadata for file content retrieval
+            inode_number = file_data.get("inode_number", 0)
+            start_offset = file_data.get("start_offset", 0)
+
+            if not inode_number:
+                self.log_error("File metadata missing inode number")
+                statusbar.clearMessage()
+                return
+
+            # Use background thread for file content retrieval (same pattern as listing table)
+            self.file_worker = self.FileContentWorker(self.image_handler, inode_number, start_offset)
+            self.file_worker.completed.connect(
+                lambda content, _: self.update_viewer_with_file_content(content, file_data))
+            self.file_worker.error.connect(
+                lambda msg: (self.log_error(f"Error loading search file: {msg}"), statusbar.clearMessage()))
+            self.file_worker.start()
+
+            logger.info(f"Initiated file content loading for: {file_data.get('name', 'unknown')}")
+
+        except Exception as e:
+            self.log_error(f"Error processing search file selection: {str(e)}")
             statusbar.clearMessage()
 
 
