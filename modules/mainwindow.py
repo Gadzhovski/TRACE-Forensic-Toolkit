@@ -15,13 +15,14 @@ import subprocess
 import platform
 from contextlib import contextmanager
 from functools import lru_cache
-from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer
-from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup, QPixmap
+from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QMargins
+from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup, QPixmap, QPainter, QColor
+from PySide6.QtCharts import QChart, QChartView, QPieSeries, QPieSlice
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
+                               QDialog, QVBoxLayout, QHBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy, QGroupBox,
-                               QCheckBox, QGridLayout)
+                               QCheckBox, QGridLayout, QScrollArea, QPushButton)
 
 from modules.about import AboutDialog
 from modules.converter import Main
@@ -210,6 +211,105 @@ class ImageHandler:
             return self.img_info.read(offset, size)
         else:
             raise NotImplementedError("The image format does not support direct reading.")
+
+    def build_allocation_map(self, start_offset):
+        """Build a map of allocated disk regions by traversing the filesystem."""
+        allocation_map = []
+
+        try:
+            fs_info = self.get_fs_info(start_offset)
+            if not fs_info:
+                logger.warning(f"Unable to get filesystem info for offset {start_offset}")
+                return allocation_map
+
+            # Get block size for this filesystem
+            block_size = fs_info.info.block_size
+
+            # Recursively walk filesystem to find all allocated files
+            def walk_directory(directory, path="/"):
+                """Recursively walk directory and collect allocated file ranges."""
+                try:
+                    for entry in directory:
+                        # Skip current and parent directory entries
+                        if not hasattr(entry, 'info') or not hasattr(entry.info, 'name'):
+                            continue
+
+                        name = entry.info.name.name.decode('utf-8', errors='ignore')
+                        if name in [".", ".."]:
+                            continue
+
+                        # Check if this is an allocated file
+                        if not hasattr(entry.info, 'meta') or entry.info.meta is None:
+                            continue
+
+                        # Only process allocated files (skip deleted files)
+                        is_allocated = bool(int(entry.info.meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC)
+                        if not is_allocated:
+                            continue
+
+                        # Get file size and inode
+                        file_size = entry.info.meta.size
+
+                        # Only process files with actual data
+                        if file_size > 0:
+                            try:
+                                # Open the file to access its data runs
+                                file_obj = fs_info.open_meta(inode=entry.info.meta.addr)
+
+                                # Calculate byte offsets for the file's data
+                                # This is approximate - we use the file's logical position
+                                # For a more accurate map, we'd need to walk data runs
+                                # but this is a reasonable approximation for most filesystems
+
+                                # Get partition offset in bytes
+                                partition_offset_bytes = start_offset * 512
+
+                                # For simplicity, we'll mark regions based on inode metadata
+                                # A more sophisticated approach would walk TSK_FS_BLOCK structures
+                                # but pytsk3 doesn't expose block_walk easily
+
+                                # Estimate file location based on inode number and size
+                                # This is a simplified approach - actual blocks may be fragmented
+                                inode_addr = entry.info.meta.addr
+                                estimated_start = partition_offset_bytes + (inode_addr * block_size)
+                                estimated_end = estimated_start + file_size
+
+                                allocation_map.append((estimated_start, estimated_end))
+
+                            except Exception as e:
+                                # Skip files we can't open
+                                logger.debug(f"Could not process file {path}{name}: {e}")
+                                pass
+
+                        # Recursively process directories
+                        if entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+                            try:
+                                sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
+                                walk_directory(sub_directory, f"{path}{name}/")
+                            except Exception as e:
+                                logger.debug(f"Could not open directory {path}{name}: {e}")
+                                pass
+
+                except Exception as e:
+                    logger.debug(f"Error walking directory {path}: {e}")
+                    pass
+
+            # Start walking from root directory
+            try:
+                root_dir = fs_info.open_dir(path="/")
+                walk_directory(root_dir)
+            except Exception as e:
+                logger.error(f"Error accessing root directory: {e}")
+
+            # Sort allocation map by start offset for efficient searching
+            allocation_map.sort(key=lambda x: x[0])
+
+            logger.info(f"Built allocation map with {len(allocation_map)} allocated file regions")
+
+        except Exception as e:
+            logger.error(f"Error building allocation map: {e}")
+
+        return allocation_map
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
@@ -2026,12 +2126,12 @@ class MainWindow(QMainWindow):
             self.veriphone_widget.set_api_key(veriphone_key)
 
     def show_conversion_widget(self):
-        # Show the conversion widget
+        """Show the conversion widget."""
         self.select_dialog = Main()
         self.select_dialog.show()
 
     def show_veriphone_widget(self):
-        # Create the VeriphoneWidget only if it hasn't been created yet
+        """Create the VeriphoneWidget only if it hasn't been created yet."""
         if not hasattr(self, 'veriphone_widget'):
             self.veriphone_widget = VeriphoneWidget()
             # Set the API key after creating the widget
@@ -2388,8 +2488,8 @@ class MainWindow(QMainWindow):
         else:  # It's a directory
             self.populate_contents(item, data, data.get("inode_number"))
 
-    # Create a worker thread class for handling file operations in the background
     class FileContentWorker(QThread):
+        """Worker thread class for handling file operations in the background."""
         completed = Signal(bytes, object)
         error = Signal(str)
 
@@ -2408,6 +2508,44 @@ class MainWindow(QMainWindow):
                     self.error.emit("Unable to read file content.")
             except Exception as e:
                 self.error.emit(f"Error reading file: {str(e)}")
+
+    # Worker thread for opening media files for streaming (doesn't load content into memory)
+    class MediaStreamWorker(QThread):
+        completed = Signal(object, int, object)  # file_obj, file_size, metadata
+        error = Signal(str)
+
+        def __init__(self, image_handler, inode_number, offset):
+            super().__init__()
+            self.image_handler = image_handler
+            self.inode_number = inode_number
+            self.offset = offset
+
+        def run(self):
+            try:
+                # Get filesystem info
+                fs = self.image_handler.get_fs_info(self.offset)
+                if not fs:
+                    self.error.emit("Unable to get filesystem info.")
+                    return
+
+                # Open the file object (don't read content)
+                file_obj = fs.open_meta(inode=self.inode_number)
+                if not file_obj:
+                    self.error.emit("Unable to open file.")
+                    return
+
+                file_size = file_obj.info.meta.size
+                metadata = file_obj.info.meta
+
+                if file_size == 0:
+                    self.error.emit("File has no content or is a special metafile!")
+                    return
+
+                # Return the file object for streaming (don't read content)
+                self.completed.emit(file_obj, file_size, metadata)
+
+            except Exception as e:
+                self.error.emit(f"Error opening file for streaming: {str(e)}")
 
     # Create a worker thread class for handling unallocated space operations in the background
     class UnallocatedSpaceWorker(QThread):
@@ -2790,6 +2928,37 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log_error(f"Error displaying content in viewer: {str(e)}")
 
+    def update_viewer_with_media_stream(self, file_obj, file_size, metadata, data):
+        """Update the application viewer with a media stream for playback."""
+        # Clear the status message if it exists
+        statusbar = self.statusBar()
+        statusbar.clearMessage()
+
+        try:
+            # Determine MIME type from file extension
+            full_file_path = data.get("name", "")
+            file_extension = os.path.splitext(full_file_path)[-1].lower()
+
+            # Map extension to MIME type
+            mime_type = None
+            if file_extension in ['.mp3', '.wav', '.ogg', '.aac', '.m4a']:
+                mime_type = f'audio/{file_extension[1:]}'
+            elif file_extension in ['.mp4', '.mkv', '.flv', '.avi', '.mov', '.webm', '.wmv', '.m4v']:
+                mime_type = 'video/mp4'
+            else:
+                mime_type = 'application/octet-stream'
+
+            # Call the load method with streaming parameters
+            self.application_viewer.load(
+                mime_type=mime_type,
+                path=full_file_path,
+                file_obj=file_obj,
+                file_size=file_size
+            )
+
+        except Exception as e:
+            self.log_error(f"Error setting up media stream: {str(e)}")
+
     def display_content_for_active_tab(self):
         """Display content appropriate for the currently active tab."""
         if not self.current_selected_data:
@@ -2799,17 +2968,61 @@ class MainWindow(QMainWindow):
         statusbar.showMessage("Updating view...")
 
         try:
+            # IMPORTANT: Cancel any running workers before starting new ones
+            # This prevents race conditions when switching between files
+            if hasattr(self, 'media_worker') and self.media_worker and self.media_worker.isRunning():
+                try:
+                    # Disconnect signals to prevent callbacks
+                    self.media_worker.completed.disconnect()
+                    self.media_worker.error.disconnect()
+                    # Request interruption (graceful)
+                    self.media_worker.requestInterruption()
+                    # Don't wait - let it finish naturally
+                except Exception as e:
+                    print(f"Error cancelling media worker: {e}")
+
+            if hasattr(self, 'file_worker') and self.file_worker and self.file_worker.isRunning():
+                try:
+                    # Disconnect signals to prevent callbacks
+                    self.file_worker.completed.disconnect()
+                    self.file_worker.error.disconnect()
+                    # Request interruption (graceful)
+                    self.file_worker.requestInterruption()
+                    # Don't wait - let it finish naturally
+                except Exception as e:
+                    print(f"Error cancelling file worker: {e}")
+
             inode_number = self.current_selected_data.get("inode_number")
             offset = self.current_selected_data.get("start_offset", self.current_offset)
 
             if inode_number:
-                # For file content, use the worker thread
-                self.file_worker = self.FileContentWorker(self.image_handler, inode_number, offset)
-                self.file_worker.completed.connect(
-                    lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))
-                self.file_worker.error.connect(
-                    lambda msg: (self.log_error(msg), statusbar.clearMessage()))
-                self.file_worker.start()
+                # Check if the active tab is Application tab (index 2) and file is audio/video
+                current_tab_index = self.viewer_tab.currentIndex()
+                file_name = self.current_selected_data.get("name", "")
+                file_extension = os.path.splitext(file_name)[-1].lower()
+
+                # Media file extensions
+                media_extensions = ['.mp3', '.wav', '.ogg', '.aac', '.m4a', '.mp4', '.mkv',
+                                  '.flv', '.avi', '.mov', '.webm', '.wmv', '.m4v']
+
+                # Use streaming for media files on Application tab
+                if current_tab_index == 2 and file_extension in media_extensions:
+                    # Use MediaStreamWorker for streaming playback (doesn't load content)
+                    self.media_worker = self.MediaStreamWorker(self.image_handler, inode_number, offset)
+                    self.media_worker.completed.connect(
+                        lambda file_obj, file_size, metadata: self.update_viewer_with_media_stream(
+                            file_obj, file_size, metadata, self.current_selected_data))
+                    self.media_worker.error.connect(
+                        lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                    self.media_worker.start()
+                else:
+                    # For non-media files or other tabs, use FileContentWorker (loads content)
+                    self.file_worker = self.FileContentWorker(self.image_handler, inode_number, offset)
+                    self.file_worker.completed.connect(
+                        lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))
+                    self.file_worker.error.connect(
+                        lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                    self.file_worker.start()
             else:
                 statusbar.clearMessage()
         except Exception as e:
@@ -2884,8 +3097,9 @@ class MainWindow(QMainWindow):
         if indexes:
             selected_item = self.tree_viewer.itemFromIndex(indexes[0])
             menu = QMenu()
+            data = selected_item.data(0, Qt.UserRole)
 
-            # Check if the selected item is a root item
+            # Check if the selected item is a root item (disk image)
             if selected_item and selected_item.parent() is None:
                 view_os_info_action = menu.addAction("View Image Information")
                 view_os_info_action.triggered.connect(lambda: self.view_os_information(indexes[0]))
@@ -2899,58 +3113,579 @@ class MainWindow(QMainWindow):
             menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
 
     def view_os_information(self, index):
+        """Display comprehensive disk image information with space allocation pie chart."""
         item = self.tree_viewer.itemFromIndex(index)
         if item is None or item.parent() is not None:
-            # Ensure that only the root item triggers the OS information display
+            # Ensure that only the root item triggers the information display
             return
 
-        partitions = self.image_handler.get_partitions()
-        table = QTableWidget()
-
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["Partition", "OS Information", "File System Type"])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        table.horizontalHeader().setFont(QFont("Arial", 10, QFont.Bold))
-        table.verticalHeader().setVisible(False)
-
-        partition_icon = QIcon('Icons/devices/drive-harddisk.svg')  # Replace with your partition icon path
-        os_icon = QIcon('Icons/start-here.svg')  # Replace with your OS icon path
-
-        for row, part in enumerate(partitions):
-            start_offset = part[2]  # Start offset of the partition
-            fs_type = self.image_handler.get_fs_type(start_offset)
-
-            os_version = None
-            if fs_type == "NTFS":
-                os_version = self.image_handler.get_windows_version(start_offset)
-
-            table.insertRow(row)
-            partition_item = QTableWidgetItem(f"Partition {part[0]}")
-            partition_item.setIcon(partition_icon)
-            os_version_item = QTableWidgetItem(os_version if os_version else "N/A")
-            if os_version:
-                os_version_item.setIcon(os_icon)
-            fs_type_item = QTableWidgetItem(fs_type or "Unrecognized")
-
-            table.setItem(row, 0, partition_item)
-            table.setItem(row, 1, os_version_item)
-            table.setItem(row, 2, fs_type_item)
-
-        table.resizeRowsToContents()
-        table.resizeColumnsToContents()
-
-        # Dialog for displaying the table
+        # Create modern dialog
         dialog = QDialog(self)
-        dialog.setWindowTitle("OS and File System Information")
-        dialog.resize(460, 320)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(table)
+        dialog.setWindowTitle("Disk Image Information")
+        dialog.resize(1200, 800)
 
-        buttonBox = QDialogButtonBox(QDialogButtonBox.Ok)
-        buttonBox.accepted.connect(dialog.accept)
-        layout.addWidget(buttonBox)
+        # Main vertical layout
+        main_layout = QVBoxLayout(dialog)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # === TOP SECTION: Image Overview with Chart ===
+        top_widget = QWidget()
+        top_widget.setStyleSheet("background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;")
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(20, 20, 20, 20)
+        top_layout.setSpacing(30)
+
+        # Left: Image Summary Card
+        summary_card = QWidget()
+        summary_card.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-radius: 8px;
+                border: 1px solid #dee2e6;
+            }
+        """)
+        summary_layout = QVBoxLayout(summary_card)
+        summary_layout.setContentsMargins(20, 20, 20, 20)
+        summary_layout.setSpacing(12)
+
+        # Title
+        title_label = QLabel("Disk Image Overview")
+        title_label.setStyleSheet("font-size: 16pt; font-weight: bold; color: #212529; border: none;")
+        summary_layout.addWidget(title_label)
+
+        # Key info
+        image_info = self._get_image_info()
+        key_fields = ["Image Path", "Image Type", "Total Size", "Partition Scheme", "Number of Partitions", "Status"]
+
+        for field in key_fields:
+            if field in image_info:
+                info_row = QWidget()
+                info_row.setStyleSheet("border: none;")
+                info_row_layout = QHBoxLayout(info_row)
+                info_row_layout.setContentsMargins(0, 0, 0, 0)
+                info_row_layout.setSpacing(10)
+
+                label = QLabel(f"{field}:")
+                label.setStyleSheet("font-weight: bold; color: #495057; font-size: 10pt; border: none;")
+                label.setMinimumWidth(140)
+
+                value = QLabel(str(image_info[field]))
+                value.setStyleSheet("color: #212529; font-size: 10pt; border: none;")
+                value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                value.setWordWrap(True)
+
+                info_row_layout.addWidget(label)
+                info_row_layout.addWidget(value, 1)
+
+                summary_layout.addWidget(info_row)
+
+        summary_layout.addStretch()
+        summary_card.setFixedWidth(450)
+
+        # Right: Pie Chart with Legend
+        chart_widget = QWidget()
+        chart_widget.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-radius: 8px;
+                border: 1px solid #dee2e6;
+            }
+        """)
+        chart_outer_layout = QVBoxLayout(chart_widget)
+        chart_outer_layout.setContentsMargins(15, 15, 15, 15)
+        chart_outer_layout.setSpacing(10)
+
+        chart_title = QLabel("Space Allocation")
+        chart_title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #212529; border: none;")
+        chart_title.setAlignment(Qt.AlignCenter)
+        chart_outer_layout.addWidget(chart_title)
+
+        # Create horizontal layout for legend (left) and chart (right)
+        chart_content_layout = QHBoxLayout()
+        chart_content_layout.setSpacing(15)
+
+        # Create chart
+        chart_view, partition_info_list = self._create_space_allocation_chart()
+
+        # Compact legend on the left
+        if partition_info_list:
+            legend_widget = QWidget()
+            legend_widget.setStyleSheet("border: none;")
+            legend_layout = QVBoxLayout(legend_widget)
+            legend_layout.setContentsMargins(5, 5, 5, 5)
+            legend_layout.setSpacing(6)
+
+            for label_text, color in partition_info_list:
+                legend_row = QWidget()
+                legend_row.setStyleSheet("border: none;")
+                legend_row_layout = QHBoxLayout(legend_row)
+                legend_row_layout.setContentsMargins(0, 0, 0, 0)
+                legend_row_layout.setSpacing(8)
+
+                color_indicator = QLabel()
+                color_indicator.setFixedSize(16, 16)
+                color_indicator.setStyleSheet(f"""
+                    background-color: rgb({color.red()}, {color.green()}, {color.blue()});
+                    border: 1px solid #adb5bd;
+                    border-radius: 3px;
+                """)
+
+                text_label = QLabel(label_text)
+                text_label.setStyleSheet("color: #495057; font-size: 9pt; border: none;")
+                text_label.setWordWrap(True)
+
+                legend_row_layout.addWidget(color_indicator)
+                legend_row_layout.addWidget(text_label, 1)
+
+                legend_layout.addWidget(legend_row)
+
+            legend_layout.addStretch()
+            legend_widget.setMaximumWidth(300)
+            chart_content_layout.addWidget(legend_widget)
+
+        chart_content_layout.addWidget(chart_view, 1)
+        chart_outer_layout.addLayout(chart_content_layout, 1)
+
+        top_layout.addWidget(summary_card)
+        top_layout.addWidget(chart_widget, 1)
+
+        main_layout.addWidget(top_widget)
+
+        # === BOTTOM SECTION: Detailed Partition Information ===
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(20, 20, 20, 20)
+        bottom_layout.setSpacing(15)
+
+        # Section title
+        details_title = QLabel("Volume Details")
+        details_title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #212529; padding-bottom: 10px;")
+        bottom_layout.addWidget(details_title)
+
+        # Scrollable partition details with grid layout
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        scroll_content = QWidget()
+        scroll_layout = QGridLayout(scroll_content)
+        scroll_layout.setSpacing(15)
+        scroll_layout.setContentsMargins(0, 0, 10, 0)
+
+        partitions = self.image_handler.get_partitions()
+
+        if partitions:
+            # Display volumes in a grid (2-3 columns depending on count)
+            columns = 3 if len(partitions) > 2 else 2
+
+            for idx, part in enumerate(partitions):
+                # Create comprehensive volume cards for each partition
+                volume_cards = self._create_comprehensive_volume_cards(part, idx)
+                for card in volume_cards:
+                    row = idx // columns
+                    col = idx % columns
+                    scroll_layout.addWidget(card, row, col, Qt.AlignTop)
+
+            # Add stretch to remaining columns in last row if needed
+            last_row = (len(partitions) - 1) // columns
+            scroll_layout.setRowStretch(last_row + 1, 1)
+        else:
+            no_part_label = QLabel("No partitions detected or single filesystem image")
+            no_part_label.setStyleSheet("color: #6c757d; font-style: italic; padding: 20px;")
+            scroll_layout.addWidget(no_part_label, 0, 0, 1, 3)
+
+        scroll.setWidget(scroll_content)
+        bottom_layout.addWidget(scroll, 1)
+
+        # Close button at bottom right
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        close_button.setMinimumWidth(100)
+
+        button_layout.addWidget(close_button)
+        bottom_layout.addLayout(button_layout)
+
+        main_layout.addWidget(bottom_widget, 1)
 
         dialog.exec_()
+
+    def _create_comprehensive_volume_cards(self, partition, index):
+        """Create simple text display for a volume/partition with basic pytsk3 info only."""
+        addr, desc, start, length = partition
+        cards = []
+
+        # Get basic volume information (pytsk3 only, no hive extraction)
+        volume_info = self._extract_comprehensive_volume_info(start)
+
+        # Get filesystem type and matching color
+        fs_type = volume_info["basic"].get("Filesystem Type", "Unknown")
+        fs_colors = self._get_filesystem_colors()
+        color = fs_colors.get(fs_type, fs_colors["Unknown"])
+
+        # Create simple text widget with color-coded border
+        volume_widget = QWidget()
+        volume_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: white;
+                border-left: 4px solid rgb({color.red()}, {color.green()}, {color.blue()});
+                border-top: 1px solid #e0e0e0;
+                border-right: 1px solid #e0e0e0;
+                border-bottom: 1px solid #e0e0e0;
+                border-radius: 4px;
+            }}
+        """)
+        volume_widget.setMinimumWidth(350)
+        volume_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        volume_layout = QVBoxLayout(volume_widget)
+        volume_layout.setContentsMargins(12, 10, 12, 10)
+        volume_layout.setSpacing(6)
+
+        # Volume header with filesystem color
+        desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+        header_text = f"<b style='color: rgb({color.red()}, {color.green()}, {color.blue()});'>Volume {addr}: {fs_type}</b>"
+
+        # Add description as subtitle if it exists
+        if desc_str and desc_str.strip():
+            header_text += f"<br><span style='font-size: 9pt; color: #6c757d;'>{desc_str}</span>"
+
+        header_label = QLabel(header_text)
+        header_label.setStyleSheet("font-size: 11pt; color: #212529; background: transparent; border: none;")
+        header_label.setWordWrap(True)
+        volume_layout.addWidget(header_label)
+
+        # Separator line
+        separator = QLabel()
+        separator.setFixedHeight(1)
+        separator.setStyleSheet(f"background-color: rgb({color.red()}, {color.green()}, {color.blue()}); opacity: 0.3; border: none;")
+        volume_layout.addWidget(separator)
+
+        # Combine basic and filesystem info
+        all_info = {}
+        all_info.update(volume_info["basic"])
+        all_info.update(volume_info["filesystem"])
+
+        # Display info as simple text
+        if all_info:
+            for key, value in all_info.items():
+                if key != "Filesystem Type":  # Already shown in header
+                    # Create a container for each info row
+                    info_container = QWidget()
+                    info_container.setStyleSheet("background: transparent; border: none;")
+                    info_row_layout = QHBoxLayout(info_container)
+                    info_row_layout.setContentsMargins(0, 2, 0, 2)
+                    info_row_layout.setSpacing(8)
+
+                    # Key label
+                    key_label = QLabel(f"{key}:")
+                    key_label.setStyleSheet("font-size: 9pt; color: #6c757d; font-weight: 600; background: transparent; border: none;")
+                    key_label.setMinimumWidth(120)
+                    key_label.setMaximumWidth(120)
+
+                    # Value label
+                    value_label = QLabel(str(value))
+                    value_label.setStyleSheet("font-size: 9pt; color: #212529; background: transparent; border: none;")
+                    value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                    value_label.setWordWrap(True)
+
+                    info_row_layout.addWidget(key_label)
+                    info_row_layout.addWidget(value_label, 1)
+
+                    volume_layout.addWidget(info_container)
+
+        cards.append(volume_widget)
+        return cards
+
+    def _extract_comprehensive_volume_info(self, start_offset):
+        """Extract basic pytsk3 information from a volume."""
+        info = {
+            "basic": {},
+            "filesystem": {}
+        }
+
+        try:
+            # Get filesystem info
+            fs_info = self.image_handler.get_fs_info(start_offset)
+            if not fs_info:
+                info["basic"]["Status"] = "Unable to access filesystem"
+                return info
+
+            fs_type = self.image_handler.get_fs_type(start_offset)
+
+            # === BASIC INFO ===
+            info["basic"]["Partition Offset"] = f"{start_offset:,} sectors ({start_offset * 512:,} bytes)"
+            info["basic"]["Filesystem Type"] = fs_type or "Unknown"
+
+            if hasattr(fs_info.info, 'block_size'):
+                info["basic"]["Block Size"] = f"{fs_info.info.block_size:,} bytes"
+            if hasattr(fs_info.info, 'block_count'):
+                total_blocks = fs_info.info.block_count
+                total_size = total_blocks * fs_info.info.block_size
+                info["basic"]["Total Blocks"] = f"{total_blocks:,}"
+                info["basic"]["Volume Size"] = FileSystemUtils.get_readable_size(total_size)
+
+            # === FILESYSTEM DETAILS ===
+            if hasattr(fs_info.info, 'first_block'):
+                info["filesystem"]["First Block"] = f"{fs_info.info.first_block:,}"
+            if hasattr(fs_info.info, 'last_block'):
+                info["filesystem"]["Last Block"] = f"{fs_info.info.last_block:,}"
+            if hasattr(fs_info.info, 'inum_count'):
+                info["filesystem"]["Inode Count"] = f"{fs_info.info.inum_count:,}"
+            if hasattr(fs_info.info, 'root_inum'):
+                info["filesystem"]["Root Inode"] = f"{fs_info.info.root_inum}"
+
+        except Exception as e:
+            logger.error(f"Error extracting volume info: {e}")
+            info["basic"]["Error"] = str(e)
+
+        return info
+
+    def _get_image_info(self):
+        """Extract comprehensive disk image information."""
+        info = {}
+
+        try:
+            # Basic image info
+            info["Image Path"] = self.image_handler.image_path
+            info["Image Type"] = self.image_handler.get_image_type().upper()
+
+            # Image size
+            total_size = self.image_handler.get_size()
+            info["Total Size"] = FileSystemUtils.get_readable_size(total_size)
+            info["Total Size (Bytes)"] = f"{total_size:,}"
+
+            # Sector information
+            sector_count = total_size // 512
+            info["Total Sectors"] = f"{sector_count:,}"
+            info["Bytes per Sector"] = "512"
+
+            # Volume information
+            if self.image_handler.volume_info:
+                try:
+                    vol_type = self.image_handler.volume_info.info.vstype
+                    volume_types = {
+                        pytsk3.TSK_VS_TYPE_DOS: "DOS/MBR",
+                        pytsk3.TSK_VS_TYPE_GPT: "GPT (GUID Partition Table)",
+                        pytsk3.TSK_VS_TYPE_MAC: "Mac Partition Map",
+                        pytsk3.TSK_VS_TYPE_BSD: "BSD Disk Label",
+                        pytsk3.TSK_VS_TYPE_SUN: "Sun VTOC",
+                    }
+                    info["Partition Scheme"] = volume_types.get(vol_type, f"Unknown ({vol_type})")
+                    info["Number of Partitions"] = len(self.image_handler.get_partitions())
+                except Exception as e:
+                    logger.debug(f"Could not get volume type: {e}")
+            else:
+                info["Partition Scheme"] = "No partition table detected"
+
+            # Check if wiped
+            if self.image_handler.is_wiped():
+                info["Status"] = "⚠️ Wiped/Empty Image"
+            else:
+                info["Status"] = "✓ Valid Image"
+
+            # File modification time
+            if os.path.exists(self.image_handler.image_path):
+                mod_time = os.path.getmtime(self.image_handler.image_path)
+                info["File Modified"] = datetime.datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d %H:%M:%S")
+
+        except Exception as e:
+            logger.error(f"Error getting image info: {e}")
+            info["Error"] = str(e)
+
+        return info
+
+    def _get_partition_info(self, partition):
+        """Extract detailed partition information."""
+        info = {}
+
+        try:
+            addr, desc, start, length = partition
+
+            # Basic partition info (skip description as it's in the group box title)
+            info["Start Offset (Sectors)"] = f"{start:,}"
+            info["Start Offset (Bytes)"] = f"{start * 512:,}"
+            info["Length (Sectors)"] = f"{length:,}"
+            info["Length (Bytes)"] = f"{length * 512:,}"
+            info["Size"] = FileSystemUtils.get_readable_size(length * 512)
+
+            # Filesystem information
+            try:
+                fs_info = self.image_handler.get_fs_info(start)
+                if fs_info:
+                    fs_type = self.image_handler.get_fs_type(start)
+                    info["File System"] = fs_type or "Unknown"
+
+                    # Block/cluster information
+                    if hasattr(fs_info.info, 'block_size'):
+                        info["Block Size"] = f"{fs_info.info.block_size:,} bytes"
+                    if hasattr(fs_info.info, 'block_count'):
+                        info["Block Count"] = f"{fs_info.info.block_count:,}"
+
+                    # First and last block
+                    if hasattr(fs_info.info, 'first_block'):
+                        info["First Block"] = f"{fs_info.info.first_block:,}"
+                    if hasattr(fs_info.info, 'last_block'):
+                        info["Last Block"] = f"{fs_info.info.last_block:,}"
+
+                    # Inode information
+                    if hasattr(fs_info.info, 'inum_count'):
+                        info["Inode Count"] = f"{fs_info.info.inum_count:,}"
+                    if hasattr(fs_info.info, 'root_inum'):
+                        info["Root Inode"] = f"{fs_info.info.root_inum}"
+
+                    # OS detection for NTFS
+                    if fs_type == "NTFS":
+                        os_version = self.image_handler.get_windows_version(start)
+                        if os_version:
+                            info["Operating System"] = os_version
+
+                    # Try to get volume label
+                    try:
+                        root_dir = fs_info.open_dir(path="/")
+                        for entry in root_dir:
+                            if hasattr(entry, 'info') and hasattr(entry.info, 'name'):
+                                name = entry.info.name.name.decode('utf-8', errors='ignore')
+                                if name in ["$VOLUME", "volume", ".volume"]:
+                                    # Found volume label
+                                    break
+                    except:
+                        pass
+
+                else:
+                    info["File System"] = "Could not open filesystem"
+
+            except Exception as e:
+                info["File System"] = f"Error: {str(e)}"
+                logger.debug(f"Error getting filesystem info for partition: {e}")
+
+        except Exception as e:
+            logger.error(f"Error getting partition info: {e}")
+            info["Error"] = str(e)
+
+        return info
+
+    def _get_filesystem_colors(self):
+        """Return consistent color mapping for filesystem types."""
+        return {
+            "NTFS": QColor(41, 128, 185),      # Blue
+            "FAT32": QColor(46, 204, 113),     # Green
+            "FAT16": QColor(26, 188, 156),     # Turquoise
+            "FAT12": QColor(22, 160, 133),     # Dark Turquoise
+            "exFAT": QColor(52, 152, 219),     # Light Blue
+            "EXT4": QColor(231, 76, 60),       # Red
+            "EXT3": QColor(192, 57, 43),       # Dark Red
+            "EXT2": QColor(155, 89, 182),      # Purple
+            "HFS+": QColor(241, 196, 15),      # Yellow
+            "APFS": QColor(243, 156, 18),      # Orange
+            "ISO9660": QColor(230, 126, 34),   # Dark Orange
+            "Unallocated": QColor(149, 165, 166),  # Gray
+            "Unknown": QColor(127, 140, 141),  # Dark Gray
+        }
+
+    def _create_space_allocation_chart(self):
+        """Create a pie chart showing allocated vs unallocated space."""
+        # Create pie series
+        series = QPieSeries()
+        legend_items = []  # Track items for legend
+
+        try:
+            total_size = self.image_handler.get_size()
+            partitions = self.image_handler.get_partitions()
+
+            # Get filesystem color mapping
+            fs_colors = self._get_filesystem_colors()
+
+            # Calculate allocated space (partitions)
+            allocated_space = 0
+            partition_details = []
+
+            if partitions:
+                for part in partitions:
+                    addr, desc, start, length = part
+                    size = length * 512
+                    allocated_space += size
+
+                    # Get filesystem type
+                    fs_type = self.image_handler.get_fs_type(start)
+                    if not fs_type:
+                        fs_type = "Unknown"
+
+                    partition_details.append((fs_type, size, part[0]))
+
+            # Calculate unallocated space
+            unallocated_space = total_size - allocated_space
+
+            # Add partition slices with consistent colors
+            for idx, (fs_type, size, part_num) in enumerate(partition_details):
+                percentage = (size / total_size) * 100
+
+                # Don't show label on slice - use legend instead
+                slice = series.append("", size)
+
+                # Use consistent color based on filesystem type
+                color = fs_colors.get(fs_type, fs_colors["Unknown"])
+                slice.setColor(color)
+                slice.setLabelVisible(False)  # Hide labels on pie
+
+                # Add border between slices for clear separation
+                slice.setBorderColor(QColor(255, 255, 255))
+                slice.setBorderWidth(3)
+
+                # Add to legend with full details
+                legend_label = f"{fs_type} - Partition {part_num} ({FileSystemUtils.get_readable_size(size)}, {percentage:.1f}%)"
+                legend_items.append((legend_label, color))
+
+            # Add unallocated space
+            if unallocated_space > 0:
+                percentage = (unallocated_space / total_size) * 100
+                unalloc_slice = series.append("", unallocated_space)
+                unalloc_slice.setColor(fs_colors["Unallocated"])
+                unalloc_slice.setLabelVisible(False)
+                unalloc_slice.setBorderColor(QColor(255, 255, 255))
+                unalloc_slice.setBorderWidth(3)
+
+                # Add to legend
+                legend_label = f"Unallocated Space ({FileSystemUtils.get_readable_size(unallocated_space)}, {percentage:.1f}%)"
+                legend_items.append((legend_label, fs_colors["Unallocated"]))
+
+            # If no partitions, show entire disk as unallocated
+            if not partitions:
+                slice = series.append("", total_size)
+                slice.setColor(fs_colors["Unallocated"])
+                slice.setLabelVisible(False)
+
+                # Add to legend
+                legend_label = f"Entire Disk ({FileSystemUtils.get_readable_size(total_size)}, 100%)"
+                legend_items.append((legend_label, fs_colors["Unallocated"]))
+
+        except Exception as e:
+            logger.error(f"Error creating allocation chart: {e}")
+            # Add error slice
+            series.append("Error Loading Data", 1)
+
+        # Create chart
+        chart = QChart()
+        chart.addSeries(series)
+        chart.setTitle("")
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        chart.legend().setVisible(False)  # Use custom legend instead
+
+        # Minimal margins for maximum chart size
+        chart.setMargins(QMargins(0, 0, 0, 0))
+        chart.setBackgroundVisible(False)
+
+        # Create chart view
+        chart_view = QChartView(chart)
+        chart_view.setRenderHint(QPainter.Antialiasing)
+        chart_view.setMinimumSize(350, 350)
+        chart_view.setStyleSheet("border: none; background: transparent;")
+
+        return chart_view, legend_items
 
     def create_action(self, icon_path, text, callback):
         action = QAction(QIcon(icon_path), text, self)
@@ -3039,14 +3774,7 @@ class MainWindow(QMainWindow):
             statusbar.clearMessage()
 
     def on_search_file_selected(self, file_data: Dict[str, Any]) -> None:
-        """Handle file selection from the File Search widget.
-
-        This method is called when a user double-clicks a file in the File Search tab.
-        It retrieves the file content and displays it in the appropriate viewer tab.
-
-        Args:
-            file_data: Dictionary containing file metadata (inode_number, start_offset, name, etc.)
-        """
+        """Handle file selection from the File Search widget."""
         if not file_data:
             logger.warning("No file data provided to search file handler")
             return

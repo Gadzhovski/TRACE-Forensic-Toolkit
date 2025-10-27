@@ -549,5 +549,41 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background-color: #505050;
 }
 
+/* UnifiedViewer Placeholder Label - "No content loaded" message */
+#placeholderLabel {
+    background-color: #3C3C3C;  /* Dark gray background */
+    font-size: 16px;
+    color: #888888;  /* Medium gray text */
+    padding: 10px;
+}
 
+/* AudioVideoPlayer Audio-Only Label - "Playing Audio" message */
+#audioOnlyLabel {
+    background-color: #4C4C4C;  /* Slightly lighter dark gray */
+    font-size: 18px;
+    color: #B0B0B0;  /* Light gray text */
+    padding: 20px;
+}
+
+/* Toolbar Compact Styles - for PictureViewer and PDFViewer */
+QToolBar {
+    spacing: 2px;
+    padding: 1px;
+}
+
+QToolButton {
+    padding: 2px;
+    margin: 1px;
+}
+
+/* Media Player Sliders - Position and Volume */
+QSlider::groove:horizontal {
+    height: 5px;
+    margin: 2px 0;
+}
+
+QSlider::handle:horizontal {
+    width: 10px;
+    margin: -3px 0;
+}
 

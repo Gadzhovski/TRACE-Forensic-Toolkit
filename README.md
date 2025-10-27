@@ -129,76 +129,80 @@
 
 ## Getting Started 🚀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
-### Prerequisites 🔧
+### Installation ⚙️
 
 
-#### For Windows:
-*There's a compatibility issue with Python 3.12. Please install Python 3.11 from the official Python website: https://www.python.org/downloads/release/python-3110/
-<br>
+#### **Windows:**
+1.  Install Python 3.11<br>
+    (⚠️ Python 3.12 is not supported)<br>
+    [👉 Download from python.org](https://www.python.org/downloads/release/python-3110/)
 
-If you don't already have Microsoft C++ Build Tools installed, you'll need to install them to compile required packages like libewf-python and pytsk3.
+2.  Install Microsoft C++ Build Tools<br>
+    [👉 Download Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
 
-Step 1: Download and Install Microsoft C++ Build Tools - https://visualstudio.microsoft.com/visual-cpp-build-tools/
-During the installation, make sure to select the following workloads:
-  - Desktop development with C++
-  - C++ build tools
-  
-Step 2: Install the Dependencies
-```bash
-pip install -r requirements.txt
-  ```
+    During setup, ensure the following workloads are selected:
 
+    - ✅ Desktop development with C++
+    - ✅ C++ build tools
 
-#### For macOS - Apple Silicon:
+3.  Create and activate a virtual environment
 
-Create a virtual environment with python 3.11
+    ```bash
+    python -m venv venv
+    venv\Scripts\activate
+    ```
 
-```bash
-python3.11 -m venv venv
-source venv/bin/activate
-```
+4.  Install dependencies
 
-```bash
-chmod +x install_macos_silicon.sh
- ```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-```bash
-./install_macos_silicon.sh
- ```
-**This script will:**
-- Check if Homebrew is installed and offer to install it if it’s not.
-- Install necessary system dependencies (ffmpeg and poppler) using Homebrew.
-- Install all Python dependencies specified in requirements_macos_silicon.txt using pip.
+5.  Run the tool
+
+    ```bash
+    python main.py
+    ```
 
 
-#### For Ubuntu on WSL:
-```bash
-chmod +x WSL_Ubuntu_install.sh
-```
 
-```bash
-./WSL_Ubuntu_install.sh
-```
+#### **macOS (Apple Silicon) & Linux (Ubuntu/WSL):**
+1.  Make the installation script executable:
 
-**This script will:**
+    ```bash
+    chmod +x install_macos_linux_WSL.sh
+    ```
 
-- Update package lists and install necessary system packages including graphics libraries and sound management tools.
-- Install necessary Python dependencies from requirements_macos_silicon.txt (same requirements for Ubuntu).
+2.  Run the installation script:
+
+    ```bash
+    ./install_macos_linux_WSL.sh
+    ```
+
+    The script will:
+    - ✅ Create and activate a Python 3.11 virtual environment
+    - ✅ Detect your system (macOS or Linux)
+    - ✅ Install required system dependencies (via Homebrew or apt)
+    - ✅Install the appropriate Python packages:
+        * `requirements_macos_silicon.txt` → macOS
+        * `requirements.txt` → Linux
+    - ✅ After installation, it will automatically activate your virtual environment and notify you that it’s ready to use.
+
+3.  Run the Tool
+
+    Once the virtual environment is activated (you’ll see `(venv)` in your terminal prompt):
+
+    ```bash
+    python main.py
+    ```
 
 
-### Configuration ⚙️
+### Configuration ⚙️ 
 
 **API Keys Configuration**:The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. To update the API keys, go to the Options menu and select API Keys submenu.
 
 
 
-### Running the Tool ▶️
-
-
-```bash
-python main.py
-```
-<br>
 
 ## Built With 🧱  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
@@ -210,8 +214,6 @@ python main.py
 
 ## Work in Progress 🧑‍🔧  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
-- **Direct Video/Audio Playback**: Currently, the video and audio player saves files temporarily before playing them, which can cause delays. The goal is to enable direct playback for faster performance.
-- **Integrated File Search and Viewer**: The file search functionality is not yet connected to the "Viewer Tab," which displays HEX, text, application-specific views, metadata, and other details. This integration needs to be implemented.
 - **Cross-Platform Image Mounting**: Image mounting currently works only on Windows using the Arsenal Image Mounter executable. The aim is to make this feature work across all platforms without relying on external executables.
 - **File Carving and Viewer Integration**: The file carving functionality is not yet connected to the "Viewer Tab," where users can view HEX, text, application-specific views, and metadata. Additionally, the current file carving process does not distinguish between deleted and non-deleted files; it will "carve" all files of the selected type from the disk image.
 - **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.

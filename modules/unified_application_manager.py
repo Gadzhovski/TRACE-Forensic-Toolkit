@@ -1,4 +1,3 @@
-import tempfile
 import os
 from ctypes import cast, POINTER
 from weakref import WeakValueDictionary
@@ -6,7 +5,7 @@ import mimetypes
 import platform
 import time
 
-from PySide6.QtCore import Qt, QUrl, Slot, QSize, QTimer, QPoint
+from PySide6.QtCore import Qt, QUrl, Slot, QSize, QTimer, QPoint, QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout, QPainter, QColor, QPen, QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -14,14 +13,88 @@ from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QFileDialog, QApplication)
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel, QHBoxLayout, QComboBox, \
     QSpacerItem, QSizePolicy
-# from comtypes import CLSCTX_ALL
-from fitz import open as fitz_open, Matrix
 
-# from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+from fitz import open as fitz_open, Matrix
 
 if os.name == "nt":  # Windows
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
     from comtypes import CLSCTX_ALL
+
+
+class PyTsk3StreamDevice(QIODevice):
+    """Custom QIODevice that streams data directly from pytsk3 file objects. """
+
+    def __init__(self, file_obj, file_size, parent=None):
+        """Initialize the stream device. """
+        super().__init__(parent)
+        self.file_obj = file_obj
+        self.file_size = file_size
+        self.current_position = 0
+        self._is_closed = False  # Track if device has been closed
+
+    def size(self):
+        """Return the total size of the media file."""
+        return self.file_size
+
+    def isSequential(self):
+        """Return False to indicate this device supports seeking."""
+        return False
+
+    def seek(self, pos):
+        """Seek to a specific position in the file."""
+        if 0 <= pos <= self.file_size:
+            self.current_position = pos
+            # Call parent seek to update internal state
+            return super().seek(pos)
+        return False
+
+    def pos(self):
+        """Return the current position in the file."""
+        return self.current_position
+
+    def atEnd(self):
+        """Return True if at end of file."""
+        return self.current_position >= self.file_size
+
+    def readData(self, maxSize):
+        """Read data from the pytsk3 file object."""
+        # Safety check: Don't read if device is closed
+        if self._is_closed:
+            return b''
+
+        if self.current_position >= self.file_size:
+            return b''
+
+        # Safety check: Make sure file_obj still exists
+        if not self.file_obj:
+            return b''
+
+        try:
+            # Calculate how much to read
+            bytes_to_read = min(maxSize, self.file_size - self.current_position)
+
+            # Read from pytsk3 file object
+            data = self.file_obj.read_random(self.current_position, bytes_to_read)
+
+            # Update position
+            self.current_position += len(data)
+
+            return data
+        except Exception as e:
+            # This is expected if the device was closed while reading
+            if not self._is_closed:
+                print(f"Error reading from pytsk3 file object: {e}")
+            return b''
+
+    def writeData(self, data):
+        """Write data (not supported for read-only device)."""
+        return -1
+
+    def close(self):
+        """Close the device and mark it as closed."""
+        self._is_closed = True
+        self.file_obj = None  # Release reference to file object
+        super().close()
 
 
 class UnifiedViewer(QWidget):
@@ -37,10 +110,8 @@ class UnifiedViewer(QWidget):
 
         # Create placeholder widget to show when nothing is loaded
         self.placeholder = QLabel("No content loaded")
+        self.placeholder.setObjectName("placeholderLabel")  # For stylesheet targeting
         self.placeholder.setAlignment(Qt.AlignCenter)
-        # Use explicit colors instead of named colors
-        self.placeholder.setStyleSheet(
-            "background-color: rgb(240, 240, 240); font-size: 16px; color: rgb(136, 136, 136); padding: 10px;")
         self.layout.addWidget(self.placeholder)
 
         # Initialize viewers as None for lazy loading
@@ -48,13 +119,12 @@ class UnifiedViewer(QWidget):
         self._picture_viewer = None
         self._audio_video_player = None
 
-        # Set up a timer for cleanup of temporary files
-        self.cleanup_timer = QTimer(self)
-        self.cleanup_timer.timeout.connect(self.cleanup_temporary_files)
-        self.cleanup_timer.start(5 * 60 * 1000)  # Cleanup every 5 minutes
+        # Store media buffer for in-memory playback (keeps buffer alive during playback)
+        self._media_buffer = None
 
-        # Track temporary files for cleanup
-        self.temp_files = []
+        # Store stream device and file object for streaming playback from disk images
+        self._media_stream_device = None
+        self._media_file_obj = None
 
     def ensure_icons_directory(self):
         """Check if Icons directory exists and create it if needed"""
@@ -117,58 +187,6 @@ class UnifiedViewer(QWidget):
         except Exception as e:
             print(f"Error creating default icon {path}: {e}")
 
-    def cleanup_temporary_files(self):
-        """Clean up temporary files that were created during playback"""
-        # Make sure media playback is stopped first
-        if self._audio_video_player:
-            try:
-                self._audio_video_player.safe_stop()
-                # Wait a moment to ensure resources are released
-                QApplication.processEvents()
-                time.sleep(0.1)  # Short delay to let system release files
-            except Exception as e:
-                print(f"Error stopping media player before cleanup: {e}")
-
-        # Try to delete temporary files with retry
-        remaining_files = []
-        for temp_file in self.temp_files[:]:
-            try:
-                if os.path.exists(temp_file):
-                    # Try to remove the file
-                    os.remove(temp_file)
-                    self.temp_files.remove(temp_file)
-                else:
-                    # File doesn't exist, remove from tracking list
-                    self.temp_files.remove(temp_file)
-            except Exception as e:
-                print(f"Error removing temporary file {temp_file}: {e}")
-                # Keep track of files we couldn't delete for retry
-                remaining_files.append(temp_file)
-
-        # If we have files that couldn't be deleted, schedule a retry
-        if remaining_files:
-            self.temp_files = remaining_files
-            # Schedule a retry after a delay
-            QTimer.singleShot(2000, self.retry_cleanup_files)
-
-    def retry_cleanup_files(self):
-        """Retry cleaning up files that couldn't be deleted earlier"""
-        remaining_files = []
-        for temp_file in self.temp_files[:]:
-            try:
-                if os.path.exists(temp_file):
-                    # Try to remove the file again
-                    os.remove(temp_file)
-                    self.temp_files.remove(temp_file)
-                else:
-                    # File doesn't exist, remove from tracking list
-                    self.temp_files.remove(temp_file)
-            except Exception as e:
-                print(f"Retry failed to remove temporary file {temp_file}: {e}")
-                remaining_files.append(temp_file)
-
-        # Update the list with any files still remaining
-        self.temp_files = remaining_files
 
     def get_pdf_viewer(self):
         """Lazy initialization of PDF viewer"""
@@ -194,12 +212,14 @@ class UnifiedViewer(QWidget):
             self.layout.addWidget(self._audio_video_player)
         return self._audio_video_player
 
-    def load(self, content, mime_type, path=None):
+    def load(self, content=None, mime_type=None, path=None, file_obj=None, file_size=None):
+        """Load content into the appropriate viewer."""
         # Clear any previous content
         self.clear()
         self.current_path = path
 
-        if not content:
+        # Check if we have either content or file_obj
+        if not content and not file_obj:
             self.placeholder.setVisible(True)
             return
 
@@ -220,47 +240,75 @@ class UnifiedViewer(QWidget):
                 self.placeholder.setVisible(False)
                 return True
 
-            # Process audio and video
+            # Process audio and video - use streaming if file_obj provided, otherwise QBuffer
             elif mime_type.startswith(('audio/', 'video/')):
-                # For audio/video, we need to write content to a temporary file
-                suffix = mimetypes.guess_extension(mime_type) or '.tmp'
-                fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-                os.write(fd, content)
-                os.close(fd)
-
-                # Add to temp file list for cleanup
-                self.temp_files.append(tmp_path)
-
                 player = self.get_audio_video_player()
 
-                # Set up special options for MP3 files with embedded artwork
-                if mime_type.startswith('audio/'):
-                    # For MP3 files, the media player will use higher values for analyzeduration and probesize
-                    # to better handle embedded artwork
-                    media_player = player.media_player
-                    try:
-                        # Try to set the options using different ways depending on PySide6 version
-                        if hasattr(media_player, 'setOption'):
-                            # Newer QMediaPlayer API
-                            media_player.setOption("analyzeduration", "10000000")  # 10 seconds
-                            media_player.setOption("probesize", "20000000")  # 20MB
-                        elif hasattr(media_player, 'setMedia'):
-                            # Older QMediaPlayer API - might not support options directly
-                            print("Using older QMediaPlayer API - options may not be supported")
-                    except Exception as e:
-                        print(f"Warning: Could not set media player options: {e}")
+                # Create a hint URL with the mime type to help the media backend
+                # identify the format correctly
+                hint_url = QUrl()
+                hint_url.setScheme("memory")
+                suffix = mimetypes.guess_extension(mime_type) or '.tmp'
+                hint_url.setPath(f"media{suffix}")
 
-                # Set the media source
-                player.media_player.setSource(QUrl.fromLocalFile(tmp_path))
+                # OPTION 1: Stream from pytsk3 file object (for large files from disk images)
+                if file_obj is not None and file_size is not None:
+                    print(f"Using streaming playback for {file_size} byte media file")
+
+                    # Create custom stream device
+                    self._media_stream_device = PyTsk3StreamDevice(file_obj, file_size, self)
+
+                    # Open the stream device for reading
+                    if not self._media_stream_device.open(QIODevice.ReadOnly):
+                        print("Failed to open stream device for reading")
+                        self.placeholder.setText("Error: Could not open stream device")
+                        self.placeholder.setVisible(True)
+                        return False
+
+                    # Keep file_obj reference alive
+                    self._media_file_obj = file_obj
+
+                    # Set the media source from stream device
+                    player.media_player.setSourceDevice(self._media_stream_device, hint_url)
+
+                # OPTION 2: Use QBuffer for in-memory playback (small files or pre-loaded content)
+                elif content is not None:
+                    # Determine if we should use QBuffer based on size
+                    file_size_mb = len(content) / (1024 * 1024)
+                    print(f"Using in-memory playback for {file_size_mb:.2f} MB media file")
+
+                    # Create QBuffer for in-memory playback
+                    # QBuffer needs to stay alive during playback, so we store it as instance variable
+                    self._media_buffer = QBuffer()
+
+                    # Wrap content in QByteArray and set it to the buffer
+                    byte_array = QByteArray(content)
+                    self._media_buffer.setData(byte_array)
+
+                    # Open buffer for reading
+                    if not self._media_buffer.open(QIODevice.ReadOnly):
+                        print("Failed to open media buffer for reading")
+                        self.placeholder.setText("Error: Could not open media buffer")
+                        self.placeholder.setVisible(True)
+                        return False
+
+                    # Set the media source from buffer
+                    player.media_player.setSourceDevice(self._media_buffer, hint_url)
+
+                else:
+                    self.placeholder.setText("Error: No content or stream source provided")
+                    self.placeholder.setVisible(True)
+                    return False
+
                 player.setVisible(True)
                 self.placeholder.setVisible(False)
 
-                # For MP3 files, hide the video widget since it's audio only
+                # For audio files, configure for audio-only mode
                 if mime_type.startswith('audio/'):
                     try:
-                        player.video_widget.setVisible(False)
+                        player.set_audio_only_mode(True)
                     except Exception as e:
-                        print(f"Warning: Could not hide video widget: {e}")
+                        print(f"Warning: Could not set audio-only mode: {e}")
 
                 return True
 
@@ -286,13 +334,48 @@ class UnifiedViewer(QWidget):
             self._picture_viewer.clear()
             self._picture_viewer.setVisible(False)
 
+        # Clean up media player
         if self._audio_video_player:
-            # Ensure the media player is stopped properly
             try:
+                # Stop playback
                 self._audio_video_player.stop()
             except Exception as e:
                 print(f"Error stopping media player: {e}")
             self._audio_video_player.setVisible(False)
+
+        # Clean up media buffer
+        if self._media_buffer:
+            try:
+                if self._media_buffer.isOpen():
+                    self._media_buffer.close()
+                self._media_buffer = None
+            except Exception as e:
+                print(f"Error closing media buffer: {e}")
+
+        # Clean up stream device - with safety delay
+        if self._media_stream_device:
+            # Store reference for delayed cleanup
+            old_stream_device = self._media_stream_device
+            old_file_obj = self._media_file_obj
+
+            # Clear references immediately
+            self._media_stream_device = None
+            self._media_file_obj = None
+
+            # Close the device after a short delay to let background threads finish
+            # This is non-blocking and happens asynchronously
+            def delayed_cleanup():
+                try:
+                    if old_stream_device and old_stream_device.isOpen():
+                        old_stream_device.close()
+                except Exception as e:
+                    print(f"Error in delayed stream device cleanup: {e}")
+
+            # Schedule cleanup after 100ms (non-blocking)
+            QTimer.singleShot(100, delayed_cleanup)
+        else:
+            # No stream device, just clear file object
+            self._media_file_obj = None
 
         # Show the placeholder
         self.placeholder.setText("No content loaded")
@@ -324,19 +407,44 @@ class UnifiedViewer(QWidget):
         """Handle proper cleanup when the widget is closed"""
         # Make sure to stop any media playback
         if self._audio_video_player:
-            self._audio_video_player.stop()
+            try:
+                self._audio_video_player.stop()
+            except:
+                pass
 
-        # Clean up temporary files
-        self.cleanup_temporary_files()
+        # Clean up media buffer
+        if self._media_buffer:
+            try:
+                if self._media_buffer.isOpen():
+                    self._media_buffer.close()
+                self._media_buffer = None
+            except:
+                pass
+
+        # Clean up stream device (immediate, not delayed)
+        if self._media_stream_device:
+            try:
+                if self._media_stream_device.isOpen():
+                    self._media_stream_device.close()
+                self._media_stream_device = None
+            except:
+                pass
+
+        # Release file object
+        self._media_file_obj = None
 
         # Accept the close event
         super().closeEvent(event)
 
     def __del__(self):
         """Ensure proper cleanup when the object is garbage collected"""
-        # Clean up temporary files
+        # Clean up media resources
         try:
-            self.cleanup_temporary_files()
+            if self._media_buffer and self._media_buffer.isOpen():
+                self._media_buffer.close()
+            if self._media_stream_device and self._media_stream_device.isOpen():
+                self._media_stream_device.close()
+            self._media_file_obj = None
         except:
             pass  # Ignore errors during cleanup in destructor
 
@@ -356,10 +464,7 @@ class UnifiedViewer(QWidget):
                 try:
                     # Stop media playback and remove references
                     self._audio_video_player.safe_stop()
-
-                    # Wait a moment for resources to be released
                     QApplication.processEvents()
-                    time.sleep(0.1)  # Short delay
 
                     # Release reference
                     player = self._audio_video_player
@@ -367,12 +472,30 @@ class UnifiedViewer(QWidget):
                 except Exception as e:
                     print(f"Error during audio/video player shutdown: {e}")
 
-            # Wait a bit for resources to be released
-            QApplication.processEvents()
-            time.sleep(0.2)  # Wait for any pending operations
+            # Clean up media buffer
+            if self._media_buffer:
+                try:
+                    if self._media_buffer.isOpen():
+                        self._media_buffer.close()
+                    self._media_buffer = None
+                except Exception as e:
+                    print(f"Error closing media buffer during shutdown: {e}")
 
-            # Cleanup temporary files
-            self.cleanup_temporary_files()
+            # Clean up stream device
+            if self._media_stream_device:
+                try:
+                    if self._media_stream_device.isOpen():
+                        self._media_stream_device.close()
+                    self._media_stream_device = None
+                except Exception as e:
+                    print(f"Error closing stream device during shutdown: {e}")
+
+            # Release file object reference
+            self._media_file_obj = None
+
+            # Process any pending events
+            QApplication.processEvents()
+
         except Exception as e:
             print(f"Error during UnifiedViewer shutdown: {e}")
 
@@ -423,16 +546,6 @@ class PictureViewer(QWidget):
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(16, 16))  # Reduce icon size
         self.toolbar.setFixedHeight(32)  # Reduce toolbar height
-        self.toolbar.setStyleSheet("""
-            QToolBar {
-                spacing: 2px;
-                padding: 1px;
-            }
-            QToolButton {
-                padding: 2px;
-                margin: 1px;
-            }
-        """)
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
@@ -570,16 +683,6 @@ class PDFViewer(QWidget):
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(16, 16))  # Reduce icon size
         self.toolbar.setFixedHeight(32)  # Reduce toolbar height
-        self.toolbar.setStyleSheet("""
-            QToolBar {
-                spacing: 2px;
-                padding: 1px;
-            }
-            QToolButton {
-                padding: 2px;
-                margin: 1px;
-            }
-        """)
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
@@ -1054,10 +1157,8 @@ class AudioVideoPlayer(QWidget):
 
         # Create label to display when playing audio-only content
         self.audio_label = QLabel("Playing Audio", self)
+        self.audio_label.setObjectName("audioOnlyLabel")  # For stylesheet targeting
         self.audio_label.setAlignment(Qt.AlignCenter)
-        # Use explicit RGB colors instead of hex for better compatibility
-        self.audio_label.setStyleSheet(
-            "background-color: rgb(224, 224, 224); font-size: 18px; color: rgb(68, 68, 68); padding: 20px;")
         self.audio_label.setVisible(False)
 
         # Set default volume
@@ -1388,16 +1489,6 @@ class AudioVideoPlayer(QWidget):
         self.position_slider.setFixedHeight(22)
         self.position_slider.setRange(0, 0)  # Will be updated when media is loaded
         self.position_slider.setToolTip("Position")
-        self.position_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                height: 5px;
-                margin: 2px 0;
-            }
-            QSlider::handle:horizontal {
-                width: 10px;
-                margin: -3px 0;
-            }
-        """)
 
         # Time labels
         self.current_time_label = QLabel("00:00", self)
@@ -1434,16 +1525,6 @@ class AudioVideoPlayer(QWidget):
         self.volume_slider.setValue(self._current_volume)
         self.volume_slider.setMaximumWidth(80)
         self.volume_slider.setToolTip("Volume")
-        self.volume_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                height: 5px;
-                margin: 2px 0;
-            }
-            QSlider::handle:horizontal {
-                width: 10px;
-                margin: -3px 0;
-            }
-        """)
 
         # Add controls to layout
         self.control_layout.addWidget(self.play_button)

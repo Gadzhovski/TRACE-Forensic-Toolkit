@@ -522,3 +522,41 @@ QLabel[text="ASCII"] {
     background-color: #F5F5F5;
     color: #333333;
 }
+
+/* UnifiedViewer Placeholder Label - "No content loaded" message */
+#placeholderLabel {
+    background-color: #F0F0F0;  /* Light gray background */
+    font-size: 16px;
+    color: #888888;  /* Medium gray text */
+    padding: 10px;
+}
+
+/* AudioVideoPlayer Audio-Only Label - "Playing Audio" message */
+#audioOnlyLabel {
+    background-color: #E0E0E0;  /* Light gray background */
+    font-size: 18px;
+    color: #444444;  /* Dark gray text */
+    padding: 20px;
+}
+
+/* Toolbar Compact Styles - for PictureViewer and PDFViewer */
+QToolBar {
+    spacing: 2px;
+    padding: 1px;
+}
+
+QToolButton {
+    padding: 2px;
+    margin: 1px;
+}
+
+/* Media Player Sliders - Position and Volume */
+QSlider::groove:horizontal {
+    height: 5px;
+    margin: 2px 0;
+}
+
+QSlider::handle:horizontal {
+    width: 10px;
+    margin: -3px 0;
+}

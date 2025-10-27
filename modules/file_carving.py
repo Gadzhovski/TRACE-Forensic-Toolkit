@@ -44,6 +44,7 @@ class FileCarvingWidget(QWidget):
         self.executor = ThreadPoolExecutor(max_workers=4)  # ThreadPoolExecutor for background tasks
         self.carved_files = []
         self.carved_file_names = set()  # Track carved file names to avoid duplicates
+        self.allocation_map = []  # Map of allocated disk regions to skip during carving
         self.init_ui()
 
     def init_ui(self):
@@ -204,6 +205,39 @@ class FileCarvingWidget(QWidget):
         if not os.path.exists(thumbnail_folder):
             os.makedirs(thumbnail_folder)
 
+        # Build allocation map for all partitions to skip allocated files
+        print("Building allocation map for allocated files...")
+        self.allocation_map = []
+
+        try:
+            partitions = self.image_handler.get_partitions()
+
+            if partitions:
+                # Process each partition
+                for partition_info in partitions:
+                    # partition_info is (addr, desc, start, len)
+                    start_offset = partition_info[2]  # start offset in sectors
+
+                    # Build allocation map for this partition
+                    partition_map = self.image_handler.build_allocation_map(start_offset)
+                    self.allocation_map.extend(partition_map)
+                    print(f"  Partition at offset {start_offset}: {len(partition_map)} allocated regions")
+            else:
+                # No partitions, try offset 0 (single filesystem)
+                if self.image_handler.has_filesystem(0):
+                    partition_map = self.image_handler.build_allocation_map(0)
+                    self.allocation_map.extend(partition_map)
+                    print(f"  Single filesystem: {len(partition_map)} allocated regions")
+
+            # Sort the combined allocation map
+            self.allocation_map.sort(key=lambda x: x[0])
+            print(f"Total allocated regions to skip: {len(self.allocation_map)}")
+
+        except Exception as e:
+            print(f"Warning: Could not build allocation map: {e}")
+            print("Will carve from entire disk (may include duplicates)")
+            self.allocation_map = []
+
         selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
                                checkbox.isChecked()]
         self.executor.submit(self.carve_files, selected_file_types)
@@ -216,6 +250,47 @@ class FileCarvingWidget(QWidget):
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler
         self.start_button.setEnabled(True)
+
+    @staticmethod
+    def is_offset_allocated(offset, chunk_size, allocation_map):
+        """
+        Check if a given offset range overlaps with any allocated regions.
+
+        Uses binary search for efficient lookup in sorted allocation map.
+
+        Args:
+            offset: Starting byte offset of the chunk
+            chunk_size: Size of the chunk in bytes
+            allocation_map: Sorted list of (start, end) tuples representing allocated regions
+
+        Returns:
+            True if the chunk overlaps with any allocated region, False otherwise
+        """
+        if not allocation_map:
+            return False
+
+        chunk_end = offset + chunk_size
+
+        # Binary search to find potential overlapping regions
+        # We need to check if our chunk [offset, chunk_end) overlaps with any allocated region
+        left, right = 0, len(allocation_map)
+
+        while left < right:
+            mid = (left + right) // 2
+            alloc_start, alloc_end = allocation_map[mid]
+
+            # Check for overlap: two ranges overlap if one starts before the other ends
+            if offset < alloc_end and chunk_end > alloc_start:
+                return True
+
+            # If our chunk is entirely before this allocated region, search left half
+            if chunk_end <= alloc_start:
+                right = mid
+            # If our chunk is entirely after this allocated region, search right half
+            else:
+                left = mid + 1
+
+        return False
 
     def open_context_menu(self, position):
         menu = QMenu()
@@ -596,8 +671,19 @@ class FileCarvingWidget(QWidget):
             self.stop_carving = False
             chunk_size = 1024 * 1024 * 100
             offset = 0
+            chunks_processed = 0
+            chunks_skipped = 0
 
             while offset < self.image_handler.get_size():
+                # Check if this chunk overlaps with allocated space
+                if self.is_offset_allocated(offset, chunk_size, self.allocation_map):
+                    # Skip this chunk - it's in allocated space (existing files)
+                    chunks_skipped += 1
+                    offset += chunk_size
+                    continue
+
+                chunks_processed += 1
+
                 chunk = self.image_handler.read(offset, chunk_size)
                 if not chunk:
                     break
@@ -606,6 +692,7 @@ class FileCarvingWidget(QWidget):
                     self.stop_carving = False
                     self.start_button.setEnabled(True)
                     self.stop_button.setEnabled(False)
+                    print(f"Carving stopped. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
                     return
 
                 # Call the carve function for each selected file type
@@ -640,6 +727,8 @@ class FileCarvingWidget(QWidget):
                         self.carve_bmp_files(chunk, offset)
 
                 offset += chunk_size
+
+            print(f"Carving complete. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
         finally:
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
