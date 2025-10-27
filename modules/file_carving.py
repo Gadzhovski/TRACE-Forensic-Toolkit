@@ -129,11 +129,11 @@ class FileCarvingWidget(QWidget):
 
     def create_list_widget(self):
         list_widget = QListWidget()
-        # remove space between items
         list_widget.setViewMode(QListWidget.IconMode)
-
-        list_widget.setIconSize(QSize(100, 100))
+        list_widget.setIconSize(QSize(120, 120))
         list_widget.setResizeMode(QListWidget.Adjust)
+        list_widget.setUniformItemSizes(True)
+        list_widget.setSpacing(5)
         list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         list_widget.customContextMenuRequested.connect(self.open_context_menu)
 
@@ -172,24 +172,48 @@ class FileCarvingWidget(QWidget):
         widget = QWidget()
         widget.setLayout(layout)
         self.tab_widget.addTab(widget, "Thumbnails")
-
-        # self.tab_widget.addTab(list_widget, "Thumbnails")
         return list_widget
+
+    @staticmethod
+    def center_crop_to_square(pixmap, target_size):
+        """Crop pixmap to center square and scale to target size for uniform thumbnails."""
+        if pixmap.isNull():
+            return pixmap
+
+        width = pixmap.width()
+        height = pixmap.height()
+
+        if width == height:
+            # Already square, just scale
+            return pixmap.scaled(target_size, target_size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+
+        # Determine the crop size (smaller dimension)
+        crop_size = min(width, height)
+
+        # Calculate crop position to center the crop
+        x = (width - crop_size) // 2
+        y = (height - crop_size) // 2
+
+        # Crop to square
+        cropped = pixmap.copy(x, y, crop_size, crop_size)
+
+        # Scale to target size
+        return cropped.scaled(target_size, target_size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
 
     def set_icon_size(self, size):
         self.list_widget.setIconSize(QSize(size, size))
         for index in range(self.list_widget.count()):
             item = self.list_widget.item(index)
-            item.setSizeHint(QSize(size + 20, size + 20))  # Provide some padding around the icon
+            item.setSizeHint(QSize(size + 10, size + 25))  # Compact padding with space for text
 
     def set_small_size(self):
-        self.set_icon_size(50)
+        self.set_icon_size(80)
 
     def set_medium_size(self):
-        self.set_icon_size(100)
+        self.set_icon_size(120)
 
     def set_large_size(self):
-        self.set_icon_size(200)
+        self.set_icon_size(180)
 
     def start_carving(self):
         self.start_button.setEnabled(False)
@@ -254,18 +278,7 @@ class FileCarvingWidget(QWidget):
     @staticmethod
     def is_offset_allocated(offset, chunk_size, allocation_map):
         """
-        Check if a given offset range overlaps with any allocated regions.
-
-        Uses binary search for efficient lookup in sorted allocation map.
-
-        Args:
-            offset: Starting byte offset of the chunk
-            chunk_size: Size of the chunk in bytes
-            allocation_map: Sorted list of (start, end) tuples representing allocated regions
-
-        Returns:
-            True if the chunk overlaps with any allocated region, False otherwise
-        """
+        Check if a given offset range overlaps with any allocated regions."""
         if not allocation_map:
             return False
 
@@ -816,14 +829,14 @@ class FileCarvingWidget(QWidget):
                 thumbnail_path = file_full_path
                 pixmap = QPixmap(thumbnail_path)
 
-            # Scale the pixmap to the icon size while maintaining aspect ratio
-            pixmap = pixmap.scaled(QSize(150, 150), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # Center-crop to perfect square for modern uniform gallery look
+            pixmap = self.center_crop_to_square(pixmap, 120)
             icon = QIcon(pixmap)
 
             # Create a QListWidgetItem, set its icon, and provide a size hint to ensure the text is visible
             item = QListWidgetItem(icon, name)
-            # Set a fixed size for the QListWidgetItem with some extra space for the text
-            item.setSizeHint(QSize(200, 200))  # Adjust the width as necessary to fit the text
+            # Set a compact size for the QListWidgetItem with minimal padding for text
+            item.setSizeHint(QSize(130, 145))
 
             # Set the item flags to not be movable and to be selectable
             item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled & ~Qt.ItemIsDropEnabled)

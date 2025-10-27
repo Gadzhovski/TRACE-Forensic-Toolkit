@@ -71,8 +71,6 @@ COLUMN_WIDTHS = {
 
 # Progress dialog settings
 PROGRESS_DIALOG_WIDTH = 300
-CLEANUP_STEPS = 10
-CLEANUP_STEP_DELAY = 0.1  # seconds
 
 # Timeouts (in seconds)
 MOUNT_TIMEOUT = 30
@@ -81,7 +79,7 @@ PROCESS_TIMEOUT = 30
 THREAD_SLEEP_MS = 1000  # milliseconds
 
 # Minimum duration for progress dialog (milliseconds)
-PROGRESS_MIN_DURATION = 500
+PROGRESS_MIN_DURATION = 1500
 
 # Icon size
 TREE_ICON_SIZE = 16
@@ -1670,51 +1668,6 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.StandardButton.Yes:
             self.image_manager.dismount_image()
 
-    def _create_cleanup_progress_dialog(self) -> QProgressDialog:
-        """Create and configure cleanup progress dialog."""
-        progress = QProgressDialog("Cleaning up resources...", None, 0, 100, self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setCancelButton(None)
-        progress.setWindowTitle("Shutting Down")
-        progress.setMinimumWidth(PROGRESS_DIALOG_WIDTH)
-
-        # Apply styling
-        progress.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid grey;
-                border-radius: 5px;
-                text-align: center;
-                height: 20px;
-                margin: 0px 10px;
-            }
-            QProgressBar::chunk {
-                background-color: #05B8CC;
-                width: 10px;
-            }
-            QLabel {
-                margin-bottom: 5px;
-                font-size: 12px;
-            }
-        """)
-
-        # Center on parent
-        progress.setGeometry(
-            self.geometry().center().x() - PROGRESS_DIALOG_WIDTH // 2,
-            self.geometry().center().y() - progress.height() // 2,
-            PROGRESS_DIALOG_WIDTH,
-            progress.height()
-        )
-
-        progress.show()
-        QApplication.processEvents()
-        return progress
-
-    def _animate_cleanup_progress(self, progress: QProgressDialog) -> None:
-        """Animate progress bar during cleanup."""
-        for i in range(CLEANUP_STEPS + 1):
-            progress.setValue(i * (100 // CLEANUP_STEPS))
-            QApplication.processEvents()
-            time.sleep(CLEANUP_STEP_DELAY)
 
     def _create_tree_item_for_entry(self, parent_item: QTreeWidgetItem, entry: Dict[str, Any],
                                     start_offset: int) -> QTreeWidgetItem:
@@ -2229,13 +2182,8 @@ class MainWindow(QMainWindow):
 
         self._handle_dismount_if_needed()
 
-        # Show progress and cleanup
-        progress = self._create_cleanup_progress_dialog()
+        # Cleanup resources
         self.cleanup_resources()
-        self._animate_cleanup_progress(progress)
-
-        progress.close()
-        QApplication.processEvents()
         event.accept()
 
     def cleanup_resources(self):
