@@ -135,6 +135,29 @@ QMenuBar::item:pressed {
     background-color: #d7d7d7;
 }
 
+QMenu {
+    background-color: #FFFFFF;
+    border: 1px solid #C0C0C0;
+    border-radius: 6px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 5px 25px 5px 10px;
+    border-radius: 4px;
+    color: #333333;
+}
+QMenu::item:selected {
+    background-color: #e7e7e7;
+}
+QMenu::item:pressed {
+    background-color: #d7d7d7;
+}
+QMenu::separator {
+    height: 1px;
+    background-color: #E5E5E5;
+    margin: 3px 5px;
+}
+
 /* MessageBox Styles */
 QMessageBox {
     background-color: #ffffff;

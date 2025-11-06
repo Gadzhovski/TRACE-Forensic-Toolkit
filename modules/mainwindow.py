@@ -58,14 +58,14 @@ VIEWER_DOCK_MAX_SIZE = 16777215  # Qt maximum size value
 
 # Column widths for listing table
 COLUMN_WIDTHS = {
-    'name': 200,
-    'inode': 60,
-    'type': 100,
-    'size': 80,
-    'created': 150,
-    'accessed': 150,
-    'modified': 150,
-    'changed': 150,
+    'name': 300,
+    'inode': 45,
+    'type': 50,
+    'size': 70,
+    'created': 125,
+    'accessed': 125,
+    'modified': 125,
+    'changed': 125,
     'path': 200
 }
 
@@ -1726,7 +1726,7 @@ class MainWindow(QMainWindow):
         entry_name = entry.get("name", "")
         inode_number = entry.get("inode_number", 0)
         is_directory = entry.get("is_directory", False)
-        description = "Directory" if is_directory else "File"
+        description = "Dir" if is_directory else "File"
         size_in_bytes = entry.get("size", 0)
         readable_size = self.image_handler.get_readable_size(size_in_bytes)
         created = entry.get("created", "N/A")
@@ -1921,19 +1921,27 @@ class MainWindow(QMainWindow):
         self.listing_widget = QWidget()
         self.listing_widget.setLayout(self.listing_layout)
 
-        # Set the horizontal header with dynamic resizing
+        # Set the horizontal header with dynamic resizing for professional appearance
         header = self.listing_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)  # Make all columns interactively resizable
-        # Set default widths for columns to have sensible starting sizes
-        self.listing_table.setColumnWidth(0, COLUMN_WIDTHS['name'])  # Name column
-        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode column
-        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type column
-        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size column
-        self.listing_table.setColumnWidth(4, COLUMN_WIDTHS['created'])  # Created Date column
-        self.listing_table.setColumnWidth(5, COLUMN_WIDTHS['accessed'])  # Accessed Date column
-        self.listing_table.setColumnWidth(6, COLUMN_WIDTHS['modified'])  # Modified Date column
-        self.listing_table.setColumnWidth(7, COLUMN_WIDTHS['changed'])  # Changed Date column
-        self.listing_table.setColumnWidth(8, COLUMN_WIDTHS['path'])  # Path column
+
+        # Configure resize modes: Stretch columns fill available space, Interactive are manually resizable
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name - expands to fill space
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Inode - manually resizable
+        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Type - manually resizable
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size - manually resizable
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Created - auto-sizes to content
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Accessed - auto-sizes to content
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Modified - auto-sizes to content
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Changed - auto-sizes to content
+        header.setSectionResizeMode(8, QHeaderView.Stretch)  # Path - expands to fill space
+
+        # Set initial widths for Interactive columns at their tight, compact sizes
+        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode column - 45px
+        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type column - 50px
+        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size column - 70px
+
+        # Force Name column to start at 160px width (Stretch mode will expand it from here)
+        header.resizeSection(0, 160)
 
         # Remove any extra space in the header
         header.setStyleSheet("QHeaderView::section { margin-top: 0px; padding-top: 2px; }")

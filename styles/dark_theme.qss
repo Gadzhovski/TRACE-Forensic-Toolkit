@@ -408,13 +408,16 @@ QLabel {
 QMenu {
     background-color: #3C3C3C;  /* Dark background for the menu */
     border: 1px solid #5A5A5A;  /* Border for the menu */
+    border-radius: 6px;  /* Rounded corners for modern look */
+    padding: 4px;  /* Padding around menu */
     color: #E0E0E0;  /* Text color for the menu */
 }
 
 /* QMenu item default style */
 QMenu::item {
-    padding: 5px 20px;  /* Padding for menu items */
-    background-color: #3C3C3C;  /* Default background color */
+    padding: 5px 25px 5px 10px;  /* Padding for menu items */
+    border-radius: 4px;  /* Rounded corners for menu items */
+    background-color: transparent;  /* Transparent background */
     color: #E0E0E0;  /* Default text color */
 }
 
@@ -428,6 +431,13 @@ QMenu::item:hover {
 QMenu::item:selected {
     background-color: #4C4C4C;  /* Background color when selected */
     color: #FFFFFF;  /* Text color when selected */
+}
+
+/* QMenu separator style */
+QMenu::separator {
+    height: 1px;
+    background-color: #5A5A5A;  /* Separator color */
+    margin: 3px 5px;  /* Spacing around separator */
 }
 
 
