@@ -888,6 +888,7 @@ class PDFViewer(QWidget):
 
         if content:
             try:
+                # Try to open PDF directly first
                 self.pdf = fitz_open(stream=content, filetype="pdf")
                 self.current_page = 0
                 self.zoom_factor = 1.0
@@ -895,9 +896,64 @@ class PDFViewer(QWidget):
                 self.show_page(self.current_page)
                 self.update_navigation_states()
             except Exception as e:
-                print(f"Failed to load PDF: {e}")
+                # If direct open fails, try to clean up the PDF (common with carved files)
+                print(f"Initial PDF load failed: {e}, attempting cleanup...")
+                try:
+                    cleaned_content = self.cleanup_pdf_content(content)
+                    self.pdf = fitz_open(stream=cleaned_content, filetype="pdf")
+                    self.current_page = 0
+                    self.zoom_factor = 1.0
+                    self.rotation_angle = 0
+                    self.show_page(self.current_page)
+                    self.update_navigation_states()
+                    print("Successfully loaded PDF after cleanup")
+                except Exception as e2:
+                    print(f"Failed to load PDF even after cleanup: {e2}")
         else:
             self.page_label.clear()
+
+    @staticmethod
+    def cleanup_pdf_content(content):
+        """Clean up PDF content by removing trailing garbage after %%EOF.
+
+        Common issue with carved PDFs - extra bytes after the EOF marker
+        cause PyMuPDF to reject the file even though the PDF is valid.
+        """
+        try:
+            # Find the last occurrence of %%EOF
+            eof_marker = b'%%EOF'
+            last_eof = content.rfind(eof_marker)
+
+            if last_eof != -1:
+                # Include the EOF marker plus a small buffer for trailing whitespace
+                # PDF spec allows whitespace/newlines after %%EOF, but not much else
+                end_position = last_eof + len(eof_marker)
+
+                # Look ahead a bit to include any trailing newlines (up to 10 bytes)
+                max_end = min(end_position + 10, len(content))
+                trailing_section = content[end_position:max_end]
+
+                # Count how many whitespace bytes follow EOF
+                whitespace_count = 0
+                for byte in trailing_section:
+                    if byte in (0x0A, 0x0D, 0x20, 0x09):  # \n, \r, space, tab
+                        whitespace_count += 1
+                    else:
+                        break
+
+                # Truncate after EOF + whitespace
+                cleaned_content = content[:end_position + whitespace_count]
+
+                print(f"PDF cleanup: Truncated {len(content) - len(cleaned_content)} trailing bytes")
+                return cleaned_content
+            else:
+                # No EOF marker found, return original
+                print("PDF cleanup: No %%EOF marker found, returning original content")
+                return content
+
+        except Exception as e:
+            print(f"Error during PDF cleanup: {e}")
+            return content
 
     def clear(self):
         """Close the PDF and clear all resources."""

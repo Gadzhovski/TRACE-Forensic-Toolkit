@@ -25,21 +25,23 @@ class MetadataViewer(QWidget):
         layout.addWidget(self.metadata_text_edit)
 
     def display_metadata(self, data):
-        inode_number = data.get('inode_number')
-        offset = data.get('start_offset')
+        # Check if this is a carved file with content already provided
+        is_carved = data.get('is_carved', False)
+        file_content = data.get('file_content')
 
-        file_content, metadata = self.image_handler.get_file_content(inode_number, offset)
+        if is_carved and file_content:
+            # Carved file - use provided content, no filesystem metadata available
+            metadata = None
+        else:
+            # Regular file - read from filesystem
+            inode_number = data.get('inode_number')
+            offset = data.get('start_offset')
+            file_content, metadata = self.image_handler.get_file_content(inode_number, offset)
 
-        if metadata is None:
-            self.metadata_text_edit.setHtml("<b>No metadata available.</b>")
-            return
+            if metadata is None:
+                self.metadata_text_edit.setHtml("<b>No metadata available.</b>")
+                return
 
-        # Safe time formatting function
-        # def format_time(timestamp):
-        #     try:
-        #         return datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-        #     except (OverflowError, OSError, ValueError):
-        #         return "Invalid timestamp"
         def format_time(timestamp):
             if timestamp is None or timestamp == 0:
                 return "N/A"
@@ -48,32 +50,59 @@ class MetadataViewer(QWidget):
             except Exception:
                 return "N/A"
 
-        created_time = format_time(metadata.crtime) if hasattr(metadata, 'crtime') else 'N/A'
-        modified_time = format_time(metadata.mtime) if hasattr(metadata, 'mtime') else 'N/A'
-        accessed_time = format_time(metadata.atime) if hasattr(metadata, 'atime') else 'N/A'
-        changed_time = format_time(metadata.ctime) if hasattr(metadata, 'ctime') else 'N/A'
+        # Handle timestamps - use filesystem metadata if available, otherwise use carved timestamp
+        if is_carved:
+            # For carved files, use the extracted/preserved timestamp
+            carved_timestamp = data.get('carved_timestamp', 'N/A')
+            created_time = 'N/A (carved file)'
+            modified_time = carved_timestamp if carved_timestamp != 'N/A' else 'N/A (carved file)'
+            accessed_time = 'N/A (carved file)'
+            changed_time = 'N/A (carved file)'
+        else:
+            # For regular files, use filesystem metadata
+            created_time = format_time(metadata.crtime) if hasattr(metadata, 'crtime') else 'N/A'
+            modified_time = format_time(metadata.mtime) if hasattr(metadata, 'mtime') else 'N/A'
+            accessed_time = format_time(metadata.atime) if hasattr(metadata, 'atime') else 'N/A'
+            changed_time = format_time(metadata.ctime) if hasattr(metadata, 'ctime') else 'N/A'
 
         md5_hash = hashlib.md5(file_content).hexdigest() if file_content else "N/A"
         sha256_hash = hashlib.sha256(file_content).hexdigest() if file_content else "N/A"
         mime_type = Magic().from_buffer(file_content) if file_content else "N/A"
 
         # Ensure size is an integer before passing to get_readable_size
-        size = metadata.size if metadata.size else 'N/A'
-        if isinstance(size, str):
-            try:
-                size = int(size)  # Convert size to int if it's a string
-            except ValueError:
-                size = 'N/A'  # Keep as 'N/A' if conversion fails
+        if is_carved:
+            # For carved files, use size from data dict
+            size = data.get('size', 0)
+            size = self.image_handler.get_readable_size(size)
         else:
-            size = self.image_handler.get_readable_size(size)  # Convert size to a readable format
+            # For regular files, use filesystem metadata
+            size = metadata.size if metadata.size else 'N/A'
+            if isinstance(size, str):
+                try:
+                    size = int(size)  # Convert size to int if it's a string
+                except ValueError:
+                    size = 'N/A'  # Keep as 'N/A' if conversion fails
+            else:
+                size = self.image_handler.get_readable_size(size)  # Convert size to a readable format
 
         # extended_metadata = f"<b>Metadata</b>"
         extended_metadata = f"<b style='font-size: 20px; font-family: Courier New;'>Metadata</b>"
+
+        # Add carved file indicator if applicable
+        if is_carved:
+            extended_metadata += f"<p style='margin-left: 10px; font-family: Courier New; color: #ff6600;'><b>⚠ Carved File</b> (recovered from unallocated space)</p>"
+
         extended_metadata += f"<table style='margin-left: 10px; font-family: Courier New;'>"
         extended_metadata += f"<tr><th style='text-align: left;'>Name:</th><td style='padding-left: 20px;'>{data.get('name', 'N/A')}</td></tr>"
         extended_metadata += f"<tr><th style='text-align: left;'>Type:</th><td style='padding-left: 20px;'>{data.get('type')}</td></tr>"
         extended_metadata += f"<tr><th style='text-align: left;'>MIME Type:</th><td style='padding-left: 20px;'>{mime_type}</td></tr>"
         extended_metadata += f"<tr><th style='text-align: left;'>Size:</th><td style='padding-left: 20px;'>{size}</td></tr>"
+
+        # Add disk offset for carved files
+        if is_carved:
+            offset_value = data.get('offset', 0)
+            extended_metadata += f"<tr><th style='text-align: left;'>Disk Offset:</th><td style='padding-left: 20px;'>{hex(offset_value)} ({offset_value} bytes)</td></tr>"
+
         extended_metadata += f"<tr><th style='text-align: left;'>Modified:</th><td style='padding-left: 20px;'>{modified_time}</td></tr>"
         extended_metadata += f"<tr><th style='text-align: left;'>Accessed:</th><td style='padding-left: 20px;'>{accessed_time}</td></tr>"
         extended_metadata += f"<tr><th style='text-align: left;'>Created:</th><td style='padding-left: 20px;'>{created_time}</td></tr>"
@@ -84,8 +113,9 @@ class MetadataViewer(QWidget):
         extended_metadata += f"<br>"
         extended_metadata += f"<br>"
 
-        if os.name == 'nt':
-            istat_output = self.run_istat(offset, inode_number, self.image_handler.image_path)
+        # Skip istat for carved files (no inode available)
+        if not is_carved and os.name == 'nt':
+            istat_output = self.run_istat(data.get('start_offset'), data.get('inode_number'), self.image_handler.image_path)
             extended_metadata += (
                 f"<b style='font-size: 20px; font-family: Courier New;'>From The Sleuth Kit istat Tool</b>")
             extended_metadata += (f"<div style='margin-left: 15px; font-family: Courier New;'>")

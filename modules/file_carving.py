@@ -2,16 +2,20 @@ import datetime
 import io
 import os
 import struct
+import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 from PIL import Image, UnidentifiedImageError
+from PIL.ExifTags import TAGS
 from PyPDF2 import PdfReader
 from PyPDF2.errors import PdfReadError
-from PySide6.QtCore import QSize, QUrl
+from PySide6.QtCore import QSize, QUrl, QRectF
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal, Slot
-from PySide6.QtGui import QIcon, QAction, QDesktopServices, QPixmap
+from PySide6.QtGui import QIcon, QAction, QDesktopServices, QPixmap, QPainter, QImage
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QToolBar, QSizePolicy, QHBoxLayout, \
     QCheckBox, QHeaderView
 from PySide6.QtWidgets import QMenu
@@ -40,6 +44,7 @@ class FileCarvingWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.main_window = parent  # Store reference to MainWindow before it gets reparented by tab widget
         self.image_handler = None
         self.executor = ThreadPoolExecutor(max_workers=4)  # ThreadPoolExecutor for background tasks
         self.carved_files = []
@@ -122,6 +127,8 @@ class FileCarvingWidget(QWidget):
         table_widget.setHorizontalHeaderLabels(['Id', 'Name', 'Size', 'Type', 'Modification Date', 'File Path'])
         table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         table_widget.customContextMenuRequested.connect(self.open_context_menu)
+        # Connect click event to open file in internal viewer
+        table_widget.cellClicked.connect(self.on_carved_file_clicked)
 
         self.tab_widget = QTabWidget()
         self.tab_widget.addTab(table_widget, "File List")
@@ -136,6 +143,8 @@ class FileCarvingWidget(QWidget):
         list_widget.setSpacing(5)
         list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         list_widget.customContextMenuRequested.connect(self.open_context_menu)
+        # Connect click event to open file in internal viewer
+        list_widget.itemClicked.connect(self.on_carved_file_clicked)
 
         toolbar = QToolBar()
 
@@ -199,6 +208,25 @@ class FileCarvingWidget(QWidget):
 
         # Scale to target size
         return cropped.scaled(target_size, target_size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+
+    @staticmethod
+    def render_svg_to_pixmap(svg_path, target_size):
+        """Render SVG file at target resolution for crisp icons."""
+        renderer = QSvgRenderer(svg_path)
+        if not renderer.isValid():
+            return QPixmap()
+
+        # Create QImage at target size with transparency
+        image = QImage(target_size, target_size, QImage.Format_ARGB32)
+        image.fill(Qt.transparent)
+
+        # Render SVG onto the image
+        painter = QPainter(image)
+        renderer.render(painter, QRectF(0, 0, target_size, target_size))
+        painter.end()
+
+        # Convert QImage to QPixmap
+        return QPixmap.fromImage(image)
 
     def set_icon_size(self, size):
         self.list_widget.setIconSize(QSize(size, size))
@@ -307,10 +335,11 @@ class FileCarvingWidget(QWidget):
 
     def open_context_menu(self, position):
         menu = QMenu()
+
         open_location_action = QAction("Open File Location")
         open_location_action.triggered.connect(self.open_file_location)
 
-        open_image_action = QAction("Open Image")
+        open_image_action = QAction("Open Externally")
         open_image_action.triggered.connect(self.open_image)
 
         menu.addAction(open_location_action)
@@ -340,6 +369,80 @@ class FileCarvingWidget(QWidget):
                     file_path = file_info[3]  # The file path is now at index 3
                     QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(file_path)))
                     break
+
+    def get_carved_timestamp(self, file_name):
+        """Get the preserved timestamp for a carved file."""
+        for file_info in self.carved_files:
+            if file_info[0] == file_name:
+                return file_info[4]  # Modification date at index 4
+        return None
+
+    def on_carved_file_clicked(self, *args):
+        """Handle click on carved file to display in internal viewer.
+
+        Reads file content directly from disk image (forensically sound) instead of
+        from the carved file on disk. This ensures we're analyzing the original data.
+        """
+        # Get clicked file name (works for both table cellClicked and list itemClicked)
+        if len(args) == 2:  # cellClicked(row, column) from table
+            row = args[0]
+            # Get file name from column 1 (Name column, column 0 is Id)
+            file_name_item = self.table_widget.item(row, 1)
+            if not file_name_item:
+                return
+            file_name = file_name_item.text()
+        elif len(args) == 1:  # itemClicked(item) from list
+            item = args[0]
+            file_name = item.text()
+        else:
+            return
+
+        # Find file info in carved_files list
+        for file_info in self.carved_files:
+            if file_info[0] == file_name:
+                file_size_str = file_info[1]  # Size at index 1
+                file_type = file_info[2]  # Type at index 2
+                file_size = int(file_size_str)
+
+                try:
+                    # Extract disk offset from filename (hex format without extension)
+                    offset_hex = os.path.splitext(file_name)[0]
+                    offset = int(offset_hex, 16)
+
+                    # Read file content directly from disk image (forensically sound!)
+                    if not self.image_handler:
+                        print("No image handler available")
+                        return
+
+                    file_content = self.image_handler.read(offset, file_size)
+                    if not file_content:
+                        print(f"Unable to read content from offset {hex(offset)}")
+                        return
+
+                    # Create data dict for viewer (matches mainwindow's format)
+                    data = {
+                        'name': file_name,
+                        'size': file_size,
+                        'type': file_type,
+                        'offset': offset,
+                        'is_carved': True,  # Flag indicating this is a carved file
+                        'source': 'carved_file',
+                        'file_content': file_content,  # Include content so metadata viewer doesn't re-read
+                        'carved_timestamp': self.get_carved_timestamp(file_name)  # Get original timestamp if available
+                    }
+
+                    # Get MainWindow and call update_viewer_with_file_content
+                    if self.main_window and hasattr(self.main_window, 'update_viewer_with_file_content'):
+                        self.main_window.update_viewer_with_file_content(file_content, data)
+                    else:
+                        print("MainWindow not found or missing update_viewer_with_file_content method")
+
+                except Exception as e:
+                    print(f"Error opening carved file in viewer: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+                break
 
     def setup_buttons(self):
         self.start_button.setEnabled(False)
@@ -746,6 +849,58 @@ class FileCarvingWidget(QWidget):
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
 
+    @staticmethod
+    def extract_original_timestamp(file_content, file_type):
+        """Extract original file timestamp from file headers/metadata.
+
+        Returns:
+            datetime object if timestamp found, None otherwise
+        """
+        try:
+            if file_type.lower() in ['jpg', 'jpeg', 'png']:
+                # Extract EXIF DateTimeOriginal from images
+                try:
+                    img = Image.open(io.BytesIO(file_content))
+                    exif_data = img._getexif()
+                    if exif_data:
+                        # Look for DateTimeOriginal (tag 36867) or DateTime (tag 306)
+                        for tag_id, value in exif_data.items():
+                            tag_name = TAGS.get(tag_id, tag_id)
+                            if tag_name in ['DateTimeOriginal', 'DateTime']:
+                                # Parse format: "2024:01:15 14:30:00"
+                                return datetime.datetime.strptime(str(value), '%Y:%m:%d %H:%M:%S')
+                except Exception:
+                    pass
+
+            elif file_type.lower() == 'pdf':
+                # Extract CreationDate from PDF metadata
+                try:
+                    pdf = PdfReader(io.BytesIO(file_content))
+                    if pdf.metadata and '/CreationDate' in pdf.metadata:
+                        date_str = pdf.metadata['/CreationDate']
+                        # PDF date format: "D:20240115143000"
+                        if date_str.startswith('D:'):
+                            date_str = date_str[2:16]  # Extract YYYYMMDDHHmmss
+                            return datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S')
+                except Exception:
+                    pass
+
+            elif file_type.lower() == 'zip':
+                # Extract timestamp from ZIP central directory
+                try:
+                    with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
+                        if zf.namelist():
+                            # Get timestamp of first file in archive
+                            first_file_info = zf.getinfo(zf.namelist()[0])
+                            return datetime.datetime(*first_file_info.date_time)
+                except Exception:
+                    pass
+
+        except Exception as e:
+            print(f"Error extracting timestamp for {file_type}: {e}")
+
+        return None
+
     def save_file(self, file_content, file_type, file_path, offset):
         # Ensure the 'carved_files' directory exists
         if not os.path.exists("carved_files"):
@@ -754,9 +909,24 @@ class FileCarvingWidget(QWidget):
         offset_hex = format(offset, 'x')
         file_name = f"{offset_hex}.{file_type}"
         file_path = os.path.join("carved_files", file_name)
+
+        # Write file content to disk
         with open(file_path, "wb") as f:
             f.write(file_content)
-        modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Try to extract original timestamp from file metadata
+        original_timestamp = self.extract_original_timestamp(file_content, file_type)
+
+        if original_timestamp:
+            # Convert datetime to timestamp (seconds since epoch)
+            timestamp = time.mktime(original_timestamp.timetuple())
+            # Set both access time and modification time to preserve original timestamp
+            os.utime(file_path, (timestamp, timestamp))
+            modification_date = original_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            # Fall back to carving time if no original timestamp found
+            modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         file_size = str(len(file_content))
         self.carved_files.append((file_name, file_size, file_type, file_path, modification_date))
         self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
@@ -791,8 +961,8 @@ class FileCarvingWidget(QWidget):
         self.table_widget.setColumnWidth(3, 50)  # Type column width
         self.table_widget.setColumnWidth(4, 130)  # Modification Date column width
 
-        # Only proceed if the file type is one of the supported image or video formats
-        if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp']:
+        # Only proceed if the file type is one of the supported formats
+        if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp', 'zip', 'wav']:
             file_full_path = os.path.join("carved_files", name)
             thumbnail_folder = os.path.join("carved_files", "thumbnails")  # Folder to save thumbnails
 
@@ -824,13 +994,22 @@ class FileCarvingWidget(QWidget):
                 else:
                     print("Failed to extract thumbnail from WMV file")
 
+            elif type_.lower() == 'zip':
+                # Render ZIP icon at target size for crisp display
+                pixmap = self.render_svg_to_pixmap('Icons/mimetypes/application-zip.svg', 120)
+
+            elif type_.lower() == 'wav':
+                # Render audio icon at target size for crisp display
+                pixmap = self.render_svg_to_pixmap('Icons/mimetypes/audio-x-generic.svg', 120)
+
             else:
                 # For image files, use the original file path
                 thumbnail_path = file_full_path
                 pixmap = QPixmap(thumbnail_path)
 
-            # Center-crop to perfect square for modern uniform gallery look
-            pixmap = self.center_crop_to_square(pixmap, 120)
+            # Center-crop to perfect square for modern uniform gallery look (skip for SVG icons)
+            if type_.lower() not in ['zip', 'wav']:
+                pixmap = self.center_crop_to_square(pixmap, 120)
             icon = QIcon(pixmap)
 
             # Create a QListWidgetItem, set its icon, and provide a size hint to ensure the text is visible
