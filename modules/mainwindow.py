@@ -58,14 +58,14 @@ VIEWER_DOCK_MAX_SIZE = 16777215  # Qt maximum size value
 
 # Column widths for listing table
 COLUMN_WIDTHS = {
-    'name': 300,
+    'name': 350,
     'inode': 45,
     'type': 50,
     'size': 70,
-    'created': 125,
-    'accessed': 125,
-    'modified': 125,
-    'changed': 125,
+    'created': 110,
+    'accessed': 110,
+    'modified': 110,
+    'changed': 110,
     'path': 200
 }
 
@@ -1924,24 +1924,24 @@ class MainWindow(QMainWindow):
         # Set the horizontal header with dynamic resizing for professional appearance
         header = self.listing_table.horizontalHeader()
 
-        # Configure resize modes: Stretch columns fill available space, Interactive are manually resizable
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name - expands to fill space
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Inode - manually resizable
-        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Type - manually resizable
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size - manually resizable
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Created - auto-sizes to content
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Accessed - auto-sizes to content
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Modified - auto-sizes to content
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Changed - auto-sizes to content
-        header.setSectionResizeMode(8, QHeaderView.Stretch)  # Path - expands to fill space
+        # Configure columns: Stretch for important/variable content, Interactive for compact columns
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name - expands dynamically
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Inode - fixed width, stays compact
+        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Type - fixed width, stays compact
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size - fixed width, stays compact
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Created - auto-sizes to content (max ~140px)
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Accessed - auto-sizes to content (max ~140px)
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Modified - auto-sizes to content (max ~140px)
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Changed - auto-sizes to content (max ~140px)
+        header.setSectionResizeMode(8, QHeaderView.Stretch)  # Path - expands dynamically
 
-        # Set initial widths for Interactive columns at their tight, compact sizes
-        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode column - 45px
-        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type column - 50px
-        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size column - 70px
+        # Set initial widths for fixed-size columns (Stretch and ResizeToContents columns auto-size)
+        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode - 45px (stays fixed)
+        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type - 50px (stays fixed)
+        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size - 70px (stays fixed)
 
-        # Force Name column to start at 160px width (Stretch mode will expand it from here)
-        header.resizeSection(0, 160)
+        # Name and Path (Stretch) will auto-size to fill remaining space
+        # Time columns (ResizeToContents) will auto-size to fit timestamp content (~130-140px)
 
         # Remove any extra space in the header
         header.setStyleSheet("QHeaderView::section { margin-top: 0px; padding-top: 2px; }")
