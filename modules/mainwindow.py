@@ -1749,7 +1749,7 @@ class MainWindow(QMainWindow):
     # ==================== END HELPER METHODS ====================
 
     def initialize_ui(self):
-        self.setWindowTitle('Trace 1.1.0')
+        self.setWindowTitle('Trace 1.2.0')
 
         # Set application icon for all platforms
         app_icon = QIcon('Icons/logo_prev_ui.png')
@@ -1907,7 +1907,7 @@ class MainWindow(QMainWindow):
         self.listing_table.setAlternatingRowColors(True)
         self.listing_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.listing_table.setIconSize(QSize(24, 24))
-        self.listing_table.setColumnCount(9)  # Increase column count to 9 to include path
+        self.listing_table.setColumnCount(10)  # 10 columns: Name, Inode, Type, Size, 4 timestamps, Path, Info
 
         # Create a QVBoxLayout for the listing tab
         self.listing_layout = QVBoxLayout()
@@ -1924,24 +1924,31 @@ class MainWindow(QMainWindow):
         # Set the horizontal header with dynamic resizing for professional appearance
         header = self.listing_table.horizontalHeader()
 
-        # Configure columns: Stretch for important/variable content, Interactive for compact columns
+        # Configure columns: Stretch for dynamic resizing, Interactive for fixed compact columns
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name - expands dynamically
         header.setSectionResizeMode(1, QHeaderView.Interactive)  # Inode - fixed width, stays compact
         header.setSectionResizeMode(2, QHeaderView.Interactive)  # Type - fixed width, stays compact
         header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size - fixed width, stays compact
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Created - auto-sizes to content (max ~140px)
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Accessed - auto-sizes to content (max ~140px)
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Modified - auto-sizes to content (max ~140px)
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Changed - auto-sizes to content (max ~140px)
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Created - expands dynamically with window resize
+        header.setSectionResizeMode(5, QHeaderView.Stretch)  # Accessed - expands dynamically with window resize
+        header.setSectionResizeMode(6, QHeaderView.Stretch)  # Modified - expands dynamically with window resize
+        header.setSectionResizeMode(7, QHeaderView.Stretch)  # Changed - expands dynamically with window resize
         header.setSectionResizeMode(8, QHeaderView.Stretch)  # Path - expands dynamically
+        header.setSectionResizeMode(9, QHeaderView.Stretch)  # Info - expands dynamically (volumes only)
 
-        # Set initial widths for fixed-size columns (Stretch and ResizeToContents columns auto-size)
+        # Set initial widths to establish proportions for Stretch columns
+        self.listing_table.setColumnWidth(0, COLUMN_WIDTHS['name'])  # Name - 350px initial
+        self.listing_table.setColumnWidth(4, COLUMN_WIDTHS['created'])  # Created - 110px initial
+        self.listing_table.setColumnWidth(5, COLUMN_WIDTHS['accessed'])  # Accessed - 110px initial
+        self.listing_table.setColumnWidth(6, COLUMN_WIDTHS['modified'])  # Modified - 110px initial
+        self.listing_table.setColumnWidth(7, COLUMN_WIDTHS['changed'])  # Changed - 110px initial
+        self.listing_table.setColumnWidth(8, COLUMN_WIDTHS['path'])  # Path - 200px initial
+        self.listing_table.setColumnWidth(9, 250)  # Info - 250px initial (for volume descriptions)
+
+        # Set fixed widths for compact columns (stay at these sizes)
         self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode - 45px (stays fixed)
         self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type - 50px (stays fixed)
         self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size - 70px (stays fixed)
-
-        # Name and Path (Stretch) will auto-size to fill remaining space
-        # Time columns (ResizeToContents) will auto-size to fit timestamp content (~130-140px)
 
         # Remove any extra space in the header
         header.setStyleSheet("QHeaderView::section { margin-top: 0px; padding-top: 2px; }")
@@ -1949,7 +1956,7 @@ class MainWindow(QMainWindow):
 
         # Set the header labels
         self.listing_table.setHorizontalHeaderLabels(
-            ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date', 'Modified Date', 'Changed Date', 'Path']
+            ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date', 'Modified Date', 'Changed Date', 'Path', 'Info']
         )
 
         self.listing_table.itemDoubleClicked.connect(self.on_listing_table_item_clicked)
@@ -2540,6 +2547,16 @@ class MainWindow(QMainWindow):
 
         # Use a background worker thread if processing large files or unallocated space
         try:
+            # Check if this is the root disk image item (has start_offset but no type/inode)
+            if (data.get("start_offset") == 0 and
+                not data.get("type") and
+                not data.get("inode_number") and
+                not data.get("is_unallocated")):
+                # This is the root disk image - display all volumes/partitions
+                self.display_volumes_in_listing()
+                statusbar.clearMessage()
+                return
+
             if data.get("is_unallocated"):
                 # Handle unallocated space in background
                 self.unallocated_worker = self.UnallocatedSpaceWorker(
@@ -2767,10 +2784,92 @@ class MainWindow(QMainWindow):
         # Not found
         return None
 
+    def display_volumes_in_listing(self) -> None:
+        """Display all volumes/partitions in the listing table when disk image root is clicked."""
+        # Clear existing content
+        self.listing_table.setRowCount(0)
+        self.listing_table.setSortingEnabled(False)
+
+        # Hide columns not relevant for volumes
+        self.listing_table.setColumnHidden(1, True)  # Hide Inode
+        self.listing_table.setColumnHidden(4, True)  # Hide Created
+        self.listing_table.setColumnHidden(5, True)  # Hide Accessed
+        self.listing_table.setColumnHidden(6, True)  # Hide Modified
+        self.listing_table.setColumnHidden(7, True)  # Hide Changed
+        self.listing_table.setColumnHidden(8, True)  # Hide Path
+        self.listing_table.setColumnHidden(9, False)  # Show Info
+
+        # Reset path to root
+        self.current_path = "/"
+
+        # Disable the up button since we're at the disk image root
+        self.go_up_action.setEnabled(False)
+
+        # Get all partitions
+        partitions = self.image_handler.get_partitions()
+
+        if not partitions:
+            # No partitions found
+            self.listing_table.setSortingEnabled(True)
+            return
+
+        try:
+            for addr, desc, start, length in partitions:
+                row_position = self.listing_table.rowCount()
+                self.listing_table.insertRow(row_position)
+
+                # Calculate volume information
+                end = start + length - 1
+                size_in_bytes = length * SECTOR_SIZE
+                readable_size = self.image_handler.get_readable_size(size_in_bytes)
+                fs_type = self.image_handler.get_fs_type(start)
+                desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+
+                # Volume name
+                volume_name = f"vol{addr}"
+                name_item = QTableWidgetItem(volume_name)
+                icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
+                name_item.setIcon(QIcon(icon_path))
+
+                # Store volume data for potential future use
+                volume_data = {
+                    "name": volume_name,
+                    "type": "volume",
+                    "start_offset": start,
+                    "end_offset": end,
+                    "addr": addr,
+                    "description": desc_str,
+                    "filesystem": fs_type
+                }
+                name_item.setData(Qt.UserRole, volume_data)
+
+                # Create table items (only for visible columns)
+                type_item = QTableWidgetItem(fs_type)
+                size_item = QTableWidgetItem(readable_size)
+                info_item = QTableWidgetItem(desc_str)  # Volume description in Info column
+
+                # Set items in table
+                self.listing_table.setItem(row_position, 0, name_item)
+                self.listing_table.setItem(row_position, 2, type_item)
+                self.listing_table.setItem(row_position, 3, size_item)
+                self.listing_table.setItem(row_position, 9, info_item)  # Info column
+
+        finally:
+            self.listing_table.setSortingEnabled(True)
+
     def populate_listing_table(self, entries: List[Dict[str, Any]], offset: int) -> None:
         """Populate the listing table with directory entries in batches for better performance."""
         # Clear existing content
         self.listing_table.setRowCount(0)
+
+        # Show columns relevant for files/folders, hide Info column
+        self.listing_table.setColumnHidden(1, False)  # Show Inode
+        self.listing_table.setColumnHidden(4, False)  # Show Created
+        self.listing_table.setColumnHidden(5, False)  # Show Accessed
+        self.listing_table.setColumnHidden(6, False)  # Show Modified
+        self.listing_table.setColumnHidden(7, False)  # Show Changed
+        self.listing_table.setColumnHidden(8, False)  # Show Path
+        self.listing_table.setColumnHidden(9, True)   # Hide Info
 
         if not entries:
             return
@@ -2837,6 +2936,7 @@ class MainWindow(QMainWindow):
             self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(modified)))
             self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
             self.listing_table.setItem(row_position, 8, QTableWidgetItem(file_path))
+            self.listing_table.setItem(row_position, 9, QTableWidgetItem(""))  # Empty Info column for files/folders
 
         except Exception as e:
             self.log_error(f"Error adding row to listing table: {str(e)}")
@@ -3686,7 +3786,24 @@ class MainWindow(QMainWindow):
         statusbar.showMessage("Loading content...")
 
         try:
-            if data.get("type") == "directory":
+            if data.get("type") == "volume":
+                # Handle volume/partition - navigate into its root directory
+                start_offset = data.get("start_offset", 0)
+
+                # Reset path to root of this volume
+                self.current_path = "/"
+
+                # Get root directory contents of the volume (inode 5 is typically root for NTFS)
+                entries = self.image_handler.get_directory_contents(start_offset, 5)
+
+                # Update directory up button - should be disabled since we're at volume root
+                self.update_directory_up_button()
+
+                # Populate listing table with volume contents
+                self.populate_listing_table(entries, start_offset)
+                statusbar.clearMessage()
+
+            elif data.get("type") == "directory":
                 inode_number = data.get("inode_number", 0)
 
                 # Find and select the corresponding item in the tree view if possible
