@@ -394,7 +394,7 @@ class UnifiedViewer(QWidget):
             mime_type = f'image/{file_extension[1:]}'
         elif file_extension in ['.mp3', '.wav', '.ogg', '.aac', '.m4a']:
             mime_type = f'audio/{file_extension[1:]}'
-        elif file_extension in ['.mp4', '.mkv', '.flv', '.avi', '.mov']:
+        elif file_extension in ['.mp4', '.mkv', '.flv', '.avi', '.mov', '.wmv']:
             mime_type = 'video/mp4'
         else:
             # Default to binary data

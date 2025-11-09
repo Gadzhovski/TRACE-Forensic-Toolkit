@@ -17,3 +17,9 @@
 
 # Ignore Python cache
 __pycache__
+
+# Ignore build artifacts
+/build/
+/dist/
+*.spec
+build_exe.py      

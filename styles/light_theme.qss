@@ -583,3 +583,56 @@ QSlider::handle:horizontal {
     width: 10px;
     margin: -3px 0;
 }
+
+/* Search Toolbar Styles (Listing View) */
+QLineEdit#listingSearchBar {
+    border: 1px solid #C0C0C0;
+    border-radius: 4px;
+    padding: 6px 10px;
+    background-color: #FFFFFF;
+    color: #333333;
+    font-size: 13px;
+}
+
+QLineEdit#listingSearchBar:hover {
+    border: 1px solid #999999;
+}
+
+QLineEdit#listingSearchBar:focus {
+    border: 1px solid #1E90FF;
+}
+
+QToolButton#clearSearchBtn {
+    border: 1px solid #C0C0C0;
+    border-radius: 4px;
+    background-color: #F5F5F5;
+    padding: 4px;
+}
+
+QToolButton#clearSearchBtn:hover {
+    background-color: #E7E7E7;
+    border: 1px solid #999999;
+}
+
+QToolButton#clearSearchBtn:pressed {
+    background-color: #D7D7D7;
+}
+
+/* File Type Filter GroupBox */
+QGroupBox#fileTypeGroup {
+    border: none;
+    background-color: transparent;
+    padding: 0px;
+    margin: 0px;
+}
+
+QGroupBox#fileTypeGroup QCheckBox {
+    spacing: 6px;
+    font-size: 12px;
+    padding: 2px;
+    color: #333333;
+}
+
+QGroupBox#fileTypeGroup QCheckBox:hover {
+    color: #000000;
+}

@@ -82,7 +82,6 @@ class FileCarvingWidget(QWidget):
         self.toolbar.addWidget(self.spacer)
 
         self.table_widget = self.create_table_widget()
-        self.table_widget.verticalHeader().setVisible(False)
         self.table_widget.resizeEvent = self.handle_resize_event
 
         self.list_widget = self.create_list_widget()
@@ -117,17 +116,50 @@ class FileCarvingWidget(QWidget):
 
     def create_table_widget(self):
         table_widget = QTableWidget()
-        table_widget.setColumnCount(6)  # Updated to include the 'Id' column
+        table_widget.setColumnCount(6)  # Id, Name, Size, Type, Modification Date, File Path
         table_widget.setSelectionBehavior(QTableWidget.SelectRows)
         table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
-        table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         table_widget.setSortingEnabled(True)
+        table_widget.verticalHeader().setVisible(False)
+        table_widget.setObjectName("fileCarvingTable")  # For CSS styling
 
-        # Include 'Id' as the first header
+        # Set size policy to expand with window
+        table_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Use alternate row colors (matching Listing tab)
+        table_widget.setAlternatingRowColors(True)
+        table_widget.setIconSize(QSize(24, 24))
+
+        # Enable horizontal scrolling for smaller windows (matching Listing tab)
+        table_widget.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        table_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Configure header - all columns use Interactive mode for horizontal scrolling
+        header = table_widget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Id - fixed, manually resizable
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Name - fixed, manually resizable
+        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Size - fixed, manually resizable
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Type - fixed, manually resizable
+        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Modification Date - fixed, manually resizable
+        header.setSectionResizeMode(5, QHeaderView.Interactive)  # File Path - fixed, manually resizable
+
+        # Set column widths (matching Listing tab style)
+        table_widget.setColumnWidth(0, 100)   # Id - compact
+        table_widget.setColumnWidth(1, 400)  # Name - widest (matching Listing tab)
+        table_widget.setColumnWidth(2, 100)   # Size - compact (matching Listing tab)
+        table_widget.setColumnWidth(3, 100)   # Type - compact (matching Listing tab)
+        table_widget.setColumnWidth(4, 160)   # Modification Date - matching timestamp columns in Listing
+        table_widget.setColumnWidth(5, 1100)  # File Path - wide (matching Listing tab)
+
+        # Set header alignment (matching Listing tab)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        # Set the header labels
         table_widget.setHorizontalHeaderLabels(['Id', 'Name', 'Size', 'Type', 'Modification Date', 'File Path'])
+
+        # Context menu and click handlers
         table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         table_widget.customContextMenuRequested.connect(self.open_context_menu)
-        # Connect click event to open file in internal viewer
         table_widget.cellClicked.connect(self.on_carved_file_clicked)
 
         self.tab_widget = QTabWidget()
@@ -938,28 +970,23 @@ class FileCarvingWidget(QWidget):
         readable_size = self.image_handler.get_readable_size(int(size))
         self.table_widget.insertRow(row)
 
-        # Set Id column manually
-        self.table_widget.setItem(row, 0, QTableWidgetItem(str(row + 1)))  # Setting the 'Id' field
-        self.table_widget.setItem(row, 1, QTableWidgetItem(name))
+        # Get file icon based on type/extension
+        extension = type_.lower() if type_ else 'unknown'
+        icon_path = self.main_window.db_manager.get_icon_path('file', extension)
+
+        # Set Id column
+        self.table_widget.setItem(row, 0, QTableWidgetItem(str(row + 1)))
+
+        # Set Name column with icon
+        name_item = QTableWidgetItem(name)
+        name_item.setIcon(QIcon(icon_path))
+        self.table_widget.setItem(row, 1, name_item)
+
+        # Set other columns
         self.table_widget.setItem(row, 2, NumericTableWidgetItem(readable_size))
         self.table_widget.setItem(row, 3, QTableWidgetItem(type_))
         self.table_widget.setItem(row, 4, QTableWidgetItem(modification_date))
         self.table_widget.setItem(row, 5, QTableWidgetItem(file_path))
-
-        # Set column resize modes
-        header = self.table_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)  # Id column fixed width
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Name column stretches dynamically
-        header.setSectionResizeMode(2, QHeaderView.Fixed)  # Size column fixed width
-        header.setSectionResizeMode(3, QHeaderView.Fixed)  # Type column fixed width
-        header.setSectionResizeMode(4, QHeaderView.Fixed)  # Modification Date column fixed width
-        header.setSectionResizeMode(5, QHeaderView.Stretch)  # File Path column stretches dynamically
-
-        # Set fixed widths for non-stretch columns
-        self.table_widget.setColumnWidth(0, 30)  # Id column width
-        self.table_widget.setColumnWidth(2, 70)  # Size column width
-        self.table_widget.setColumnWidth(3, 50)  # Type column width
-        self.table_widget.setColumnWidth(4, 130)  # Modification Date column width
 
         # Only proceed if the file type is one of the supported formats
         if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp', 'zip', 'wav']:

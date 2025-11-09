@@ -8,6 +8,7 @@ import tempfile
 import gc
 import time
 import logging
+import re
 from typing import Optional, Dict, Any, List, Tuple
 from Registry import Registry
 from sqlite3 import connect as sqlite3_connect
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
                                QDialog, QVBoxLayout, QHBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy, QGroupBox,
-                               QCheckBox, QGridLayout, QScrollArea, QPushButton)
+                               QCheckBox, QGridLayout, QScrollArea, QPushButton, QToolButton)
 
 from modules.about import AboutDialog
 from modules.converter import Main
@@ -58,15 +59,15 @@ VIEWER_DOCK_MAX_SIZE = 16777215  # Qt maximum size value
 
 # Column widths for listing table
 COLUMN_WIDTHS = {
-    'name': 350,
-    'inode': 45,
-    'type': 50,
-    'size': 70,
-    'created': 110,
-    'accessed': 110,
-    'modified': 110,
-    'changed': 110,
-    'path': 200
+    'name': 400,        # Widest - file names can be long
+    'inode': 50,        # Compact - numbers don't vary much
+    'type': 50,         # Compact - short text like "File", "Dir"
+    'size': 100,         # Compact - formatted sizes
+    'created': 160,      # Narrower - timestamps are consistent length
+    'accessed': 160,     # Narrower - timestamps are consistent length
+    'modified': 160,     # Narrower - timestamps are consistent length
+    'changed': 160,      # Narrower - timestamps are consistent length
+    'path': 1100         # Wide - paths can be long
 }
 
 # Progress dialog settings
@@ -712,19 +713,39 @@ class ImageHandler:
                 file_name = entry.info.name.name.decode("utf-8", errors='replace')
                 file_extension = os.path.splitext(file_name)[1].lower()
 
+                # Determine if this entry should be included in results
+                is_directory = entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR
+
                 if search_query:
                     # If there's a search query, check if the file name contains the query
                     if search_query.startswith('.'):
                         # If the search query is an extension (e.g., '.jpg')
                         query_matches = file_extension == search_query.lower()
+                        match_reason = f"extension matches '{search_query}'" if query_matches else ""
                     else:
-                        # If the search query is a file name or part of it
+                        # If the search query is a file name or part of it (SUBSTRING MATCH)
                         query_matches = search_query.lower() in file_name.lower()
+                        match_reason = f"filename contains '{search_query}'" if query_matches else ""
                 else:
-                    # If no search query, handle as before based on extensions
-                    query_matches = extensions is None or file_extension in extensions or '' in extensions
+                    # If no search query, handle based on extensions
+                    if is_directory:
+                        # Always include directories when no search query (for navigation)
+                        query_matches = True
+                        match_reason = "directory (no filter)"
+                    else:
+                        # For files, apply extension filter
+                        query_matches = extensions is None or file_extension in extensions or '' in extensions
+                        match_reason = "extension filter"
 
-                if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+                if is_directory:
+                    # If directory matches search query, add it to results
+                    if query_matches:
+                        dir_info = self._get_directory_metadata(entry, parent_path, start_offset)
+                        files_list.append(dir_info)
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"MATCH (DIR): '{file_name}' - {match_reason}")
+
+                    # Recursively search subdirectory
                     try:
                         sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
                         self._recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name),
@@ -736,17 +757,80 @@ class ImageHandler:
                 elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and query_matches:
                     file_info = self._get_file_metadata(entry, parent_path, start_offset)
                     files_list.append(file_info)
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"MATCH (FILE): '{file_name}' - {match_reason}")
             except UnicodeDecodeError:
                 continue  # Skip entries with encoding issues
+
+    def _get_directory_metadata(self, entry, parent_path, start_offset=0):
+        """Get directory metadata for search results."""
+        try:
+            dir_name = entry.info.name.name.decode("utf-8", errors='replace')
+            inode_number = entry.info.meta.addr if entry.info.meta else 0
+
+            # Get volume name for this offset
+            volume_name = self._get_volume_name_for_offset(start_offset)
+            # Create full path with volume information
+            full_path = f"{volume_name}:{os.path.join(parent_path, dir_name)}"
+
+            return {
+                "name": dir_name,
+                "path": full_path,
+                "size": 0,  # Directories don't have a size in this context
+                "accessed": safe_datetime(entry.info.meta.atime if entry.info.meta else None),
+                "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
+                "created": safe_datetime(entry.info.meta.crtime if hasattr(entry.info.meta, 'crtime') else None),
+                "changed": safe_datetime(entry.info.meta.ctime if entry.info.meta else None),
+                "inode_item": str(inode_number),
+                "inode_number": inode_number,
+                "start_offset": start_offset,
+                "is_directory": True,  # Mark as directory
+                "type": "directory"
+            }
+        except Exception as e:
+            logger.error(f"Error getting directory metadata: {e}")
+            return {
+                "name": "Error reading directory",
+                "path": parent_path + "/unknown",
+                "size": 0,
+                "accessed": "N/A",
+                "modified": "N/A",
+                "created": "N/A",
+                "changed": "N/A",
+                "inode_item": "0",
+                "inode_number": 0,
+                "start_offset": start_offset,
+                "is_directory": True,
+                "type": "directory"
+            }
+
+    def _get_volume_name_for_offset(self, start_offset):
+        """Get the volume name (e.g., 'vol0', 'vol1') for a given partition offset."""
+        try:
+            partitions = self.get_partitions()
+            for addr, desc, start, length in partitions:
+                if start == start_offset:
+                    return f"vol{addr}"
+            # If not found in partitions, it might be a single filesystem image
+            return "vol0"
+        except Exception as e:
+            logger.warning(f"Could not determine volume name for offset {start_offset}: {e}")
+            return "vol0"
 
     def _get_file_metadata(self, entry, parent_path, start_offset=0):
         """Get file metadata including all fields needed for viewing."""
         try:
             file_name = entry.info.name.name.decode("utf-8", errors='replace')
             inode_number = entry.info.meta.addr if entry.info.meta else 0
+
+            # Get volume name for this offset
+            volume_name = self._get_volume_name_for_offset(start_offset)
+            # Create full path with volume information
+            full_path = f"{volume_name}:{os.path.join(parent_path, file_name)}"
+
             return {
                 "name": file_name,
-                "path": os.path.join(parent_path, file_name),
+                "path": full_path,  # Now includes volume information
                 "size": entry.info.meta.size if entry.info.meta else 0,
                 "accessed": safe_datetime(entry.info.meta.atime if entry.info.meta else None),
                 "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
@@ -777,26 +861,37 @@ class ImageHandler:
             }
 
     def search_files(self, search_query=None):
+        logger.info(f"ImageHandler.search_files called with query: '{search_query}'")
         files_list = []
         img_info = self.open_image()
 
         try:
             volume_info = pytsk3.Volume_Info(img_info)
+            partition_count = 0
             for partition in volume_info:
                 if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
+                    partition_count += 1
+                    logger.info(f"Searching partition {partition_count} (offset: {partition.start} sectors)")
                     # Store offset in SECTORS (not bytes) - get_fs_info will multiply by 512
                     self.process_partition_search(img_info, partition.start, files_list, search_query)
-        except IOError:
+            logger.info(f"Searched {partition_count} allocated partitions")
+        except IOError as e:
             # No volume information, attempt to read as a single filesystem
+            logger.info(f"No volume info, reading as single filesystem: {e}")
             self.process_partition_search(img_info, 0, files_list, search_query)
 
+        logger.info(f"Total files found: {len(files_list)}")
         return files_list
 
     def process_partition_search(self, img_info, offset_sectors, files_list, search_query):
         """Process partition search - offset_sectors is in sectors, not bytes."""
         try:
+            logger.info(f"Opening filesystem at offset {offset_sectors} sectors ({offset_sectors * SECTOR_SIZE} bytes)")
             fs_info = pytsk3.FS_Info(img_info, offset=offset_sectors * SECTOR_SIZE)
+            logger.info(f"Starting recursive search with query: '{search_query}'")
+            initial_count = len(files_list)
             self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset_sectors)
+            logger.info(f"Recursive search complete. Found {len(files_list) - initial_count} files in this partition")
         except IOError as e:
             logger.error(f"Unable to open file system for search: {e}")
 
@@ -1348,237 +1443,6 @@ class SizeTableWidgetItem(QTableWidgetItem):
         return int(self.data(Qt.UserRole)) < int(other.data(Qt.UserRole))
 
 
-class FileSearchWidget(QWidget):
-    """Widget for searching and displaying files from disk image."""
-    # Signal emitted when a file is selected for viewing
-    file_selected = Signal(dict)
-
-    def __init__(self, image_handler):
-        super(FileSearchWidget, self).__init__()
-        self.image_handler = image_handler
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        # Create the toolbar
-        self.toolbar = QToolBar()
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.toolbar)
-
-        # Add icon and title to the toolbar
-        self.icon_label = QLabel()
-        self.icon_label.setPixmap(QPixmap('Icons/icons8-piece-of-evidence-50.png'))
-        self.icon_label.setFixedSize(48, 48)
-        self.toolbar.addWidget(self.icon_label)
-
-        self.title_label = QLabel("File Search")
-        self.title_label.setStyleSheet("""
-            QLabel {
-                font-size: 20px;
-                color: #37c6d0;
-                font-weight: bold;
-                margin-left: 8px;
-            }
-        """)
-        self.toolbar.addWidget(self.title_label)
-
-        # Add spacer to push remaining widgets to the right
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.toolbar.addWidget(spacer)
-
-        # Add the checkboxes to the toolbar
-        self.extensionGroupBox = QGroupBox()
-        self.extensionLayout = QGridLayout()
-
-        # Define file types
-        self.fileTypes = ['', '.txt', '.jpg', '.jpeg', '.png', '.pdf', '.doc',
-                          '.docx', '.xls', '.xlsx', '.ppt', '.pptx']
-        self.checkBoxes = {}
-
-        row = 0
-        col = 0
-        for fileType in self.fileTypes:
-            checkBox = QCheckBox(fileType if fileType else 'All')
-            checkBox.stateChanged.connect(self.on_file_type_selected)
-            self.extensionLayout.addWidget(checkBox, row, col)
-            self.checkBoxes[fileType] = checkBox
-            col += 1
-            if col >= 6:
-                row += 1
-                col = 0
-
-        self.extensionGroupBox.setLayout(self.extensionLayout)
-        self.toolbar.addWidget(self.extensionGroupBox)
-
-        # Add a small spacer between checkboxes and search field
-        small_spacer = QWidget()
-        small_spacer.setFixedWidth(50)
-        self.toolbar.addWidget(small_spacer)
-
-        # Add search bar to the right side of the toolbar
-        self.searchBar = QLineEdit()
-        self.searchBar.setPlaceholderText("Search files by name or ext.")
-        self.searchBar.textChanged.connect(self.on_search_bar_selected)
-        self.searchBar.setFixedHeight(35)
-        self.searchBar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.toolbar.addWidget(self.searchBar)
-
-        # Increase the size of the spacer after the search bar
-        end_spacer = QWidget()
-        end_spacer.setFixedWidth(10)
-        self.toolbar.addWidget(end_spacer)
-
-        # Files table setup
-        self.filesTable = QTableWidget()
-        self.filesTable.verticalHeader().setVisible(False)
-        self.filesTable.setSelectionBehavior(QTableWidget.SelectRows)
-        self.filesTable.setEditTriggers(QTableWidget.NoEditTriggers)
-
-        # Set column count to 8
-        self.filesTable.setColumnCount(8)
-        self.filesTable.setHorizontalHeaderLabels(
-            ['Id', 'Name', 'Path', 'Size', 'Created', 'Accessed', 'Modified', 'Changed'])
-
-        # Set up the initial column structure and dynamic resizing behavior
-        header = self.filesTable.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Id column
-        header.setSectionResizeMode(1, QHeaderView.Stretch)  # Name column
-        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Path column
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size column
-        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Created Date
-        header.setSectionResizeMode(5, QHeaderView.Interactive)  # Accessed Date
-        header.setSectionResizeMode(6, QHeaderView.Interactive)  # Modified Date
-        header.setSectionResizeMode(7, QHeaderView.Interactive)  # Changed Date
-
-        # Set initial column widths for the interactive columns
-        self.filesTable.setColumnWidth(0, 30)  # Id column
-        self.filesTable.setColumnWidth(3, 70)  # Size
-        self.filesTable.setColumnWidth(4, 130)  # Created Date
-        self.filesTable.setColumnWidth(5, 130)  # Accessed Date
-        self.filesTable.setColumnWidth(6, 130)  # Modified Date
-        self.filesTable.setColumnWidth(7, 130)  # Changed Date
-
-        # Connect double-click to file selection handler
-        self.filesTable.itemDoubleClicked.connect(self.on_file_double_clicked)
-
-        layout.addWidget(self.filesTable)
-
-        # Connect the table resize event
-        self.filesTable.resizeEvent = self.handle_resize_event
-
-    def handle_resize_event(self, event):
-        """Automatically adjust the column widths when the table is resized."""
-        total_width = self.filesTable.width()
-        remaining_width = total_width - (self.filesTable.columnWidth(0) +
-                                         self.filesTable.columnWidth(3) +
-                                         self.filesTable.columnWidth(4) +
-                                         self.filesTable.columnWidth(5) +
-                                         self.filesTable.columnWidth(6) +
-                                         self.filesTable.columnWidth(7))
-
-        # Dynamically resize the "Name" and "Path" columns
-        self.filesTable.setColumnWidth(1, remaining_width // 2)
-        self.filesTable.setColumnWidth(2, remaining_width // 2)
-
-        super(QTableWidget, self.filesTable).resizeEvent(event)
-
-    def on_file_double_clicked(self, item):
-        """Handle double-click on a file to display its content."""
-        row = item.row()
-        # Get the full file metadata from the Name column (column 1)
-        name_item = self.filesTable.item(row, 1)
-        if not name_item:
-            return
-
-        file_data = name_item.data(Qt.UserRole)
-        if not file_data:
-            logger.warning("No file metadata found for selected item")
-            return
-
-        # Only emit signal for files, not directories
-        if not file_data.get('is_directory', False):
-            logger.info(f"File selected: {file_data.get('name', 'unknown')}")
-            self.file_selected.emit(file_data)
-        else:
-            logger.info(f"Directory clicked: {file_data.get('name', 'unknown')} - ignoring")
-
-    def on_search_bar_selected(self):
-        """Handle search bar text changes."""
-        search_query = self.searchBar.text().strip()
-        if search_query:
-            self.search_files(search_query)
-        else:
-            self.on_file_type_selected()
-
-    def search_files(self, search_query):
-        """Search for files matching the query."""
-        self.clear()
-        files = self.image_handler.search_files(search_query)
-        for file in files:
-            self.populate_table_row(file)
-
-    def on_file_type_selected(self):
-        """Handle file type filter selection."""
-        selectedExtensions = [ext for ext, cb in self.checkBoxes.items() if cb.isChecked()]
-        self.list_files(None if '' in selectedExtensions else ([] if not selectedExtensions else selectedExtensions))
-
-    def populate_table_row(self, file):
-        """Populate a single row in the table with file data and metadata."""
-        row_pos = self.filesTable.rowCount()
-        self.filesTable.insertRow(row_pos)
-
-        # Create table items
-        id_item = QTableWidgetItem(str(row_pos + 1))
-        name_item = QTableWidgetItem(file['name'])
-        path_item = QTableWidgetItem(file['path'])
-
-        # Size item with custom sorting
-        size_item = SizeTableWidgetItem(self.image_handler.get_readable_size(file['size']))
-        size_item.setData(Qt.UserRole, file['size'])
-
-        created_item = QTableWidgetItem(file['created'])
-        accessed_item = QTableWidgetItem(file['accessed'])
-        modified_item = QTableWidgetItem(file['modified'])
-        changed_item = QTableWidgetItem(file['changed'])
-
-        # Store complete file metadata in Name column for retrieval
-        # This includes all data needed for content viewing
-        name_item.setData(Qt.UserRole, file)
-
-        # Set items in table
-        self.filesTable.setItem(row_pos, 0, id_item)
-        self.filesTable.setItem(row_pos, 1, name_item)
-        self.filesTable.setItem(row_pos, 2, path_item)
-        self.filesTable.setItem(row_pos, 3, size_item)
-        self.filesTable.setItem(row_pos, 4, created_item)
-        self.filesTable.setItem(row_pos, 5, accessed_item)
-        self.filesTable.setItem(row_pos, 6, modified_item)
-        self.filesTable.setItem(row_pos, 7, changed_item)
-
-    def list_files(self, extension):
-        """List files filtered by extension."""
-        self.filesTable.setSortingEnabled(False)
-        self.filesTable.setRowCount(0)
-        self.filesTable.clearContents()
-        if extension is not None and not extension:
-            return
-        files = self.image_handler.list_files(extension)
-        for file in files:
-            self.populate_table_row(file)
-        self.filesTable.setSortingEnabled(True)
-
-    def clear(self):
-        """Clear the table and reset checkboxes."""
-        self.filesTable.setRowCount(0)
-        self.filesTable.clearContents()
-        for checkBox in self.checkBoxes.values():
-            checkBox.setChecked(False)
-
-# ==================== END FILE SEARCH WIDGET ====================
 
 
 class MainWindow(QMainWindow):
@@ -1597,6 +1461,22 @@ class MainWindow(QMainWindow):
         self.current_path = "/"  # Initialize current path
         self.image_handler = None
         self._directory_cache = {}
+
+        # Search/Browse mode state management
+        self._search_mode = False  # False = Browse mode, True = Search mode
+        self._search_query = ""  # Current search query
+        self._last_browsed_state = {}  # Store last directory state for restoration
+
+        # Search debounce timer - wait for user to stop typing before searching
+        self._search_timer = QTimer()
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(500)  # 500ms delay after last keystroke
+        self._search_timer.timeout.connect(self._execute_search)
+
+        # Directory navigation history (for Back/Forward buttons like Windows 11)
+        self._directory_history = []  # List of visited directories: [(offset, inode, path), ...]
+        self._history_index = -1  # Current position in history (-1 = no history)
+        self._navigating_history = False  # Flag to prevent adding to history during Back/Forward
 
         # Load configuration
         self.api_keys = configparser.ConfigParser()
@@ -1869,16 +1749,8 @@ class MainWindow(QMainWindow):
         self.main_toolbar.addAction(self.create_action('Icons/devices/icons8-hard-disk-48_red.png', "Unmount Image",
                                                        self.image_manager.dismount_image))
 
-        # Add spacer to push directory up button to the end
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.main_toolbar.addWidget(spacer)
-
-        # Add directory up button to main toolbar
-        self.go_up_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "Go Up Directory", self)
-        self.go_up_action.triggered.connect(self.navigate_up_directory)
-        self.go_up_action.setEnabled(False)
-        self.main_toolbar.addAction(self.go_up_action)
+        # Navigation buttons (Back, Forward, Up) will be added to the listing search toolbar
+        # Created later in the UI setup
 
         self.addToolBar(Qt.TopToolBarArea, self.main_toolbar)
 
@@ -1903,52 +1775,126 @@ class MainWindow(QMainWindow):
         self.listing_table.verticalHeader().setVisible(False)
         self.listing_table.setObjectName("listingTable")  # Set object name for specific CSS styling
 
+        # Set size policy to expand with window
+        self.listing_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         # Use alternate row colors
         self.listing_table.setAlternatingRowColors(True)
         self.listing_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.listing_table.setIconSize(QSize(24, 24))
         self.listing_table.setColumnCount(10)  # 10 columns: Name, Inode, Type, Size, 4 timestamps, Path, Info
 
+        # Enable horizontal scrolling for smaller windows
+        self.listing_table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        self.listing_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Connect click event to handle navigation in search mode
+        self.listing_table.itemClicked.connect(self.on_listing_table_item_clicked)
+
         # Create a QVBoxLayout for the listing tab
         self.listing_layout = QVBoxLayout()
         self.listing_layout.setContentsMargins(0, 0, 0, 0)  # Set to zero to remove margins
         self.listing_layout.setSpacing(0)  # Remove spacing between widgets
 
-        # Add the toolbar and listing table to the layout
-        self.listing_layout.addWidget(self.listing_table)  # <-- Table added below
+        # ==================== CREATE UNIFIED TOOLBAR (like File Carving tab) ====================
+        self.listing_toolbar = QToolBar()
+        self.listing_toolbar.setContentsMargins(0, 0, 0, 0)
+        self.listing_toolbar.setMovable(False)
+
+        # LEFT SIDE: Icon and Title
+        self.listing_icon_label = QLabel()
+        self.listing_icon_label.setPixmap(QPixmap('Icons/icons8-search-in-browser-50.png'))
+        self.listing_icon_label.setFixedSize(48, 48)
+        self.listing_toolbar.addWidget(self.listing_icon_label)
+
+        self.listing_title_label = QLabel("File System Browser")
+        self.listing_title_label.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                color: #37c6d0;
+                font-weight: bold;
+                margin-left: 8px;
+            }
+        """)
+        self.listing_toolbar.addWidget(self.listing_title_label)
+
+        # Add spacer after title
+        title_spacer = QLabel()
+        title_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.listing_toolbar.addWidget(title_spacer)
+
+        # MIDDLE: Navigation buttons (Back, Forward, Up) - next to title
+        self.back_action = QAction(QIcon("Icons/icons8-left-arrow-50.png"), "Back", self)
+        self.back_action.triggered.connect(self.navigate_back)
+        self.back_action.setEnabled(False)
+        self.listing_toolbar.addAction(self.back_action)
+
+        self.forward_action = QAction(QIcon("Icons/icons8-right-arrow-50.png"), "Forward", self)
+        self.forward_action.triggered.connect(self.navigate_forward)
+        self.forward_action.setEnabled(False)
+        self.listing_toolbar.addAction(self.forward_action)
+
+        self.go_up_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "Go Up Directory", self)
+        self.go_up_action.triggered.connect(self.navigate_up_directory)
+        self.go_up_action.setEnabled(False)
+        self.listing_toolbar.addAction(self.go_up_action)
+
+        # Add vertical separator after navigation buttons
+        self.listing_toolbar.addSeparator()
+
+        # RIGHT SIDE: Search functionality
+        # Add search bar
+        self.listing_search_bar = QLineEdit()
+        self.listing_search_bar.setObjectName("listingSearchBar")
+        self.listing_search_bar.setPlaceholderText("Search files (press Enter, supports wildcards: *.pdf, name.*)")
+        self.listing_search_bar.setFixedHeight(35)
+        self.listing_search_bar.setFixedWidth(450)
+        # Only search when user presses Enter
+        self.listing_search_bar.returnPressed.connect(self.trigger_listing_search)
+        # Monitor text changes for auto-clearing results
+        self.listing_search_bar.textChanged.connect(self.on_listing_search_text_changed)
+        self.listing_toolbar.addWidget(self.listing_search_bar)
+
+        # Add small end spacer
+        end_spacer = QWidget()
+        end_spacer.setFixedWidth(10)
+        self.listing_toolbar.addWidget(end_spacer)
+
+        # Add the single toolbar and listing table to the layout
+        self.listing_layout.addWidget(self.listing_toolbar)  # Single unified toolbar
+        self.listing_layout.addWidget(self.listing_table)  # Table below toolbar
 
         # Create a widget to hold the layout
         self.listing_widget = QWidget()
         self.listing_widget.setLayout(self.listing_layout)
 
-        # Set the horizontal header with dynamic resizing for professional appearance
+        # Set the horizontal header with hybrid resizing approach
         header = self.listing_table.horizontalHeader()
 
-        # Configure columns: Stretch for dynamic resizing, Interactive for fixed compact columns
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name - expands dynamically
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Inode - fixed width, stays compact
-        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Type - fixed width, stays compact
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size - fixed width, stays compact
-        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Created - expands dynamically with window resize
-        header.setSectionResizeMode(5, QHeaderView.Stretch)  # Accessed - expands dynamically with window resize
-        header.setSectionResizeMode(6, QHeaderView.Stretch)  # Modified - expands dynamically with window resize
-        header.setSectionResizeMode(7, QHeaderView.Stretch)  # Changed - expands dynamically with window resize
-        header.setSectionResizeMode(8, QHeaderView.Stretch)  # Path - expands dynamically
-        header.setSectionResizeMode(9, QHeaderView.Stretch)  # Info - expands dynamically (volumes only)
+        # All columns use Interactive mode (fixed width, manually resizable)
+        # This enables horizontal scrolling on smaller windows
+        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Name - fixed, manually resizable
+        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Inode - fixed, manually resizable
+        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Type - fixed, manually resizable
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Size - fixed, manually resizable
+        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Created - fixed, manually resizable
+        header.setSectionResizeMode(5, QHeaderView.Interactive)  # Accessed - fixed, manually resizable
+        header.setSectionResizeMode(6, QHeaderView.Interactive)  # Modified - fixed, manually resizable
+        header.setSectionResizeMode(7, QHeaderView.Interactive)  # Changed - fixed, manually resizable
+        header.setSectionResizeMode(8, QHeaderView.Interactive)  # Path - fixed, manually resizable
+        header.setSectionResizeMode(9, QHeaderView.Interactive)  # Info - fixed, manually resizable
 
-        # Set initial widths to establish proportions for Stretch columns
-        self.listing_table.setColumnWidth(0, COLUMN_WIDTHS['name'])  # Name - 350px initial
-        self.listing_table.setColumnWidth(4, COLUMN_WIDTHS['created'])  # Created - 110px initial
-        self.listing_table.setColumnWidth(5, COLUMN_WIDTHS['accessed'])  # Accessed - 110px initial
-        self.listing_table.setColumnWidth(6, COLUMN_WIDTHS['modified'])  # Modified - 110px initial
-        self.listing_table.setColumnWidth(7, COLUMN_WIDTHS['changed'])  # Changed - 110px initial
-        self.listing_table.setColumnWidth(8, COLUMN_WIDTHS['path'])  # Path - 200px initial
-        self.listing_table.setColumnWidth(9, 250)  # Info - 250px initial (for volume descriptions)
-
-        # Set fixed widths for compact columns (stay at these sizes)
-        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])  # Inode - 45px (stays fixed)
-        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])  # Type - 50px (stays fixed)
-        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])  # Size - 70px (stays fixed)
+        # Set initial column widths
+        self.listing_table.setColumnWidth(0, COLUMN_WIDTHS['name'])      # Name - 400px (widest)
+        self.listing_table.setColumnWidth(1, COLUMN_WIDTHS['inode'])     # Inode - 45px
+        self.listing_table.setColumnWidth(2, COLUMN_WIDTHS['type'])      # Type - 50px
+        self.listing_table.setColumnWidth(3, COLUMN_WIDTHS['size'])      # Size - 70px
+        self.listing_table.setColumnWidth(4, COLUMN_WIDTHS['created'])   # Created - 90px (narrower)
+        self.listing_table.setColumnWidth(5, COLUMN_WIDTHS['accessed'])  # Accessed - 90px (narrower)
+        self.listing_table.setColumnWidth(6, COLUMN_WIDTHS['modified'])  # Modified - 90px (narrower)
+        self.listing_table.setColumnWidth(7, COLUMN_WIDTHS['changed'])   # Changed - 90px (narrower)
+        self.listing_table.setColumnWidth(8, COLUMN_WIDTHS['path'])      # Path - 300px (wide)
+        self.listing_table.setColumnWidth(9, 250)                        # Info - 250px (for volumes)
 
         # Remove any extra space in the header
         header.setStyleSheet("QHeaderView::section { margin-top: 0px; padding-top: 2px; }")
@@ -1979,12 +1925,6 @@ class MainWindow(QMainWindow):
 
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
-
-        # #add tab for displaying all files chosen by user
-        self.file_search_widget = FileSearchWidget(self.image_handler)
-        self.result_viewer.addTab(self.file_search_widget, 'File Search')
-        # Connect file selection signal to handler
-        self.file_search_widget.file_selected.connect(self.on_search_file_selected)
 
         self.viewer_tab = QTabWidget(self)
 
@@ -2174,9 +2114,16 @@ class MainWindow(QMainWindow):
         self.current_image_path = None
         self.current_offset = None
         self.image_mounted = False
-        self.file_search_widget.clear()
         self.evidence_files.clear()
         self.deleted_files_widget.clear()
+
+        # Clear search bar and reset filters
+        self.listing_search_bar.clear()
+
+        # Clear navigation history
+        self._directory_history = []
+        self._history_index = -1
+        self._update_navigation_buttons()
 
         # Disable directory up button
         self.go_up_action.setEnabled(False)
@@ -2315,7 +2262,6 @@ class MainWindow(QMainWindow):
                 # Pass the image handler to widgets that need it
                 self.deleted_files_widget.set_image_handler(self.image_handler)
                 self.registry_extractor_widget.image_handler = self.image_handler
-                self.file_search_widget.image_handler = self.image_handler
                 self.metadata_viewer.image_handler = self.image_handler
                 progress.setValue(80)
 
@@ -2592,6 +2538,10 @@ class MainWindow(QMainWindow):
 
                 # Populate the listing table with directory contents
                 self.populate_listing_table(entries, data["start_offset"])
+
+                # Add to navigation history
+                self._add_to_history(data)
+
                 statusbar.clearMessage()
 
             elif data.get("inode_number") is not None:
@@ -2612,7 +2562,17 @@ class MainWindow(QMainWindow):
                 # Reset path to root when viewing partitions
                 self.current_path = "/"
 
+                # Treat partition as a volume for history
+                if "type" not in data:
+                    data["type"] = "volume"
+                if "inode_number" not in data:
+                    data["inode_number"] = 5
+
                 self.populate_listing_table(entries, data["start_offset"])
+
+                # Add to navigation history
+                self._add_to_history(data)
+
                 statusbar.clearMessage()
 
             else:
@@ -2726,6 +2686,9 @@ class MainWindow(QMainWindow):
             # Update both the tree view selection and listing table
             self.populate_listing_table(entries, parent_data["start_offset"])
 
+            # Add to navigation history
+            self._add_to_history(parent_data)
+
             # Find and select the corresponding item in the tree view if possible
             self.select_tree_item_by_inode(parent_data["inode_number"], parent_data["start_offset"])
 
@@ -2733,6 +2696,128 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.log_error(f"Error navigating to parent directory: {str(e)}")
+            statusbar.clearMessage()
+
+    def _add_to_history(self, directory_data):
+        """Add a directory to the navigation history."""
+        # Skip if we're navigating through history
+        if self._navigating_history:
+            return
+
+        # Only add directories to history (not files)
+        if directory_data.get("type") != "directory" and directory_data.get("type") != "volume":
+            return
+
+        # Create a history entry with essential data
+        history_entry = {
+            "inode_number": directory_data.get("inode_number"),
+            "start_offset": directory_data.get("start_offset"),
+            "type": directory_data.get("type"),
+            "name": directory_data.get("name"),
+            "path": self.current_path,
+            "parent_inode": directory_data.get("parent_inode")
+        }
+
+        # If we're in the middle of history (not at the end), remove everything after current position
+        if self._history_index < len(self._directory_history) - 1:
+            self._directory_history = self._directory_history[:self._history_index + 1]
+
+        # Add new entry to history
+        self._directory_history.append(history_entry)
+        self._history_index = len(self._directory_history) - 1
+
+        # Update navigation buttons
+        self._update_navigation_buttons()
+
+    def _update_navigation_buttons(self):
+        """Update the enabled state of Back/Forward navigation buttons."""
+        # Enable Back button if we can go back
+        can_go_back = self._history_index > 0
+        self.back_action.setEnabled(can_go_back)
+
+        # Enable Forward button if we can go forward
+        can_go_forward = self._history_index < len(self._directory_history) - 1
+        self.forward_action.setEnabled(can_go_forward)
+
+    def navigate_back(self):
+        """Navigate to the previous directory in history."""
+        if self._history_index <= 0:
+            return
+
+        try:
+            # Set flag to prevent adding to history
+            self._navigating_history = True
+
+            # Move back in history
+            self._history_index -= 1
+            history_entry = self._directory_history[self._history_index]
+
+            # Navigate to the directory
+            self._navigate_to_history_entry(history_entry)
+
+        finally:
+            # Always clear the flag
+            self._navigating_history = False
+            self._update_navigation_buttons()
+
+    def navigate_forward(self):
+        """Navigate to the next directory in history."""
+        if self._history_index >= len(self._directory_history) - 1:
+            return
+
+        try:
+            # Set flag to prevent adding to history
+            self._navigating_history = True
+
+            # Move forward in history
+            self._history_index += 1
+            history_entry = self._directory_history[self._history_index]
+
+            # Navigate to the directory
+            self._navigate_to_history_entry(history_entry)
+
+        finally:
+            # Always clear the flag
+            self._navigating_history = False
+            self._update_navigation_buttons()
+
+    def _navigate_to_history_entry(self, history_entry):
+        """Navigate to a specific directory from history."""
+        statusbar = self.statusBar()
+        statusbar.showMessage("Navigating...")
+
+        try:
+            # Restore the path
+            self.current_path = history_entry.get("path", "/")
+
+            # Get directory contents
+            inode_number = history_entry.get("inode_number")
+            start_offset = history_entry.get("start_offset")
+
+            if history_entry.get("type") == "volume":
+                # For volumes, get root directory (inode 5)
+                entries = self.image_handler.get_directory_contents(start_offset, 5)
+            else:
+                # For regular directories, use stored inode
+                entries = self.image_handler.get_directory_contents(start_offset, inode_number)
+
+            # Update current selected data
+            self.current_selected_data = history_entry.copy()
+
+            # Update directory up button state
+            self.update_directory_up_button()
+
+            # Populate the listing table
+            self.populate_listing_table(entries, start_offset)
+
+            # Find and select the corresponding item in the tree view if possible
+            if inode_number:
+                self.select_tree_item_by_inode(inode_number, start_offset)
+
+            statusbar.clearMessage()
+
+        except Exception as e:
+            self.log_error(f"Error navigating from history: {str(e)}")
             statusbar.clearMessage()
 
     def select_tree_item_by_inode(self, inode_number, start_offset):
@@ -2790,17 +2875,31 @@ class MainWindow(QMainWindow):
         self.listing_table.setRowCount(0)
         self.listing_table.setSortingEnabled(False)
 
-        # Hide columns not relevant for volumes
-        self.listing_table.setColumnHidden(1, True)  # Hide Inode
-        self.listing_table.setColumnHidden(4, True)  # Hide Created
-        self.listing_table.setColumnHidden(5, True)  # Hide Accessed
-        self.listing_table.setColumnHidden(6, True)  # Hide Modified
-        self.listing_table.setColumnHidden(7, True)  # Hide Changed
-        self.listing_table.setColumnHidden(8, True)  # Hide Path
-        self.listing_table.setColumnHidden(9, False)  # Show Info
+        # Show columns with volume information, hide file-specific columns
+        self.listing_table.setColumnHidden(1, False)  # Show Inode (for Volume #)
+        self.listing_table.setColumnHidden(4, False)  # Show Created (for Start Offset)
+        self.listing_table.setColumnHidden(5, False)  # Show Accessed (for End Offset)
+        self.listing_table.setColumnHidden(6, False)  # Show Modified (for Length)
+        self.listing_table.setColumnHidden(7, False)  # Show Changed (for Block Size)
+        self.listing_table.setColumnHidden(8, True)   # Hide Path (not relevant for volumes)
+        self.listing_table.setColumnHidden(9, False)  # Show Info (for additional details)
+
+        # Update column headers for volume context
+        self.listing_table.setHorizontalHeaderLabels([
+            'Name', 'Volume #', 'Type', 'Size', 'Start Offset', 'End Offset',
+            'Length', 'Block Size', 'Path', 'Details'
+        ])
+
+        # Make Info column much wider for detailed information
+        self.listing_table.setColumnWidth(9, 1200)
 
         # Reset path to root
         self.current_path = "/"
+
+        # Clear navigation history when returning to disk image root
+        self._directory_history = []
+        self._history_index = -1
+        self._update_navigation_buttons()
 
         # Disable the up button since we're at the disk image root
         self.go_up_action.setEnabled(False)
@@ -2825,6 +2924,16 @@ class MainWindow(QMainWindow):
                 fs_type = self.image_handler.get_fs_type(start)
                 desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
 
+                # Get additional filesystem details
+                try:
+                    fs_info = self.image_handler.get_fs_info(start)
+                    if fs_info and hasattr(fs_info.info, 'block_size'):
+                        block_size = f"{fs_info.info.block_size:,} bytes"
+                    else:
+                        block_size = "N/A"
+                except:
+                    block_size = "N/A"
+
                 # Volume name
                 volume_name = f"vol{addr}"
                 name_item = QTableWidgetItem(volume_name)
@@ -2843,16 +2952,42 @@ class MainWindow(QMainWindow):
                 }
                 name_item.setData(Qt.UserRole, volume_data)
 
-                # Create table items (only for visible columns)
+                # Create table items with detailed information
+                inode_item = QTableWidgetItem(str(addr))  # Volume number in Inode column
                 type_item = QTableWidgetItem(fs_type)
                 size_item = QTableWidgetItem(readable_size)
-                info_item = QTableWidgetItem(desc_str)  # Volume description in Info column
+
+                # Use timestamp columns for partition geometry
+                start_offset_item = QTableWidgetItem(f"{start:,} sectors")
+                end_offset_item = QTableWidgetItem(f"{end:,} sectors")
+                length_item = QTableWidgetItem(f"{length:,} sectors")
+                block_size_item = QTableWidgetItem(block_size)
+
+                # Build comprehensive info string
+                info_parts = []
+                # Add description first without label if it exists
+                if desc_str and desc_str.strip():
+                    info_parts.append(desc_str)
+                # Add detailed partition information
+                info_parts.append(f"Start: {start:,} sectors ({start * SECTOR_SIZE:,} bytes)")
+                info_parts.append(f"End: {end:,} sectors ({end * SECTOR_SIZE:,} bytes)")
+                info_parts.append(f"Length: {length:,} sectors ({size_in_bytes:,} bytes)")
+                if block_size != "N/A":
+                    info_parts.append(f"Block Size: {block_size}")
+                info_parts.append(f"Filesystem: {fs_type}")
+
+                info_item = QTableWidgetItem(" | ".join(info_parts))
 
                 # Set items in table
                 self.listing_table.setItem(row_position, 0, name_item)
+                self.listing_table.setItem(row_position, 1, inode_item)
                 self.listing_table.setItem(row_position, 2, type_item)
                 self.listing_table.setItem(row_position, 3, size_item)
-                self.listing_table.setItem(row_position, 9, info_item)  # Info column
+                self.listing_table.setItem(row_position, 4, start_offset_item)
+                self.listing_table.setItem(row_position, 5, end_offset_item)
+                self.listing_table.setItem(row_position, 6, length_item)
+                self.listing_table.setItem(row_position, 7, block_size_item)
+                self.listing_table.setItem(row_position, 9, info_item)
 
         finally:
             self.listing_table.setSortingEnabled(True)
@@ -2861,6 +2996,12 @@ class MainWindow(QMainWindow):
         """Populate the listing table with directory entries in batches for better performance."""
         # Clear existing content
         self.listing_table.setRowCount(0)
+
+        # Restore original column headers for file/folder view
+        self.listing_table.setHorizontalHeaderLabels([
+            'Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date',
+            'Modified Date', 'Changed Date', 'Path', 'Info'
+        ])
 
         # Show columns relevant for files/folders, hide Info column
         self.listing_table.setColumnHidden(1, False)  # Show Inode
@@ -3094,6 +3235,19 @@ class MainWindow(QMainWindow):
             data = selected_item.data(Qt.UserRole)
             menu = QMenu()
 
+            # If in search mode and item is a file, add "Open File" and "Show in Directory"
+            if self._search_mode and data.get('type') == 'file':
+                # Open File action
+                open_action = menu.addAction("Open File")
+                open_action.triggered.connect(lambda: self.open_search_result_file(data))
+
+                # Show in Directory action
+                show_in_dir_action = menu.addAction("Show in Directory")
+                show_in_dir_action.triggered.connect(lambda: self.show_file_in_directory(data))
+
+                # Add separator
+                menu.addSeparator()
+
             # Add the 'Export' option for any file or folder
             export_action = menu.addAction("Export")
             export_action.triggered.connect(lambda: self.handle_export(data, QFileDialog.getExistingDirectory(self,
@@ -3319,42 +3473,65 @@ class MainWindow(QMainWindow):
         details_title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #212529; padding-bottom: 10px;")
         bottom_layout.addWidget(details_title)
 
-        # Scrollable partition details with grid layout
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # Professional table view for volume information
+        volume_table = QTableWidget()
+        volume_table.setSortingEnabled(True)
+        volume_table.verticalHeader().setVisible(False)
+        volume_table.setObjectName("volumeInfoTable")
+        volume_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        volume_table.setAlternatingRowColors(True)
+        volume_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        volume_table.setIconSize(QSize(24, 24))
+        volume_table.setSelectionBehavior(QTableWidget.SelectRows)
 
-        scroll_content = QWidget()
-        scroll_layout = QGridLayout(scroll_content)
-        scroll_layout.setSpacing(15)
-        scroll_layout.setContentsMargins(0, 0, 10, 0)
+        # Enable horizontal scrolling for smaller windows
+        volume_table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
+        volume_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
+        # Set column count and headers
+        volume_table.setColumnCount(10)
+        volume_table.setHorizontalHeaderLabels([
+            'Volume', 'Filesystem', 'Offset (Sectors)', 'Block Size', 'Volume Size',
+            'Total Blocks', 'First Block', 'Last Block', 'Inode Count', 'Root Inode'
+        ])
+
+        # Configure header - all columns use Interactive mode for horizontal scrolling
+        header = volume_table.horizontalHeader()
+        for i in range(10):
+            header.setSectionResizeMode(i, QHeaderView.Interactive)
+
+        # Set column widths
+        volume_table.setColumnWidth(0, 100)   # Volume
+        volume_table.setColumnWidth(1, 120)   # Filesystem
+        volume_table.setColumnWidth(2, 140)   # Offset
+        volume_table.setColumnWidth(3, 100)   # Block Size
+        volume_table.setColumnWidth(4, 120)   # Volume Size
+        volume_table.setColumnWidth(5, 120)   # Total Blocks
+        volume_table.setColumnWidth(6, 120)   # First Block
+        volume_table.setColumnWidth(7, 120)   # Last Block
+        volume_table.setColumnWidth(8, 120)   # Inode Count
+        volume_table.setColumnWidth(9, 100)   # Root Inode
+
+        # Set header alignment
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+        # Populate table with partition data
         partitions = self.image_handler.get_partitions()
 
         if partitions:
-            # Display volumes in a grid (2-3 columns depending on count)
-            columns = 3 if len(partitions) > 2 else 2
-
-            for idx, part in enumerate(partitions):
-                # Create comprehensive volume cards for each partition
-                volume_cards = self._create_comprehensive_volume_cards(part, idx)
-                for card in volume_cards:
-                    row = idx // columns
-                    col = idx % columns
-                    scroll_layout.addWidget(card, row, col, Qt.AlignTop)
-
-            # Add stretch to remaining columns in last row if needed
-            last_row = (len(partitions) - 1) // columns
-            scroll_layout.setRowStretch(last_row + 1, 1)
+            self._populate_volume_table(volume_table, partitions)
         else:
-            no_part_label = QLabel("No partitions detected or single filesystem image")
-            no_part_label.setStyleSheet("color: #6c757d; font-style: italic; padding: 20px;")
-            scroll_layout.addWidget(no_part_label, 0, 0, 1, 3)
+            # Show message in table if no partitions
+            volume_table.setRowCount(1)
+            no_part_item = QTableWidgetItem("No partitions detected or single filesystem image")
+            no_part_item.setForeground(QBrush(QColor(108, 117, 125)))
+            font = no_part_item.font()
+            font.setItalic(True)
+            no_part_item.setFont(font)
+            volume_table.setItem(0, 0, no_part_item)
+            volume_table.setSpan(0, 0, 1, 10)
 
-        scroll.setWidget(scroll_content)
-        bottom_layout.addWidget(scroll, 1)
+        bottom_layout.addWidget(volume_table, 1)
 
         # Close button at bottom right
         button_layout = QHBoxLayout()
@@ -3371,91 +3548,84 @@ class MainWindow(QMainWindow):
 
         dialog.exec_()
 
-    def _create_comprehensive_volume_cards(self, partition, index):
-        """Create simple text display for a volume/partition with basic pytsk3 info only."""
-        addr, desc, start, length = partition
-        cards = []
+    def _populate_volume_table(self, table, partitions):
+        """Populate the volume table with partition information."""
+        table.setRowCount(len(partitions))
+        table.setSortingEnabled(False)  # Disable sorting while populating
 
-        # Get basic volume information (pytsk3 only, no hive extraction)
-        volume_info = self._extract_comprehensive_volume_info(start)
+        for idx, partition in enumerate(partitions):
+            addr, desc, start, length = partition
 
-        # Get filesystem type and matching color
-        fs_type = volume_info["basic"].get("Filesystem Type", "Unknown")
-        fs_colors = self._get_filesystem_colors()
-        color = fs_colors.get(fs_type, fs_colors["Unknown"])
+            # Get volume information
+            volume_info = self._extract_comprehensive_volume_info(start)
 
-        # Create simple text widget with color-coded border
-        volume_widget = QWidget()
-        volume_widget.setStyleSheet(f"""
-            QWidget {{
-                background-color: white;
-                border-left: 4px solid rgb({color.red()}, {color.green()}, {color.blue()});
-                border-top: 1px solid #e0e0e0;
-                border-right: 1px solid #e0e0e0;
-                border-bottom: 1px solid #e0e0e0;
-                border-radius: 4px;
-            }}
-        """)
-        volume_widget.setMinimumWidth(350)
-        volume_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        volume_layout = QVBoxLayout(volume_widget)
-        volume_layout.setContentsMargins(12, 10, 12, 10)
-        volume_layout.setSpacing(6)
+            # Combine all info
+            all_info = {}
+            all_info.update(volume_info["basic"])
+            all_info.update(volume_info["filesystem"])
 
-        # Volume header with filesystem color
-        desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
-        header_text = f"<b style='color: rgb({color.red()}, {color.green()}, {color.blue()});'>Volume {addr}: {fs_type}</b>"
+            # Get filesystem type for icon
+            fs_type = all_info.get("Filesystem Type", "Unknown")
+            icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
 
-        # Add description as subtitle if it exists
-        if desc_str and desc_str.strip():
-            header_text += f"<br><span style='font-size: 9pt; color: #6c757d;'>{desc_str}</span>"
+            # Column 0: Volume (with icon)
+            desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+            volume_text = f"vol{addr}"
+            if desc_str and desc_str.strip():
+                volume_text += f" ({desc_str})"
 
-        header_label = QLabel(header_text)
-        header_label.setStyleSheet("font-size: 11pt; color: #212529; background: transparent; border: none;")
-        header_label.setWordWrap(True)
-        volume_layout.addWidget(header_label)
+            volume_item = QTableWidgetItem(volume_text)
+            volume_item.setIcon(QIcon(icon_path))
+            table.setItem(idx, 0, volume_item)
 
-        # Separator line
-        separator = QLabel()
-        separator.setFixedHeight(1)
-        separator.setStyleSheet(f"background-color: rgb({color.red()}, {color.green()}, {color.blue()}); opacity: 0.3; border: none;")
-        volume_layout.addWidget(separator)
+            # Column 1: Filesystem
+            fs_item = QTableWidgetItem(fs_type)
+            table.setItem(idx, 1, fs_item)
 
-        # Combine basic and filesystem info
-        all_info = {}
-        all_info.update(volume_info["basic"])
-        all_info.update(volume_info["filesystem"])
+            # Column 2: Offset (Sectors)
+            offset_value = all_info.get("Partition Offset", "N/A")
+            # Extract just the sector count
+            if "sectors" in offset_value:
+                offset_value = offset_value.split("sectors")[0].strip()
+            offset_item = QTableWidgetItem(offset_value)
+            table.setItem(idx, 2, offset_item)
 
-        # Display info as simple text
-        if all_info:
-            for key, value in all_info.items():
-                if key != "Filesystem Type":  # Already shown in header
-                    # Create a container for each info row
-                    info_container = QWidget()
-                    info_container.setStyleSheet("background: transparent; border: none;")
-                    info_row_layout = QHBoxLayout(info_container)
-                    info_row_layout.setContentsMargins(0, 2, 0, 2)
-                    info_row_layout.setSpacing(8)
+            # Column 3: Block Size
+            block_size = all_info.get("Block Size", "N/A")
+            block_size_item = QTableWidgetItem(block_size)
+            table.setItem(idx, 3, block_size_item)
 
-                    # Key label
-                    key_label = QLabel(f"{key}:")
-                    key_label.setStyleSheet("font-size: 9pt; color: #6c757d; font-weight: 600; background: transparent; border: none;")
-                    key_label.setMinimumWidth(120)
-                    key_label.setMaximumWidth(120)
+            # Column 4: Volume Size
+            volume_size = all_info.get("Volume Size", "N/A")
+            volume_size_item = QTableWidgetItem(volume_size)
+            table.setItem(idx, 4, volume_size_item)
 
-                    # Value label
-                    value_label = QLabel(str(value))
-                    value_label.setStyleSheet("font-size: 9pt; color: #212529; background: transparent; border: none;")
-                    value_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                    value_label.setWordWrap(True)
+            # Column 5: Total Blocks
+            total_blocks = all_info.get("Total Blocks", "N/A")
+            total_blocks_item = QTableWidgetItem(total_blocks)
+            table.setItem(idx, 5, total_blocks_item)
 
-                    info_row_layout.addWidget(key_label)
-                    info_row_layout.addWidget(value_label, 1)
+            # Column 6: First Block
+            first_block = all_info.get("First Block", "N/A")
+            first_block_item = QTableWidgetItem(first_block)
+            table.setItem(idx, 6, first_block_item)
 
-                    volume_layout.addWidget(info_container)
+            # Column 7: Last Block
+            last_block = all_info.get("Last Block", "N/A")
+            last_block_item = QTableWidgetItem(last_block)
+            table.setItem(idx, 7, last_block_item)
 
-        cards.append(volume_widget)
-        return cards
+            # Column 8: Inode Count
+            inode_count = all_info.get("Inode Count", "N/A")
+            inode_count_item = QTableWidgetItem(inode_count)
+            table.setItem(idx, 8, inode_count_item)
+
+            # Column 9: Root Inode
+            root_inode = all_info.get("Root Inode", "N/A")
+            root_inode_item = QTableWidgetItem(root_inode)
+            table.setItem(idx, 9, root_inode_item)
+
+        table.setSortingEnabled(True)  # Re-enable sorting after populating
 
     def _extract_comprehensive_volume_info(self, start_offset):
         """Extract basic pytsk3 information from a volume."""
@@ -3771,6 +3941,494 @@ class MainWindow(QMainWindow):
             logger.error(f"Error finding grandparent inode: {str(e)}")
             return None
 
+    # ==================== SEARCH AND FILTER HANDLERS ====================
+
+    def on_listing_table_item_clicked(self, item):
+        """Handle clicks on listing table items - navigate tree view in search mode."""
+        # Only handle navigation if we're in search mode
+        if not self._search_mode:
+            return
+
+        # Get the file data from the clicked item
+        row = item.row()
+        name_item = self.listing_table.item(row, 0)  # Name column
+        if not name_item:
+            return
+
+        file_data = name_item.data(Qt.UserRole)
+        if not file_data:
+            return
+
+        # Get the path from the file data
+        file_path = file_data.get('path', '')
+        if not file_path:
+            return
+
+        # Navigate the tree view to show this file's location
+        self.navigate_tree_to_path(file_path, file_data)
+
+    def navigate_tree_to_path(self, path, file_data):
+        """Navigate and expand the tree view to show the specified path."""
+        if not path or not self.tree_viewer:
+            return
+
+        # Split the path into components (e.g., "/folder1/folder2/file.txt" -> ["folder1", "folder2", "file.txt"])
+        # Remove leading/trailing slashes and split
+        path_parts = [p for p in path.split('/') if p]
+
+        if not path_parts:
+            return
+
+        # Start from the root - find the partition/volume first
+        root = self.tree_viewer.invisibleRootItem()
+        current_item = None
+
+        # Find the correct partition by matching the start_offset from file_data
+        start_offset = file_data.get('start_offset')
+        if start_offset is not None:
+            for i in range(root.childCount()):
+                child = root.child(i)
+                child_data = child.data(0, Qt.UserRole)
+                if child_data and child_data.get('start_offset') == start_offset:
+                    current_item = child
+                    current_item.setExpanded(True)
+                    break
+
+        if not current_item:
+            return
+
+        # Now traverse the path, expanding each folder
+        for part_index, part_name in enumerate(path_parts):
+            found = False
+
+            # Expand current item to load its children
+            if not current_item.isExpanded():
+                current_item.setExpanded(True)
+                # Give Qt time to process the expansion and load children
+                QApplication.processEvents()
+
+            # Search through children for the next part
+            for i in range(current_item.childCount()):
+                child = current_item.child(i)
+                child_text = child.text(0)
+
+                if child_text == part_name:
+                    current_item = child
+                    found = True
+
+                    # If this is not the last part, expand it
+                    if part_index < len(path_parts) - 1:
+                        current_item.setExpanded(True)
+                        QApplication.processEvents()
+                    break
+
+            if not found:
+                # Path component not found, stop navigation
+                break
+
+        # Select and highlight the final item
+        if current_item:
+            self.tree_viewer.setCurrentItem(current_item)
+            self.tree_viewer.scrollToItem(current_item)
+
+            # Set a special background color to highlight the search result
+            # Store the original background to restore later
+            if not hasattr(self, '_original_tree_item_background'):
+                self._original_tree_item_background = None
+
+            # Clear previous highlight
+            if hasattr(self, '_highlighted_tree_item') and self._highlighted_tree_item:
+                if self._original_tree_item_background:
+                    self._highlighted_tree_item.setBackground(0, self._original_tree_item_background)
+
+            # Save current item and its background
+            self._highlighted_tree_item = current_item
+            self._original_tree_item_background = current_item.background(0)
+
+            # Set red highlight for the found item
+            from PySide6.QtGui import QBrush, QColor
+            current_item.setBackground(0, QBrush(QColor(255, 100, 100, 100)))  # Semi-transparent red
+
+    def on_listing_search_text_changed(self):
+        """Handle text changes in search bar - auto-clear results if empty."""
+        search_query = self.listing_search_bar.text().strip()
+
+        # Auto-clear results when user manually empties the search bar
+        if not search_query and self._search_mode:
+            self.switch_to_browse_mode()
+
+    def trigger_listing_search(self):
+        """Trigger search when Enter is pressed."""
+        search_query = self.listing_search_bar.text().strip()
+
+        if not search_query:
+            # If empty, just return to browse mode
+            self.switch_to_browse_mode()
+            return
+
+        # Store the query
+        self._search_query = search_query
+
+        # Switch to search mode if not already
+        if not self._search_mode:
+            self.switch_to_search_mode()
+
+        # Perform the search
+        self.perform_search(search_query)
+
+    def _execute_search(self):
+        """Execute the search after debounce delay."""
+        if self._search_query:
+            # Switch to search mode and perform search
+            self.switch_to_search_mode()
+
+    def clear_listing_search(self):
+        """Clear the search bar and return to browse mode."""
+        self.listing_search_bar.clear()  # This will trigger on_listing_search_text_changed
+        # Return to browse mode
+        if self._search_mode:
+            self.switch_to_browse_mode()
+
+    def switch_to_search_mode(self):
+        """Switch from Browse mode to Search mode."""
+        if self._search_mode:
+            return  # Already in search mode
+
+        # Save current browse state
+        self._last_browsed_state = {
+            'offset': self.current_offset,
+            'path': self.current_path,
+            'directory_data': self.current_selected_data
+        }
+
+        # Switch to search mode
+        self._search_mode = True
+
+        # Keep tree view enabled - user can still navigate while searching
+        # (removed: self.tree_viewer.setEnabled(False))
+
+        # Show Path column (critical for search results)
+        self.listing_table.setColumnHidden(8, False)  # Path column
+
+        # Update status bar
+        statusbar = self.statusBar()
+        statusbar.showMessage(f"Searching for '{self._search_query}'...")
+
+        # Perform the search
+        self.perform_search(self._search_query)
+
+    def switch_to_browse_mode(self):
+        """Switch from Search mode to Browse mode."""
+        if not self._search_mode:
+            return  # Already in browse mode
+
+        # Switch to browse mode
+        self._search_mode = False
+        self._search_query = ""
+
+        # Clear any tree view highlights from search results
+        if hasattr(self, '_highlighted_tree_item') and self._highlighted_tree_item:
+            if hasattr(self, '_original_tree_item_background') and self._original_tree_item_background:
+                self._highlighted_tree_item.setBackground(0, self._original_tree_item_background)
+            self._highlighted_tree_item = None
+            self._original_tree_item_background = None
+
+        # Tree view stays enabled (removed: self.tree_viewer.setEnabled(True))
+
+        # Hide Path column in browse mode (tree shows location)
+        self.listing_table.setColumnHidden(8, True)
+
+        # Restore previous browse state
+        if self._last_browsed_state:
+            directory_data = self._last_browsed_state.get('directory_data')
+            path = self._last_browsed_state.get('path')
+
+            if directory_data and path:
+                try:
+                    # Navigate the tree view back to this location
+                    # This will also update the listing table via on_item_clicked
+                    self._restore_tree_selection(path, directory_data)
+                except Exception as e:
+                    self.statusBar().showMessage(f"Error restoring directory view: {str(e)}")
+
+        # Clear status bar
+        self.statusBar().clearMessage()
+
+    def _restore_tree_selection(self, path, directory_data):
+        """Restore tree view selection to a previous location."""
+        if not path or not self.tree_viewer:
+            return
+
+        # Reuse the navigate_tree_to_path logic but without the red highlight
+        path_parts = [p for p in path.split('/') if p]
+        if not path_parts:
+            # Root path, select the partition
+            root = self.tree_viewer.invisibleRootItem()
+            start_offset = directory_data.get('start_offset')
+            if start_offset is not None:
+                for i in range(root.childCount()):
+                    child = root.child(i)
+                    child_data = child.data(0, Qt.UserRole)
+                    if child_data and child_data.get('start_offset') == start_offset:
+                        self.tree_viewer.setCurrentItem(child)
+                        self.tree_viewer.scrollToItem(child)
+                        # Manually trigger the item clicked event to update the listing table
+                        self.on_item_clicked(child, 0)
+                        break
+            return
+
+        # Full path restoration
+        root = self.tree_viewer.invisibleRootItem()
+        current_item = None
+
+        # Find the correct partition
+        start_offset = directory_data.get('start_offset')
+        if start_offset is not None:
+            for i in range(root.childCount()):
+                child = root.child(i)
+                child_data = child.data(0, Qt.UserRole)
+                if child_data and child_data.get('start_offset') == start_offset:
+                    current_item = child
+                    current_item.setExpanded(True)
+                    break
+
+        if not current_item:
+            return
+
+        # Traverse the path
+        for part_index, part_name in enumerate(path_parts):
+            found = False
+            if not current_item.isExpanded():
+                current_item.setExpanded(True)
+                QApplication.processEvents()
+
+            for i in range(current_item.childCount()):
+                child = current_item.child(i)
+                if child.text(0) == part_name:
+                    current_item = child
+                    found = True
+                    if part_index < len(path_parts) - 1:
+                        current_item.setExpanded(True)
+                        QApplication.processEvents()
+                    break
+
+            if not found:
+                break
+
+        # Select the final item and trigger the click to update listing table
+        if current_item:
+            self.tree_viewer.setCurrentItem(current_item)
+            self.tree_viewer.scrollToItem(current_item)
+            # Manually trigger the item clicked event to update the listing table
+            self.on_item_clicked(current_item, 0)
+
+    def _wildcard_to_regex(self, pattern):
+        """Convert wildcard pattern (*.pdf, name.*) to regex pattern."""
+        # Escape special regex characters except * and ?
+        pattern = re.escape(pattern)
+        # Replace escaped wildcards with regex equivalents
+        pattern = pattern.replace(r'\*', '.*')  # * matches any characters
+        pattern = pattern.replace(r'\?', '.')   # ? matches single character
+        return f"^{pattern}$"  # Match entire string
+
+    def _matches_wildcard(self, filename, pattern):
+        """Check if filename matches wildcard pattern."""
+        regex_pattern = self._wildcard_to_regex(pattern)
+        return re.match(regex_pattern, filename, re.IGNORECASE) is not None
+
+    def perform_search(self, search_query):
+        """Execute file search with wildcard support."""
+        if not self.image_handler:
+            return
+
+        statusbar = self.statusBar()
+        statusbar.showMessage(f"Searching for '{search_query}'...")
+
+        try:
+            # Check if search query contains wildcards
+            has_wildcards = '*' in search_query or '?' in search_query
+
+            if has_wildcards:
+                # For wildcard searches, get all files and filter locally
+                files = self.image_handler.search_files(None)
+                # Filter by wildcard pattern
+                files = [f for f in files if self._matches_wildcard(f['name'], search_query)]
+            else:
+                # Regular substring search
+                files = self.image_handler.search_files(search_query)
+
+            # Clear and populate table
+            self.listing_table.setRowCount(0)
+            self.listing_table.setSortingEnabled(False)
+
+            # Show columns relevant for search results
+            self.listing_table.setColumnHidden(1, False)  # Show Inode
+            self.listing_table.setColumnHidden(2, False)  # Show Type (can be files or folders)
+            self.listing_table.setColumnHidden(4, False)  # Show Created
+            self.listing_table.setColumnHidden(5, False)  # Show Accessed
+            self.listing_table.setColumnHidden(6, False)  # Show Modified
+            self.listing_table.setColumnHidden(7, False)  # Show Changed
+            self.listing_table.setColumnHidden(8, False)  # Show Path (critical for search)
+            self.listing_table.setColumnHidden(9, True)   # Hide Info
+
+            # Populate with search results
+            for file in files:
+                self.insert_search_result_row(file)
+
+            self.listing_table.setSortingEnabled(True)
+
+            # Update status bar with result count
+            statusbar.showMessage(f"{len(files)} result(s) for '{search_query}'")
+
+        except Exception as e:
+            statusbar.showMessage(f"Search error: {str(e)}")
+
+    def insert_search_result_row(self, file_data):
+        """Insert a search result into the listing table."""
+        row_position = self.listing_table.rowCount()
+        self.listing_table.insertRow(row_position)
+
+        # Get file icon based on type
+        file_name = file_data.get('name', '')
+        is_directory = file_data.get('is_directory', False)
+
+        if is_directory:
+            # Directory icon
+            icon_path = self.db_manager.get_icon_path('folder', 'folder')
+        else:
+            # File icon based on extension
+            extension = os.path.splitext(file_name)[1].lower()
+            # Remove the dot from extension for icon lookup (e.g., '.pdf' -> 'pdf')
+            ext_without_dot = extension[1:] if extension else 'txt'
+            icon_path = self.db_manager.get_icon_path('file', ext_without_dot)
+
+        # Create name item with icon
+        name_item = QTableWidgetItem(file_name)
+        name_item.setIcon(QIcon(icon_path))
+        name_item.setData(Qt.UserRole, file_data)
+
+        # Create other items
+        inode_item = QTableWidgetItem(str(file_data.get('inode_number', '')))
+        type_item = QTableWidgetItem("Folder" if is_directory else "File")
+        size_item = SizeTableWidgetItem(self.image_handler.get_readable_size(file_data.get('size', 0)))
+        size_item.setData(Qt.UserRole, file_data.get('size', 0))
+
+        created_item = QTableWidgetItem(file_data.get('created', ''))
+        accessed_item = QTableWidgetItem(file_data.get('accessed', ''))
+        modified_item = QTableWidgetItem(file_data.get('modified', ''))
+        changed_item = QTableWidgetItem(file_data.get('changed', ''))
+        path_item = QTableWidgetItem(file_data.get('path', ''))
+
+        # Set items in table
+        self.listing_table.setItem(row_position, 0, name_item)
+        self.listing_table.setItem(row_position, 1, inode_item)
+        self.listing_table.setItem(row_position, 2, type_item)  # Type column
+        self.listing_table.setItem(row_position, 3, size_item)
+        self.listing_table.setItem(row_position, 4, created_item)
+        self.listing_table.setItem(row_position, 5, accessed_item)
+        self.listing_table.setItem(row_position, 6, modified_item)
+        self.listing_table.setItem(row_position, 7, changed_item)
+        self.listing_table.setItem(row_position, 8, path_item)
+
+    def apply_browse_filter(self, extensions):
+        """Apply file type filter to current directory in browse mode."""
+        if not self.image_handler or self.current_offset is None:
+            return
+
+        try:
+            statusbar = self.statusBar()
+            statusbar.showMessage("Applying filter...")
+
+            if extensions is None:
+                # No filter - show all files in current directory (need to get current inode)
+                # For simplicity, refresh the current view
+                # This requires tracking current inode - for now, we'll just clear the message
+                statusbar.showMessage("Show all files in current directory")
+                # TODO: Implement proper directory refresh
+            else:
+                # Get all files from current directory and filter by extension
+                # This requires getting the current inode and filtering results
+                # For now, we'll use the list_files method from ImageHandler
+                files = self.image_handler.list_files(extensions)
+
+                # Clear and populate table with filtered results
+                self.listing_table.setRowCount(0)
+                self.listing_table.setSortingEnabled(False)
+
+                for file in files:
+                    self.insert_search_result_row(file)
+
+                self.listing_table.setSortingEnabled(True)
+                statusbar.showMessage(f"{len(files)} file(s) matching selected types")
+
+        except Exception as e:
+            logger.error(f"Filter error: {str(e)}")
+            self.statusBar().showMessage(f"Filter error: {str(e)}")
+
+    def open_search_result_file(self, file_data):
+        """Open a file from search results in the viewer tabs."""
+        # This is the same as double-clicking - open in viewer
+        # Use the existing file opening logic
+        self.load_file_content(file_data)
+
+    def show_file_in_directory(self, file_data):
+        """Navigate to the file's directory in browse mode and select the file."""
+        try:
+            # Clear search and switch to browse mode
+            self.listing_search_bar.clear()  # This triggers switch_to_browse_mode
+
+            # Get file's location details
+            start_offset = file_data.get('start_offset')
+            file_path = file_data.get('path', '')
+            file_inode = file_data.get('inode_number')
+
+            if start_offset is None or not file_path:
+                self.statusBar().showMessage("Cannot determine file location")
+                return
+
+            # Parse the path to get parent directory
+            # file_path format: "/path/to/file.txt"
+            path_parts = file_path.split('/')
+            if len(path_parts) < 2:
+                # File is in root
+                parent_inode = 5
+                self.current_path = "/"
+            else:
+                # Need to navigate to parent directory
+                # For simplicity, navigate to root for now
+                # TODO: Implement proper path-to-inode resolution for deep directories
+                parent_inode = 5
+                self.current_path = "/"
+
+            # Load the parent directory contents
+            entries = self.image_handler.get_directory_contents(start_offset, parent_inode)
+            self.current_offset = start_offset
+            self.populate_listing_table(entries, start_offset)
+
+            # Find and select the file in the table
+            for row in range(self.listing_table.rowCount()):
+                item = self.listing_table.item(row, 0)
+                if item:
+                    item_data = item.data(Qt.UserRole)
+                    if item_data and item_data.get('inode_number') == file_inode:
+                        # Select this row
+                        self.listing_table.selectRow(row)
+                        # Scroll to make it visible
+                        self.listing_table.scrollToItem(item)
+                        break
+
+            # Update status bar
+            self.statusBar().showMessage(f"Showing {file_data.get('name', 'file')} in directory")
+
+            # TODO: Expand tree view to show this location
+            # This would require traversing the tree to find and expand the correct nodes
+
+        except Exception as e:
+            logger.error(f"Error showing file in directory: {str(e)}")
+            self.statusBar().showMessage(f"Error navigating to file location: {str(e)}")
+
+    # ==================== END SEARCH AND FILTER HANDLERS ====================
+
     def on_listing_table_item_clicked(self, item):
         """Handle click events on the listing table."""
         row = item.row()
@@ -3801,6 +4459,10 @@ class MainWindow(QMainWindow):
 
                 # Populate listing table with volume contents
                 self.populate_listing_table(entries, start_offset)
+
+                # Add to navigation history
+                self._add_to_history(data)
+
                 statusbar.clearMessage()
 
             elif data.get("type") == "directory":
@@ -3828,6 +4490,10 @@ class MainWindow(QMainWindow):
                 self.update_directory_up_button()
 
                 self.populate_listing_table(entries, data["start_offset"])
+
+                # Add to navigation history
+                self._add_to_history(data)
+
                 statusbar.clearMessage()
             else:
                 # Find and select the corresponding file in the tree view if possible
@@ -3846,41 +4512,6 @@ class MainWindow(QMainWindow):
             self.log_error(f"Error processing listing table click: {str(e)}")
             statusbar.clearMessage()
 
-    def on_search_file_selected(self, file_data: Dict[str, Any]) -> None:
-        """Handle file selection from the File Search widget."""
-        if not file_data:
-            logger.warning("No file data provided to search file handler")
-            return
-
-        statusbar = self.statusBar()
-        statusbar.showMessage(f"Loading {file_data.get('name', 'file')}...")
-
-        try:
-            # Store as current selection for viewer tab switching
-            self.current_selected_data = file_data
-
-            # Get required metadata for file content retrieval
-            inode_number = file_data.get("inode_number", 0)
-            start_offset = file_data.get("start_offset", 0)
-
-            if not inode_number:
-                self.log_error("File metadata missing inode number")
-                statusbar.clearMessage()
-                return
-
-            # Use background thread for file content retrieval (same pattern as listing table)
-            self.file_worker = self.FileContentWorker(self.image_handler, inode_number, start_offset)
-            self.file_worker.completed.connect(
-                lambda content, _: self.update_viewer_with_file_content(content, file_data))
-            self.file_worker.error.connect(
-                lambda msg: (self.log_error(f"Error loading search file: {msg}"), statusbar.clearMessage()))
-            self.file_worker.start()
-
-            logger.info(f"Initiated file content loading for: {file_data.get('name', 'unknown')}")
-
-        except Exception as e:
-            self.log_error(f"Error processing search file selection: {str(e)}")
-            statusbar.clearMessage()
 
 
 # Add a worker thread for exporting files and directories
