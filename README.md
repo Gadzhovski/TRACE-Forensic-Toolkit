@@ -116,7 +116,7 @@
 <br>
 
 
-## Cross-Platform Compatibility 💻🖥️  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+## Cross-Platform Compatibility 🍏🐧🗔  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
 | Operating System                   | Screenshot                                                                                                           |
 |------------------------------------|----------------------------------------------------------------------------------------------------------------------|
