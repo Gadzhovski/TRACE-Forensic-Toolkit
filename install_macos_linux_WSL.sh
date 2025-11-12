@@ -139,7 +139,7 @@ if [[ "$USER_OS" == "Linux" ]]; then
     echo -e "\n${CYAN}📥 Installing Python packages...${R}"
     source venv/bin/activate
     pip install --upgrade pip setuptools wheel
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements_macos_silicon.txt
     deactivate
 
     echo -e "\n${GREEN}✅ Installation complete!${R}"
@@ -168,7 +168,7 @@ if [[ "$USER_OS" == "WSL" ]]; then
     echo -e "\n${CYAN}📥 Installing Python packages...${R}"
     source venv/bin/activate
     pip install --upgrade pip setuptools wheel
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements_macos_silicon.txt
     deactivate
 
     echo -e "\n${GREEN}✅ Installation complete!${R}"
