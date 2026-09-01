@@ -199,7 +199,7 @@
 
 ### Configuration ⚙️ 
 
-**API Keys Configuration**:The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. To update the API keys, go to the Options menu and select API Keys submenu.
+**API Keys Configuration**: The tool integrates with the VirusTotal API, and you will need to provide your own API key to use that feature. To set the key, go to the Options menu and select the API Keys submenu.
 
 
 

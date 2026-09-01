@@ -35,7 +35,6 @@ from modules.registry import RegistryExtractor
 from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.verification import VerificationWidget
-from modules.veriphone_api import VeriphoneWidget
 from modules.virus_total_tab import VirusTotal
 
 SECTOR_SIZE = 512
@@ -1709,10 +1708,6 @@ class MainWindow(QMainWindow):
         conversion_action.triggered.connect(self.show_conversion_widget)
         tools_menu.addAction(conversion_action)
 
-        veriphone_api_action = QAction("Veriphone API", self)
-        veriphone_api_action.triggered.connect(self.show_veriphone_widget)
-        tools_menu.addAction(veriphone_api_action)
-
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
         api_key_action = QAction("API Keys", self)
@@ -1995,17 +1990,10 @@ class MainWindow(QMainWindow):
         virus_total_input.setMinimumWidth(INPUT_FIELD_MIN_WIDTH)  # Set a minimum width for the input field
         layout.addRow(virus_total_label, virus_total_input)
 
-        # Veriphone API Key
-        veriphone_label = QLabel("Veriphone API Key:")
-        veriphone_input = QLineEdit()
-        veriphone_input.setText(self.api_keys.get('API_KEYS', 'veriphone', fallback=''))
-        veriphone_input.setMinimumWidth(INPUT_FIELD_MIN_WIDTH)  # Set a minimum width for the input field
-        layout.addRow(veriphone_label, veriphone_input)
-
         # Buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(
-            lambda: self.save_api_keys(virus_total_input.text(), veriphone_input.text(), dialog))
+            lambda: self.save_api_keys(virus_total_input.text(), dialog))
         button_box.rejected.connect(dialog.reject)
         layout.addRow(button_box)
 
@@ -2013,13 +2001,12 @@ class MainWindow(QMainWindow):
         dialog.setLayout(layout)
         dialog.exec_()
 
-    def save_api_keys(self, virus_total_key, veriphone_key, dialog):
+    def save_api_keys(self, virus_total_key, dialog):
         # Save the API keys in a configuration file
         if not self.api_keys.has_section('API_KEYS'):
             self.api_keys.add_section('API_KEYS')
 
         self.api_keys.set('API_KEYS', 'virustotal', virus_total_key)
-        self.api_keys.set('API_KEYS', 'veriphone', veriphone_key)
 
         with open('config.ini', 'w') as config_file:
             self.api_keys.write(config_file)
@@ -2029,23 +2016,10 @@ class MainWindow(QMainWindow):
         # Pass the updated API keys to the appropriate modules
         self.virus_total_api.set_api_key(virus_total_key)
 
-        # Set Veriphone API key only if the widget is created
-        if hasattr(self, 'veriphone_widget'):
-            self.veriphone_widget.set_api_key(veriphone_key)
-
     def show_conversion_widget(self):
         """Show the conversion widget."""
         self.select_dialog = Main()
         self.select_dialog.show()
-
-    def show_veriphone_widget(self):
-        """Create the VeriphoneWidget only if it hasn't been created yet."""
-        if not hasattr(self, 'veriphone_widget'):
-            self.veriphone_widget = VeriphoneWidget()
-            # Set the API key after creating the widget
-            veriphone_key = self.api_keys.get('API_KEYS', 'veriphone', fallback='')
-            self.veriphone_widget.set_api_key(veriphone_key)
-        self.veriphone_widget.show()
 
     def verify_image(self):
         if self.image_handler is None:
