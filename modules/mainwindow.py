@@ -12,8 +12,6 @@ import re
 from typing import Optional, Dict, Any, List, Tuple
 from Registry import Registry
 from sqlite3 import connect as sqlite3_connect
-import subprocess
-import platform
 from contextlib import contextmanager
 from functools import lru_cache
 from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QMargins
@@ -73,7 +71,6 @@ COLUMN_WIDTHS = {
 PROGRESS_DIALOG_WIDTH = 300
 
 # Timeouts (in seconds)
-MOUNT_TIMEOUT = 30
 INFO_TIMEOUT = 10
 PROCESS_TIMEOUT = 30
 THREAD_SLEEP_MS = 1000  # milliseconds
@@ -1015,426 +1012,6 @@ class DatabaseManager:
                 c.close()
 
 
-# ImageManager class with optimizations
-class ImageManager(QThread):
-    operationCompleted = Signal(bool, str)  # Signal to indicate operation completion
-    showMessage = Signal(str, str)  # Signal to show a message (Title, Content)
-    progressUpdated = Signal(int)  # Signal for progress updates
-
-    def __init__(self):
-        super().__init__()
-        self.operation = None
-        self.image_path = None
-        self.file_name = None
-        self.is_running = False
-        self._process = None
-
-    def __del__(self):
-        self.cleanup_resources()
-
-    def cleanup_resources(self):
-        """Clean up any resources used by the image mounting process."""
-        if self._process and hasattr(self._process, 'poll') and self._process.poll() is None:
-            try:
-                self._process.terminate()
-                self._process = None
-            except:
-                pass
-
-    def run(self):
-        self.is_running = True
-        system = platform.system()
-
-        try:
-            if self.operation == 'mount' and self.image_path:
-                if system == 'Darwin':  # macOS
-                    self._mount_image_macos()
-                elif system == 'Linux':  # Linux (including Kali)
-                    self._mount_image_linux()
-                elif system == 'Windows':  # Windows
-                    self._mount_image_windows()
-                else:
-                    raise Exception("Unsupported Operating System")
-            elif self.operation == 'dismount':
-                if system == 'Darwin':
-                    self._dismount_image_macos()
-                elif system == 'Linux':
-                    self._dismount_image_linux()
-                elif system == 'Windows':
-                    self._dismount_image_windows()
-                else:
-                    raise Exception("Unsupported Operating System")
-        except Exception as e:
-            self.operationCompleted.emit(False, f"Failed to {self.operation} the image. Error: {e}")
-        finally:
-            self.is_running = False
-
-    def _mount_image_windows(self):
-        """Mount image on Windows using Arsenal Image Mounter."""
-        try:
-            aim_path = 'tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe'
-            if not os.path.exists(aim_path):
-                self.operationCompleted.emit(False, "Arsenal Image Mounter not found. Please install it.")
-                return
-
-            cmd = [
-                aim_path,
-                '--mount',
-                '--readonly',
-                f'--filename={self.image_path}'
-            ]
-
-            # Use subprocess.Popen with proper parameter checking
-            self._process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
-
-            # Wait for the process to complete or timeout after 30 seconds
-            try:
-                stdout, stderr = self._process.communicate(timeout=MOUNT_TIMEOUT)
-                if self._process.returncode != 0:
-                    error_msg = stderr.decode('utf-8', errors='replace')
-                    self.operationCompleted.emit(False, f"Failed to mount the image: {error_msg}")
-                    return
-                self.operationCompleted.emit(True, f"Image {self.file_name} mounted successfully.")
-            except subprocess.TimeoutExpired:
-                # Process is taking too long, but this is sometimes normal for mounting
-                # We'll assume it's working in the background
-                self.operationCompleted.emit(True,
-                                             f"Image {self.file_name} mount initiated. Check Windows Disk Management.")
-
-        except Exception as e:
-            self.operationCompleted.emit(False, f"Failed to mount the image on Windows. Error: {e}")
-
-    def _mount_image_macos(self):
-        """Mount image on macOS using hdiutil."""
-        try:
-            # Step 1: Attach the image without mounting it
-            attach_cmd = [
-                'hdiutil', 'attach',
-                '-imagekey', 'diskimage-class=CRawDiskImage',
-                '-nomount', self.image_path
-            ]
-
-            attach_process = subprocess.Popen(
-                attach_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-
-            # Wait with timeout
-            try:
-                attach_output, _ = attach_process.communicate(timeout=MOUNT_TIMEOUT)
-                if attach_process.returncode != 0:
-                    self.operationCompleted.emit(False, f"Failed to attach image: {attach_output.decode()}")
-                    return
-            except subprocess.TimeoutExpired:
-                attach_process.kill()
-                self.operationCompleted.emit(False, "Attaching image timed out")
-                return
-
-            attach_output = attach_output.decode().strip()
-
-            # Step 2: Add a short delay to ensure the system has time to process the attachment
-            QThread.msleep(THREAD_SLEEP_MS)  # More reliable than time.sleep in a QThread
-
-            # Step 3: Extract the disk identifier from the output
-            lines = attach_output.splitlines()
-            disk_identifier = None
-
-            for line in lines:
-                if line.startswith('/dev/disk'):
-                    disk_identifier = line.split()[0]
-                    break
-
-            if not disk_identifier:
-                self.operationCompleted.emit(False, "Failed to find disk identifier after attaching the image.")
-                return
-
-            # Step 4: Mount the disk using the identifier
-            mount_cmd = ['hdiutil', 'mount', disk_identifier]
-            mount_process = subprocess.Popen(
-                mount_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-
-            try:
-                mount_output, _ = mount_process.communicate(timeout=MOUNT_TIMEOUT)
-                if mount_process.returncode != 0:
-                    self.operationCompleted.emit(False, f"Failed to mount disk: {mount_output.decode()}")
-                    return
-            except subprocess.TimeoutExpired:
-                mount_process.kill()
-                self.operationCompleted.emit(False, "Mounting timed out")
-                return
-
-            mount_output = mount_output.decode().strip()
-
-            # Step 5: Extract the mount point (e.g., /Volumes/LABEL2)
-            lines = mount_output.splitlines()
-            mount_point = None
-
-            for line in lines:
-                if line.startswith('/dev/') and '\t' in line:
-                    mount_point = line.split('\t')[1]
-                    break
-
-            if mount_point:
-                # Emit success with the mount point
-                self.operationCompleted.emit(True, f"Image {self.file_name} mounted successfully at {mount_point}.")
-            else:
-                self.operationCompleted.emit(False, f"Image {self.file_name} mounted, but no volumes were detected.")
-
-        except subprocess.CalledProcessError as e:
-            self.operationCompleted.emit(False, f"Failed to mount the image on macOS. Error: {e.output.decode()}")
-        except Exception as e:
-            self.operationCompleted.emit(False, f"Unexpected error mounting image: {str(e)}")
-
-    def _mount_image_linux(self):
-        """Mount image on Linux using appropriate tools."""
-        try:
-            if self.image_path.lower().endswith('.e01'):
-                # Use ewfmount for .e01 images
-                ewf_mount_dir = '/mnt/ewf'
-
-                # Create mount directory if it doesn't exist
-                if not os.path.exists(ewf_mount_dir):
-                    os.makedirs(ewf_mount_dir, exist_ok=True)
-
-                # Run ewfmount with proper error handling
-                ewf_cmd = ['sudo', 'ewfmount', self.image_path, ewf_mount_dir]
-                ewf_process = subprocess.run(ewf_cmd, check=True, capture_output=True, text=True)
-
-                # Get the partition table info using fdisk
-                fdisk_cmd = ['fdisk', '-l', os.path.join(ewf_mount_dir, 'ewf1')]
-                fdisk_output = subprocess.check_output(fdisk_cmd, text=True)
-
-                # Find the partition start sector
-                partition_start_sector = None
-                for line in fdisk_output.splitlines():
-                    if '/dev/' in line and not line.startswith('Disk '):
-                        # Assuming you want the first partition listed
-                        parts = line.split()
-                        if len(parts) > 1:
-                            try:
-                                partition_start_sector = int(parts[1])
-                                break
-                            except (ValueError, IndexError):
-                                continue
-
-                if partition_start_sector is None:
-                    raise Exception("Failed to find partition start sector in the EWF image.")
-
-                # Calculate the byte offset
-                byte_offset = partition_start_sector * 512
-
-                # Mount the partition using the calculated offset
-                mount_dir = '/mnt/disk_image'
-                os.makedirs(mount_dir, exist_ok=True)
-
-                mount_cmd = [
-                    'sudo', 'mount', '-o',
-                    f'ro,loop,offset={byte_offset}',
-                    os.path.join(ewf_mount_dir, 'ewf1'),
-                    mount_dir
-                ]
-
-                mount_process = subprocess.run(mount_cmd, check=True, capture_output=True, text=True)
-
-            else:
-                # Use mount for .dd images and other raw formats
-                mount_dir = '/mnt/disk_image'
-                os.makedirs(mount_dir, exist_ok=True)
-
-                mount_cmd = [
-                    'sudo', 'mount', '-o', 'loop,ro',
-                    self.image_path, mount_dir
-                ]
-
-                mount_process = subprocess.run(mount_cmd, check=True, capture_output=True, text=True)
-
-            self.operationCompleted.emit(True, f"Image {self.file_name} mounted successfully.")
-        except subprocess.CalledProcessError as e:
-            self.operationCompleted.emit(False, f"Failed to mount the image on Linux. Error: {e.stderr}")
-        except Exception as e:
-            self.operationCompleted.emit(False, f"An unexpected error occurred: {str(e)}")
-
-    def _dismount_image_linux(self):
-        """Dismount image on Linux."""
-        try:
-            # Attempt to unmount the disk image
-            disk_cmd = ['sudo', 'umount', '/mnt/disk_image']
-            ewf_cmd = ['sudo', 'umount', '/mnt/ewf']
-
-            try:
-                # Try to unmount disk image
-                subprocess.run(disk_cmd, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"Could not unmount disk image: {e.stderr}")
-
-            try:
-                # Try to unmount EWF
-                subprocess.run(ewf_cmd, check=True, capture_output=True, text=True)
-            except subprocess.CalledProcessError as e:
-                logger.warning(f"Could not unmount EWF: {e.stderr}")
-
-            self.operationCompleted.emit(True, "Image was dismounted successfully.")
-        except Exception as e:
-            self.operationCompleted.emit(False, f"Failed to dismount the image on Linux. Error: {str(e)}")
-
-    def _dismount_image_macos(self):
-        """Dismount image on macOS using hdiutil."""
-        try:
-            # Get the list of currently mounted disk images
-            info_cmd = ['hdiutil', 'info']
-            info_process = subprocess.Popen(
-                info_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-
-            try:
-                info_output, _ = info_process.communicate(timeout=INFO_TIMEOUT)
-                if info_process.returncode != 0:
-                    self.operationCompleted.emit(False, f"Failed to get mounted disks: {info_output.decode()}")
-                    return
-            except subprocess.TimeoutExpired:
-                info_process.kill()
-                self.operationCompleted.emit(False, "Getting disk info timed out")
-                return
-
-            info_output = info_output.decode()
-
-            lines = info_output.splitlines()
-            mounted_disks = []
-            current_image_path = None
-
-            # Parse the output to find the disk identifier for the given image path
-            for line in lines:
-                if 'image-path' in line:
-                    current_image_path = line.split(': ')[1].strip()
-                elif line.startswith('/dev/disk') and current_image_path == self.image_path:
-                    disk_identifier = line.split()[0]
-                    mounted_disks.append(disk_identifier)
-                    current_image_path = None  # Reset after finding the corresponding disk
-
-            if not mounted_disks:
-                # If we're not targeting a specific image, try to unmount all mounted disks
-                if not self.image_path:
-                    for line in lines:
-                        if line.startswith('/dev/disk'):
-                            disk_identifier = line.split()[0]
-                            mounted_disks.append(disk_identifier)
-
-                if not mounted_disks:
-                    self.operationCompleted.emit(False, "No mounted images found.")
-                    return
-
-            # Attempt to dismount all found disk identifiers
-            success = False
-            errors = []
-
-            for disk_identifier in mounted_disks:
-                try:
-                    detach_cmd = ['hdiutil', 'detach', disk_identifier]
-                    detach_process = subprocess.run(detach_cmd, check=True, capture_output=True, text=True)
-                    success = True
-                except subprocess.CalledProcessError:
-                    try:
-                        # If normal detach fails, attempt a forced detach
-                        force_detach_cmd = ['hdiutil', 'detach', '-force', disk_identifier]
-                        force_process = subprocess.run(force_detach_cmd, check=True, capture_output=True, text=True)
-                        success = True
-                    except subprocess.CalledProcessError as e:
-                        errors.append(f"Failed to detach {disk_identifier}: {e.stderr}")
-
-            if success:
-                self.operationCompleted.emit(True, "Image was dismounted successfully.")
-            else:
-                self.operationCompleted.emit(False, "Failed to dismount all images: " + "; ".join(errors))
-
-        except Exception as e:
-            self.operationCompleted.emit(False, f"Failed to dismount the image on macOS: {str(e)}")
-
-    def _dismount_image_windows(self):
-        """Dismount image on Windows using Arsenal Image Mounter."""
-        try:
-            aim_path = 'tools/Arsenal-Image-Mounter-v3.10.257/aim_cli.exe'
-            if not os.path.exists(aim_path):
-                self.operationCompleted.emit(False, "Arsenal Image Mounter not found. Please install it.")
-                return
-
-            cmd = [aim_path, '--dismount']
-
-            # Use subprocess.run with proper error handling
-            process = subprocess.run(
-                cmd,
-                check=True,
-                capture_output=True,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
-
-            self.operationCompleted.emit(True, "Image was dismounted successfully.")
-        except subprocess.CalledProcessError as e:
-            self.operationCompleted.emit(False, f"Failed to dismount the image on Windows. Error: {e.stderr}")
-        except Exception as e:
-            self.operationCompleted.emit(False, f"Unexpected error dismounting image: {str(e)}")
-
-    def dismount_image(self):
-        """Attempt to dismount the currently mounted image."""
-        if self.is_running:
-            self.showMessage.emit("Operation in Progress", "Please wait for the current operation to complete.")
-            return
-
-        self.operation = 'dismount'
-        self.start()
-
-    def mount_image(self):
-        """Attempt to mount an image after prompting the user to select one."""
-        if self.is_running:
-            self.showMessage.emit("Operation in Progress", "Please wait for the current operation to complete.")
-            return
-
-        system = platform.system()
-
-        if system == 'Darwin':  # macOS
-            # Only allow .raw and .dd files on macOS
-            supported_formats = "Raw Files (*.raw *.dd);;All Files (*)"
-            valid_extensions = ['.raw', '.dd']
-        else:
-            # Original behavior for other operating systems
-            supported_formats = (
-                "EWF Files (*.E01);;Raw Files (*.dd);;AFF4 Files (*.aff4);;"
-                "VHD Files (*.vhd);;VDI Files (*.vdi);;XVA Files (*.xva);;"
-                "VMDK Files (*.vmdk);;OVA Files (*.ova);;QCOW Files (*.qcow *.qcow2);;All Files (*)"
-            )
-            valid_extensions = ['.e01', '.dd', '.aff4', '.vhd', '.vdi', '.xva', '.vmdk', '.ova', '.qcow', '.qcow2']
-
-        while True:
-            image_path, _ = QFileDialog.getOpenFileName(QWidget(None), "Select Disk Image", "", supported_formats)
-
-            if not image_path:
-                return  # No image was selected, so just exit the function
-
-            file_extension = os.path.splitext(image_path)[1].lower()
-            if file_extension in valid_extensions:
-                break  # Exit the loop if a valid image was selected
-            else:
-                # Show an error message for an invalid file
-                QMessageBox.warning(QWidget(None), "Invalid File Type", "The selected file is not a valid disk image.")
-
-        # Normalize the path
-        self.image_path = os.path.normpath(image_path)
-        self.file_name = os.path.basename(self.image_path)
-        self.operation = 'mount'
-        self.start()
-
-
 # ==================== FILE SEARCH WIDGET CLASSES ====================
 class SizeTableWidgetItem(QTableWidgetItem):
     """Custom table widget item for proper size sorting."""
@@ -1485,28 +1062,15 @@ class MainWindow(QMainWindow):
             logger.error(f"Error loading configuration: {e}")
 
         # Initialize instance attributes
-        self.image_mounted = False
         self.current_offset = None
         self.current_image_path = None
-        self.image_manager = ImageManager()
         self.current_selected_data = None
 
         self.evidence_files = []
 
-        # Connect to named method instead of complex lambda
-        self.image_manager.operationCompleted.connect(self._handle_mount_operation_complete)
-
         self.initialize_ui()
 
     # ==================== HELPER METHODS ====================
-
-    def _handle_mount_operation_complete(self, success: bool, message: str) -> None:
-        """Handle completion of mount/dismount operation."""
-        if success:
-            QMessageBox.information(self, "Image Operation", message)
-            self.image_mounted = not self.image_mounted
-        else:
-            QMessageBox.critical(self, "Image Operation", message)
 
     def _get_file_icon(self, file_extension: str) -> QIcon:
         """Get icon for file extension with caching."""
@@ -1531,22 +1095,6 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.No
         )
         return reply == QMessageBox.StandardButton.Yes
-
-    def _handle_dismount_if_needed(self) -> None:
-        """Dismount image if mounted and user confirms."""
-        if not self.image_mounted:
-            return
-
-        reply = QMessageBox.question(
-            self, 'Dismount Image',
-            'Do you want to dismount the mounted image before exiting?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            self.image_manager.dismount_image()
-
 
     def _create_tree_item_for_entry(self, parent_item: QTreeWidgetItem, entry: Dict[str, Any],
                                     start_offset: int) -> QTreeWidgetItem:
@@ -1649,8 +1197,6 @@ class MainWindow(QMainWindow):
         file_actions = {
             'Add Evidence File': self.load_image_evidence,
             'Remove Evidence File': self.remove_image_evidence,
-            'Image Mounting': self.image_manager.mount_image,
-            'Image Unmounting': self.image_manager.dismount_image,
             'separator': None,  # This will add a separator
             'Exit': self.close
         }
@@ -1738,11 +1284,6 @@ class MainWindow(QMainWindow):
         self.verify_image_button = self.create_action('Icons/icons8-verify-blue.png', "Verify Image", self.verify_image)
         self.main_toolbar.addAction(self.verify_image_button)
 
-        self.main_toolbar.addSeparator()
-        self.main_toolbar.addAction(
-            self.create_action('Icons/devices/icons8-hard-disk-48.png', "Mount Image", self.image_manager.mount_image))
-        self.main_toolbar.addAction(self.create_action('Icons/devices/icons8-hard-disk-48_red.png', "Unmount Image",
-                                                       self.image_manager.dismount_image))
 
         # Navigation buttons (Back, Forward, Up) will be added to the listing search toolbar
         # Created later in the UI setup
@@ -2087,7 +1628,6 @@ class MainWindow(QMainWindow):
         self.clear_viewers()
         self.current_image_path = None
         self.current_offset = None
-        self.image_mounted = False
         self.evidence_files.clear()
         self.deleted_files_widget.clear()
 
@@ -2115,8 +1655,6 @@ class MainWindow(QMainWindow):
         if not self._confirm_exit():
             event.ignore()
             return
-
-        self._handle_dismount_if_needed()
 
         # Cleanup resources
         self.cleanup_resources()

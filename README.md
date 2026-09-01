@@ -39,7 +39,6 @@
 
 ## Features 🌟 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
-✅ ***Image Mounting**: Mount forensic disk images. (Windows only) \
 ✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
 ✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
 ✅ **EXIF Data Extraction**: Extract and display EXIF metadata from photos.\
@@ -209,12 +208,10 @@
 - [pytsk3](https://pypi.org/project/pytsk3/) - Python bindings for the SleuthKit
 - [libewf-python](https://github.com/libyal/libewf) - Library to access the Expert Witness Compression Format (EWF)
 - [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
-- [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
 
 
 ## Work in Progress 🧑‍🔧  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
 
-- **Cross-Platform Image Mounting**: Image mounting currently works only on Windows using the Arsenal Image Mounter executable. The aim is to make this feature work across all platforms without relying on external executables.
 - **File Carving**: The verification of carved files needs improvement, as it may carve data fragments that are not actual files.
 - **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
 
