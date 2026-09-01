@@ -1,25 +1,35 @@
-# Ignore E01, dd, and raw image files in the root directory
+# Forensic test images (never commit evidence files)
 /*.E01
+/*.Ex01
+/*.s01
 /*.dd
 /*.raw
+/*.img
+/*.iso
+/*.ad1
 
-# Ignore IDE-specific folders and files
+# IDE-specific folders and files
 .idea/
+.vscode/
 
-# Ignore config files
+# User config (may contain API keys)
 /config.ini
 
-# Ignore the carved_files directory
+# Application output
 /carved_files/
 
-# Ignore virtual environment folders
+# Virtual environment
 /venv/
+/.venv/
 
-# Ignore Python cache
-__pycache__
+# Python cache
+__pycache__/
+*.py[cod]
 
-# Ignore build artifacts
+# PyInstaller build artifacts
 /build/
 /dist/
-*.spec
-build_exe.py      
+
+# Vendored third-party binaries (downloaded, not committed)
+/tools/Arsenal-Image-Mounter-*/
+/tools/sleuthkit-*/
