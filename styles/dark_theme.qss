@@ -1082,8 +1082,23 @@ QTreeWidget::item {
     padding-right: 4px;
 }
 
-/* The branch column carries the expand arrow. Qt's default leaves it
-   background-filled, which showed as a block beside a selected row. */
+/* The branch column carries the expand arrow.
+
+   Styling ::branch at all replaces the arrow the platform style would draw,
+   so the image has to be supplied here -- setting only a background removed
+   the arrows entirely and left no way to tell an expanded row from a
+   collapsed one. Rows with no children get no image, just the transparent
+   background that keeps the selection colour continuous across the strip. */
 QTreeWidget::branch {
     background: transparent;
+}
+
+QTreeWidget::branch:has-children:!has-siblings:closed,
+QTreeWidget::branch:closed:has-children:has-siblings {
+    image: url('Icons/tabler/themed/chevron-right-dark.svg');
+}
+
+QTreeWidget::branch:open:has-children:!has-siblings,
+QTreeWidget::branch:open:has-children:has-siblings {
+    image: url('Icons/tabler/themed/chevron-down-dark.svg');
 }
