@@ -2,6 +2,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont, QPalette, QColor
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 
 
 class AboutDialog(QDialog):
@@ -13,7 +14,7 @@ class AboutDialog(QDialog):
 
         # Load and scale the logo
         logo = QLabel(self)
-        pixmap = QPixmap(resource_path('Icons/logo.png'))  # Ensure resource_path('Icons/logo.png') is the correct path
+        pixmap = QPixmap(icons.path(icons.LOGO))  # Ensure icons.path(icons.LOGO) is the correct path
         # Adjust the logo size here
         scaled_pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         logo.setPixmap(scaled_pixmap)

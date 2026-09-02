@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 from trace_app.ui.widgets.property_table import PropertyTable
 
 logger = logging.getLogger('TRACE.Registry')
@@ -19,9 +20,9 @@ class RegistryExtractor(QWidget):
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
-        self.hive_icon = QIcon(resource_path("Icons/icons8-hive-48.png"))
-        self.key_icon = QIcon(resource_path("Icons/icons8-key-48_blue.png"))
-        self.value_icon = QIcon(resource_path("Icons/icons8-wasp-48.png"))
+        self.hive_icon = QIcon(icons.path(icons.REGISTRY_HIVE))
+        self.key_icon = QIcon(icons.path(icons.REGISTRY_KEY))
+        self.value_icon = QIcon(icons.path(icons.REGISTRY_VALUE))
         self.init_ui()
 
     def set_image_handler(self, image_handler):
@@ -39,7 +40,7 @@ class RegistryExtractor(QWidget):
         main_layout.addWidget(self.toolbar)
 
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QIcon(resource_path("Icons/icons8-registry-editor-96.png")).pixmap(48, 48))
+        self.icon_label.setPixmap(QIcon(icons.path(icons.REGISTRY)).pixmap(48, 48))
         self.toolbar.addWidget(self.icon_label)
 
         self.label = QLabel("Registry Browser")

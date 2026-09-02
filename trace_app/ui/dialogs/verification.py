@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QAppli
                                QFileDialog, QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Verify')
 
@@ -51,7 +52,7 @@ class VerificationWidget(QWidget):
         self.image_handler = image_handler
         self.thread = None
         self.setWindowTitle("Trace - Image Verification")
-        self.setWindowIcon(QIcon(resource_path('Icons/logo.png')))
+        self.setWindowIcon(QIcon(icons.path(icons.LOGO)))
         self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
         self._verified = False  # Track verification status
 

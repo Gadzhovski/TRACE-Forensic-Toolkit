@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QSlider, QSizePolicy)
 
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Viewer.Media')
 
@@ -182,9 +183,9 @@ class AudioVideoPlayer(QWidget):
         if self._is_playing:
             # Try different pause icon paths
             pause_icon_paths = [
-                resource_path("Icons/icons8-pause-50.png"),
-                resource_path("Icons/pause.png"),
-                resource_path("Icons/icons8-pause-button-50.png")
+                icons.path(icons.PAUSE),
+                icons.path(icons.PAUSE),
+                icons.path(icons.PAUSE)
             ]
             icon_set = False
             for path in pause_icon_paths:
@@ -198,9 +199,9 @@ class AudioVideoPlayer(QWidget):
         else:
             # Try different play icon paths
             play_icon_paths = [
-                resource_path("Icons/icons8-play-50.png"),
-                resource_path("Icons/play.png"),
-                resource_path("Icons/icons8-circled-play-50.png")
+                icons.path(icons.PLAY),
+                icons.path(icons.PLAY),
+                icons.path(icons.PLAY)
             ]
             icon_set = False
             for path in play_icon_paths:
@@ -241,8 +242,8 @@ class AudioVideoPlayer(QWidget):
             self.set_volume(0)
             # Try different mute icon paths
             mute_icon_paths = [
-                resource_path("Icons/icons8-mute-50.png"),
-                resource_path("Icons/mute.png")
+                icons.path(icons.MUTE),
+                icons.path(icons.MUTE)
             ]
             icon_set = False
             for path in mute_icon_paths:
@@ -257,9 +258,9 @@ class AudioVideoPlayer(QWidget):
             self.set_volume(self._previous_volume)
             # Try different volume icon paths
             volume_icon_paths = [
-                resource_path("Icons/icons8-audio-50.png"),
-                resource_path("Icons/volume.png"),
-                resource_path("Icons/audio.png")
+                icons.path(icons.AUDIO),
+                icons.path(icons.VOLUME),
+                icons.path(icons.AUDIO)
             ]
             icon_set = False
             for path in volume_icon_paths:
@@ -288,8 +289,8 @@ class AudioVideoPlayer(QWidget):
             self._is_muted = True
             # Try different mute icon paths
             mute_icon_paths = [
-                resource_path("Icons/icons8-mute-50.png"),
-                resource_path("Icons/mute.png")
+                icons.path(icons.MUTE),
+                icons.path(icons.MUTE)
             ]
             icon_set = False
             for path in mute_icon_paths:
@@ -304,9 +305,9 @@ class AudioVideoPlayer(QWidget):
             self._is_muted = False
             # Try different volume icon paths
             volume_icon_paths = [
-                resource_path("Icons/icons8-audio-50.png"),
-                resource_path("Icons/volume.png"),
-                resource_path("Icons/audio.png")
+                icons.path(icons.AUDIO),
+                icons.path(icons.VOLUME),
+                icons.path(icons.AUDIO)
             ]
             icon_set = False
             for path in volume_icon_paths:
@@ -354,9 +355,9 @@ class AudioVideoPlayer(QWidget):
         self.play_button = QPushButton(self)
         # Try different icon paths
         play_icon_paths = [
-            resource_path("Icons/icons8-play-50.png"),
-            resource_path("Icons/play.png"),
-            resource_path("Icons/icons8-circled-play-50.png")
+            icons.path(icons.PLAY),
+            icons.path(icons.PLAY),
+            icons.path(icons.PLAY)
         ]
         for path in play_icon_paths:
             if os.path.exists(path):
@@ -375,9 +376,9 @@ class AudioVideoPlayer(QWidget):
         self.stop_button = QPushButton(self)
         # Try different icon paths
         stop_icon_paths = [
-            resource_path("Icons/icons8-stop-50.png"),
-            resource_path("Icons/stop.png"),
-            resource_path("Icons/icons8-stop-circled-50.png")
+            icons.path(icons.STOP),
+            icons.path(icons.STOP),
+            icons.path(icons.STOP)
         ]
         for path in stop_icon_paths:
             if os.path.exists(path):
@@ -410,9 +411,9 @@ class AudioVideoPlayer(QWidget):
         self.volume_button = QPushButton(self)
         # Try different icon paths
         volume_icon_paths = [
-            resource_path("Icons/icons8-audio-50.png"),
-            resource_path("Icons/volume.png"),
-            resource_path("Icons/audio.png")
+            icons.path(icons.AUDIO),
+            icons.path(icons.VOLUME),
+            icons.path(icons.AUDIO)
         ]
         for path in volume_icon_paths:
             if os.path.exists(path):

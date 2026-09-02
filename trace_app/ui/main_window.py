@@ -30,6 +30,7 @@ from trace_app.ui.viewers.hex import HexViewer
 from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
 from trace_app.infra.paths import config_file, resource_path
+from trace_app.ui import icons
 from trace_app.ui.viewers.registry_hive import RegistryExtractor
 from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
@@ -217,7 +218,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.setWindowTitle('Trace 1.2.0')
 
         # Set application icon for all platforms
-        app_icon = QIcon(resource_path('Icons/logo_prev_ui.png'))
+        app_icon = QIcon(icons.path(icons.LOGO_LARGE))
         self.setWindowIcon(app_icon)
 
         # Set taskbar/dock icon for different platforms
@@ -311,13 +312,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.main_toolbar.setMovable(False)
         self.main_toolbar.setFloatable(False)
         self.main_toolbar.addAction(
-            self.create_action(resource_path('Icons/icons8-evidence-48.png'), "Load Image", self.load_image_evidence))
+            self.create_action(icons.path(icons.EVIDENCE_ADD), "Load Image", self.load_image_evidence))
         self.main_toolbar.addAction(
-            self.create_action(resource_path('Icons/icons8-evidence-96.png'), "Remove Image", self.remove_image_evidence))
+            self.create_action(icons.path(icons.EVIDENCE_REMOVE), "Remove Image", self.remove_image_evidence))
         self.main_toolbar.addSeparator()
 
         # Create verify_image_button as an attribute of MainWindow
-        self.verify_image_button = self.create_action(resource_path('Icons/icons8-verify-blue.png'), "Verify Image", self.verify_image)
+        self.verify_image_button = self.create_action(icons.path(icons.VERIFY), "Verify Image", self.verify_image)
         self.main_toolbar.addAction(self.verify_image_button)
 
 
@@ -377,7 +378,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # LEFT SIDE: Icon and Title
         self.listing_icon_label = QLabel()
-        self.listing_icon_label.setPixmap(QPixmap(resource_path('Icons/icons8-search-in-browser-50.png')))
+        self.listing_icon_label.setPixmap(QPixmap(icons.path(icons.SEARCH_BROWSER)))
         self.listing_icon_label.setFixedSize(48, 48)
         self.listing_toolbar.addWidget(self.listing_icon_label)
 
@@ -391,17 +392,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_toolbar.addWidget(title_spacer)
 
         # MIDDLE: Navigation buttons (Back, Forward, Up) - next to title
-        self.back_action = QAction(QIcon(resource_path("Icons/icons8-left-arrow-50.png")), "Back", self)
+        self.back_action = QAction(QIcon(icons.path(icons.BACK)), "Back", self)
         self.back_action.triggered.connect(self.navigate_back)
         self.back_action.setEnabled(False)
         self.listing_toolbar.addAction(self.back_action)
 
-        self.forward_action = QAction(QIcon(resource_path("Icons/icons8-right-arrow-50.png")), "Forward", self)
+        self.forward_action = QAction(QIcon(icons.path(icons.FORWARD)), "Forward", self)
         self.forward_action.triggered.connect(self.navigate_forward)
         self.forward_action.setEnabled(False)
         self.listing_toolbar.addAction(self.forward_action)
 
-        self.go_up_action = QAction(QIcon(resource_path("Icons/icons8-thick-arrow-pointing-up-50.png")), "Go Up Directory", self)
+        self.go_up_action = QAction(QIcon(icons.path(icons.UP)), "Go Up Directory", self)
         self.go_up_action.triggered.connect(self.navigate_up_directory)
         self.go_up_action.setEnabled(False)
         self.listing_toolbar.addAction(self.go_up_action)
@@ -625,9 +626,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Make sure verify_image_button exists before trying to change its icon
         if hasattr(self, 'verify_image_button'):
             if hasattr(self.verification_widget, 'is_verified') and self.verification_widget.is_verified:
-                self.verify_image_button.setIcon(QIcon(resource_path('Icons/icons8-verify-48_gren.png')))
+                self.verify_image_button.setIcon(QIcon(icons.path(icons.VERIFY_OK)))
             else:
-                self.verify_image_button.setIcon(QIcon(resource_path('Icons/icons8-verify-blue.png')))
+                self.verify_image_button.setIcon(QIcon(icons.path(icons.VERIFY)))
 
         # Call the original closeEvent to close the widget
         QWidget.closeEvent(self.verification_widget, event)
@@ -878,7 +879,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.enable_tabs(False)
             # set the icon back to the original - only if verify_image_button exists
             if hasattr(self, 'verify_image_button'):
-                self.verify_image_button.setIcon(QIcon(resource_path('Icons/icons8-verify-blue.png')))
+                self.verify_image_button.setIcon(QIcon(icons.path(icons.VERIFY)))
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()

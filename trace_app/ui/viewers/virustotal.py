@@ -16,6 +16,7 @@ from datetime import datetime
 from requests import get as requests_get, post as requests_post
 from requests.exceptions import RequestException
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 from trace_app.ui.widgets.property_table import PropertyTable
 
 logger = logging.getLogger('TRACE.VirusTotal')
@@ -125,7 +126,7 @@ class VirusTotal(QWidget):
 
     def setup_logo_toolbar(self):
         self.logo_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        self.virus_total_logo = QSvgWidget(resource_path("Icons/VirusTotal_logo.svg"))
+        self.virus_total_logo = QSvgWidget(icons.path(icons.VIRUSTOTAL_LOGO))
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)
@@ -134,18 +135,18 @@ class VirusTotal(QWidget):
         self.virus_total_logo.setCursor(Qt.PointingHandCursor)
 
     def setup_action_toolbar(self):
-        self.view_in_browser_action = QAction(QIcon(resource_path('Icons/apps/internet-web-browser.svg')), "View in Browser",
+        self.view_in_browser_action = QAction(QIcon(icons.path(icons.WEB_BROWSER)), "View in Browser",
                                               self)
         self.view_in_browser_action.triggered.connect(self.view_in_browser)
         self.action_toolbar.addAction(self.view_in_browser_action)
         self.view_in_browser_action.setVisible(True)
 
-        self.back_action = QAction(QIcon(resource_path('Icons/icons8-left-arrow-50.png')), "Back", self)
+        self.back_action = QAction(QIcon(icons.path(icons.BACK)), "Back", self)
         self.back_action.triggered.connect(self.reset_ui)
         self.action_toolbar.addAction(self.back_action)
         self.action_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))
 
-        self.virus_total_logo = QSvgWidget(resource_path("Icons/VirusTotal_logo.svg"))
+        self.virus_total_logo = QSvgWidget(icons.path(icons.VIRUSTOTAL_LOGO))
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)

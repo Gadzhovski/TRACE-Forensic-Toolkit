@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QToolBar, QScrollAr
                                QFileDialog, QMessageBox, QSizePolicy)
 
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Viewer.Picture')
 
@@ -61,12 +62,12 @@ class PictureViewer(QWidget):
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
-        zoom_in_icon = QIcon(resource_path("Icons/icons8-zoom-in-50.png"))
-        zoom_out_icon = QIcon(resource_path("Icons/icons8-zoom-out-50.png"))
-        rotate_left_icon = QIcon(resource_path("Icons/icons8-rotate-left-50.png"))
-        rotate_right_icon = QIcon(resource_path("Icons/icons8-rotate-right-50.png"))
-        reset_icon = QIcon(resource_path("Icons/icons8-no-rotation-50.png"))
-        export_icon = QIcon(resource_path("Icons/icons8-save-as-50.png"))
+        zoom_in_icon = QIcon(icons.path(icons.ZOOM_IN))
+        zoom_out_icon = QIcon(icons.path(icons.ZOOM_OUT))
+        rotate_left_icon = QIcon(icons.path(icons.ROTATE_LEFT))
+        rotate_right_icon = QIcon(icons.path(icons.ROTATE_RIGHT))
+        reset_icon = QIcon(icons.path(icons.ROTATE_RESET))
+        export_icon = QIcon(icons.path(icons.SAVE_AS))
 
         zoom_in_action = QAction(zoom_in_icon, 'Zoom In', self)
         zoom_out_action = QAction(zoom_out_icon, 'Zoom Out', self)

@@ -23,6 +23,7 @@ from fitz import open as fitz_open, Matrix
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.infra.paths import carved_files_dir, resource_path
+from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Carving')
 
@@ -72,7 +73,7 @@ class FileCarvingWidget(QWidget):
         self.layout.addWidget(self.toolbar)
 
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QPixmap(resource_path('Icons/icons8-carving-64.png')))
+        self.icon_label.setPixmap(QPixmap(icons.path(icons.CARVING)))
         self.icon_label.setFixedSize(48, 48)
         self.toolbar.addWidget(self.icon_label)
 
@@ -185,13 +186,13 @@ class FileCarvingWidget(QWidget):
 
         # Define actions
         action_small_size = (QAction("Small Size", self))
-        action_small_size.setIcon(QIcon(resource_path('Icons/icons8-small-icons-50.png')))
+        action_small_size.setIcon(QIcon(icons.path(icons.ICONS_SMALL)))
 
         action_medium_size = (QAction("Medium Size", self))
-        action_medium_size.setIcon(QIcon(resource_path('Icons/icons8-medium-icons-50.png')))
+        action_medium_size.setIcon(QIcon(icons.path(icons.ICONS_MEDIUM)))
 
         action_large_size = (QAction("Large Size", self))
-        action_large_size.setIcon(QIcon(resource_path('Icons/icons8-large-icons-50.png')))
+        action_large_size.setIcon(QIcon(icons.path(icons.ICONS_LARGE)))
 
         # Set icons
 
@@ -936,15 +937,15 @@ class FileCarvingWidget(QWidget):
                 # ffmpeg binary, for a thumbnail. Carved video fragments are
                 # frequently truncated and fail to decode anyway, so show a
                 # generic icon instead.
-                pixmap = self.render_svg_to_pixmap(resource_path('Icons/mimetypes/video-x-generic.svg'), 120)
+                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_VIDEO), 120)
 
             elif type_.lower() == 'zip':
                 # Render ZIP icon at target size for crisp display
-                pixmap = self.render_svg_to_pixmap(resource_path('Icons/mimetypes/application-zip.svg'), 120)
+                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_ARCHIVE), 120)
 
             elif type_.lower() == 'wav':
                 # Render audio icon at target size for crisp display
-                pixmap = self.render_svg_to_pixmap(resource_path('Icons/mimetypes/audio-x-generic.svg'), 120)
+                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_AUDIO), 120)
 
             else:
                 # For image files, use the original file path
