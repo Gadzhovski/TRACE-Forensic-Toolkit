@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
+                                       DIALOG_ICON_SIZE,
                                        GROUP_SPACING,
                                        TABLE_ROW_HEIGHT,
                                        CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
@@ -119,14 +120,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return self._icon_cache[file_extension]
 
     def _confirm_exit(self) -> bool:
-        """Ask user to confirm exit."""
-        reply = QMessageBox.question(
-            self, 'Exit Confirmation',
-            'Are you sure you want to exit?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        return reply == QMessageBox.StandardButton.Yes
+        """Ask user to confirm exit.
+
+        Built rather than taken from QMessageBox.question, which supplies Qt's
+        own blue question mark -- the one piece of stock platform art left in
+        the window, and out of place beside the themed line icons. Setting the
+        icon explicitly also lets the text sit against it properly; the stock
+        dialog packs the two tight together.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle('Exit Confirmation')
+        box.setText('Are you sure you want to exit?')
+        box.setInformativeText('Any unsaved work will be lost.')
+        box.setIconPixmap(icons.icon(icons.HELP).pixmap(DIALOG_ICON_SIZE,
+                                                        DIALOG_ICON_SIZE))
+        box.setStandardButtons(QMessageBox.StandardButton.Yes
+                               | QMessageBox.StandardButton.No)
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        return box.exec() == QMessageBox.StandardButton.Yes
 
     def _create_tree_item_for_entry(self, parent_item: QTreeWidgetItem, entry: Dict[str, Any],
                                     start_offset: int) -> QTreeWidgetItem:

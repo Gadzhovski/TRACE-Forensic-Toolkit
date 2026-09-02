@@ -16,7 +16,7 @@ from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
-from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
 
 logger = logging.getLogger('TRACE.Viewer.PDF')
 
@@ -166,16 +166,16 @@ class PDFViewer(QWidget):
         self.toolbar.addAction(self.pan_tool_action)
 
         # Add a spacer to push the following buttons to the right
-        spacer = QWidget(self)
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.toolbar.addWidget(spacer)
+        self.toolbar.addWidget(stretch())
 
         # One Save button with a format menu, rather than a bare "Save PDF"
         # action. Saving the original document and exporting its extracted
         # text are different operations, so both are offered here.
         self.save_button = QToolButton(self)
         self.save_button.setObjectName("exportButton")
-        self.save_button.setIcon(icons.icon(icons.SAVE_AS))
+        # Registered, so the glyph re-tints with the theme -- see
+        # ExportButton for why setIcon alone is not enough.
+        icons.apply_to(self.save_button, icons.SAVE_AS)
         self.save_button.setToolTip("Save the document, or export its text")
         self.save_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.save_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))

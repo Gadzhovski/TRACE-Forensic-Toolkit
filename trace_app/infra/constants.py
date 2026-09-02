@@ -89,6 +89,10 @@ TOOLBAR_ICON_SIZE = 18
 #: same visual weight as the heading text next to it.
 PANEL_ICON_SIZE = 22
 
+#: Size of the glyph beside a message-dialog's text. Larger than a toolbar
+#: icon: it is the dialog's only piece of art and carries the message's tone.
+DIALOG_ICON_SIZE = 40
+
 # --- Button widths --------------------------------------------------------
 #: Dialog buttons (Close, Save, Copy) so they line up in a row.
 BUTTON_WIDTH = 96

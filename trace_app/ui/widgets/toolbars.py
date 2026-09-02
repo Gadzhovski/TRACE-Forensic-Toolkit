@@ -79,11 +79,18 @@ def align_controls(toolbar):
         child.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
 
+#: Gap widgets must not paint. A bare QWidget picks up the content-surface
+#: colour from the stylesheet, which is a shade lighter than a toolbar -- so an
+#: expanding gap showed as a pale band across the empty half of the bar.
+_GAP_STYLE = "background: transparent;"
+
+
 def spacer(width=GROUP_SPACING):
     """A fixed-width gap between groups of controls."""
     widget = QWidget()
     widget.setFixedWidth(width)
     widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+    widget.setStyleSheet(_GAP_STYLE)
     return widget
 
 
@@ -91,6 +98,7 @@ def stretch():
     """An expanding gap that pushes what follows to the right."""
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    widget.setStyleSheet(_GAP_STYLE)
     return widget
 
 

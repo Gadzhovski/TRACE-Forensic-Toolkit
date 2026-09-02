@@ -123,11 +123,14 @@ class VirusTotal(QWidget):
     def spacer(self, policy1, policy2):
         spacer = QWidget(self)
         spacer.setSizePolicy(policy1, policy2)
+        # A bare QWidget picks up the content-surface colour, which is lighter
+        # than a toolbar and shows as a pale band in the gap.
+        spacer.setStyleSheet("background: transparent;")
         return spacer
 
     def setup_logo_toolbar(self):
         self.logo_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))
-        self.virus_total_logo = QSvgWidget(icons.path(icons.VIRUSTOTAL_LOGO))
+        self.virus_total_logo = icons.apply_svg(QSvgWidget(), icons.VIRUSTOTAL_LOGO)
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)
@@ -147,7 +150,7 @@ class VirusTotal(QWidget):
         self.action_toolbar.addAction(self.back_action)
         self.action_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))
 
-        self.virus_total_logo = QSvgWidget(icons.path(icons.VIRUSTOTAL_LOGO))
+        self.virus_total_logo = icons.apply_svg(QSvgWidget(), icons.VIRUSTOTAL_LOGO)
         self.virus_total_logo.setFixedSize(141, 27)
         logo_action = QWidgetAction(self)
         logo_action.setDefaultWidget(self.virus_total_logo)

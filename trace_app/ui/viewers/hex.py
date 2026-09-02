@@ -12,7 +12,7 @@ from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
-from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
 
 logger = logging.getLogger('TRACE.Hex')
 
@@ -319,9 +319,7 @@ class HexViewer(QWidget):
         self.toolbar.addWidget(self.export_button)
 
         # Add a spacer to push the following widgets to the right
-        spacer = QWidget(self)
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.toolbar.addWidget(spacer)
+        self.toolbar.addWidget(stretch())
 
         # Search bar components
         self.search_bar = QLineEdit(self)

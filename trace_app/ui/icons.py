@@ -25,7 +25,8 @@ logger = logging.getLogger('TRACE.Icons')
 # --- Application -----------------------------------------------------------
 LOGO = "Icons/logo.png"
 LOGO_LARGE = "Icons/logo_prev_ui.png"
-VIRUSTOTAL_LOGO = "Icons/VirusTotal_logo.svg"
+VIRUSTOTAL_LOGO = "Icons/tabler/virustotal-wordmark.svg"
+HELP = "Icons/tabler/help-circle.svg"
 
 # --- Evidence --------------------------------------------------------------
 EVIDENCE_ADD = "Icons/tabler/file-plus.svg"
@@ -101,6 +102,7 @@ _theme = 'light'
 #: Held weakly: registering a widget here must not keep it alive.
 _tracked_actions = WeakKeyDictionary()
 _tracked_labels = WeakKeyDictionary()
+_tracked_svg = WeakKeyDictionary()
 
 
 def set_theme(theme):
@@ -125,6 +127,12 @@ def set_theme(theme):
     for label, (name, size) in list(_tracked_labels.items()):
         try:
             label.setPixmap(icon(name).pixmap(size, size))
+        except RuntimeError:
+            pass
+
+    for widget, name in list(_tracked_svg.items()):
+        try:
+            widget.load(_recoloured_svg(name, foreground()))
         except RuntimeError:
             pass
 
@@ -163,6 +171,35 @@ def _auto_tint(name):
     if not name.startswith('Icons/tabler/'):
         return None
     return _THEME_TINTS.get(_theme)
+
+
+def foreground():
+    """The colour monochrome art is tinted to under the current theme."""
+    return _THEME_TINTS[_theme]
+
+
+def _recoloured_svg(name, colour):
+    """Read an SVG and substitute `currentColor`, returning raw bytes.
+
+    Qt's SVG renderer does not resolve `currentColor` -- it paints it black,
+    which is invisible on a dark background. Icons drawn as a QIcon get around
+    this by compositing a tint over the alpha channel, but that path renders at
+    square sizes and would squash a wide wordmark. Substituting the colour in
+    the markup keeps the aspect ratio intact.
+    """
+    try:
+        markup = open(resource_path(name), encoding='utf-8').read()
+    except OSError:
+        logger.warning("Icon not found: %s", name)
+        return b''
+    return markup.replace('currentColor', colour).encode('utf-8')
+
+
+def apply_svg(widget, name):
+    """Load a themed SVG into a QSvgWidget and keep it following the theme."""
+    widget.load(_recoloured_svg(name, foreground()))
+    _tracked_svg[widget] = name
+    return widget
 
 
 def path(name):

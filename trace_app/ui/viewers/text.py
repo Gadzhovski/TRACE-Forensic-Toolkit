@@ -15,7 +15,7 @@ from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
-from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
 
 
 class SearchDirection(Enum):
@@ -218,9 +218,7 @@ class TextViewer(QWidget):
         self.export_button = ExportButton(self._export_content, "Text View", self)
         self.toolbar.addWidget(self.export_button)
 
-        spacer = QWidget(self)
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.toolbar.addWidget(spacer)
+        self.toolbar.addWidget(stretch())
 
         # Search controls
         self.search_input = QLineEdit(self)
@@ -235,6 +233,10 @@ class TextViewer(QWidget):
 
     def setup_text_edit(self):
         self.text_edit = CustomTextEdit(self)
+        # Named so it reads as a content surface. Unnamed it picked up the
+        # shared QLineEdit/QTextEdit rule, which paints an input field -- a
+        # shade lighter than every other viewer tab.
+        self.text_edit.setObjectName("textContentView")
         self.text_edit.setReadOnly(True)
         self.layout.addWidget(self.text_edit)
 

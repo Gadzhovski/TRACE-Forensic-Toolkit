@@ -40,7 +40,10 @@ class ExportButton(QToolButton):
         self._title = title
 
         self.setObjectName("exportButton")
-        self.setIcon(icons.icon(icons.SAVE_AS))
+        # Registered rather than set directly: an icon set with
+        # icons.icon() keeps its light-theme tint forever, which left the
+        # save glyph near-black and invisible on a dark toolbar.
+        icons.apply_to(self, icons.SAVE_AS)
         self.setToolTip("Export the current view as text, PDF or HTML")
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))

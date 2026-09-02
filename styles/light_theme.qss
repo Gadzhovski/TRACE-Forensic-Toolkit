@@ -277,6 +277,7 @@ QTabWidget {
 
 QTabWidget::pane {
     border-top: 1px solid #E5E5E5;
+    background-color: #FFFFFF;
 }
 
 QTabBar {
@@ -885,6 +886,11 @@ QComboBox::drop-down {
 /* Toolbar buttons: square, so an icon sits centred in its hover highlight
    rather than floating in a wide rectangle. */
 QToolBar QToolButton {
+    /* Transparent until hovered. Without this, Qt paints its default button
+       fill, which is a shade lighter than the bar and put a faint panel behind
+       every icon. */
+    background-color: transparent;
+    border: none;
     padding: 0px;
     margin: 0px 1px;
     border-radius: 4px;
@@ -1011,4 +1017,20 @@ QToolBarSeparator {
     max-width: 1px;
     min-width: 1px;
     margin: 6px 8px;
+}
+
+/* The text viewer and the Application tab's placeholder are content surfaces,
+   not input fields. Both previously sat a shade lighter than the other viewer
+   tabs -- the text pane by inheriting the shared QTextEdit rule, the
+   placeholder by setting its own colour -- so switching tabs changed the
+   background under you. */
+QTextEdit#textContentView {
+    background-color: #FFFFFF;
+    color: #212529;
+    border: 1px solid #CED4DA;
+    border-radius: 4px;
+}
+
+#placeholderLabel {
+    background-color: #FFFFFF;
 }
