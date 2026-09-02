@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
 from fitz import open as fitz_open, Matrix
 
 from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
+from trace_app.infra.constants import CONTROL_HEIGHT, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
@@ -78,38 +78,42 @@ class PDFViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = icons.action(icons.UP, "First", self)
+        self.first_action = icons.action(icons.UP, "First page", self)
         self.first_action.triggered.connect(self.show_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = icons.action(icons.BACK, "Previous", self)
+        self.prev_action = icons.action(icons.BACK, "Previous page", self)
         self.prev_action.triggered.connect(self.show_previous_page)
         self.toolbar.addAction(self.prev_action)
 
         # Page entry
         self.page_entry = QLineEdit(self)
-        self.page_entry.setMaximumWidth(40)
-        self.page_entry.setAlignment(Qt.AlignRight)
+        # Sized and centred exactly as in the Hex and Text viewers, so the page
+        # box sits in the same place whichever tab you are on.
+        self.page_entry.setFixedWidth(48)
+        self.page_entry.setAlignment(Qt.AlignCenter)
+        self.page_entry.setPlaceholderText("1")
         self.page_entry.returnPressed.connect(self.go_to_page)
         self.toolbar.addWidget(self.page_entry)
 
-        # Total pages label
-        self.total_pages_label = QLabel(f"of {len(self.pdf)}" if self.pdf else "of 0")
+        # Parented to self: align_controls only reaches the toolbar's children,
+        # so an unparented label kept its natural height and sat off centre.
+        self.total_pages_label = QLabel(f"of {len(self.pdf)}" if self.pdf else "of —", self)
+        self.total_pages_label.setFixedWidth(64)
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
-        self.next_action = icons.action(icons.FORWARD, "Next", self)
+        self.next_action = icons.action(icons.FORWARD, "Next page", self)
         self.next_action.triggered.connect(self.show_next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = icons.action(icons.DOWN, "Last", self)
+        self.last_action = icons.action(icons.DOWN, "Last page", self)
         self.last_action.triggered.connect(self.show_last_page)
         self.toolbar.addAction(self.last_action)
 
-        # Add small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # Zoom actions
         self.zoom_in_action = icons.action(icons.ZOOM_IN, "Zoom In", self)
@@ -134,10 +138,9 @@ class PDFViewer(QWidget):
         self.reset_zoom_action.triggered.connect(self.reset_zoom)
         self.toolbar.addAction(self.reset_zoom_action)
 
-        # Add small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # Fit in window
         fit_window_icon = icons.icon(icons.FIT_WINDOW)
@@ -151,10 +154,9 @@ class PDFViewer(QWidget):
         self.fit_width_action.triggered.connect(self.fit_width)
         self.toolbar.addAction(self.fit_width_action)
 
-        # Add small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # Pan tool button
         self.pan_tool_icon = icons.icon(icons.PAN)
@@ -241,7 +243,7 @@ class PDFViewer(QWidget):
             self.next_action.setEnabled(False)
             self.first_action.setEnabled(False)
             self.last_action.setEnabled(False)
-            self.total_pages_label.setText("of 0")
+            self.total_pages_label.setText("of —")
             self.page_entry.setText("")
             return
 

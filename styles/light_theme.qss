@@ -999,8 +999,16 @@ QToolButton#multiSelectButton::menu-indicator {
 /* Group divider inside a toolbar. A visible rule makes it obvious where one
    group of controls ends and the next begins -- the blank spacers these
    replaced left the bars reading as one long undifferentiated row. */
-QToolBar::separator:horizontal {
+/* Group divider inside a toolbar. A visible rule makes it obvious where one
+   group of controls ends and the next begins -- the blank spacers these
+   replaced left the bars reading as one long undifferentiated row.
+
+   Qt builds these as real QToolBarSeparator widgets, so they are targeted by
+   type. The ::separator subcontrol rule does not reach them and leaves Qt
+   drawing its default 17px block instead of a rule. */
+QToolBarSeparator {
     background-color: #dee2e6;
-    width: 1px;
+    max-width: 1px;
+    min-width: 1px;
     margin: 6px 8px;
 }

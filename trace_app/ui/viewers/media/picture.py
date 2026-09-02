@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QToolBar, QScrollAr
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
-from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
 
 logger = logging.getLogger('TRACE.Viewer.Picture')
 
@@ -85,12 +85,21 @@ class PictureViewer(QWidget):
         reset_action.triggered.connect(self.reset)
         self.export_action.triggered.connect(self.export_original_image)
 
-        # Add actions to the toolbar
+        # Grouped rather than run together: six icons of the same weight in one
+        # unbroken row gave no clue which did what. Zoom, then rotate, then
+        # reset -- with Save pushed to the right, where the PDF toolbar also
+        # puts it, so the two viewers read the same way.
         self.toolbar.addAction(zoom_in_action)
         self.toolbar.addAction(zoom_out_action)
+
+        self.toolbar.addSeparator()
         self.toolbar.addAction(rotate_left_action)
         self.toolbar.addAction(rotate_right_action)
+
+        self.toolbar.addSeparator()
         self.toolbar.addAction(reset_action)
+
+        self.toolbar.addWidget(stretch())
         self.toolbar.addAction(self.export_action)
         # Every control in this toolbar gets the shared height, once it is built.
         align_controls(self.toolbar)
