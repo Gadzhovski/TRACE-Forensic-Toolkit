@@ -135,13 +135,13 @@ class VirusTotal(QWidget):
         self.virus_total_logo.setCursor(Qt.PointingHandCursor)
 
     def setup_action_toolbar(self):
-        self.view_in_browser_action = QAction(QIcon(icons.path(icons.WEB_BROWSER)), "View in Browser",
+        self.view_in_browser_action = icons.action(icons.WEB_BROWSER, "View in Browser",
                                               self)
         self.view_in_browser_action.triggered.connect(self.view_in_browser)
         self.action_toolbar.addAction(self.view_in_browser_action)
         self.view_in_browser_action.setVisible(True)
 
-        self.back_action = QAction(QIcon(icons.path(icons.BACK)), "Back", self)
+        self.back_action = icons.action(icons.BACK, "Back", self)
         self.back_action.triggered.connect(self.reset_ui)
         self.action_toolbar.addAction(self.back_action)
         self.action_toolbar.addWidget(self.spacer(QSizePolicy.Expanding, QSizePolicy.Preferred))

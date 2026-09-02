@@ -21,9 +21,9 @@ class RegistryExtractor(QWidget):
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
-        self.hive_icon = QIcon(icons.path(icons.REGISTRY_HIVE))
-        self.key_icon = QIcon(icons.path(icons.REGISTRY_KEY))
-        self.value_icon = QIcon(icons.path(icons.REGISTRY_VALUE))
+        self.hive_icon = icons.icon(icons.REGISTRY_HIVE)
+        self.key_icon = icons.icon(icons.REGISTRY_KEY)
+        self.value_icon = icons.icon(icons.REGISTRY_VALUE)
         self.init_ui()
 
     def set_image_handler(self, image_handler):
@@ -42,7 +42,7 @@ class RegistryExtractor(QWidget):
 
         self.icon_label = QLabel()
         self.icon_label.setObjectName("panelIcon")
-        self.icon_label.setPixmap(icons.icon(icons.REGISTRY).pixmap(PANEL_ICON_SIZE, PANEL_ICON_SIZE))
+        icons.apply_pixmap(self.icon_label, icons.REGISTRY, PANEL_ICON_SIZE)
         self.toolbar.addWidget(self.icon_label)
 
         self.label = QLabel("Registry Browser")

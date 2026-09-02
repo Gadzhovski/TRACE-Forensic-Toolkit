@@ -14,7 +14,7 @@ class AboutDialog(QDialog):
 
         # Load and scale the logo
         logo = QLabel(self)
-        pixmap = QPixmap(icons.path(icons.LOGO))  # Ensure icons.path(icons.LOGO) is the correct path
+        pixmap = icons.icon(icons.LOGO).pixmap(24, 24)  # Ensure icons.path(icons.LOGO) is the correct path
         # Adjust the logo size here
         scaled_pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         logo.setPixmap(scaled_pixmap)

@@ -74,11 +74,11 @@ class PDFViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = QAction(QIcon(icons.path(icons.UP)), "First", self)
+        self.first_action = icons.action(icons.UP, "First", self)
         self.first_action.triggered.connect(self.show_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon(icons.path(icons.BACK)), "Previous", self)
+        self.prev_action = icons.action(icons.BACK, "Previous", self)
         self.prev_action.triggered.connect(self.show_previous_page)
         self.toolbar.addAction(self.prev_action)
 
@@ -96,11 +96,11 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
-        self.next_action = QAction(QIcon(icons.path(icons.FORWARD)), "Next", self)
+        self.next_action = icons.action(icons.FORWARD, "Next", self)
         self.next_action.triggered.connect(self.show_next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon(icons.path(icons.DOWN)), "Last", self)
+        self.last_action = icons.action(icons.DOWN, "Last", self)
         self.last_action.triggered.connect(self.show_last_page)
         self.toolbar.addAction(self.last_action)
 
@@ -110,7 +110,7 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Zoom actions
-        self.zoom_in_action = QAction(QIcon(icons.path(icons.ZOOM_IN)), "Zoom In", self)
+        self.zoom_in_action = icons.action(icons.ZOOM_IN, "Zoom In", self)
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.toolbar.addAction(self.zoom_in_action)
 
@@ -123,12 +123,12 @@ class PDFViewer(QWidget):
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
         self.toolbar.addWidget(self.zoom_percentage_entry)
 
-        self.zoom_out_action = QAction(QIcon(icons.path(icons.ZOOM_OUT)), "Zoom Out", self)
+        self.zoom_out_action = icons.action(icons.ZOOM_OUT, "Zoom Out", self)
         self.zoom_out_action.triggered.connect(self.zoom_out)
         self.toolbar.addAction(self.zoom_out_action)
 
         # Create a reset zoom button with its icon and add it to the toolbar
-        reset_zoom_icon = QIcon(icons.path(icons.ZOOM_ACTUAL))
+        reset_zoom_icon = icons.icon(icons.ZOOM_ACTUAL)
         self.reset_zoom_action = QAction(reset_zoom_icon, "Reset Zoom", self)
         self.reset_zoom_action.triggered.connect(self.reset_zoom)
         self.toolbar.addAction(self.reset_zoom_action)
@@ -139,13 +139,13 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Fit in window
-        fit_window_icon = QIcon(icons.path(icons.FIT_WINDOW))
+        fit_window_icon = icons.icon(icons.FIT_WINDOW)
         self.fit_window_action = QAction(fit_window_icon, "Fit in Window", self)
         self.fit_window_action.triggered.connect(self.fit_window)
         self.toolbar.addAction(self.fit_window_action)
 
         # Fit in width
-        fit_width_icon = QIcon(icons.path(icons.FIT_WIDTH))
+        fit_width_icon = icons.icon(icons.FIT_WIDTH)
         self.fit_width_action = QAction(fit_width_icon, "Fit in Width", self)
         self.fit_width_action.triggered.connect(self.fit_width)
         self.toolbar.addAction(self.fit_width_action)
@@ -156,7 +156,7 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Pan tool button
-        self.pan_tool_icon = QIcon(icons.path(icons.PAN))
+        self.pan_tool_icon = icons.icon(icons.PAN)
         self.pan_tool_action = QAction(self.pan_tool_icon, "Pan Tool", self)
         self.pan_tool_action.setCheckable(True)
         self.pan_tool_action.toggled.connect(self.toggle_pan_mode)
@@ -168,12 +168,12 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Print button
-        self.print_icon = QIcon(icons.path(icons.PRINT))
+        self.print_icon = icons.icon(icons.PRINT)
         self.print_action = QAction(self.print_icon, "Print", self)
         self.print_action.triggered.connect(self.print_pdf)
         self.toolbar.addAction(self.print_action)
 
-        self.save_pdf_action = QAction(QIcon(icons.path(icons.SAVE_AS)), "Save PDF", self)
+        self.save_pdf_action = icons.action(icons.SAVE_AS, "Save PDF", self)
         self.save_pdf_action.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.save_pdf_action)
 

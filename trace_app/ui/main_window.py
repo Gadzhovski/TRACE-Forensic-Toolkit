@@ -218,7 +218,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.setWindowTitle('Trace 1.2.0')
 
         # Set application icon for all platforms
-        app_icon = QIcon(icons.path(icons.LOGO_LARGE))
+        app_icon = icons.icon(icons.LOGO_LARGE)
         self.setWindowIcon(app_icon)
 
         # Set taskbar/dock icon for different platforms
@@ -312,13 +312,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.main_toolbar.setMovable(False)
         self.main_toolbar.setFloatable(False)
         self.main_toolbar.addAction(
-            self.create_action(icons.path(icons.EVIDENCE_ADD), "Load Image", self.load_image_evidence))
+            self.create_action(icons.EVIDENCE_ADD, "Load Image", self.load_image_evidence))
         self.main_toolbar.addAction(
-            self.create_action(icons.path(icons.EVIDENCE_REMOVE), "Remove Image", self.remove_image_evidence))
+            self.create_action(icons.EVIDENCE_REMOVE, "Remove Image", self.remove_image_evidence))
         self.main_toolbar.addSeparator()
 
         # Create verify_image_button as an attribute of MainWindow
-        self.verify_image_button = self.create_action(icons.path(icons.VERIFY), "Verify Image", self.verify_image)
+        self.verify_image_button = self.create_action(icons.VERIFY, "Verify Image", self.verify_image)
         self.main_toolbar.addAction(self.verify_image_button)
 
 
@@ -379,8 +379,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # LEFT SIDE: Icon and Title
         self.listing_icon_label = QLabel()
         self.listing_icon_label.setObjectName("panelIcon")
-        self.listing_icon_label.setPixmap(
-            icons.icon(icons.SEARCH_BROWSER).pixmap(PANEL_ICON_SIZE, PANEL_ICON_SIZE))
+        icons.apply_pixmap(self.listing_icon_label, icons.SEARCH_BROWSER, PANEL_ICON_SIZE)
         self.listing_toolbar.addWidget(self.listing_icon_label)
 
         self.listing_title_label = QLabel("File System Browser")
@@ -393,17 +392,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_toolbar.addWidget(title_spacer)
 
         # MIDDLE: Navigation buttons (Back, Forward, Up) - next to title
-        self.back_action = QAction(QIcon(icons.path(icons.BACK)), "Back", self)
+        self.back_action = icons.action(icons.BACK, "Back", self)
         self.back_action.triggered.connect(self.navigate_back)
         self.back_action.setEnabled(False)
         self.listing_toolbar.addAction(self.back_action)
 
-        self.forward_action = QAction(QIcon(icons.path(icons.FORWARD)), "Forward", self)
+        self.forward_action = icons.action(icons.FORWARD, "Forward", self)
         self.forward_action.triggered.connect(self.navigate_forward)
         self.forward_action.setEnabled(False)
         self.listing_toolbar.addAction(self.forward_action)
 
-        self.go_up_action = QAction(QIcon(icons.path(icons.UP)), "Go Up Directory", self)
+        self.go_up_action = icons.action(icons.UP, "Go Up Directory", self)
         self.go_up_action.triggered.connect(self.navigate_up_directory)
         self.go_up_action.setEnabled(False)
         self.listing_toolbar.addAction(self.go_up_action)
@@ -552,7 +551,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # registry needs to know which theme is active before anything asks it
         # for an icon.
         icons.set_theme(theme)
-        self._refresh_icons()
 
         try:
             with open(qss_file, 'r') as f:
@@ -579,13 +577,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return f"url({quote}{resolved}{quote})"
 
         return cls._QSS_URL.sub(absolute, stylesheet)
-
-    def _refresh_icons(self):
-        """Re-apply icons after a theme change so their tint updates."""
-        if not hasattr(self, 'main_toolbar'):
-            return  # called during construction, before the UI exists
-        for action, name in getattr(self, '_themed_actions', ()):
-            action.setIcon(icons.icon(name))
 
     def show_api_key_dialog(self):
         # Create a dialog to get API keys from the user
@@ -659,9 +650,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Make sure verify_image_button exists before trying to change its icon
         if hasattr(self, 'verify_image_button'):
             if hasattr(self.verification_widget, 'is_verified') and self.verification_widget.is_verified:
-                self.verify_image_button.setIcon(QIcon(icons.path(icons.VERIFY_OK)))
+                icons.apply_to(self.verify_image_button, icons.VERIFY_OK)
             else:
-                self.verify_image_button.setIcon(QIcon(icons.path(icons.VERIFY)))
+                icons.apply_to(self.verify_image_button, icons.VERIFY)
 
         # Call the original closeEvent to close the widget
         QWidget.closeEvent(self.verification_widget, event)
@@ -912,7 +903,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.enable_tabs(False)
             # set the icon back to the original - only if verify_image_button exists
             if hasattr(self, 'verify_image_button'):
-                self.verify_image_button.setIcon(QIcon(icons.path(icons.VERIFY)))
+                icons.apply_to(self.verify_image_button, icons.VERIFY)
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()
@@ -1913,8 +1904,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
 
-    def create_action(self, icon_path, text, callback):
-        action = QAction(QIcon(icon_path), text, self)
+    def create_action(self, icon_name, text, callback):
+        """Toolbar action whose icon follows the theme.
+
+        Takes a registry name (icons.EVIDENCE_ADD), not a filesystem path:
+        building the QIcon from a path skipped tinting, which is why these
+        toolbar icons rendered black in both themes.
+        """
+        action = icons.action(icon_name, text, self)
         action.triggered.connect(callback)
         return action
 

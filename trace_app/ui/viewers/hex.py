@@ -257,11 +257,11 @@ class HexViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = QAction(QIcon(icons.path(icons.UP)), "First", self)
+        self.first_action = icons.action(icons.UP, "First", self)
         self.first_action.triggered.connect(self.load_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon(icons.path(icons.BACK)), "Previous", self)
+        self.prev_action = icons.action(icons.BACK, "Previous", self)
         self.prev_action.triggered.connect(self.previous_page)
         self.toolbar.addAction(self.prev_action)
 
@@ -278,11 +278,11 @@ class HexViewer(QWidget):
         self.total_pages_label.setFixedHeight(25)  # Set fixed height for label
         self.toolbar.addWidget(self.total_pages_label)
 
-        self.next_action = QAction(QIcon(icons.path(icons.FORWARD)), "Next", self)
+        self.next_action = icons.action(icons.FORWARD, "Next", self)
         self.next_action.triggered.connect(self.next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon(icons.path(icons.DOWN)), "Last", self)
+        self.last_action = icons.action(icons.DOWN, "Last", self)
         self.last_action.triggered.connect(self.load_last_page)
         self.toolbar.addAction(self.last_action)
 

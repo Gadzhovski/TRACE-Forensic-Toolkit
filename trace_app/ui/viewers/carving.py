@@ -75,7 +75,7 @@ class FileCarvingWidget(QWidget):
 
         self.icon_label = QLabel()
         self.icon_label.setObjectName("panelIcon")
-        self.icon_label.setPixmap(icons.icon(icons.CARVING).pixmap(PANEL_ICON_SIZE, PANEL_ICON_SIZE))
+        icons.apply_pixmap(self.icon_label, icons.CARVING, PANEL_ICON_SIZE)
         self.toolbar.addWidget(self.icon_label)
 
         self.title_label = QLabel("File Carving")
@@ -187,13 +187,13 @@ class FileCarvingWidget(QWidget):
 
         # Define actions
         action_small_size = (QAction("Small Size", self))
-        action_small_size.setIcon(QIcon(icons.path(icons.ICONS_SMALL)))
+        icons.apply_to(action_small_size, icons.ICONS_SMALL)
 
         action_medium_size = (QAction("Medium Size", self))
-        action_medium_size.setIcon(QIcon(icons.path(icons.ICONS_MEDIUM)))
+        icons.apply_to(action_medium_size, icons.ICONS_MEDIUM)
 
         action_large_size = (QAction("Large Size", self))
-        action_large_size.setIcon(QIcon(icons.path(icons.ICONS_LARGE)))
+        icons.apply_to(action_large_size, icons.ICONS_LARGE)
 
         # Set icons
 

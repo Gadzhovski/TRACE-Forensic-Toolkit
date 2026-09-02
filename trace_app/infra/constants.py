@@ -45,7 +45,9 @@ TREE_ICON_SIZE = 16
 TABLE_ICON_SIZE = 24
 TOOLBAR_ICON_SIZE = 16
 # Icon beside a panel heading (File System Browser, File Carving, Registry).
-PANEL_ICON_SIZE = 20
+# Sized against the 16px bold title text: a Tabler glyph carries internal
+# padding, so a 24px box renders roughly the same visual weight as the text.
+PANEL_ICON_SIZE = 24
 
 # Table settings
 TABLE_COLUMN_COUNT = 9

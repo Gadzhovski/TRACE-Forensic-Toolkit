@@ -52,7 +52,7 @@ class VerificationWidget(QWidget):
         self.image_handler = image_handler
         self.thread = None
         self.setWindowTitle("Trace - Image Verification")
-        self.setWindowIcon(QIcon(icons.path(icons.LOGO)))
+        self.setWindowIcon(icons.icon(icons.LOGO))
         self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
         self._verified = False  # Track verification status
 

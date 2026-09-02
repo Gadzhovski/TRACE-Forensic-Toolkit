@@ -62,12 +62,12 @@ class PictureViewer(QWidget):
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
-        zoom_in_icon = QIcon(icons.path(icons.ZOOM_IN))
-        zoom_out_icon = QIcon(icons.path(icons.ZOOM_OUT))
-        rotate_left_icon = QIcon(icons.path(icons.ROTATE_LEFT))
-        rotate_right_icon = QIcon(icons.path(icons.ROTATE_RIGHT))
-        reset_icon = QIcon(icons.path(icons.ROTATE_RESET))
-        export_icon = QIcon(icons.path(icons.SAVE_AS))
+        zoom_in_icon = icons.icon(icons.ZOOM_IN)
+        zoom_out_icon = icons.icon(icons.ZOOM_OUT)
+        rotate_left_icon = icons.icon(icons.ROTATE_LEFT)
+        rotate_right_icon = icons.icon(icons.ROTATE_RIGHT)
+        reset_icon = icons.icon(icons.ROTATE_RESET)
+        export_icon = icons.icon(icons.SAVE_AS)
 
         zoom_in_action = QAction(zoom_in_icon, 'Zoom In', self)
         zoom_out_action = QAction(zoom_out_icon, 'Zoom Out', self)

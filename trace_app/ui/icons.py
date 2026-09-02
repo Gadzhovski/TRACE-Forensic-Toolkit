@@ -13,9 +13,10 @@ Two practical consequences:
 """
 
 import logging
+from weakref import WeakKeyDictionary
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 
 from trace_app.infra.paths import resource_path
 
@@ -96,12 +97,61 @@ _THEME_TINTS = {
 _theme = 'light'
 
 
+#: Widgets handed a tinted icon, so they can be re-tinted on a theme change.
+#: Held weakly: registering a widget here must not keep it alive.
+_tracked_actions = WeakKeyDictionary()
+_tracked_labels = WeakKeyDictionary()
+
+
 def set_theme(theme):
-    """Tell the registry which theme is active, so tints follow it."""
+    """Switch themes: drop cached icons and re-tint everything already placed.
+
+    Tinting happens when an icon is handed out, so a theme change has to reach
+    back to the widgets already holding one. Tracking them here means a call
+    site cannot forget to refresh -- using the registry is enough.
+    """
     global _theme
-    if theme != _theme:
-        _theme = theme
-        clear_cache()
+    if theme == _theme:
+        return
+    _theme = theme
+    clear_cache()
+
+    for action, name in list(_tracked_actions.items()):
+        try:
+            action.setIcon(icon(name))
+        except RuntimeError:
+            pass  # the underlying C++ object is gone
+
+    for label, (name, size) in list(_tracked_labels.items()):
+        try:
+            label.setPixmap(icon(name).pixmap(size, size))
+        except RuntimeError:
+            pass
+
+
+def apply_to(action, name):
+    """Set an action's icon and keep it in step with later theme changes."""
+    action.setIcon(icon(name))
+    _tracked_actions[action] = name
+    return action
+
+
+def apply_pixmap(label, name, size):
+    """Set a label's pixmap and keep it in step with later theme changes."""
+    label.setPixmap(icon(name).pixmap(size, size))
+    _tracked_labels[label] = (name, size)
+    return label
+
+
+def action(name, text, parent=None):
+    """Build a QAction whose icon follows the theme.
+
+    Use this instead of ``QAction(icons.icon(NAME), ...)``: the action is
+    registered, so its icon is re-tinted when the theme changes.
+    """
+    result = QAction(icon(name), text, parent)
+    _tracked_actions[result] = name
+    return result
 
 
 def _auto_tint(name):
