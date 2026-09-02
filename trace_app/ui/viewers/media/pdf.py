@@ -5,15 +5,17 @@ import logging
 from PySide6.QtCore import Qt, QSize, QPoint
 from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout, QPainter
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolBar,
-                               QScrollArea, QLineEdit, QFileDialog, QMessageBox,
-                               QPushButton, QSizePolicy, QApplication)
+from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
+                               QLineEdit, QMenu, QMessageBox, QPushButton,
+                               QScrollArea, QSizePolicy, QToolBar, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from fitz import open as fitz_open, Matrix
 
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Viewer.PDF')
@@ -166,15 +168,36 @@ class PDFViewer(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
 
-        # Print button
-        self.print_icon = icons.icon(icons.PRINT)
-        self.print_action = QAction(self.print_icon, "Print", self)
+        # One Save button with a format menu, rather than a bare "Save PDF"
+        # action. Saving the original document and exporting its extracted
+        # text are different operations, so both are offered here.
+        self.save_button = QToolButton(self)
+        self.save_button.setObjectName("exportButton")
+        self.save_button.setIcon(icons.icon(icons.SAVE_AS))
+        self.save_button.setToolTip("Save the document, or export its text")
+        self.save_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.save_button.setPopupMode(QToolButton.InstantPopup)
+
+        save_menu = QMenu(self)
+        save_original = QAction("PDF (original document)", self)
+        save_original.triggered.connect(self.save_pdf)
+        save_menu.addAction(save_original)
+
+        save_text = QAction("Text (extracted)", self)
+        save_text.triggered.connect(lambda: self.export_extracted("txt"))
+        save_menu.addAction(save_text)
+
+        save_html = QAction("HTML (extracted)", self)
+        save_html.triggered.connect(lambda: self.export_extracted("html"))
+        save_menu.addAction(save_html)
+        self.save_button.setMenu(save_menu)
+        self.toolbar.addWidget(self.save_button)
+
+        # Print stays its own control: it sends pages to a printer rather than
+        # writing a file, so it does not belong in a Save menu.
+        self.print_action = icons.action(icons.PRINT, "Print", self)
         self.print_action.triggered.connect(self.print_pdf)
         self.toolbar.addAction(self.print_action)
-
-        self.save_pdf_action = icons.action(icons.SAVE_AS, "Save PDF", self)
-        self.save_pdf_action.triggered.connect(self.save_pdf)
-        self.toolbar.addAction(self.save_pdf_action)
         # Every control in this toolbar gets the shared height, once it is built.
         align_controls(self.toolbar)
 
@@ -492,6 +515,27 @@ class PDFViewer(QWidget):
             self.is_panning = False
             self.setCursor(Qt.OpenHandCursor)  # Change back to open hand cursor
         event.accept()
+
+    def export_extracted(self, suffix):
+        """Write the document's extracted text as .txt or .html.
+
+        Distinct from saving the PDF itself: this is the text content, useful
+        for searching or quoting in a report.
+        """
+        if not self.pdf:
+            QMessageBox.warning(self, "No Document", "No document available to export.")
+            return
+
+        try:
+            text = "\n\n".join(page.get_text() for page in self.pdf)
+        except Exception as e:
+            logger.error("Could not extract text from PDF: %s", e)
+            QMessageBox.critical(self, "Export failed", f"Could not read the document:\n{e}")
+            return
+
+        button = ExportButton(lambda: text, "PDF Text", self)
+        button.hide()
+        button.export(suffix)
 
     def print_pdf(self):
         """Print the current PDF."""

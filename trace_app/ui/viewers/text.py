@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEd
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 
@@ -212,6 +213,11 @@ class TextViewer(QWidget):
         spacer.setFixedSize(GROUP_SPACING, 0)
         self.toolbar.addWidget(spacer)
 
+        # The Text tab had no export at all; it now offers the same three
+        # formats as Hex, from the same shared widget.
+        self.export_button = ExportButton(self._export_content, "Text View", self)
+        self.toolbar.addWidget(self.export_button)
+
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
@@ -235,6 +241,11 @@ class TextViewer(QWidget):
     def display_text_content(self, file_content):
         self.manager.load_text_content(file_content)
         self.refresh_content()
+
+    def _export_content(self):
+        """Plain text for the page currently shown, for the export button."""
+        text = self.text_edit.toPlainText()
+        return text if text else None
 
     def clear_content(self):
         self.text_edit.clear()
