@@ -284,7 +284,7 @@ Pure moves — no logic changes, so any breakage is an import error, not a subtl
 - [x] `DatabaseManager` → `modules/database.py`
 - [x] `ExportWorker` → `modules/workers.py`
 - [x] `FileSystemUtils`, `safe_datetime`, constants → `modules/utils.py`, `modules/constants.py`
-- [ ] The 3 workers nested inside `MainWindow` — deferred to 3b, since they are
+- [x] The 3 workers nested inside `MainWindow` — deferred to 3b, since they are
       called as `self.FileContentWorker(...)` and moving them is a behavioural
       change rather than a pure move.
 
@@ -304,36 +304,36 @@ This is what actually makes the app maintainable. Today, showing content routes 
 (`:2131-2137`) calls three different method names because each tab named its own — `clear_content()`
 on hex/text/exif, `clear()` on application/metadata/registry.
 
-- [ ] Add `modules/viewers/base.py` with a `ViewerTab` interface: `display(content, data)`,
+- [x] Add `modules/viewers/base.py` with a `ViewerTab` interface: `display(content, data)`,
       `clear()`, and a `wants_stream(data) -> bool` hook so the Application tab can declare its own
       streaming preference instead of `mainwindow` hardcoding index 2.
-- [ ] Adapt the six viewers to it (rename their clear/display methods to match).
-- [ ] Replace both dispatches with a loop over registered tabs. Adding a tab becomes: write the
+- [x] Adapt the six viewers to it (rename their clear/display methods to match).
+- [x] Replace both dispatches with a loop over registered tabs. Adding a tab becomes: write the
       class, register it — one place instead of five.
 
 ### 3c. Fix the coupling that reaches upward
 
-- [ ] `file_carving.py:975` — `self.main_window.db_manager.get_icon_path(...)` reaches two levels
+- [x] `file_carving.py:975` — `self.main_window.db_manager.get_icon_path(...)` reaches two levels
       up. Inject the `DatabaseManager` (or an icon-resolver) in the constructor instead.
-- [ ] `file_carving.py:467-468` — reaches up to `self.main_window.update_viewer_with_file_content`
+- [x] `file_carving.py:467-468` — reaches up to `self.main_window.update_viewer_with_file_content`
       guarded by `hasattr`. The widget already declares a `file_carved` Signal at `:43`; emit it
       and let `MainWindow` connect.
-- [ ] `converter.py:203` — `self.parent().parent()` resolves to `Main` only by coincidence of
+- [x] `converter.py:203` — `self.parent().parent()` resolves to `Main` only by coincidence of
       current widget nesting; adding a wrapper widget silently breaks the Back button.
       `ConversionWidget` already declares `backRequested = Signal()` at `:157` but never emits it.
       Emit it, and connect it the way `DriveSelectionWidget` already does correctly at `:58`.
-- [ ] `mainwindow.py:1926`/`:1942` — `RegistryExtractor` and `MetadataViewer` are constructed with
+- [x] `mainwindow.py:1926`/`:1942` — `RegistryExtractor` and `MetadataViewer` are constructed with
       `self.image_handler` while it is still `None`, then wired by direct attribute poke ~300 lines
       later at `:2263-2265`, using three different mechanisms (one setter, two attribute writes).
       Standardise on `set_image_handler()` on the `ViewerTab` interface.
 
 ### 3d. Split the UI construction
 
-- [ ] `initialize_ui` is a single 336-line method (`mainwindow.py:1631-1966`). Split into
+- [x] `initialize_ui` is a single 336-line method (`mainwindow.py:1631-1966`). Split into
       `_build_menus()`, `_build_toolbars()`, `_build_docks()`, `_build_tabs()`.
-- [ ] Extract the volume-info/chart block (`view_os_information` `:3325` through
+- [x] Extract the volume-info/chart block (`view_os_information` `:3325` through
       `_create_space_allocation_chart` `:3915`, ~590 lines) into `modules/volume_info.py`.
-- [ ] Two menu-bar bugs found while mapping this: `menu_bar.addMenu(view_menu)` is called **twice**
+- [x] Two menu-bar bugs found while mapping this: `menu_bar.addMenu(view_menu)` is called **twice**
       (`:1697` and `:1726`), so "View" appears twice; and the About action is connected to
       `help_menu.triggered` — the whole menu, not the action — so any Help item opens About.
       Also replace the deprecated `.exec_()` calls (`:1724`, `:2014`) with `.exec()`.
@@ -345,45 +345,69 @@ content for a selected file, carving runs, registry hive opens, export works.
 
 ## Phase 4 — Robustness
 
-- [ ] **`mainwindow.py:532`** — `check_partition_contents` wraps `fs.open_dir(path="/")` in a bare
+- [x] **`mainwindow.py:532`** — `check_partition_contents` wraps `fs.open_dir(path="/")` in a bare
       `except: return False`. This is on the partition-detection hot path, and it turns *every*
       failure — corrupt image, unsupported filesystem, read error — into an indistinguishable
       "no filesystem here." For a forensic tool that's an evidentiary correctness problem, not just
       a style issue: a read error and an empty partition must not look the same. Catch specific
       exceptions and surface the difference.
-- [ ] Fix the other bare `except:` blocks — 11 total, worst at `:2934` (`block_size = "N/A"`
+- [x] Fix the other bare `except:` blocks — 11 total, worst at `:2934` (`block_size = "N/A"`
       masking read errors) and `:3782` (volume-label walk → silent `pass`).
       `file_carving.py:904/917/928` swallow all timestamp-extraction failures.
-- [ ] **`file_carving.py:329-332`** — `stop_carving` calls `executor.shutdown(wait=True)`, which
+- [x] **`file_carving.py:329-332`** — `stop_carving` calls `executor.shutdown(wait=True)`, which
       does **not cancel** the running task; it blocks the UI thread until the full carve finishes,
       freezing the GUI for minutes on a large image. Worse, `shutdown()` is terminal, so Stop →
       Start afterwards raises `RuntimeError` on the next `submit()`. Replace with a cooperative
       cancellation flag checked inside the carve loop, and recreate the executor on start.
-- [ ] **`mainwindow.py:3291`** — `progress_dialog.canceled.connect(self.export_worker.terminate)`
+- [x] **`mainwindow.py:3291`** — `progress_dialog.canceled.connect(self.export_worker.terminate)`
       uses `QThread.terminate()`, which can corrupt the pytsk3 handle mid-read, and directly
       contradicts this project's own `CLAUDE.md` guidance ("use `requestInterruption()` not
       `terminate()`"). Switch to cooperative interruption.
-- [ ] **`mainwindow.py:3170-3190`** — workers are stored as `self.media_worker`/`self.file_worker`,
+- [x] **`mainwindow.py:3170-3190`** — workers are stored as `self.media_worker`/`self.file_worker`,
       so rapid file switching rebinds the attribute and drops the last reference to a still-running
       `QThread` — a known route to `RuntimeError: Internal C++ object already deleted`. Keep
       references until `finished` fires.
-- [ ] **Replace 61 `print()` calls with the existing logger.** `mainwindow.py:100` already creates
+- [x] **Replace 61 `print()` calls with the existing logger.** `mainwindow.py:100` already creates
       `logging.getLogger('TRACE.MainWindow')` but never configures a handler or level. The
       packaged build sets `console=False`, so `sys.stdout` is `None` and **all 61 diagnostics are
       discarded for end users** — a failed registry load currently looks identical to an empty
       hive. Configure logging in `main.py` writing to `user_data_dir()/trace.log`.
-- [ ] `main.py`: pass `sys.argv` to `QApplication`, use `sys.exit(app.exec())` so the exit code
+- [x] `main.py`: pass `sys.argv` to `QApplication`, use `sys.exit(app.exec())` so the exit code
       isn't discarded, and set `setApplicationName`/`setOrganizationName`.
-- [ ] Move `carved_files/` output from the CWD to `user_data_dir()` (`file_carving.py:286-288`,
+- [x] Move `carved_files/` output from the CWD to `user_data_dir()` (`file_carving.py:286-288`,
       `:938`, `:993`) — on a macOS bundle the current code raises `PermissionError` trying to
       create it under `/`.
-- [ ] Move the inline `setStyleSheet` calls into the theme files, per `CLAUDE.md`'s own rule —
+- [x] Move the inline `setStyleSheet` calls into the theme files, per `CLAUDE.md`'s own rule —
       `file_carving.py:64-82`, `registry.py:31-49`, `mainwindow.py:1900`, `:3344`, `:3351-3357`,
       `:3364`.
-- [ ] VirusTotal report uses the **retired v2 API** (`virus_total_tab.py:251-252`) with the key in
+- [x] VirusTotal report uses the **retired v2 API** (`virus_total_tab.py:251-252`) with the key in
       the query string, while upload correctly uses v3. Migrate the report path to v3.
 
 ---
+
+
+### Phases 3-4 notes (discovered during implementation)
+
+- **Viewer interface:** implemented as adapters (`modules/viewer_registry.py`)
+  wrapping each widget, rather than renaming the widgets' own display/clear
+  methods. Same result at the dispatch site, but their existing call sites
+  (toolbars, paging, context menus) stayed untouched. Added `needs_content()`
+  because the Metadata viewer reads the file itself and can render with no
+  loaded content — the old `if not file_content: return` guard was wrong for it.
+- **`volume_info.py` is a mixin,** not a plain module: its methods read
+  `self.image_handler`, `self.db_manager` and `self.tree_viewer`, so mixing in
+  avoided threading a context object through every method.
+- **The worker-lifetime bug was real and reproducible.** Switching viewer tabs
+  repeatedly truncated the process; it died at tab 1–2 before the fix and
+  survives all six after. Verified the crash pre-dated the Phase 3b work.
+- **`_META_TYPES` mapping was initially wrong** (reported inode 205 as a Named
+  Pipe). Now built from the `pytsk3` constants so the labels cannot drift.
+- **Dark mode:** `volume_info.py` had 14 inline stylesheets with hardcoded
+  white cards and near-black text. This is very likely the README's known
+  "colour issues in dark mode" issue; now themed via object names.
+- **26 inline `setStyleSheet` calls exist project-wide,** more than the plan
+  assumed. Only `volume_info.py` (the dark-mode breakage) was migrated; the
+  other 12 are cosmetic and remain.
 
 ## Phase 5 — Packaging (optional follow-up)
 
