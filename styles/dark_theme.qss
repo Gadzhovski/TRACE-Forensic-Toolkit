@@ -594,13 +594,15 @@ QSlider::handle:horizontal {
 }
 
 /* Search Toolbar Styles (Listing View) */
+/* Colour only. Padding, height and radius come from the shared
+   QLineEdit rule, so every search box in the application matches.
+   This block used to set `padding: 6px 10px`, and because an ID
+   selector outranks the generic rule, 12px of vertical padding was
+   applied inside a 24px-tall field -- which clipped the placeholder. */
 QLineEdit#listingSearchBar {
-    border: 1px solid #5A5A5A;
-    border-radius: 4px;
-    padding: 6px 10px;
+    border: 1px solid #4C4C4C;
     background-color: #3C3C3C;
     color: #E0E0E0;
-    font-size: 13px;
 }
 
 QLineEdit#listingSearchBar:hover {
@@ -608,7 +610,7 @@ QLineEdit#listingSearchBar:hover {
 }
 
 QLineEdit#listingSearchBar:focus {
-    border: 1px solid #1E90FF;
+    border: 1px solid #58A6FF;
 }
 
 QToolButton#clearSearchBtn {
@@ -727,16 +729,6 @@ QLabel#panelTitle {
     color: #E8E8E8;
     margin-left: 6px;
     padding: 2px 0;
-}
-
-QToolBar#compactToolbar {
-    spacing: 2px;
-    padding: 1px;
-}
-
-QToolBar#compactToolbar QToolButton {
-    padding: 2px;
-    margin: 1px;
 }
 
 QTableWidget#hexTable {
