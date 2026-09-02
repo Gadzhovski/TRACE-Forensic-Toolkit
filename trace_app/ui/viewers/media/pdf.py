@@ -121,11 +121,15 @@ class PDFViewer(QWidget):
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.toolbar.addAction(self.zoom_in_action)
 
-        # QLineEdit for zoom percentage
+        # Zoom percentage. Centred and sized like the page box above it and
+        # the font-size control in the Hex and Text bars, so the three tabs
+        # present the same kind of field the same way; it was right-aligned,
+        # which put its text hard against the edge while every other field in
+        # the application centres its value.
         self.zoom_percentage_entry = QLineEdit(self)
         self.zoom_percentage_entry.setFixedWidth(64)
-        self.zoom_percentage_entry.setAlignment(Qt.AlignRight)
-        self.zoom_percentage_entry.setPlaceholderText("100%")  # Default zoom is 100%
+        self.zoom_percentage_entry.setAlignment(Qt.AlignCenter)
+        self.zoom_percentage_entry.setPlaceholderText("100%")
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
         self.toolbar.addWidget(self.zoom_percentage_entry)
 
