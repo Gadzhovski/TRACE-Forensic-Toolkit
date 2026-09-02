@@ -1,3 +1,4 @@
+import logging
 import os
 import mimetypes
 import platform
@@ -14,6 +15,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel
 
 from fitz import open as fitz_open, Matrix
 from modules.paths import resource_path
+
+logger = logging.getLogger('TRACE.Viewer')
 
 if os.name == "nt":  # Windows
     # cast/POINTER are only used by the pycaw volume interface below, so they
@@ -85,7 +88,7 @@ class PyTsk3StreamDevice(QIODevice):
         except Exception as e:
             # This is expected if the device was closed while reading
             if not self._is_closed:
-                print(f"Error reading from pytsk3 file object: {e}")
+                logger.error(f"Error reading from pytsk3 file object: {e}")
             return b''
 
     def writeData(self, data):
@@ -138,7 +141,7 @@ class UnifiedViewer(QWidget):
         if not os.path.exists(icons_dir):
             try:
                 os.makedirs(icons_dir)
-                print(f"Created missing Icons directory: {icons_dir}")
+                logger.debug(f"Created missing Icons directory: {icons_dir}")
 
                 # Create missing default icons
                 self.create_default_icon(os.path.join(icons_dir, "play.png"), (50, 50), (0, 255, 0))
@@ -147,7 +150,7 @@ class UnifiedViewer(QWidget):
                 self.create_default_icon(os.path.join(icons_dir, "volume.png"), (50, 50), (0, 0, 255))
                 self.create_default_icon(os.path.join(icons_dir, "mute.png"), (50, 50), (128, 128, 128))
             except Exception as e:
-                print(f"Error creating Icons directory: {e}")
+                logger.error(f"Error creating Icons directory: {e}")
 
     def create_default_icon(self, path, size, color):
         """Create a simple colored square icon at the specified path"""
@@ -191,7 +194,7 @@ class UnifiedViewer(QWidget):
             painter.end()
             image.save(path)
         except Exception as e:
-            print(f"Error creating default icon {path}: {e}")
+            logger.error(f"Error creating default icon {path}: {e}")
 
 
     def get_pdf_viewer(self):
@@ -259,14 +262,14 @@ class UnifiedViewer(QWidget):
 
                 # OPTION 1: Stream from pytsk3 file object (for large files from disk images)
                 if file_obj is not None and file_size is not None:
-                    print(f"Using streaming playback for {file_size} byte media file")
+                    logger.debug(f"Using streaming playback for {file_size} byte media file")
 
                     # Create custom stream device
                     self._media_stream_device = PyTsk3StreamDevice(file_obj, file_size, self)
 
                     # Open the stream device for reading
                     if not self._media_stream_device.open(QIODevice.ReadOnly):
-                        print("Failed to open stream device for reading")
+                        logger.error("Failed to open stream device for reading")
                         self.placeholder.setText("Error: Could not open stream device")
                         self.placeholder.setVisible(True)
                         return False
@@ -281,7 +284,7 @@ class UnifiedViewer(QWidget):
                 elif content is not None:
                     # Determine if we should use QBuffer based on size
                     file_size_mb = len(content) / (1024 * 1024)
-                    print(f"Using in-memory playback for {file_size_mb:.2f} MB media file")
+                    logger.debug(f"Using in-memory playback for {file_size_mb:.2f} MB media file")
 
                     # Create QBuffer for in-memory playback
                     # QBuffer needs to stay alive during playback, so we store it as instance variable
@@ -293,7 +296,7 @@ class UnifiedViewer(QWidget):
 
                     # Open buffer for reading
                     if not self._media_buffer.open(QIODevice.ReadOnly):
-                        print("Failed to open media buffer for reading")
+                        logger.error("Failed to open media buffer for reading")
                         self.placeholder.setText("Error: Could not open media buffer")
                         self.placeholder.setVisible(True)
                         return False
@@ -314,7 +317,7 @@ class UnifiedViewer(QWidget):
                     try:
                         player.set_audio_only_mode(True)
                     except Exception as e:
-                        print(f"Warning: Could not set audio-only mode: {e}")
+                        logger.error(f"Warning: Could not set audio-only mode: {e}")
 
                 return True
 
@@ -346,7 +349,7 @@ class UnifiedViewer(QWidget):
                 # Stop playback
                 self._audio_video_player.stop()
             except Exception as e:
-                print(f"Error stopping media player: {e}")
+                logger.error(f"Error stopping media player: {e}")
             self._audio_video_player.setVisible(False)
 
         # Clean up media buffer
@@ -356,7 +359,7 @@ class UnifiedViewer(QWidget):
                     self._media_buffer.close()
                 self._media_buffer = None
             except Exception as e:
-                print(f"Error closing media buffer: {e}")
+                logger.error(f"Error closing media buffer: {e}")
 
         # Clean up stream device - with safety delay
         if self._media_stream_device:
@@ -375,7 +378,7 @@ class UnifiedViewer(QWidget):
                     if old_stream_device and old_stream_device.isOpen():
                         old_stream_device.close()
                 except Exception as e:
-                    print(f"Error in delayed stream device cleanup: {e}")
+                    logger.error(f"Error in delayed stream device cleanup: {e}")
 
             # Schedule cleanup after 100ms (non-blocking)
             QTimer.singleShot(100, delayed_cleanup)
@@ -415,8 +418,8 @@ class UnifiedViewer(QWidget):
         if self._audio_video_player:
             try:
                 self._audio_video_player.stop()
-            except:
-                pass
+            except RuntimeError as e:
+                logger.debug("Media player already gone during close: %s", e)
 
         # Clean up media buffer
         if self._media_buffer:
@@ -424,8 +427,8 @@ class UnifiedViewer(QWidget):
                 if self._media_buffer.isOpen():
                     self._media_buffer.close()
                 self._media_buffer = None
-            except:
-                pass
+            except RuntimeError as e:
+                logger.debug("Media buffer already closed: %s", e)
 
         # Clean up stream device (immediate, not delayed)
         if self._media_stream_device:
@@ -433,8 +436,8 @@ class UnifiedViewer(QWidget):
                 if self._media_stream_device.isOpen():
                     self._media_stream_device.close()
                 self._media_stream_device = None
-            except:
-                pass
+            except RuntimeError as e:
+                logger.debug("Stream device already closed: %s", e)
 
         # Release file object
         self._media_file_obj = None
@@ -451,8 +454,11 @@ class UnifiedViewer(QWidget):
             if self._media_stream_device and self._media_stream_device.isOpen():
                 self._media_stream_device.close()
             self._media_file_obj = None
-        except:
-            pass  # Ignore errors during cleanup in destructor
+        except Exception:
+            # __del__ can run during interpreter shutdown, when globals and
+            # even the logger may already be torn down. Nothing useful can be
+            # done or reported here.
+            pass
 
     def shutdown(self):
         """Properly shut down all resources, especially media players.
@@ -476,7 +482,7 @@ class UnifiedViewer(QWidget):
                     player = self._audio_video_player
                     self._audio_video_player = None
                 except Exception as e:
-                    print(f"Error during audio/video player shutdown: {e}")
+                    logger.error(f"Error during audio/video player shutdown: {e}")
 
             # Clean up media buffer
             if self._media_buffer:
@@ -485,7 +491,7 @@ class UnifiedViewer(QWidget):
                         self._media_buffer.close()
                     self._media_buffer = None
                 except Exception as e:
-                    print(f"Error closing media buffer during shutdown: {e}")
+                    logger.error(f"Error closing media buffer during shutdown: {e}")
 
             # Clean up stream device
             if self._media_stream_device:
@@ -494,7 +500,7 @@ class UnifiedViewer(QWidget):
                         self._media_stream_device.close()
                     self._media_stream_device = None
                 except Exception as e:
-                    print(f"Error closing stream device during shutdown: {e}")
+                    logger.error(f"Error closing stream device during shutdown: {e}")
 
             # Release file object reference
             self._media_file_obj = None
@@ -503,7 +509,7 @@ class UnifiedViewer(QWidget):
             QApplication.processEvents()
 
         except Exception as e:
-            print(f"Error during UnifiedViewer shutdown: {e}")
+            logger.error(f"Error during UnifiedViewer shutdown: {e}")
 
 
 class PictureViewer(QWidget):
@@ -903,7 +909,7 @@ class PDFViewer(QWidget):
                 self.update_navigation_states()
             except Exception as e:
                 # If direct open fails, try to clean up the PDF (common with carved files)
-                print(f"Initial PDF load failed: {e}, attempting cleanup...")
+                logger.error(f"Initial PDF load failed: {e}, attempting cleanup...")
                 try:
                     cleaned_content = self.cleanup_pdf_content(content)
                     self.pdf = fitz_open(stream=cleaned_content, filetype="pdf")
@@ -912,9 +918,9 @@ class PDFViewer(QWidget):
                     self.rotation_angle = 0
                     self.show_page(self.current_page)
                     self.update_navigation_states()
-                    print("Successfully loaded PDF after cleanup")
+                    logger.debug("Successfully loaded PDF after cleanup")
                 except Exception as e2:
-                    print(f"Failed to load PDF even after cleanup: {e2}")
+                    logger.error(f"Failed to load PDF even after cleanup: {e2}")
         else:
             self.page_label.clear()
 
@@ -950,15 +956,15 @@ class PDFViewer(QWidget):
                 # Truncate after EOF + whitespace
                 cleaned_content = content[:end_position + whitespace_count]
 
-                print(f"PDF cleanup: Truncated {len(content) - len(cleaned_content)} trailing bytes")
+                logger.debug(f"PDF cleanup: Truncated {len(content) - len(cleaned_content)} trailing bytes")
                 return cleaned_content
             else:
                 # No EOF marker found, return original
-                print("PDF cleanup: No %%EOF marker found, returning original content")
+                logger.debug("PDF cleanup: No %%EOF marker found, returning original content")
                 return content
 
         except Exception as e:
-            print(f"Error during PDF cleanup: {e}")
+            logger.error(f"Error during PDF cleanup: {e}")
             return content
 
     def clear(self):
@@ -1252,7 +1258,7 @@ class AudioVideoPlayer(QWidget):
                     self.media_player.setOption("audio-only", "false")
                     self.media_player.setOption("skip-video", "false")
         except Exception as e:
-            print(f"Warning: Could not set audio-only mode options: {e}")
+            logger.error(f"Warning: Could not set audio-only mode options: {e}")
 
     def handle_media_status_change(self, status):
         """Handle media status changes"""
@@ -1268,7 +1274,7 @@ class AudioVideoPlayer(QWidget):
                 # Set the appropriate mode
                 self.set_audio_only_mode(not has_video)
         except Exception as e:
-            print(f"Warning: Error detecting audio/video mode: {e}")
+            logger.error(f"Warning: Error detecting audio/video mode: {e}")
 
     def setup_connections(self):
         # Media player signals (updated for newer API)
@@ -1300,7 +1306,7 @@ class AudioVideoPlayer(QWidget):
                 interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                 self._volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
             except Exception as e:
-                print(f"Could not initialize Windows audio integration: {e}")
+                logger.error(f"Could not initialize Windows audio integration: {e}")
 
     def set_os_volume(self, volume_level):
         """Set system volume (Windows only)"""
@@ -1309,7 +1315,7 @@ class AudioVideoPlayer(QWidget):
                 # Convert from 0-100 to 0.0-1.0 range
                 self._volume_interface.SetMasterVolumeLevelScalar(volume_level / 100.0, None)
             except Exception as e:
-                print(f"Error setting system volume: {e}")
+                logger.error(f"Error setting system volume: {e}")
 
     def toggle_play(self):
         if self._is_playing:
@@ -1325,7 +1331,7 @@ class AudioVideoPlayer(QWidget):
                 self._is_playing = False
                 self.update_controls()
         except Exception as e:
-            print(f"Error stopping media playback: {e}")
+            logger.error(f"Error stopping media playback: {e}")
 
     def update_play_state(self, state):
         # Updated for newer API
@@ -1485,7 +1491,7 @@ class AudioVideoPlayer(QWidget):
             if hasattr(self, 'media_player') and self.media_player:
                 self.media_player.stop()
         except Exception as e:
-            print(f"Error stopping media player during close: {e}")
+            logger.error(f"Error stopping media player during close: {e}")
         super().closeEvent(event)
 
     def __del__(self):
@@ -1619,7 +1625,7 @@ class AudioVideoPlayer(QWidget):
                             # Process events to ensure this is applied
                             QApplication.processEvents()
                         except Exception as e:
-                            print(f"Error removing audio output: {e}")
+                            logger.error(f"Error removing audio output: {e}")
 
                 # Set media to null/empty to release resources
                 if hasattr(self.media_player, 'setSource'):
@@ -1628,9 +1634,9 @@ class AudioVideoPlayer(QWidget):
                         # Process events to ensure this is applied
                         QApplication.processEvents()
                     except Exception as e:
-                        print(f"Error clearing media source: {e}")
+                        logger.error(f"Error clearing media source: {e}")
 
                 # Wait a moment for resources to be released
                 time.sleep(0.1)
         except Exception as e:
-            print(f"Error in safe_stop: {e}")
+            logger.error(f"Error in safe_stop: {e}")

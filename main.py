@@ -31,6 +31,11 @@ def configure_logging():
         handlers=handlers,
     )
 
+    # Third-party libraries are chatty at DEBUG (PIL logs every plugin import).
+    # Keep the log readable for someone diagnosing a TRACE problem.
+    for noisy in ('PIL', 'matplotlib', 'urllib3'):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
 
 def main():
     configure_logging()

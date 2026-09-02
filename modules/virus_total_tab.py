@@ -1,3 +1,4 @@
+import logging
 import io
 import zipfile
 from datetime import date
@@ -11,6 +12,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QToolBar, QWidgetAction, QSi
 from requests import post as requests_post
 from requests.exceptions import RequestException
 from modules.paths import resource_path
+
+logger = logging.getLogger('TRACE.VirusTotal')
 
 
 class VirusTotal(QWidget):
@@ -167,7 +170,7 @@ class VirusTotal(QWidget):
         if response.status_code == 200:
             self.process_vt_response(response.json())
         else:
-            print("Failed to upload file to VirusTotal:", response.text)
+            logger.error("Failed to upload file to VirusTotal:", response.text)
 
     def process_vt_response(self, response):
         data = response.get('data', {})

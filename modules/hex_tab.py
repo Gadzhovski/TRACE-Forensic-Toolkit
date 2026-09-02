@@ -1,3 +1,4 @@
+import logging
 import os
 from functools import lru_cache
 
@@ -8,6 +9,8 @@ from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayo
                                QSizePolicy, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
                                QToolButton, QComboBox, QSplitter)
 from modules.paths import resource_path
+
+logger = logging.getLogger('TRACE.Hex')
 
 
 class SearchWorker(QObject):
@@ -530,14 +533,14 @@ class HexViewer(QWidget):
             self.current_page = 0
             self.display_current_page()
         except (AttributeError, IndexError) as e:
-            print(f"Error occurred: {e}")
+            logger.error(f"Error occurred: {e}")
 
     def load_last_page(self):
         try:
             self.current_page = self.hex_viewer_manager.total_pages() - 1
             self.display_current_page()
         except (AttributeError, IndexError) as e:
-            print(f"Error occurred: {e}")
+            logger.error(f"Error occurred: {e}")
 
     def next_page(self):
         try:
@@ -545,7 +548,7 @@ class HexViewer(QWidget):
                 self.current_page += 1
             self.display_current_page()
         except (AttributeError, IndexError) as e:
-            print(f"Error occurred: {e}")
+            logger.error(f"Error occurred: {e}")
 
     def previous_page(self):
         try:
@@ -553,7 +556,7 @@ class HexViewer(QWidget):
                 self.current_page -= 1
             self.display_current_page()
         except (AttributeError, IndexError) as e:
-            print(f"Error occurred: {e}")
+            logger.error(f"Error occurred: {e}")
 
     def search_result_clicked(self, item):
         address = item.text().split(":")[1].strip()

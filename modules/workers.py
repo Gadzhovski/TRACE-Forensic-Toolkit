@@ -29,6 +29,8 @@ class ExportWorker(QThread):
                     self._export_directory(self.inode_number, self.offset, self.dest_dir, self.name)
                 else:
                     self._export_file(self.inode_number, self.offset, self.dest_dir, self.name)
+            if self.isInterruptionRequested():
+                self.status_update.emit("Export cancelled.")
             self.finished.emit()
         except Exception as e:
             self.error.emit(f"Export error: {str(e)}")
@@ -48,6 +50,8 @@ class ExportWorker(QThread):
 
             # Export each entry
             for entry in entries:
+                if self.isInterruptionRequested():
+                    return
                 try:
                     self._export_item(
                         entry["inode_number"],
@@ -68,6 +72,8 @@ class ExportWorker(QThread):
 
         # Count items in subdirectories
         for entry in entries:
+            if self.isInterruptionRequested():
+                return
             if entry["is_directory"]:
                 sub_entries = self.image_handler.get_directory_contents(offset, entry["inode_number"])
                 self._count_items_recursive(sub_entries, offset)
@@ -85,6 +91,8 @@ class ExportWorker(QThread):
 
             # Export each entry in the subdirectory
             for entry in entries:
+                if self.isInterruptionRequested():
+                    return
                 self._export_item(
                     entry["inode_number"],
                     offset,

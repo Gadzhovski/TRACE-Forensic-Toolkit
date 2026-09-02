@@ -1134,8 +1134,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             elif data.get("inode_number") is not None:
                 # Handle files in background
-                self.file_worker = self.FileContentWorker(
-                    self.image_handler, data["inode_number"], data["start_offset"])
+                self.file_worker = self._retain_worker(self.FileContentWorker(
+                    self.image_handler, data["inode_number"], data["start_offset"]))
                 self.file_worker.completed.connect(
                     lambda content, _: self.update_viewer_with_file_content(content, data))
                 self.file_worker.error.connect(
@@ -1519,7 +1519,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         block_size = f"{fs_info.info.block_size:,} bytes"
                     else:
                         block_size = "N/A"
-                except:
+                except (AttributeError, IOError, OSError, RuntimeError) as e:
+                    # "N/A" is shown either way, but an unreadable filesystem
+                    # should leave a trace rather than looking like a volume
+                    # that simply has no block size.
+                    logger.warning("Could not read block size at offset %s: %s", start, e)
                     block_size = "N/A"
 
                 # Volume name
@@ -1673,8 +1677,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             try:
                 if row_position >= 0:
                     self.listing_table.removeRow(row_position)
-            except:
-                pass
+            except RuntimeError as e:
+                logger.debug("Could not remove incomplete row %s: %s", row_position, e)
 
     def update_viewer_with_file_content(self, file_content, data):
         """Update the active viewer tab with the file content.
@@ -1715,6 +1719,42 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         except Exception as e:
             self.log_error(f"Error setting up media stream: {str(e)}")
 
+    def _retain_worker(self, worker):
+        """Keep a running QThread alive until it finishes.
+
+        Workers are stored on attributes such as self.file_worker, so starting
+        a new one rebinds the attribute and drops the last Python reference to
+        a thread that is still running. The wrapped C++ object can then be
+        collected mid-read, which surfaces as
+        "RuntimeError: Internal C++ object already deleted" or a hard crash.
+        Holding the worker in a set until its finished signal fires prevents
+        that; the discard is queued through the signal, so it runs on the UI
+        thread after the thread has actually stopped.
+        """
+        if not hasattr(self, '_active_workers'):
+            self._active_workers = set()
+        self._active_workers.add(worker)
+        worker.finished.connect(lambda: self._active_workers.discard(worker))
+        return worker
+
+    def _cancel_worker(self, attr_name):
+        """Ask the worker held on `attr_name` to stop, if it is still running."""
+        worker = getattr(self, attr_name, None)
+        if worker is None:
+            return
+        try:
+            if not worker.isRunning():
+                return
+            # Drop callbacks first so a late completion cannot write into the
+            # viewer after we have moved on to another file.
+            worker.completed.disconnect()
+            worker.error.disconnect()
+            worker.requestInterruption()
+        except (RuntimeError, TypeError) as e:
+            # RuntimeError: the underlying thread object is already gone.
+            # TypeError: the signals had no remaining connections.
+            logger.debug("Could not cancel %s: %s", attr_name, e)
+
     def display_content_for_active_tab(self):
         """Display content appropriate for the currently active tab."""
         if not self.current_selected_data:
@@ -1724,29 +1764,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         statusbar.showMessage("Updating view...")
 
         try:
-            # IMPORTANT: Cancel any running workers before starting new ones
-            # This prevents race conditions when switching between files
-            if hasattr(self, 'media_worker') and self.media_worker and self.media_worker.isRunning():
-                try:
-                    # Disconnect signals to prevent callbacks
-                    self.media_worker.completed.disconnect()
-                    self.media_worker.error.disconnect()
-                    # Request interruption (graceful)
-                    self.media_worker.requestInterruption()
-                    # Don't wait - let it finish naturally
-                except Exception as e:
-                    print(f"Error cancelling media worker: {e}")
-
-            if hasattr(self, 'file_worker') and self.file_worker and self.file_worker.isRunning():
-                try:
-                    # Disconnect signals to prevent callbacks
-                    self.file_worker.completed.disconnect()
-                    self.file_worker.error.disconnect()
-                    # Request interruption (graceful)
-                    self.file_worker.requestInterruption()
-                    # Don't wait - let it finish naturally
-                except Exception as e:
-                    print(f"Error cancelling file worker: {e}")
+            # Cancel any in-flight workers before starting new ones, so a
+            # rapid selection change does not race two reads into the viewer.
+            self._cancel_worker('media_worker')
+            self._cancel_worker('file_worker')
 
             inode_number = self.current_selected_data.get("inode_number")
             offset = self.current_selected_data.get("start_offset", self.current_offset)
@@ -1757,7 +1778,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 adapter = self.active_viewer_adapter()
                 if adapter is not None and adapter.wants_stream(self.current_selected_data):
                     # Use MediaStreamWorker for streaming playback (doesn't load content)
-                    self.media_worker = self.MediaStreamWorker(self.image_handler, inode_number, offset)
+                    self.media_worker = self._retain_worker(self.MediaStreamWorker(self.image_handler, inode_number, offset))
                     self.media_worker.completed.connect(
                         lambda file_obj, file_size, metadata: self.update_viewer_with_media_stream(
                             file_obj, file_size, metadata, self.current_selected_data))
@@ -1766,7 +1787,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.media_worker.start()
                 else:
                     # For non-media files or other tabs, use FileContentWorker (loads content)
-                    self.file_worker = self.FileContentWorker(self.image_handler, inode_number, offset)
+                    self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, offset))
                     self.file_worker.completed.connect(
                         lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))
                     self.file_worker.error.connect(
@@ -1840,7 +1861,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.export_worker.finished.connect(progress_dialog.close)
 
             # Connect the cancel button
-            progress_dialog.canceled.connect(self.export_worker.terminate)
+            # requestInterruption, not terminate: terminate kills the thread at an
+            # arbitrary point, which can leave the pytsk3 handle in a bad state
+            # mid-read. ExportWorker checks isInterruptionRequested() each entry.
+            progress_dialog.canceled.connect(self.export_worker.requestInterruption)
 
             # Start the worker
             self.export_worker.start()
@@ -2401,7 +2425,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
                 # Files are processed in a background thread
                 inode_number = data.get("inode_number", 0)
-                self.file_worker = self.FileContentWorker(self.image_handler, inode_number, data["start_offset"])
+                self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, data["start_offset"]))
                 self.file_worker.completed.connect(
                     lambda content, _: self.update_viewer_with_file_content(content, data))
                 self.file_worker.error.connect(

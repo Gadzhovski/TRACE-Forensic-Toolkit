@@ -1,8 +1,11 @@
+import logging
 from io import BytesIO as io_BytesIO
 
 from PIL import Image
 from PIL.ExifTags import TAGS
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
+
+logger = logging.getLogger('TRACE.Exif')
 
 
 class ExifViewerManager:
@@ -23,7 +26,7 @@ class ExifViewerManager:
             # Return the extracted EXIF data
             return image._getexif()
         except Exception as e:
-            print(f"Error extracting EXIF data: {e}")
+            logger.error(f"Error extracting EXIF data: {e}")
             return None
 
     def load_exif_data(self, file_content):
@@ -40,7 +43,7 @@ class ExifViewerManager:
                         tag_value = exif_data[key]
                         structured_data.append((tag_name, tag_value))
                     except Exception as e:
-                        print(f"Error processing key {key}: {e}")
+                        logger.error(f"Error processing key {key}: {e}")
             return structured_data
         else:
             return None

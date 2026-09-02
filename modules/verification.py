@@ -1,8 +1,11 @@
+import logging
 from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
                                QFileDialog, QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
 from modules.paths import resource_path
+
+logger = logging.getLogger('TRACE.Verify')
 
 
 class HashCalculationThread(QThread):
@@ -23,7 +26,7 @@ class HashCalculationThread(QThread):
             if self.isRunning:  # Check if we're still running before emitting the signal
                 self.hashCalculated.emit(hash_results)
         except Exception as e:
-            print(f"Error in hash calculation thread: {e}")
+            logger.error(f"Error in hash calculation thread: {e}")
             if self.isRunning:
                 self.hashCalculated.emit({})  # Empty dict indicates error
 
@@ -35,7 +38,7 @@ class HashCalculationThread(QThread):
                 percentage = min(100.0, (float(current) / float(total)) * 100.0)
                 self.progressUpdated.emit(percentage)
         except Exception as e:
-            print(f"Progress update error: {e}")
+            logger.error(f"Progress update error: {e}")
 
     def stop(self):
         """Safely stop the thread."""
@@ -161,7 +164,7 @@ class VerificationWidget(QWidget):
             self.progress_bar.setValue(int(percentage))
             QApplication.processEvents()  # Keep UI responsive
         except Exception as e:
-            print(f"Error updating progress bar: {e}")
+            logger.error(f"Error updating progress bar: {e}")
 
     def on_hash_calculated(self, hash_results):
         """Process hash results and update UI."""
@@ -217,7 +220,7 @@ class VerificationWidget(QWidget):
             else:
                 self.hash_label.setText("Error calculating hashes. Please ensure the image is accessible.")
         except Exception as e:
-            print(f"Error processing hash results: {e}")
+            logger.error(f"Error processing hash results: {e}")
             self.hash_label.setText(f"Error processing results: {str(e)}")
 
     def copy_hash(self):

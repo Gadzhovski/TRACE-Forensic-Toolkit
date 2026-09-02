@@ -64,16 +64,16 @@ class ImageHandler:
             if hasattr(fs_info, 'close'):
                 try:
                     fs_info.close()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("Error closing filesystem handle: %s", e)
 
         # Close the image
         if self.img_info:
             if hasattr(self.img_info, 'close'):
                 try:
                     self.img_info.close()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("Error closing image handle: %s", e)
             self.img_info = None
 
         # Clear caches
@@ -404,17 +404,26 @@ class ImageHandler:
             return "N/A"
 
     def check_partition_contents(self, partition_start_offset):
-        """Check if a partition has any files or folders."""
+        """Whether a partition's root directory has any entries.
+
+        A read error and a genuinely empty partition are NOT the same thing --
+        this previously caught everything and returned False for both, so a
+        corrupt or unreadable partition was reported as simply empty. The
+        distinction matters in a forensic tool, so failures are logged with
+        the offset rather than silently discarded.
+        """
         fs = self.get_fs_info(partition_start_offset)
-        if fs:
-            try:
-                root_dir = fs.open_dir(path="/")
-                for _ in root_dir:
-                    return True
-                return False
-            except:
-                return False
-        return False
+        if not fs:
+            return False
+        try:
+            root_dir = fs.open_dir(path="/")
+            for _ in root_dir:
+                return True
+            return False
+        except (IOError, OSError, RuntimeError) as e:
+            logger.warning("Could not read root directory at offset %s: %s",
+                           partition_start_offset, e)
+            return False
 
     def get_directory_contents(self, start_offset, inode_number=None):
         """Get directory contents with caching for performance."""

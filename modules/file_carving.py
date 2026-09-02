@@ -1,3 +1,4 @@
+import logging
 import datetime
 import io
 import os
@@ -20,6 +21,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetIt
 from fitz import open as fitz_open, Matrix
 
 from modules.paths import carved_files_dir, resource_path
+
+logger = logging.getLogger('TRACE.Carving')
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -294,7 +297,7 @@ class FileCarvingWidget(QWidget):
         thumbnail_folder = os.path.join(carved_dir, "thumbnails")
 
         # Build allocation map for all partitions to skip allocated files
-        print("Building allocation map for allocated files...")
+        logger.debug("Building allocation map for allocated files...")
         self.allocation_map = []
 
         try:
@@ -309,21 +312,21 @@ class FileCarvingWidget(QWidget):
                     # Build allocation map for this partition
                     partition_map = self.image_handler.build_allocation_map(start_offset)
                     self.allocation_map.extend(partition_map)
-                    print(f"  Partition at offset {start_offset}: {len(partition_map)} allocated regions")
+                    logger.debug(f"  Partition at offset {start_offset}: {len(partition_map)} allocated regions")
             else:
                 # No partitions, try offset 0 (single filesystem)
                 if self.image_handler.has_filesystem(0):
                     partition_map = self.image_handler.build_allocation_map(0)
                     self.allocation_map.extend(partition_map)
-                    print(f"  Single filesystem: {len(partition_map)} allocated regions")
+                    logger.debug(f"  Single filesystem: {len(partition_map)} allocated regions")
 
             # Sort the combined allocation map
             self.allocation_map.sort(key=lambda x: x[0])
-            print(f"Total allocated regions to skip: {len(self.allocation_map)}")
+            logger.warning(f"Total allocated regions to skip: {len(self.allocation_map)}")
 
         except Exception as e:
-            print(f"Warning: Could not build allocation map: {e}")
-            print("Will carve from entire disk (may include duplicates)")
+            logger.error(f"Warning: Could not build allocation map: {e}")
+            logger.debug("Will carve from entire disk (may include duplicates)")
             self.allocation_map = []
 
         selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
@@ -453,12 +456,12 @@ class FileCarvingWidget(QWidget):
 
                     # Read file content directly from disk image (forensically sound!)
                     if not self.image_handler:
-                        print("No image handler available")
+                        logger.debug("No image handler available")
                         return
 
                     file_content = self.image_handler.read(offset, file_size)
                     if not file_content:
-                        print(f"Unable to read content from offset {hex(offset)}")
+                        logger.error(f"Unable to read content from offset {hex(offset)}")
                         return
 
                     # Create data dict for viewer (matches mainwindow's format)
@@ -476,7 +479,7 @@ class FileCarvingWidget(QWidget):
                     self.carved_file_opened.emit(file_content, data)
 
                 except Exception as e:
-                    print(f"Error opening carved file in viewer: {e}")
+                    logger.error(f"Error opening carved file in viewer: {e}")
                     import traceback
                     traceback.print_exc()
 
@@ -507,7 +510,7 @@ class FileCarvingWidget(QWidget):
                 return True
             return True
         except (IOError, UnidentifiedImageError, ValueError, RuntimeError) as e:
-            print(f"Error validating file of type {file_type}: {str(e)}")
+            logger.error(f"Error validating file of type {file_type}: {str(e)}")
             return False
 
     def carve_pdf_files(self, chunk, global_offset):
@@ -832,7 +835,7 @@ class FileCarvingWidget(QWidget):
                     self._stop_requested = False
                     self.start_button.setEnabled(True)
                     self.stop_button.setEnabled(False)
-                    print(f"Carving stopped. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
+                    logger.warning(f"Carving stopped. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
                     return
 
                 # Call the carve function for each selected file type
@@ -868,7 +871,7 @@ class FileCarvingWidget(QWidget):
 
                 offset += chunk_size
 
-            print(f"Carving complete. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
+            logger.warning(f"Carving complete. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
         finally:
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
@@ -890,7 +893,7 @@ class FileCarvingWidget(QWidget):
                 pix.save(thumbnail_path)
             return QPixmap(thumbnail_path)
         except Exception as e:
-            print(f"Could not render PDF thumbnail for {name}: {e}")
+            logger.error(f"Could not render PDF thumbnail for {name}: {e}")
             return QPixmap()
 
     @staticmethod
@@ -940,7 +943,7 @@ class FileCarvingWidget(QWidget):
                     pass
 
         except Exception as e:
-            print(f"Error extracting timestamp for {file_type}: {e}")
+            logger.error(f"Error extracting timestamp for {file_type}: {e}")
 
         return None
 

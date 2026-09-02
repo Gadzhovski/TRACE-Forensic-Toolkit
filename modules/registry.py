@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 
@@ -8,6 +9,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from modules.paths import resource_path
+
+logger = logging.getLogger('TRACE.Registry')
 
 
 
@@ -117,7 +120,7 @@ class RegistryExtractor(QWidget):
             partitions = self.image_handler.get_partitions()
 
             if not partitions:
-                print("No partitions found.")
+                logger.debug("No partitions found.")
                 return
 
             for partition in partitions:
@@ -141,7 +144,7 @@ class RegistryExtractor(QWidget):
 
                         os.remove(temp_hive_path)
         except Exception as e:
-            print(f"An error occurred while loading the selected hive: {e}")
+            logger.error(f"An error occurred while loading the selected hive: {e}")
 
     def display_registry_hive(self, hive_name, root_key):
         self.treeWidget.clear()  # Clear the tree before displaying a new hive
