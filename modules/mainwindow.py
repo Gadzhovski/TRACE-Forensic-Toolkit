@@ -1,5 +1,4 @@
 import configparser
-import hashlib
 import os
 import datetime
 import pyewf
@@ -44,6 +43,8 @@ from modules.database import DatabaseManager
 from modules.image_handler import EWFImgInfo, ImageHandler
 from modules.paths import config_file, resource_path
 from modules.utils import FileSystemUtils, safe_datetime
+from modules.viewer_registry import (ApplicationAdapter, ExifAdapter, HexAdapter,
+                                     MetadataAdapter, TextAdapter, VirusTotalAdapter)
 from modules.workers import ExportWorker
 
 logger = logging.getLogger('TRACE.MainWindow')
@@ -497,24 +498,27 @@ class MainWindow(QMainWindow):
         self.viewer_tab = QTabWidget(self)
 
         self.hex_viewer = HexViewer(self)
-        self.viewer_tab.addTab(self.hex_viewer, 'Hex')
-
         self.text_viewer = TextViewer(self)
-        self.viewer_tab.addTab(self.text_viewer, 'Text')
-
         self.application_viewer = UnifiedViewer(self)
         self.application_viewer.layout.setContentsMargins(0, 0, 0, 0)
         self.application_viewer.layout.setSpacing(0)
-        self.viewer_tab.addTab(self.application_viewer, 'Application')
-
         self.metadata_viewer = MetadataViewer(self.image_handler)
-        self.viewer_tab.addTab(self.metadata_viewer, 'File Metadata')
-
         self.exif_viewer = ExifViewer(self)
-        self.viewer_tab.addTab(self.exif_viewer, 'Exif Data')
-
         self.virus_total_api = VirusTotal()
-        self.viewer_tab.addTab(self.virus_total_api, 'Virus Total API')
+
+        # Each viewer is wrapped in an adapter exposing a common
+        # display()/clear() interface, so nothing below has to dispatch on a
+        # tab index. Tab order comes from this list alone.
+        self.viewer_adapters = [
+            HexAdapter(self.hex_viewer),
+            TextAdapter(self.text_viewer),
+            ApplicationAdapter(self.application_viewer),
+            MetadataAdapter(self.metadata_viewer),
+            ExifAdapter(self.exif_viewer),
+            VirusTotalAdapter(self.virus_total_api),
+        ]
+        for adapter in self.viewer_adapters:
+            self.viewer_tab.addTab(adapter.widget, adapter.label)
 
         # Set the API key if it exists
         virus_total_key = self.api_keys.get('API_KEYS', 'virustotal', fallback='')
@@ -683,12 +687,16 @@ class MainWindow(QMainWindow):
         # Disable directory up button
         self.go_up_action.setEnabled(False)
 
+    def active_viewer_adapter(self):
+        """Adapter for the currently selected viewer tab, or None."""
+        index = self.viewer_tab.currentIndex()
+        if 0 <= index < len(self.viewer_adapters):
+            return self.viewer_adapters[index]
+        return None
+
     def clear_viewers(self):
-        self.hex_viewer.clear_content()
-        self.text_viewer.clear_content()
-        self.application_viewer.clear()
-        self.metadata_viewer.clear()
-        self.exif_viewer.clear_content()
+        for adapter in self.viewer_adapters:
+            adapter.clear()
         self.registry_extractor_widget.clear()
 
     def closeEvent(self, event):
@@ -1651,30 +1659,18 @@ class MainWindow(QMainWindow):
         statusbar = self.statusBar()
         statusbar.clearMessage()
 
-        # Get the active tab index
-        index = self.viewer_tab.currentIndex()
+        adapter = self.active_viewer_adapter()
+        if adapter is None:
+            return
 
-        if not file_content:
+        # The Metadata viewer reads the file itself, so it is the one viewer
+        # that still has something to show without loaded content.
+        if not file_content and adapter.needs_content():
             self.log_error("No content available to display")
             return
 
-        # Use optimized display methods for each viewer type
         try:
-            if index == 0:  # Hex tab
-                self.hex_viewer.display_hex_content(file_content)
-            elif index == 1:  # Text tab
-                self.text_viewer.display_text_content(file_content)
-            elif index == 2:  # Application tab
-                full_file_path = data.get("name", "")  # Retrieve the name from the data dictionary
-                self.application_viewer.display_application_content(file_content, full_file_path)
-            elif index == 3:  # File Metadata tab
-                self.metadata_viewer.display_metadata(data)
-            elif index == 4:  # Exif Data tab
-                self.exif_viewer.load_and_display_exif_data(file_content)
-            elif index == 5:  # Assuming VirusTotal tab is the 6th tab (0-based index)
-                file_hash = hashlib.md5(file_content).hexdigest()
-                self.virus_total_api.set_file_hash(file_hash)
-                self.virus_total_api.set_file_content(file_content, data.get("name", ""))
+            adapter.display(file_content, data)
         except Exception as e:
             self.log_error(f"Error displaying content in viewer: {str(e)}")
 
@@ -1685,27 +1681,10 @@ class MainWindow(QMainWindow):
         statusbar.clearMessage()
 
         try:
-            # Determine MIME type from file extension
-            full_file_path = data.get("name", "")
-            file_extension = os.path.splitext(full_file_path)[-1].lower()
-
-            # Map extension to MIME type
-            mime_type = None
-            if file_extension in ['.mp3', '.wav', '.ogg', '.aac', '.m4a']:
-                mime_type = f'audio/{file_extension[1:]}'
-            elif file_extension in ['.mp4', '.mkv', '.flv', '.avi', '.mov', '.webm', '.wmv', '.m4v']:
-                mime_type = 'video/mp4'
-            else:
-                mime_type = 'application/octet-stream'
-
-            # Call the load method with streaming parameters
-            self.application_viewer.load(
-                mime_type=mime_type,
-                path=full_file_path,
-                file_obj=file_obj,
-                file_size=file_size
-            )
-
+            adapter = self.active_viewer_adapter()
+            if adapter is None or not hasattr(adapter, 'display_stream'):
+                return
+            adapter.display_stream(file_obj, file_size, data)
         except Exception as e:
             self.log_error(f"Error setting up media stream: {str(e)}")
 
@@ -1746,17 +1725,10 @@ class MainWindow(QMainWindow):
             offset = self.current_selected_data.get("start_offset", self.current_offset)
 
             if inode_number:
-                # Check if the active tab is Application tab (index 2) and file is audio/video
-                current_tab_index = self.viewer_tab.currentIndex()
-                file_name = self.current_selected_data.get("name", "")
-                file_extension = os.path.splitext(file_name)[-1].lower()
-
-                # Media file extensions
-                media_extensions = ['.mp3', '.wav', '.ogg', '.aac', '.m4a', '.mp4', '.mkv',
-                                  '.flv', '.avi', '.mov', '.webm', '.wmv', '.m4v']
-
-                # Use streaming for media files on Application tab
-                if current_tab_index == 2 and file_extension in media_extensions:
+                # Ask the active viewer whether it wants a stream, rather than
+                # hardcoding the Application tab's index here.
+                adapter = self.active_viewer_adapter()
+                if adapter is not None and adapter.wants_stream(self.current_selected_data):
                     # Use MediaStreamWorker for streaming playback (doesn't load content)
                     self.media_worker = self.MediaStreamWorker(self.image_handler, inode_number, offset)
                     self.media_worker.completed.connect(

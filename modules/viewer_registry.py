@@ -1,0 +1,152 @@
+"""Adapters that give the viewer tabs one common interface.
+
+Each viewer widget grew its own vocabulary: `display_hex_content`,
+`display_text_content`, `display_application_content`, `display_metadata`,
+`load_and_display_exif_data`, and VirusTotal's `set_file_hash` /
+`set_file_content` pair. Clearing was split between `clear_content()` and
+`clear()`.
+
+MainWindow therefore dispatched on the tab's *integer index*::
+
+    if index == 0:   self.hex_viewer.display_hex_content(...)
+    elif index == 1: self.text_viewer.display_text_content(...)
+    ...
+
+which is tied to the order of the `addTab()` calls -- reordering a tab silently
+routed content to the wrong viewer -- and repeated the same coupling in
+`clear_viewers()` and in the media-streaming check (`current_tab_index == 2`).
+
+A ViewerAdapter wraps each widget so MainWindow can just say `display(...)` or
+`clear()`, and asks the adapter itself whether it wants a stream instead of
+hardcoding an index. Adapting rather than renaming the widgets' own methods
+keeps their existing call sites (toolbars, paging, context menus) untouched.
+"""
+
+import hashlib
+import os
+
+# Extensions the Application viewer plays via a streaming device rather than
+# loading the whole file into memory.
+AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.aac', '.m4a'}
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.flv', '.avi', '.mov', '.webm', '.wmv', '.m4v'}
+MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
+
+
+class ViewerAdapter:
+    """Common interface over one viewer widget.
+
+    Subclasses implement `display`; `clear` defaults to whichever clear method
+    the wrapped widget happens to provide.
+    """
+
+    #: Tab label, used when registering with the QTabWidget.
+    label = None
+
+    def __init__(self, widget):
+        self.widget = widget
+
+    def display(self, content, data):
+        """Show `content` (bytes) for the entry described by `data` (dict)."""
+        raise NotImplementedError
+
+    def clear(self):
+        for name in ('clear_content', 'clear'):
+            method = getattr(self.widget, name, None)
+            if callable(method):
+                method()
+                return
+
+    def wants_stream(self, data):
+        """True if this viewer prefers a streamed handle over loaded bytes."""
+        return False
+
+    def needs_content(self):
+        """False if `display` works from `data` alone and needs no file read."""
+        return True
+
+
+class HexAdapter(ViewerAdapter):
+    label = 'Hex'
+
+    def display(self, content, data):
+        self.widget.display_hex_content(content)
+
+
+class TextAdapter(ViewerAdapter):
+    label = 'Text'
+
+    def display(self, content, data):
+        self.widget.display_text_content(content)
+
+
+class ApplicationAdapter(ViewerAdapter):
+    label = 'Application'
+
+    def display(self, content, data):
+        self.widget.display_application_content(content, data.get('name', ''))
+
+    def wants_stream(self, data):
+        extension = os.path.splitext(data.get('name', ''))[-1].lower()
+        return extension in MEDIA_EXTENSIONS
+
+    def display_stream(self, file_obj, file_size, data):
+        """Hand the viewer a streaming handle instead of loaded bytes."""
+        path = data.get('name', '')
+        self.widget.load(
+            mime_type=self.mime_type_for(path),
+            path=path,
+            file_obj=file_obj,
+            file_size=file_size,
+        )
+
+    @staticmethod
+    def mime_type_for(path):
+        """Best-effort MIME type from the file extension."""
+        extension = os.path.splitext(path)[-1].lower()
+        if extension in AUDIO_EXTENSIONS:
+            return f'audio/{extension[1:]}'
+        if extension in VIDEO_EXTENSIONS:
+            return 'video/mp4'
+        return 'application/octet-stream'
+
+
+class MetadataAdapter(ViewerAdapter):
+    label = 'File Metadata'
+
+    def display(self, content, data):
+        self.widget.display_metadata(data)
+
+    def needs_content(self):
+        # display_metadata() reads the file itself via the image handler.
+        return False
+
+
+class ExifAdapter(ViewerAdapter):
+    label = 'Exif Data'
+
+    def display(self, content, data):
+        self.widget.load_and_display_exif_data(content)
+
+
+class VirusTotalAdapter(ViewerAdapter):
+    label = 'Virus Total API'
+
+    def display(self, content, data):
+        self.widget.set_file_hash(hashlib.md5(content).hexdigest())
+        self.widget.set_file_content(content, data.get('name', ''))
+
+    def clear(self):
+        # VirusTotal keeps its own report until a new file is submitted.
+        pass
+
+
+#: Adapter classes in tab order. Adding a viewer means adding one entry here
+#: and constructing the widget in MainWindow -- no index arithmetic anywhere.
+VIEWER_ADAPTERS = (
+    HexAdapter,
+    TextAdapter,
+    ApplicationAdapter,
+    MetadataAdapter,
+    ExifAdapter,
+    VirusTotalAdapter,
+)
