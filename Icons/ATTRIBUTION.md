@@ -18,8 +18,13 @@ Monochrome SVG on a 24×24 grid with a 2px stroke. They are authored with
 runtime. That is why one set works on both the light and dark themes.
 
 Every icon in this directory is an unmodified upstream file, downloaded from
-the tag above. The one exception is `virustotal-wordmark.svg` — see the
-VirusTotal section below.
+the tag above. The exceptions are `virustotal-wordmark.svg` (see the VirusTotal
+section below) and the files in `Icons/tabler/themed/`, which are upstream
+glyphs with their `currentColor` stroke replaced by a fixed per-theme colour,
+because Qt's SVG renderer does not resolve `currentColor` in a stylesheet. The
+`-branch` variants additionally carry a 2.5 stroke instead of 2: drawn into the
+tree's 14px indentation strip, a 2px stroke on Tabler's 24px grid lands at
+about 1.2px, too thin to antialias cleanly. The geometry is unchanged.
 
 The directory holds more icons than the interface currently uses. They are kept
 so that adding a control does not mean going back to the upstream repository

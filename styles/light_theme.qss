@@ -1079,17 +1079,32 @@ QTreeWidget::item {
    so the image has to be supplied here -- setting only a background removed
    the arrows entirely and left no way to tell an expanded row from a
    collapsed one. Rows with no children get no image, just the transparent
-   background that keeps the selection colour continuous across the strip. */
+   background.
+
+   The strip has to take the selection colour itself: it is painted separately
+   from the item cell, so on a selected row it stayed at the tree's background
+   and the highlight appeared to start after the arrow rather than run the
+   width of the row.
+
+   The -branch arrows carry a 2.5 stroke rather than Tabler's 2. On the 24px
+   grid that becomes about 1.2px once fitted into the 14px strip -- thinner
+   than a diagonal can be antialiased at, which is what made them look blocky.
+   Same geometry, drawn for the size it is used at; the toolbar keeps the
+   upstream 2. */
 QTreeWidget::branch {
     background: transparent;
 }
 
+QTreeWidget::branch:selected {
+    background: #CCE8FF;
+}
+
 QTreeWidget::branch:has-children:!has-siblings:closed,
 QTreeWidget::branch:closed:has-children:has-siblings {
-    image: url('Icons/tabler/themed/chevron-right-light.svg');
+    image: url('Icons/tabler/themed/chevron-right-light-branch.svg');
 }
 
 QTreeWidget::branch:open:has-children:!has-siblings,
 QTreeWidget::branch:open:has-children:has-siblings {
-    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    image: url('Icons/tabler/themed/chevron-down-light-branch.svg');
 }

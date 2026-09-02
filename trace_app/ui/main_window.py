@@ -389,6 +389,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # between the expand arrow and the icon beside it, which reads as the
         # two being unrelated.
         self.tree_viewer.setIndentation(TREE_INDENTATION)
+        # Selection spans the full row, branch strip included. Without this Qt
+        # highlights only the item cell, so the colour started part-way across
+        # and left the expand arrow sitting outside it.
+        self.tree_viewer.setAllColumnsShowFocus(True)
         # No dotted focus rectangle around the current item: the selection
         # colour already shows which row is current.
         self.tree_viewer.setItemDelegate(NoFocusDelegate(self.tree_viewer))
