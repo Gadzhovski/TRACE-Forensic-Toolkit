@@ -649,14 +649,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self._apply_palette(theme)
 
-        # The tree paints its own expand arrows, so it needs the current
-        # theme's chevrons handed to it. Guarded: the first stylesheet is
-        # applied during construction, before the tree exists.
-        if hasattr(self, 'tree_viewer'):
-            suffix = 'dark' if theme == 'dark' else 'light'
-            self.tree_viewer.set_branch_icons(
-                f'Icons/tabler/themed/chevron-right-{suffix}.svg',
-                f'Icons/tabler/themed/chevron-down-{suffix}.svg')
+        # BranchTreeWidget resolves its own chevrons from the active theme,
+        # so no tree needs to be told about the change here. Handing them out
+        # one tree at a time is what left the registry browser drawing light
+        # arrows on a dark background.
+        for tree in self.findChildren(BranchTreeWidget):
+            tree.viewport().update()
 
         # A verified image's icon is a recoloured pixmap built once, not a
         # registry icon, so set_theme does not reach it. The green and amber
@@ -896,7 +894,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def clear_ui(self):
         self.listing_table.clearContents()
         self.listing_table.setRowCount(0)
-        self.clear_viewers()
+        self.clear_evidence_views()
         self.current_image_path = None
         self.current_offset = None
         self.evidence_files.clear()
@@ -921,8 +919,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return None
 
     def clear_viewers(self):
+        """Empty the file viewers, ready for another file.
+
+        The registry browser is deliberately left alone. It shows a hive
+        extracted from the image, not the selected file, so clearing it here
+        threw away a loaded hive every time the user clicked a file -- and
+        reloading one takes seconds.
+        """
         for adapter in self.viewer_adapters:
             adapter.clear()
+
+    def clear_evidence_views(self):
+        """Empty everything tied to the loaded image, registry included."""
+        self.clear_viewers()
         self.registry_extractor_widget.clear()
 
     def closeEvent(self, event):

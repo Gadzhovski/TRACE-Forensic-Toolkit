@@ -18,6 +18,7 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QTreeWidget
 
 from trace_app.infra.paths import resource_path
+from trace_app.ui import icons
 
 #: Fraction of the indentation strip the glyph occupies. Less than the full
 #: width, so the arrow has air around it rather than touching the row's icon.
@@ -30,15 +31,30 @@ class BranchTreeWidget(QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._renderers = {}
-        self._closed = 'Icons/tabler/themed/chevron-right-light.svg'
-        self._open = 'Icons/tabler/themed/chevron-down-light.svg'
+        self._override = None
+
+    @staticmethod
+    def _themed(name):
+        """Path to a chevron drawn for whichever theme is active."""
+        suffix = 'dark' if icons.current_theme() == 'dark' else 'light'
+        return f'Icons/tabler/themed/chevron-{name}-{suffix}.svg'
 
     def set_branch_icons(self, closed_path, open_path):
-        """Point the arrows at the current theme's chevrons."""
-        self._closed = closed_path
-        self._open = open_path
+        """Pin the arrows to specific files, overriding the active theme."""
+        self._override = (closed_path, open_path)
         self._renderers.clear()
         self.viewport().update()
+
+    def _branch_icon(self, opened):
+        """The arrow for this state, following the theme unless overridden.
+
+        Resolved on each paint rather than stored: a tree that is not handed
+        new icons on a theme change would otherwise keep drawing the light
+        chevron on a dark background, which is what the registry tree did.
+        """
+        if self._override is not None:
+            return self._override[1 if opened else 0]
+        return self._themed('down' if opened else 'right')
 
     def _renderer(self, name):
         renderer = self._renderers.get(name)
@@ -62,7 +78,7 @@ class BranchTreeWidget(QTreeWidget):
         if not self.model().hasChildren(index):
             return
 
-        name = self._open if self.isExpanded(index) else self._closed
+        name = self._branch_icon(self.isExpanded(index))
         renderer = self._renderer(name)
         if not renderer.isValid():
             return

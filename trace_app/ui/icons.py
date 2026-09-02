@@ -182,6 +182,11 @@ def _auto_tint(name):
     return _THEME_TINTS.get(_theme)
 
 
+def current_theme():
+    """The theme name the registry is currently tinting for."""
+    return _theme
+
+
 def foreground():
     """The colour monochrome art is tinted to under the current theme."""
     return _THEME_TINTS[_theme]
