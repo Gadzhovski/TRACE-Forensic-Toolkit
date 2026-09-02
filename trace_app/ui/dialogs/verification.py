@@ -1,7 +1,7 @@
 import logging
 from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
-                               QFileDialog, QTextEdit)
+                               QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH
@@ -48,10 +48,19 @@ class HashCalculationThread(QThread):
 
 
 class VerificationWidget(QWidget):
-    def __init__(self, image_handler, parent=None):
+    def __init__(self, image_handler, parent=None, cached=None):
+        """Show hashes for `image_handler`.
+
+        `cached` is a previous result for this same image, as returned by
+        `results()`. Given one, the dialog renders it and does not recompute:
+        hashing a multi-gigabyte image takes minutes, and doing it again on a
+        second click to show the same numbers is the kind of wait that makes a
+        tool feel broken.
+        """
         super().__init__(parent)
         self.image_handler = image_handler
         self.thread = None
+        self._results_html = None
         self.setWindowTitle("Trace - Image Verification")
         self.setWindowIcon(icons.icon(icons.LOGO))
         self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
@@ -88,17 +97,7 @@ class VerificationWidget(QWidget):
         layout.addLayout(progress_bar_container)
 
         button_layout = QHBoxLayout()
-        self.save_button = QPushButton("Save to Text File", self)
-        self.save_button.setFixedWidth(BUTTON_WIDTH)
-        self.save_button.clicked.connect(self.save_hash)
-        self.save_button.setEnabled(False)
-        button_layout.addWidget(self.save_button)
-
-        self.copy_button = QPushButton("Copy", self)
-        self.copy_button.setFixedWidth(BUTTON_WIDTH)
-        self.copy_button.clicked.connect(self.copy_hash)
-        self.copy_button.setEnabled(False)
-        button_layout.addWidget(self.copy_button)
+        button_layout.addStretch()
 
         self.close_button = QPushButton("Close", self)
         self.close_button.setFixedWidth(BUTTON_WIDTH)
@@ -106,9 +105,13 @@ class VerificationWidget(QWidget):
         button_layout.addWidget(self.close_button)
         layout.addLayout(button_layout)
 
-        # Start hash calculation with a slight delay to allow the UI to initialize
-        QApplication.processEvents()
-        self.start_hash_calculation()
+        if cached:
+            self._restore(cached)
+        else:
+            # Start hash calculation with a slight delay to allow the UI to
+            # initialize
+            QApplication.processEvents()
+            self.start_hash_calculation()
 
     def closeEvent(self, event):
         """Override closeEvent to properly clean up resources."""
@@ -122,12 +125,6 @@ class VerificationWidget(QWidget):
                 self.thread.wait()
 
         super().closeEvent(event)
-
-    def save_hash(self):
-        file_name, _ = QFileDialog.getSaveFileName(self, "Save Hash", "", "Text Files (*.txt)")
-        if file_name:
-            with open(file_name, 'w') as file:
-                file.write(self.hash_label.toPlainText())
 
     def start_hash_calculation(self):
         # Clean up any previous thread
@@ -197,17 +194,30 @@ class VerificationWidget(QWidget):
                 hash_info = "<br>".join(verification_results)
                 hash_info += f"<br><br><b>Size:</b> {size_bytes} bytes ({size_mb:.2f} MB)<br><b>Path:</b> {hash_results.get('path')}"
                 self.hash_label.setHtml(hash_info)
-                self.save_button.setEnabled(True)
-                self.copy_button.setEnabled(True)
+                self._results_html = hash_info
             else:
                 self.hash_label.setText("Error calculating hashes. Please ensure the image is accessible.")
         except Exception as e:
             logger.error(f"Error processing hash results: {e}")
             self.hash_label.setText(f"Error processing results: {str(e)}")
 
-    def copy_hash(self):
-        clipboard = QApplication.clipboard()
-        clipboard.setText(self.hash_label.toPlainText())
+    def _restore(self, cached):
+        """Render a previous run without touching the image again."""
+        self._results_html = cached.get('html')
+        self._verified = cached.get('verified', False)
+        self.hash_label.setHtml(self._results_html or '')
+        self.progress_bar.setValue(100)
+        self.progress_bar.setFormat("Verified earlier this session")
+
+    def results(self):
+        """The finished result, or None while it is still being computed.
+
+        Returned as plain data so the caller can hold it per image and hand it
+        back to a later dialog.
+        """
+        if self._results_html is None:
+            return None
+        return {'html': self._results_html, 'verified': self._verified}
 
     @property
     def is_verified(self):

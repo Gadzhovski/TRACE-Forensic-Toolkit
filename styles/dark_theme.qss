@@ -923,12 +923,16 @@ QToolBar QToolButton:pressed {
     background-color: #454545;
 }
 
-/* Buttons that carry a label need room for it. */
+/* Buttons that carry a label need room for it. The square rule above caps
+   width at 28px; these override the minimum and leave the maximum alone.
+   Naming 16777215px here was Qt's own limit, and setting it explicitly made
+   Qt warn "the largest allowed size is (16777215,16777215)" on every such
+   button at startup. */
 QToolBar QToolButton[popupMode="1"],
 QToolBar QToolButton#clearSearchBtn,
 QToolBar QPushButton {
     min-width: 0px;
-    max-width: 16777215px;
+    max-width: none;
 }
 
 /* Labels inside a toolbar: match the control height so text baselines line up
@@ -1048,4 +1052,16 @@ QTextEdit#textContentView {
 
 #placeholderLabel {
     background-color: #2E2E2E;
+}
+
+/* Selected text, everywhere it can be selected.
+
+   Qt takes this from the palette when a stylesheet does not set it, and the
+   platform default is a violet that matches nothing else here. Only QComboBox
+   overrode it, so every other pane -- hex, text, metadata, the hash box --
+   highlighted in that violet. These are the same colours the themes already
+   use for a selected row, so selecting text and selecting a row now agree. */
+QWidget {
+    selection-background-color: #1E90FF;
+    selection-color: #FFFFFF;
 }

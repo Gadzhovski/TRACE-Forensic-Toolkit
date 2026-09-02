@@ -1,5 +1,6 @@
 import configparser
 import datetime
+import gc
 import logging
 import os
 import re
@@ -10,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import pytsk3
 from Registry import Registry
 from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer
-from PySide6.QtGui import QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap, QColor
+from PySide6.QtGui import QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap, QColor, QCursor
 from PySide6.QtCharts import QChart
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
@@ -107,6 +108,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.current_selected_data = None
 
         self.evidence_files = []
+
+        #: Verification results, keyed by image path. Verification is a fact
+        #: about one image, not about the session, so it is stored per image:
+        #: a second image loaded alongside a verified one is not itself
+        #: verified, and the previously toolbar-wide icon claimed otherwise.
+        self.verification_results = {}
 
         self.initialize_ui()
 
@@ -337,7 +344,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         tools_menu = QMenu('Tools', self)
 
         verify_image_action = QAction("Verify Image", self)
-        verify_image_action.triggered.connect(self.verify_image)
+        verify_image_action.triggered.connect(self.show_verify_menu)
         tools_menu.addAction(verify_image_action)
 
         # Add "Options" menu for API key configuration
@@ -376,7 +383,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.main_toolbar.addSeparator()
 
         # Create verify_image_button as an attribute of MainWindow
-        self.verify_image_button = self.create_action(icons.VERIFY, "Verify Image", self.verify_image)
+        self.verify_image_button = self.create_action(icons.VERIFY, "Verify Image",
+                                                     self.show_verify_menu)
         self.main_toolbar.addAction(self.verify_image_button)
 
 
@@ -390,6 +398,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tree_viewer = QTreeWidget(self)
         self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
+        # A second, narrow column holds the verification badge, so an image can
+        # show it without losing its own disk icon. It stays collapsed to the
+        # badge width and is empty for every row that is not a disk image.
+        self.tree_viewer.setColumnCount(2)
+        self.tree_viewer.header().setStretchLastSection(False)
+        self.tree_viewer.header().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.tree_viewer.header().setSectionResizeMode(1, QHeaderView.Fixed)
+        self.tree_viewer.setColumnWidth(1, TREE_ICON_SIZE + 8)
         self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
         self.tree_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -707,31 +723,87 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Pass the updated API keys to the appropriate modules
         self.virus_total_api.set_api_key(virus_total_key)
 
-    def verify_image(self):
+    def verify_image(self, image_path=None):
+        """Show the verification dialog for one image.
+
+        Defaults to the image currently loaded. Re-opening for an image already
+        verified this session renders the stored result instead of hashing the
+        whole image again.
+        """
         if self.image_handler is None:
             QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
             return
 
-        # Show the verification widget
-        self.verification_widget = VerificationWidget(self.image_handler)
+        path = image_path or self.current_image_path
 
-        # Connect a signal when the verification widget is closed to update the icon
-        self.verification_widget.closeEvent = lambda event: self.on_verification_closed(event)
-
-        # Show the widget
+        self.verification_widget = VerificationWidget(
+            self.image_handler, cached=self.verification_results.get(path))
+        self.verification_widget.closeEvent = (
+            lambda event, p=path: self.on_verification_closed(event, p))
         self.verification_widget.show()
 
-    def on_verification_closed(self, event):
-        """Handle the verification widget being closed."""
-        # Make sure verify_image_button exists before trying to change its icon
-        if hasattr(self, 'verify_image_button'):
-            if hasattr(self.verification_widget, 'is_verified') and self.verification_widget.is_verified:
-                icons.apply_to(self.verify_image_button, icons.VERIFY_OK)
-            else:
-                icons.apply_to(self.verify_image_button, icons.VERIFY)
+    def on_verification_closed(self, event, image_path=None):
+        """Store the result against its image, and badge that image in the tree."""
+        widget = self.verification_widget
+        results = widget.results() if hasattr(widget, 'results') else None
+        if results and image_path:
+            self.verification_results[image_path] = results
+            self.mark_image_verified(image_path, results.get('verified', False))
 
-        # Call the original closeEvent to close the widget
-        QWidget.closeEvent(self.verification_widget, event)
+        QWidget.closeEvent(widget, event)
+
+    def mark_image_verified(self, image_path, verified):
+        """Show an image verification state on its own row in the tree.
+
+        This used to swap the toolbar button icon, which is a property of the
+        window rather than of an image -- with two images loaded it claimed
+        both were verified. The mark belongs beside the image it describes.
+        """
+        root = self.tree_viewer.invisibleRootItem()
+        for i in range(root.childCount()):
+            item = root.child(i)
+            if item.text(0) != image_path:
+                continue
+            if verified:
+                item.setIcon(1, icons.icon(icons.VERIFY_OK))
+                item.setToolTip(1, "Hashes verified against those stored in the image")
+            else:
+                item.setIcon(1, icons.icon(icons.VERIFY))
+                item.setToolTip(1, "Checked this session: hashes did not match")
+            return
+
+    def verification_state(self, image_path):
+        """Return 'verified', 'failed', or None for an image."""
+        result = self.verification_results.get(image_path)
+        if result is None:
+            return None
+        return 'verified' if result.get('verified') else 'failed'
+
+    def show_verify_menu(self):
+        """Toolbar Verify: pick an image when more than one is loaded.
+
+        With a single image this goes straight to the dialog. With several, the
+        menu is the only place that says which of them have been verified.
+        """
+        if not self.evidence_files:
+            QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
+            return
+
+        if len(self.evidence_files) == 1:
+            self.verify_image(self.evidence_files[0])
+            return
+
+        menu = QMenu(self)
+        for path in self.evidence_files:
+            state = self.verification_state(path)
+            suffix = {'verified': "verified",
+                      'failed': "not verified"}.get(state, "not checked")
+            entry = menu.addAction(f"{path}  \u2014 {suffix}")
+            if state is not None:
+                entry.setIcon(icons.icon(
+                    icons.VERIFY_OK if state == 'verified' else icons.VERIFY))
+            entry.triggered.connect(lambda _=False, p=path: self.verify_image(p))
+        menu.exec(QCursor.pos())
 
     def enable_tabs(self, state):
         self.result_viewer.setEnabled(state)
@@ -979,9 +1051,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.clear_ui()
             # disable all tabs
             self.enable_tabs(False)
-            # set the icon back to the original - only if verify_image_button exists
-            if hasattr(self, 'verify_image_button'):
-                icons.apply_to(self.verify_image_button, icons.VERIFY)
+            # The toolbar icon no longer tracks verification -- that is shown
+            # per image in the tree -- so there is nothing to reset here.
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()
@@ -1973,6 +2044,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if selected_item and selected_item.parent() is None:
                 view_os_info_action = menu.addAction("View Image Information")
                 view_os_info_action.triggered.connect(lambda: self.view_os_information(indexes[0]))
+
+                # Verifying is about one image, so it belongs on that image own
+                # row as well as on the toolbar.
+                image_path = selected_item.text(0)
+                state = self.verification_state(image_path)
+                verify_action = menu.addAction(
+                    "Verify Image" if state is None else "View Verification Result")
+                verify_action.triggered.connect(
+                    lambda _=False, p=image_path: self.verify_image(p))
 
             # Add the 'Export' option for any file or folder
             export_action = menu.addAction("Export")
