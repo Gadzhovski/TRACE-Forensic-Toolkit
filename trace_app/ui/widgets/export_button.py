@@ -12,11 +12,12 @@ import html as html_module
 import logging
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QPageLayout, QPageSize, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QMenu, QToolButton
 
+from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Export')
@@ -42,7 +43,13 @@ class ExportButton(QToolButton):
         self.setIcon(icons.icon(icons.SAVE_AS))
         self.setToolTip("Export the current view as text, PDF or HTML")
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self.setPopupMode(QToolButton.InstantPopup)
+        self.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
+
+        # DelayedPopup, not InstantPopup: InstantPopup makes Qt reserve room
+        # inside the button for a menu arrow, which squeezed an 18px icon into
+        # a 28px button and pushed it off centre. The menu is opened from
+        # mousePressEvent instead, so the whole button is the icon.
+        self.setPopupMode(QToolButton.DelayedPopup)
 
         menu = QMenu(self)
         for label, suffix in (("Text (*.txt)", "txt"),
@@ -52,6 +59,14 @@ class ExportButton(QToolButton):
             action.triggered.connect(lambda _=False, s=suffix: self.export(s))
             menu.addAction(action)
         self.setMenu(menu)
+
+    def mousePressEvent(self, event):
+        """Open the menu on any click, without a menu-arrow indicator."""
+        if event.button() == Qt.LeftButton and self.menu():
+            self.showMenu()
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     # --- export ------------------------------------------------------------
 

@@ -176,7 +176,12 @@ class PDFViewer(QWidget):
         self.save_button.setIcon(icons.icon(icons.SAVE_AS))
         self.save_button.setToolTip("Save the document, or export its text")
         self.save_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self.save_button.setPopupMode(QToolButton.InstantPopup)
+        self.save_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
+        # DelayedPopup plus an explicit showMenu: InstantPopup reserves space
+        # inside the button for a menu arrow, which shrinks the icon and pushes
+        # it off centre.
+        self.save_button.setPopupMode(QToolButton.DelayedPopup)
+        self.save_button.pressed.connect(self.save_button.showMenu)
 
         save_menu = QMenu(self)
         save_original = QAction("PDF (original document)", self)

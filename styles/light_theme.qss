@@ -947,12 +947,10 @@ QLabel#aboutMetaQuiet {
     padding-top: 6px;
 }
 
-/* ==================== Multi-select and menu buttons ==================== */
-/* A dropdown that replaces a row of check boxes. Styled like a combo box so
-   it reads as a control rather than a toolbar icon. */
+/* ============ Multi-select and menu buttons ============ */
 
-QToolButton#multiSelectButton,
-QToolButton#exportButton {
+/* Shows a text summary, so it is styled like a combo box. */
+QToolButton#multiSelectButton {
     background-color: #ffffff;
     border: 1px solid #ced4da;
     border-radius: 4px;
@@ -963,19 +961,37 @@ QToolButton#exportButton {
     text-align: center;
 }
 
-QToolButton#multiSelectButton:hover,
-QToolButton#exportButton:hover {
+QToolButton#multiSelectButton:hover {
     background-color: #f1f3f5;
 }
 
-QToolButton#multiSelectButton:pressed,
-QToolButton#exportButton:pressed,
-QToolButton#multiSelectButton::menu-indicator,
-QToolButton#exportButton::menu-indicator {
-    background-color: transparent;
+QToolButton#multiSelectButton:pressed {
+    background-color: #e9ecef;
 }
 
-QToolButton#multiSelectButton:pressed,
+/* The export button is icon-only, so it must look like the navigation
+   buttons beside it -- no border, no minimum width. It previously shared the
+   rule above, which framed it and forced it 92px wide inside a 28px slot. */
+QToolButton#exportButton {
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    min-width: 0px;
+    max-width: 16777215px;
+}
+
+QToolButton#exportButton:hover {
+    background-color: #f1f3f5;
+    border-radius: 4px;
+}
+
 QToolButton#exportButton:pressed {
     background-color: #e9ecef;
+}
+
+/* No arrow overlay: the whole button is the icon. */
+QToolButton#exportButton::menu-indicator,
+QToolButton#multiSelectButton::menu-indicator {
+    image: none;
+    width: 0px;
 }
