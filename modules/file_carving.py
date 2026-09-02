@@ -6,11 +6,8 @@ import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
 from PIL import Image, UnidentifiedImageError
 from PIL.ExifTags import TAGS
-from PyPDF2 import PdfReader
-from PyPDF2.errors import PdfReadError
 from PySide6.QtCore import QSize, QUrl, QRectF
 from PySide6.QtCore import Qt
 from PySide6.QtCore import Signal, Slot
@@ -20,8 +17,8 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QToolBar, QSizePolic
     QCheckBox, QHeaderView
 from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
-from moviepy.editor import VideoFileClip
-from pdf2image import convert_from_path
+from fitz import open as fitz_open, Matrix
+
 from modules.paths import carved_files_dir, resource_path
 
 
@@ -486,8 +483,11 @@ class FileCarvingWidget(QWidget):
     def is_valid_file(self, data, file_type):
         try:
             if file_type == 'pdf':
-                # Validate PDF by trying to read it with PyPDF2
-                PdfReader(io.BytesIO(data))
+                # Validate by parsing with PyMuPDF; a carved fragment that is
+                # not a real PDF raises here.
+                with fitz_open(stream=data, filetype='pdf') as doc:
+                    if doc.page_count < 1:
+                        return False
             elif file_type in ['jpg', 'jpeg', 'png', 'gif']:
                 # Validate images by attempting to open them with PIL
                 image = Image.open(io.BytesIO(data))
@@ -504,7 +504,7 @@ class FileCarvingWidget(QWidget):
             else:
                 return True
             return True
-        except (IOError, UnidentifiedImageError, PdfReadError, ValueError) as e:
+        except (IOError, UnidentifiedImageError, ValueError, RuntimeError) as e:
             print(f"Error validating file of type {file_type}: {str(e)}")
             return False
 
@@ -872,6 +872,26 @@ class FileCarvingWidget(QWidget):
             self.stop_button.setEnabled(False)
 
     @staticmethod
+    def render_pdf_thumbnail(pdf_path, thumbnail_folder, name):
+        """Render page 1 of a carved PDF to a QPixmap via PyMuPDF.
+
+        Returns an empty QPixmap if the PDF is too damaged to open, which is
+        common for carved fragments; the caller falls back to a blank tile.
+        """
+        thumbnail_path = os.path.join(thumbnail_folder, name.rsplit('.', 1)[0] + '.png')
+        try:
+            with fitz_open(pdf_path) as doc:
+                if doc.page_count < 1:
+                    return QPixmap()
+                page = doc.load_page(0)
+                pix = page.get_pixmap(matrix=Matrix(1.5, 1.5))
+                pix.save(thumbnail_path)
+            return QPixmap(thumbnail_path)
+        except Exception as e:
+            print(f"Could not render PDF thumbnail for {name}: {e}")
+            return QPixmap()
+
+    @staticmethod
     def extract_original_timestamp(file_content, file_type):
         """Extract original file timestamp from file headers/metadata.
 
@@ -897,13 +917,12 @@ class FileCarvingWidget(QWidget):
             elif file_type.lower() == 'pdf':
                 # Extract CreationDate from PDF metadata
                 try:
-                    pdf = PdfReader(io.BytesIO(file_content))
-                    if pdf.metadata and '/CreationDate' in pdf.metadata:
-                        date_str = pdf.metadata['/CreationDate']
-                        # PDF date format: "D:20240115143000"
-                        if date_str.startswith('D:'):
-                            date_str = date_str[2:16]  # Extract YYYYMMDDHHmmss
-                            return datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S')
+                    with fitz_open(stream=file_content, filetype='pdf') as doc:
+                        date_str = (doc.metadata or {}).get('creationDate', '')
+                    # PDF date format: "D:20240115143000"
+                    if date_str and date_str.startswith('D:'):
+                        date_str = date_str[2:16]  # Extract YYYYMMDDHHmmss
+                        return datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S')
                 except Exception:
                     pass
 
@@ -982,30 +1001,19 @@ class FileCarvingWidget(QWidget):
             file_full_path = os.path.join(carved_dir, name)
             thumbnail_folder = os.path.join(carved_dir, "thumbnails")
 
-            if type_.lower() == 'mov':
-                thumbnail_path = os.path.join(thumbnail_folder, name.replace('.mov', '.png'))
-                with VideoFileClip(file_full_path) as clip:
-                    clip.save_frame(thumbnail_path, t=0.5)  # save frame at 0.5 seconds
-                pixmap = QPixmap(thumbnail_path)
+            if type_.lower() == 'pdf':
+                # Render the first page with PyMuPDF, which is already a
+                # dependency (the Application viewer uses it). This replaces
+                # pdf2image, which needed a separate poppler install.
+                pixmap = self.render_pdf_thumbnail(file_full_path, thumbnail_folder, name)
 
-            elif type_.lower() == 'pdf':
-                # Convert the first page of the PDF to a thumbnail
-                images = convert_from_path(file_full_path)
-                thumbnail_path = os.path.join(thumbnail_folder, name.replace('.pdf', '.png'))
-                images[0].save(thumbnail_path, 'PNG')
-                # Create the QPixmap from the full path
-                pixmap = QPixmap(thumbnail_path)
-
-            elif type_.lower() == 'wmv':
-                capture = cv2.VideoCapture(file_full_path)
-                success, image = capture.read()
-                capture.release()  # Release the capture object explicitly
-                if success:
-                    thumbnail_path = os.path.join(thumbnail_folder, name.replace('.wmv', '.png'))
-                    cv2.imwrite(thumbnail_path, image)
-                    pixmap = QPixmap(thumbnail_path)
-                else:
-                    print("Failed to extract thumbnail from WMV file")
+            elif type_.lower() in ('mov', 'wmv'):
+                # Video frame extraction previously needed moviepy (ffmpeg) for
+                # .mov and OpenCV for .wmv -- roughly 100 MB of wheels plus an
+                # ffmpeg binary, for a thumbnail. Carved video fragments are
+                # frequently truncated and fail to decode anyway, so show a
+                # generic icon instead.
+                pixmap = self.render_svg_to_pixmap(resource_path('Icons/mimetypes/video-x-generic.svg'), 120)
 
             elif type_.lower() == 'zip':
                 # Render ZIP icon at target size for crisp display
@@ -1021,7 +1029,7 @@ class FileCarvingWidget(QWidget):
                 pixmap = QPixmap(thumbnail_path)
 
             # Center-crop to perfect square for modern uniform gallery look (skip for SVG icons)
-            if type_.lower() not in ['zip', 'wav']:
+            if type_.lower() not in ['zip', 'wav', 'mov', 'wmv']:
                 pixmap = self.center_crop_to_square(pixmap, 120)
             icon = QIcon(pixmap)
 
