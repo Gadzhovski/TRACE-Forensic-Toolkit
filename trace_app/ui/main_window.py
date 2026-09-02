@@ -382,14 +382,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_toolbar.addWidget(self.listing_icon_label)
 
         self.listing_title_label = QLabel("File System Browser")
-        self.listing_title_label.setStyleSheet("""
-            QLabel {
-                font-size: 20px;
-                color: #37c6d0;
-                font-weight: bold;
-                margin-left: 8px;
-            }
-        """)
+        self.listing_title_label.setObjectName("panelTitle")
         self.listing_toolbar.addWidget(self.listing_title_label)
 
         # Add spacer after title
@@ -471,7 +464,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setColumnWidth(9, 250)                        # Info - 250px (for volumes)
 
         # Remove any extra space in the header
-        header.setStyleSheet("QHeaderView::section { margin-top: 0px; padding-top: 2px; }")
+        header.setObjectName("listingTableHeader")
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         # Set the header labels

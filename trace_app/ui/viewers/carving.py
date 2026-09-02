@@ -77,14 +77,7 @@ class FileCarvingWidget(QWidget):
         self.toolbar.addWidget(self.icon_label)
 
         self.title_label = QLabel("File Carving")
-        self.title_label.setStyleSheet("""
-            QLabel {
-                font-size: 20px; /* Slightly larger size for the title */
-                color: #37c6d0; /* Hex color for the text */
-                font-weight: bold; /* Make the text bold */
-                margin-left: 8px; /* Space between icon and label */
-            }
-        """)
+        self.title_label.setObjectName("panelTitle")
         self.toolbar.addWidget(self.title_label)
 
         self.spacer = QLabel()

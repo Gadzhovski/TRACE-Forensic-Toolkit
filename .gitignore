@@ -33,3 +33,7 @@ __pycache__/
 # Vendored third-party binaries (downloaded, not committed)
 /tools/Arsenal-Image-Mounter-*/
 /tools/sleuthkit-*/
+
+
+# docs folder
+/docs/

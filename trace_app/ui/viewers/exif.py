@@ -60,7 +60,7 @@ class ExifViewer(QWidget):
         """Initialize the user interface components."""
         # Set up a read-only text edit for displaying the EXIF data
         self.text_edit = QTextEdit(self)
-        self.text_edit.setStyleSheet("border: 0px;")
+        self.text_edit.setObjectName("borderlessView")
         self.text_edit.setReadOnly(True)
         self.text_edit.setContentsMargins(0, 0, 0, 0)
 

@@ -148,16 +148,7 @@ class TextViewer(QWidget):
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(16, 16))  # Reduce icon size
         self.toolbar.setFixedHeight(32)  # Reduce toolbar height
-        self.toolbar.setStyleSheet("""
-            QToolBar {
-                spacing: 2px;
-                padding: 1px;
-            }
-            QToolButton {
-                padding: 2px;
-                margin: 1px;
-            }
-        """)
+        self.toolbar.setObjectName("compactToolbar")
         # disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 

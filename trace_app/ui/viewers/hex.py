@@ -251,16 +251,7 @@ class HexViewer(QWidget):
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(16, 16))  # Reduce icon size
         self.toolbar.setFixedHeight(32)  # Reduce toolbar height
-        self.toolbar.setStyleSheet("""
-            QToolBar {
-                spacing: 2px;
-                padding: 1px;
-            }
-            QToolButton {
-                padding: 2px;
-                margin: 1px;
-            }
-        """)
+        self.toolbar.setObjectName("compactToolbar")
         # disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
@@ -411,7 +402,7 @@ class HexViewer(QWidget):
 
         # Set resizing policies for the header
         header = self.hex_table.horizontalHeader()
-        header.setStyleSheet("QHeaderView::section { padding: 2px; }")  # Reduce header padding
+        header.setObjectName("hexTableHeader")
         header.setDefaultSectionSize(25)  # Set a smaller default size
 
         # Address column - Resize based on content
@@ -432,16 +423,7 @@ class HexViewer(QWidget):
         self.hex_table.setColumnWidth(0, 120)  # Address column initial width
         self.hex_table.setColumnWidth(17, 200)  # ASCII column initial width
 
-        self.hex_table.setStyleSheet("""
-            QTableWidget {
-                gridline-color: transparent;
-                border: 1px solid #d3d3d3;
-            }
-            QTableWidget::item {
-                padding: 0px;
-                border: none;
-            }
-        """)
+        self.hex_table.setObjectName("hexTable")
         self.hex_table.setShowGrid(False)
         self.hex_table.setAlternatingRowColors(True)
         self.hex_table.setEditTriggers(QAbstractItemView.NoEditTriggers)

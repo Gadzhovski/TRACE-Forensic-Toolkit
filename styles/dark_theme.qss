@@ -714,3 +714,72 @@ QChartView#volumeInfoChartView {
     border: none;
     background: transparent;
 }
+
+/* ==================== Migrated inline styles ==================== */
+/* Dark-mode counterparts. The verification hash box in particular hardcoded
+   a light background (#f0f0f0) with dark text (#333) in Python, so it was
+   unreadable here -- this is the rule that fixes it. */
+
+/* Panel titles: File System Browser / File Carving / Registry Browser.
+   Previously three copies of the same inline rule using a teal (#37c6d0)
+   that clashed with the blue used for selection. One accent now. */
+QLabel#panelTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #58A6FF;
+    margin-left: 8px;
+    padding: 2px 0;
+}
+
+QToolBar#compactToolbar {
+    spacing: 2px;
+    padding: 1px;
+}
+
+QToolBar#compactToolbar QToolButton {
+    padding: 2px;
+    margin: 1px;
+}
+
+QTableWidget#hexTable {
+    gridline-color: transparent;
+    border: 1px solid #3C3C3C;
+}
+
+QTableWidget#hexTable::item {
+    padding: 0px;
+    border: none;
+}
+
+QHeaderView#hexTableHeader::section {
+    padding: 2px;
+}
+
+QHeaderView#listingTableHeader::section {
+    margin-top: 0px;
+    padding-top: 2px;
+}
+
+QTextEdit#hashResultBox {
+    background-color: #262626;
+    border: 1px solid #3C3C3C;
+    color: #E0E0E0;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+QProgressBar#verifyProgress {
+    border: 1px solid #3C3C3C;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #262626;
+    color: #E0E0E0;
+}
+
+QProgressBar#verifyProgress::chunk {
+    background-color: #2F81F7;
+    border-radius: 3px;
+}
+
+QTextEdit#borderlessView {
+    border: 0px;
+}

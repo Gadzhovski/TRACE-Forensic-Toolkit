@@ -700,3 +700,71 @@ QChartView#volumeInfoChartView {
     border: none;
     background: transparent;
 }
+
+/* ==================== Migrated inline styles ==================== */
+/* These were setStyleSheet() calls in Python, so the widgets could not
+   respond to a theme change at all. Object names let both themes style them. */
+
+/* Panel titles: File System Browser / File Carving / Registry Browser.
+   Previously three copies of the same inline rule using a teal (#37c6d0)
+   that clashed with the blue used for selection. One accent now. */
+QLabel#panelTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2F81F7;
+    margin-left: 8px;
+    padding: 2px 0;
+}
+
+QToolBar#compactToolbar {
+    spacing: 2px;
+    padding: 1px;
+}
+
+QToolBar#compactToolbar QToolButton {
+    padding: 2px;
+    margin: 1px;
+}
+
+QTableWidget#hexTable {
+    gridline-color: transparent;
+    border: 1px solid #d3d3d3;
+}
+
+QTableWidget#hexTable::item {
+    padding: 0px;
+    border: none;
+}
+
+QHeaderView#hexTableHeader::section {
+    padding: 2px;
+}
+
+QHeaderView#listingTableHeader::section {
+    margin-top: 0px;
+    padding-top: 2px;
+}
+
+QTextEdit#hashResultBox {
+    background-color: #f5f5f5;
+    border: 1px solid #ced4da;
+    color: #212529;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+QProgressBar#verifyProgress {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #f5f5f5;
+    color: #212529;
+}
+
+QProgressBar#verifyProgress::chunk {
+    background-color: #2F81F7;
+    border-radius: 3px;
+}
+
+QTextEdit#borderlessView {
+    border: 0px;
+}

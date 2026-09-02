@@ -69,17 +69,7 @@ class VerificationWidget(QWidget):
         self.hash_label = QTextEdit("Calculating hashes...")
         self.hash_label.setReadOnly(True)
         self.hash_label.setFont(QFont("Courier", 10))
-        self.hash_label.setStyleSheet("""
-            QTextEdit {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                color: #333;
-                font-family: 'Courier';
-            }
-            QTextEdit::indicator:checked {
-                background: #b0b0b0;
-            }
-        """)
+        self.hash_label.setObjectName("hashResultBox")
         layout.addWidget(self.hash_label)
 
         progress_bar_container = QHBoxLayout()
@@ -90,17 +80,7 @@ class VerificationWidget(QWidget):
         self.progress_bar.setMaximum(100)  # Set to 100 for percentage display
         self.progress_bar.setFixedWidth(400)
         self.progress_bar.setAlignment(Qt.AlignCenter)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid grey;
-                border-radius: 5px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #05B8CC;
-                width: 20px;
-            }
-        """)
+        self.progress_bar.setObjectName("verifyProgress")
         progress_bar_container.addWidget(self.progress_bar)
         progress_bar_container.addStretch()
         layout.addLayout(progress_bar_container)
