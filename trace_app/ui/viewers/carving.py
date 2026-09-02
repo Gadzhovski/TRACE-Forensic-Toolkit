@@ -23,6 +23,7 @@ from fitz import open as fitz_open, Matrix
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.infra.paths import carved_files_dir, resource_path
+from trace_app.infra.constants import PANEL_ICON_SIZE
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Carving')
@@ -73,8 +74,8 @@ class FileCarvingWidget(QWidget):
         self.layout.addWidget(self.toolbar)
 
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QPixmap(icons.path(icons.CARVING)))
-        self.icon_label.setFixedSize(48, 48)
+        self.icon_label.setObjectName("panelIcon")
+        self.icon_label.setPixmap(icons.icon(icons.CARVING).pixmap(PANEL_ICON_SIZE, PANEL_ICON_SIZE))
         self.toolbar.addWidget(self.icon_label)
 
         self.title_label = QLabel("File Carving")

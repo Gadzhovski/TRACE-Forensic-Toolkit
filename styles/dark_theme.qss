@@ -37,7 +37,7 @@ QCheckBox::indicator:unchecked {
     background-color: #3C3C3C;
 }
 QCheckBox::indicator:checked {
-    image: url('Icons/icons8-tick-48.png');
+    image: url('Icons/tabler/themed/check-dark.svg');
 }
 
 /* ComboBox Styles */
@@ -61,7 +61,7 @@ QComboBox::drop-down {
     background-color: #4C4C4C;
 }
 QComboBox::down-arrow {
-    image: url('Icons/icons8-dropdown-48.png');
+    image: url('Icons/tabler/themed/chevron-down-dark.svg');
     width: 16px;
     height: 16px;
 }
@@ -357,7 +357,7 @@ QTableWidget::item:selected, QListWidget::item:selected {
 }
 
 #exportButton::menu-arrow {
-    image: url('Icons/icons8-dropdown-48.png');
+    image: url('Icons/tabler/themed/chevron-down-dark.svg');
     width: 16px;  /* Adjust the width of the image */
     height: 16px;  /* Adjust the height of the image */
 }
@@ -784,46 +784,56 @@ QTextEdit#borderlessView {
     border: 0px;
 }
 
-/* ==================== Property tables (was inline HTML) ==================== */
-/* These panes previously built HTML with colours hardcoded for a light
-   background -- the EXIF pane even carried its own <style> block with #ddd
-   headers and black text. That is why they were unreadable here. As real
-   tables they follow the theme like every other widget. */
+/* ==================== Property tables ==================== */
+/* These panes used to be generated HTML with colours hardcoded for a light
+   background, which is why they were unreadable here. As real tables they
+   follow the theme like every other widget. */
 
 QTableWidget#propertyTable {
-    border: 1px solid #3C3C3C;
-    gridline-color: transparent;
-    alternate-background-color: #2B2B2B;
-    background-color: #262626;
+    border: none;
+    background-color: transparent;
     color: #E0E0E0;
-    selection-background-color: #2F81F7;
-    selection-color: #ffffff;
+    gridline-color: transparent;
+    outline: none;
 }
 
 QTableWidget#propertyTable::item {
-    padding: 4px 8px;
+    padding: 3px 12px 3px 8px;
+    border: none;
 }
 
 QTableWidget#propertyTable::item:selected {
-    background-color: #2F81F7;
-    color: #ffffff;
+    background-color: #2d4a6b;
+    color: #FFFFFF;
 }
 
-QHeaderView#propertyTableHeader::section {
-    background-color: #333333;
-    color: #B0B0B0;
-    padding: 5px 8px;
-    border: none;
-    border-bottom: 1px solid #3C3C3C;
-    font-weight: 600;
+/* Field names: quieter than their values, which carry the information. */
+QTableWidget#propertyTable::item[state="label"] {
+    color: #9aa4b0;
+}
+
+/* Section headings ("File", "Timestamps", "Hashes"). */
+QTableWidget#propertyTable::item[state="section"] {
+    color: #58A6FF;
+    padding-top: 10px;
+    padding-bottom: 3px;
+}
+
+QTableWidget#propertyTable::item[state="warning"] {
+    color: #e3a008;
 }
 
 QPlainTextEdit#monoDetailView {
-    border: 1px solid #3C3C3C;
-    background-color: #262626;
-    color: #E0E0E0;
-    font-family: 'Courier New', Courier, monospace;
-    padding: 6px;
+    border: none;
+    border-top: 1px solid #3C3C3C;
+    background-color: transparent;
+    color: #B8BFC7;
+    font-family: 'Consolas', 'Courier New', monospace;
+    padding: 8px;
+}
+
+QLabel#panelIcon {
+    padding: 0 4px 0 8px;
 }
 
 QLabel#vtVerdict {
@@ -833,16 +843,12 @@ QLabel#vtVerdict {
     color: #B0B0B0;
 }
 
-QLabel#vtVerdict[state="malicious"] {
-    color: #ff7b72;
-}
-
-QLabel#vtVerdict[state="clean"] {
-    color: #3fb950;
-}
+QLabel#vtVerdict[state="malicious"] { color: #ff7b72; }
+QLabel#vtVerdict[state="clean"] { color: #3fb950; }
 
 QLabel#vtSectionLabel {
     font-weight: 600;
-    color: #B0B0B0;
-    padding-top: 4px;
+    color: #9aa4b0;
+    padding-top: 8px;
 }
+

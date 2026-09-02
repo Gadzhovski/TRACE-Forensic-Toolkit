@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
 from trace_app.ui.dialogs.about import AboutDialog
-from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
+from trace_app.infra.constants import (PANEL_ICON_SIZE, API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
                                DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
                                INPUT_FIELD_MIN_WIDTH, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
                                SECTOR_SIZE, TABLE_BATCH_SIZE, VIEWER_DOCK_MAX_WIDTH,
@@ -378,8 +378,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # LEFT SIDE: Icon and Title
         self.listing_icon_label = QLabel()
-        self.listing_icon_label.setPixmap(QPixmap(icons.path(icons.SEARCH_BROWSER)))
-        self.listing_icon_label.setFixedSize(48, 48)
+        self.listing_icon_label.setObjectName("panelIcon")
+        self.listing_icon_label.setPixmap(
+            icons.icon(icons.SEARCH_BROWSER).pixmap(PANEL_ICON_SIZE, PANEL_ICON_SIZE))
         self.listing_toolbar.addWidget(self.listing_icon_label)
 
         self.listing_title_label = QLabel("File System Browser")
@@ -556,9 +557,28 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         try:
             with open(qss_file, 'r') as f:
                 stylesheet = f.read()
-            QApplication.instance().setStyleSheet(stylesheet)
+            QApplication.instance().setStyleSheet(self._resolve_qss_urls(stylesheet))
         except Exception as e:
             logger.error(f"Error loading stylesheet {qss_file}: {e}")
+
+    #: Matches url('Icons/...') / url("styles/...") / url(Icons/...) in QSS.
+    _QSS_URL = re.compile(r"""url\(\s*(['"]?)((?:Icons|styles)/[^'")]+)\1\s*\)""")
+
+    @classmethod
+    def _resolve_qss_urls(cls, stylesheet):
+        """Rewrite relative url() paths in a stylesheet to absolute ones.
+
+        Qt resolves a relative url() against the process working directory, not
+        against the stylesheet's own location, so the combo-box arrow and the
+        check-box tick silently disappeared whenever the application was
+        started from anywhere other than the project root.
+        """
+        def absolute(match):
+            quote, relative = match.group(1), match.group(2)
+            resolved = resource_path(relative).replace('\\', '/')
+            return f"url({quote}{resolved}{quote})"
+
+        return cls._QSS_URL.sub(absolute, stylesheet)
 
     def _refresh_icons(self):
         """Re-apply icons after a theme change so their tint updates."""

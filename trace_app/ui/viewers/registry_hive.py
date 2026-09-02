@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.paths import resource_path
+from trace_app.infra.constants import PANEL_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.property_table import PropertyTable
 
@@ -40,7 +41,8 @@ class RegistryExtractor(QWidget):
         main_layout.addWidget(self.toolbar)
 
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QIcon(icons.path(icons.REGISTRY)).pixmap(48, 48))
+        self.icon_label.setObjectName("panelIcon")
+        self.icon_label.setPixmap(icons.icon(icons.REGISTRY).pixmap(PANEL_ICON_SIZE, PANEL_ICON_SIZE))
         self.toolbar.addWidget(self.icon_label)
 
         self.label = QLabel("Registry Browser")

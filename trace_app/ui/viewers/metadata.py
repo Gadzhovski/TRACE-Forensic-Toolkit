@@ -40,8 +40,13 @@ class MetadataViewer(QWidget):
         self.details_view.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.splitter.addWidget(self.details_view)
 
-        self.splitter.setStretchFactor(0, 3)
-        self.splitter.setStretchFactor(1, 2)
+        # The properties are the point of this pane; the low-level dump is
+        # supporting detail, so it yields space first when the dock is short.
+        self.splitter.setStretchFactor(0, 4)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setCollapsible(0, False)
+        self.property_table.setMinimumHeight(140)
+        self.details_view.setMinimumHeight(60)
         layout.addWidget(self.splitter)
 
     def display_metadata(self, data):
@@ -90,11 +95,14 @@ class MetadataViewer(QWidget):
             else:
                 size = self.image_handler.get_readable_size(size)
 
+        # Grouped into sections so the pane reads as three short lists rather
+        # than one long undifferentiated column.
         rows = []
         if is_carved:
             rows.append(("Carved File", "Recovered from unallocated space", "warning"))
 
         rows += [
+            (None, "File"),
             ("Name", data.get('name', 'N/A')),
             ("Type", data.get('type')),
             ("MIME Type", mime_type),
@@ -106,10 +114,12 @@ class MetadataViewer(QWidget):
             rows.append(("Disk Offset", f"{hex(offset_value)} ({offset_value} bytes)"))
 
         rows += [
+            (None, "Timestamps"),
             ("Modified", modified_time),
             ("Accessed", accessed_time),
             ("Created", created_time),
             ("Changed", changed_time),
+            (None, "Hashes"),
             ("MD5", md5_hash),
             ("SHA-256", sha256_hash),
         ]

@@ -44,6 +44,8 @@ PROGRESS_MIN_DURATION = 1500
 TREE_ICON_SIZE = 16
 TABLE_ICON_SIZE = 24
 TOOLBAR_ICON_SIZE = 16
+# Icon beside a panel heading (File System Browser, File Carving, Registry).
+PANEL_ICON_SIZE = 20
 
 # Table settings
 TABLE_COLUMN_COUNT = 9
