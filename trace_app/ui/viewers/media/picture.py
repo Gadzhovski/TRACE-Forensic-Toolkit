@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QToolBar, QScrollAr
                                QFileDialog, QMessageBox, QSizePolicy)
 
 from trace_app.infra.paths import resource_path
+from trace_app.infra.constants import TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Viewer.Picture')
@@ -57,8 +58,8 @@ class PictureViewer(QWidget):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
-        self.toolbar.setIconSize(QSize(16, 16))  # Reduce icon size
-        self.toolbar.setFixedHeight(32)  # Reduce toolbar height
+        self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
+        self.toolbar.setFixedHeight(TOOLBAR_HEIGHT)
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 

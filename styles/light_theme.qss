@@ -1,6 +1,6 @@
 /* Global Widget Styles */
 QWidget {
-    font-size: 14px;
+    font-size: 13px;
     color: #333333;
     background-color: #FFFFFF;
 }
@@ -310,7 +310,11 @@ QTabBar::tab:!selected {
 QToolBar {
     background-color: #FFFFFF;
     border-bottom: 1px solid #E5E5E5;
-    padding: 5px;
+    /* One height and one spacing for every toolbar in the app.
+       These were previously set per widget, so a toolbar with an
+       explicit setFixedHeight sat 6px taller than one without. */
+    padding: 4px 6px;
+    spacing: 6px;
 }
 QToolBar::item:hover {
     background-color: #e7e7e7;
@@ -397,7 +401,7 @@ QGroupBox {
 /* General styles for all QTableWidgets, QTreeWidgets, and QListWidgets in light theme */
 QTableWidget, QTreeWidget, QListWidget {
     gridline-color: #E5E5E5;  /* Light gridline color */
-    font-size: 12px;
+    font-size: 13px;
     background-color: #FFFFFF;  /* Light background for tables */
     color: #000000;  /* Dark text color */
 }
@@ -489,14 +493,14 @@ QListWidget::item:selected, QTreeWidget::item:selected {
 }
 
 #softwareInfoLabel {
-    font-size: 16pt;             /* Slightly larger font for the main title */
+    font-size: 19px;             /* Slightly larger font for the main title */
     font-weight: bold;
     color: #333333;              /* Dark text color */
     padding: 10px 0;             /* Add some vertical padding */
 }
 
 #subtitleLabel {
-    font-size: 12pt;
+    font-size: 15px;
     color: #666666;              /* Medium gray for the subtitle */
     padding: 5px 0;              /* Add a little space around the subtitle */
 }
@@ -520,7 +524,7 @@ QListWidget::item:selected, QTreeWidget::item:selected {
     background-color: #FFFFFF;
     color: #333333;
     border: none;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 #search_results_widget::item {
@@ -549,7 +553,7 @@ QLabel[text="ASCII"] {
 /* UnifiedViewer Placeholder Label - "No content loaded" message */
 #placeholderLabel {
     background-color: #F0F0F0;  /* Light gray background */
-    font-size: 16px;
+    font-size: 15px;
     color: #888888;  /* Medium gray text */
     padding: 10px;
 }
@@ -557,16 +561,12 @@ QLabel[text="ASCII"] {
 /* AudioVideoPlayer Audio-Only Label - "Playing Audio" message */
 #audioOnlyLabel {
     background-color: #E0E0E0;  /* Light gray background */
-    font-size: 18px;
+    font-size: 19px;
     color: #444444;  /* Dark gray text */
     padding: 20px;
 }
 
 /* Toolbar Compact Styles - for PictureViewer and PDFViewer */
-QToolBar {
-    spacing: 2px;
-    padding: 1px;
-}
 
 QToolButton {
     padding: 2px;
@@ -628,7 +628,7 @@ QGroupBox#fileTypeGroup {
 
 QGroupBox#fileTypeGroup QCheckBox {
     spacing: 6px;
-    font-size: 12px;
+    font-size: 13px;
     padding: 2px;
     color: #333333;
 }
@@ -657,21 +657,21 @@ QWidget#volumeInfoRow {
 }
 
 QLabel#volumeInfoTitle {
-    font-size: 16pt;
+    font-size: 19px;
     font-weight: bold;
     color: #212529;
     border: none;
 }
 
 QLabel#volumeInfoSubtitle {
-    font-size: 14pt;
+    font-size: 15px;
     font-weight: bold;
     color: #212529;
     border: none;
 }
 
 QLabel#volumeInfoSectionTitle {
-    font-size: 14pt;
+    font-size: 15px;
     font-weight: bold;
     color: #212529;
     padding-bottom: 10px;
@@ -680,19 +680,19 @@ QLabel#volumeInfoSectionTitle {
 QLabel#volumeInfoFieldLabel {
     font-weight: bold;
     color: #495057;
-    font-size: 10pt;
+    font-size: 13px;
     border: none;
 }
 
 QLabel#volumeInfoFieldValue {
     color: #212529;
-    font-size: 10pt;
+    font-size: 13px;
     border: none;
 }
 
 QLabel#volumeInfoLegendLabel {
     color: #495057;
-    font-size: 9pt;
+    font-size: 11px;
     border: none;
 }
 
@@ -711,7 +711,7 @@ QChartView#volumeInfoChartView {
    foreground text now -- blue is reserved for selection and progress,
    where it means something. */
 QLabel#panelTitle {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     color: #212529;
     margin-left: 6px;
@@ -810,14 +810,7 @@ QTableWidget#propertyTable::item[state="warning"] {
     color: #b45309;
 }
 
-QPlainTextEdit#monoDetailView {
-    border: none;
-    border-top: 1px solid #e3e6ea;
-    background-color: transparent;
-    color: #495057;
-    font-family: 'Consolas', 'Courier New', monospace;
-    padding: 8px;
-}
+
 
 QLabel#panelIcon {
     padding: 0 4px 0 8px;
@@ -839,3 +832,36 @@ QLabel#vtSectionLabel {
     padding-top: 8px;
 }
 
+/* ==================== Metadata pane ==================== */
+/* One scroll area holding the property table and the low-level dump, so the
+   pane has a single scrollbar instead of two competing ones. */
+
+QScrollArea#metadataScroll,
+QWidget#metadataContent {
+    background-color: #ffffff;
+    border: none;
+}
+
+QLabel#detailHeading {
+    font-size: 13px;
+    font-weight: 600;
+    color: #495057;
+    padding: 14px 0 4px 8px;
+    border-top: 1px solid #e9ecef;
+    margin-top: 10px;
+}
+
+QPlainTextEdit#monoDetailView {
+    border: none;
+    background-color: transparent;
+    color: #495057;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 2px 8px;
+}
+
+QLabel#emptyStateLabel {
+    color: #868e96;
+    font-size: 13px;
+    padding: 12px 8px;
+}

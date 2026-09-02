@@ -18,11 +18,13 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
 from trace_app.ui.dialogs.about import AboutDialog
-from trace_app.infra.constants import (PANEL_ICON_SIZE, API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
-                               DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
-                               INPUT_FIELD_MIN_WIDTH, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
-                               SECTOR_SIZE, TABLE_BATCH_SIZE, VIEWER_DOCK_MAX_WIDTH,
-                               VIEWER_DOCK_MIN_HEIGHT)
+from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
+                                       TABLE_ROW_HEIGHT,
+                                       CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
+                                       DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
+                                       PANEL_ICON_SIZE, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
+                                       SECTOR_SIZE, TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
+                                       TREE_ICON_SIZE, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.exif import ExifViewer
 from trace_app.ui.viewers.carving import FileCarvingWidget
@@ -359,7 +361,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_central_widgets(self):
         """Tree viewer, listing table and its toolbar."""
         self.tree_viewer = QTreeWidget(self)
-        self.tree_viewer.setIconSize(QSize(16, 16))
+        self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
         self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
@@ -386,7 +388,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Use alternate row colors
         self.listing_table.setAlternatingRowColors(True)
         self.listing_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.listing_table.setIconSize(QSize(24, 24))
+        self.listing_table.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
+        self.listing_table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
         self.listing_table.setColumnCount(10)  # 10 columns: Name, Inode, Type, Size, 4 timestamps, Path, Info
 
         # Enable horizontal scrolling for smaller windows
@@ -445,8 +448,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_search_bar = QLineEdit()
         self.listing_search_bar.setObjectName("listingSearchBar")
         self.listing_search_bar.setPlaceholderText("Search files (press Enter, supports wildcards: *.pdf, name.*)")
-        self.listing_search_bar.setFixedHeight(35)
-        self.listing_search_bar.setFixedWidth(450)
+        self.listing_search_bar.setFixedHeight(CONTROL_HEIGHT)
+        self.listing_search_bar.setFixedWidth(360)
         # Only search when user presses Enter
         self.listing_search_bar.returnPressed.connect(self.trigger_listing_search)
         # Monitor text changes for auto-clearing results
@@ -455,7 +458,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Add small end spacer
         end_spacer = QWidget()
-        end_spacer.setFixedWidth(10)
+        end_spacer.setFixedWidth(CONTROL_SPACING)
         self.listing_toolbar.addWidget(end_spacer)
 
         # Add the single toolbar and listing table to the layout

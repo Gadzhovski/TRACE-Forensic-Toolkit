@@ -42,14 +42,43 @@ THREAD_SLEEP_MS = 1000  # milliseconds
 # Minimum duration for progress dialog (milliseconds)
 PROGRESS_MIN_DURATION = 1500
 
-# Icon size
+# ==================== UI METRICS ====================
+# One scale for the whole interface. Control heights had drifted to seven
+# different values (22, 25, 27, 30, 32, 35, 40) set widget by widget, which is
+# what made toolbars look ragged: a 25px combo box beside a 22px button beside
+# a 35px search field.
+#
+# Everything below is a multiple of 4, so controls line up on a common grid.
+
+#: Height of a control that sits in a toolbar (buttons, combos, line edits).
+CONTROL_HEIGHT = 24
+
+#: Height of a toolbar itself: a control plus breathing room above and below.
+TOOLBAR_HEIGHT = 36
+
+#: Standard gap between related controls in a row.
+CONTROL_SPACING = 6
+
+#: Wider gap used to separate groups of controls in the same toolbar.
+GROUP_SPACING = 16
+
+#: Row height in the listing, tree and property tables.
+TABLE_ROW_HEIGHT = 26
+
+# --- Icon sizes -----------------------------------------------------------
 TREE_ICON_SIZE = 16
-TABLE_ICON_SIZE = 24
-TOOLBAR_ICON_SIZE = 16
-# Icon beside a panel heading (File System Browser, File Carving, Registry).
-# Sized against the 16px bold title text: a Tabler glyph carries internal
-# padding, so a 24px box renders roughly the same visual weight as the text.
-PANEL_ICON_SIZE = 24
+TABLE_ICON_SIZE = 20
+TOOLBAR_ICON_SIZE = 18
+#: Icon beside a panel heading (File System Browser, File Carving, Registry).
+#: A Tabler glyph carries internal padding, so this renders at roughly the
+#: same visual weight as the heading text next to it.
+PANEL_ICON_SIZE = 22
+
+# --- Button widths --------------------------------------------------------
+#: Dialog buttons (Close, Save, Copy) so they line up in a row.
+BUTTON_WIDTH = 96
+#: Wider action buttons that carry a longer label.
+BUTTON_WIDTH_WIDE = 130
 
 # Table settings
 TABLE_COLUMN_COUNT = 9

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolB
 from fitz import open as fitz_open, Matrix
 
 from trace_app.infra.paths import resource_path
+from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Viewer.PDF')
@@ -68,8 +69,8 @@ class PDFViewer(QWidget):
         self.toolbar = QToolBar(self)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
-        self.toolbar.setIconSize(QSize(16, 16))  # Reduce icon size
-        self.toolbar.setFixedHeight(32)  # Reduce toolbar height
+        self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
+        self.toolbar.setFixedHeight(TOOLBAR_HEIGHT)
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
@@ -85,14 +86,14 @@ class PDFViewer(QWidget):
         # Page entry
         self.page_entry = QLineEdit(self)
         self.page_entry.setMaximumWidth(40)
-        self.page_entry.setFixedHeight(22)  # Set fixed height
+        self.page_entry.setFixedHeight(CONTROL_HEIGHT)
         self.page_entry.setAlignment(Qt.AlignRight)
         self.page_entry.returnPressed.connect(self.go_to_page)
         self.toolbar.addWidget(self.page_entry)
 
         # Total pages label
         self.total_pages_label = QLabel(f"of {len(self.pdf)}" if self.pdf else "of 0")
-        self.total_pages_label.setFixedHeight(22)  # Set fixed height
+        self.total_pages_label.setFixedHeight(CONTROL_HEIGHT)
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
@@ -106,7 +107,7 @@ class PDFViewer(QWidget):
 
         # Add small spacer
         spacer = QWidget(self)
-        spacer.setFixedSize(20, 0)
+        spacer.setFixedSize(GROUP_SPACING, 0)
         self.toolbar.addWidget(spacer)
 
         # Zoom actions
@@ -116,8 +117,8 @@ class PDFViewer(QWidget):
 
         # QLineEdit for zoom percentage
         self.zoom_percentage_entry = QLineEdit(self)
-        self.zoom_percentage_entry.setFixedWidth(60)  # Set a fixed width for consistency
-        self.zoom_percentage_entry.setFixedHeight(22)  # Set fixed height
+        self.zoom_percentage_entry.setFixedWidth(64)
+        self.zoom_percentage_entry.setFixedHeight(CONTROL_HEIGHT)
         self.zoom_percentage_entry.setAlignment(Qt.AlignRight)
         self.zoom_percentage_entry.setPlaceholderText("100%")  # Default zoom is 100%
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
@@ -135,7 +136,7 @@ class PDFViewer(QWidget):
 
         # Add small spacer
         spacer = QWidget(self)
-        spacer.setFixedSize(20, 0)
+        spacer.setFixedSize(GROUP_SPACING, 0)
         self.toolbar.addWidget(spacer)
 
         # Fit in window
@@ -152,7 +153,7 @@ class PDFViewer(QWidget):
 
         # Add small spacer
         spacer = QWidget(self)
-        spacer.setFixedSize(20, 0)
+        spacer.setFixedSize(GROUP_SPACING, 0)
         self.toolbar.addWidget(spacer)
 
         # Pan tool button

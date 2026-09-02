@@ -24,6 +24,8 @@ from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QKeySequence, Q
 from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QTableWidget,
                                QTableWidgetItem)
 
+from trace_app.infra.constants import TABLE_ROW_HEIGHT
+
 #: Values shown in a monospaced font: anything where character alignment helps.
 MONO_LABELS = {
     'md5', 'sha-1', 'sha1', 'sha-256', 'sha256', 'disk offset', 'inode',
@@ -57,9 +59,9 @@ class PropertyTable(QTableWidget):
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setHighlightSections(False)
-        self.setColumnWidth(0, 150)
+        self.setColumnWidth(0, 160)
 
-        self.verticalHeader().setDefaultSectionSize(24)
+        self.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
         self.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
 
         self._mono = QFontDatabase.systemFont(QFontDatabase.FixedFont)

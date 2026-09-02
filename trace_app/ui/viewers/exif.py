@@ -3,7 +3,8 @@ from io import BytesIO as io_BytesIO
 
 from PIL import Image
 from PIL.ExifTags import TAGS
-from PySide6.QtWidgets import QWidget, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from trace_app.ui.widgets.property_table import PropertyTable
 
@@ -59,13 +60,47 @@ class ExifViewer(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        """Initialize the user interface components."""
-        self.table = PropertyTable("Tag", "Value", self)
+        """A single scrolling surface, matching the Metadata pane.
 
-        layout = QVBoxLayout()
+        The table grows to its full content height inside a scroll area rather
+        than providing its own scrollbar, so the pane reads top to bottom with
+        one scrollbar however short the dock is.
+        """
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.table)
-        self.setLayout(layout)
+        layout.setSpacing(0)
+
+        self.scroll = QScrollArea(self)
+        self.scroll.setObjectName("metadataScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.NoFrame)
+
+        content = QWidget()
+        content.setObjectName("metadataContent")
+        inner = QVBoxLayout(content)
+        inner.setContentsMargins(12, 10, 12, 12)
+        inner.setSpacing(0)
+
+        self.empty_label = QLabel("No EXIF data in this file.", content)
+        self.empty_label.setObjectName("emptyStateLabel")
+        inner.addWidget(self.empty_label)
+
+        self.table = PropertyTable("Tag", "Value", content)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner.addWidget(self.table)
+
+        inner.addStretch(1)
+        self.scroll.setWidget(content)
+        layout.addWidget(self.scroll)
+
+    def _fit_to_contents(self):
+        """Size the table to its rows; the scroll area handles overflow."""
+        rows = self.table.rowCount()
+        height = sum(self.table.rowHeight(r) for r in range(rows))
+        self.table.setFixedHeight(height + 2 * self.table.frameWidth())
+        self.table.setVisible(rows > 0)
+        self.empty_label.setVisible(rows == 0)
 
     def display_exif_data(self, exif_data):
         """Display the provided EXIF tags.
@@ -75,10 +110,12 @@ class ExifViewer(QWidget):
         unreadable in dark mode. A real table follows the application theme.
         """
         self.table.set_rows(list(exif_data) if exif_data else [])
+        self._fit_to_contents()
 
     def clear_content(self):
         """Clear the displayed content."""
         self.table.clear_rows()
+        self._fit_to_contents()
 
     def load_and_display_exif_data(self, file_content):
         """Load the EXIF data from the file content and display it."""

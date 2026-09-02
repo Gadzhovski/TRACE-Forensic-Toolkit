@@ -2,6 +2,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont, QPalette, QColor
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
 from trace_app.infra.paths import resource_path
+from trace_app.infra.constants import BUTTON_WIDTH, TOOLBAR_HEIGHT
 from trace_app.ui import icons
 
 
@@ -40,7 +41,7 @@ class AboutDialog(QDialog):
         button_layout = QHBoxLayout()
         button_layout.addStretch()  # Add stretchable space on the left
         close_button = QPushButton("Close")
-        close_button.setFixedSize(100, 30)  # Set the size of the button
+        close_button.setFixedSize(BUTTON_WIDTH, TOOLBAR_HEIGHT)
         close_button.clicked.connect(self.close)
         button_layout.addWidget(close_button)  # Add the button to the layout
         button_layout.addStretch()  # Add stretchable space on the right

@@ -1,3 +1,4 @@
+from trace_app.infra.constants import BUTTON_WIDTH, TABLE_ICON_SIZE
 """Volume and image information view.
 
 The "View Image Information" dialog: per-partition tables, filesystem details,
@@ -177,7 +178,7 @@ class VolumeInfoMixin:
         volume_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         volume_table.setAlternatingRowColors(True)
         volume_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        volume_table.setIconSize(QSize(24, 24))
+        volume_table.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
         volume_table.setSelectionBehavior(QTableWidget.SelectRows)
 
         # Enable horizontal scrolling for smaller windows
@@ -235,7 +236,7 @@ class VolumeInfoMixin:
 
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.accept)
-        close_button.setMinimumWidth(100)
+        close_button.setMinimumWidth(BUTTON_WIDTH)
 
         button_layout.addWidget(close_button)
         bottom_layout.addLayout(button_layout)

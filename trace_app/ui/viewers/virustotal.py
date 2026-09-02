@@ -16,6 +16,7 @@ from datetime import datetime
 from requests import get as requests_get, post as requests_post
 from requests.exceptions import RequestException
 from trace_app.infra.paths import resource_path
+from trace_app.infra.constants import BUTTON_WIDTH_WIDE, TOOLBAR_HEIGHT
 from trace_app.ui import icons
 from trace_app.ui.widgets.property_table import PropertyTable
 
@@ -60,14 +61,14 @@ class VirusTotal(QWidget):
 
         self.pass_hash_button = QPushButton("Pass Hash")
         self.pass_hash_button.clicked.connect(self.pass_hash)
-        self.pass_hash_button.setFixedSize(120, 40)  # Set fixed size for a modern look
+        self.pass_hash_button.setFixedSize(BUTTON_WIDTH_WIDE, TOOLBAR_HEIGHT)
 
         buttonLayout.addWidget(self.pass_hash_button)
 
         # Upload File Button
         self.upload_file_button = QPushButton("Upload File")
         self.upload_file_button.clicked.connect(self.upload_file)
-        self.upload_file_button.setFixedSize(120, 40)  # Set fixed size for a modern look
+        self.upload_file_button.setFixedSize(BUTTON_WIDTH_WIDE, TOOLBAR_HEIGHT)
 
         buttonLayout.addWidget(self.upload_file_button)
         self.layout.addLayout(buttonLayout)

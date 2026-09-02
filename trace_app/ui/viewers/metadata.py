@@ -2,7 +2,9 @@ import datetime
 
 import pytsk3
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPlainTextEdit, QSplitter, QWidget, QVBoxLayout
+from PySide6.QtGui import QFontMetrics
+from PySide6.QtWidgets import (QLabel, QPlainTextEdit, QScrollArea, QVBoxLayout,
+                               QWidget)
 
 from trace_app.ui.widgets.property_table import PropertyTable
 import hashlib
@@ -20,36 +22,74 @@ class MetadataViewer(QWidget):
         self.image_handler = image_handler
 
     def init_ui(self):
+        """One scrolling surface, not two.
+
+        This pane used to stack a property table above a text view inside a
+        splitter. In a dock only ~160px tall that gave each of them its own
+        cramped scroll area -- 13 rows of properties squeezed into three rows
+        of visible space, with the low-level dump scrolling separately below.
+
+        Both now sit inside a single scroll area and grow to their full
+        content height, so there is one scrollbar for the whole pane and
+        everything reads top to bottom.
+        """
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.splitter = QSplitter(Qt.Vertical, self)
-        self.splitter.setObjectName("metadataSplitter")
+        self.scroll = QScrollArea(self)
+        self.scroll.setObjectName("metadataScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QScrollArea.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-        # Summary properties. A real table rather than generated HTML, so it
-        # follows the theme and an examiner can select and copy a hash.
-        self.property_table = PropertyTable("Property", "Value", self)
-        self.splitter.addWidget(self.property_table)
+        content = QWidget()
+        content.setObjectName("metadataContent")
+        inner = QVBoxLayout(content)
+        inner.setContentsMargins(12, 10, 12, 12)
+        inner.setSpacing(0)
 
-        # Low-level filesystem output is preformatted text, so it stays a text
-        # view -- but a themed, monospaced one rather than an HTML <pre>.
-        self.details_view = QPlainTextEdit(self)
+        # Properties. A real table rather than generated HTML, so it follows
+        # the theme and an examiner can select and copy a hash.
+        self.property_table = PropertyTable("Property", "Value", content)
+        self.property_table.setSizeAdjustPolicy(PropertyTable.AdjustToContents)
+        self.property_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.property_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        inner.addWidget(self.property_table)
+
+        self.details_heading = QLabel("Filesystem detail", content)
+        self.details_heading.setObjectName("detailHeading")
+        inner.addWidget(self.details_heading)
+
+        # Low-level output is preformatted text, so it stays a text view -- but
+        # a themed, monospaced one rather than an HTML <pre>.
+        self.details_view = QPlainTextEdit(content)
         self.details_view.setObjectName("monoDetailView")
         self.details_view.setReadOnly(True)
         self.details_view.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.splitter.addWidget(self.details_view)
+        self.details_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.details_view.setFrameShape(QPlainTextEdit.NoFrame)
+        inner.addWidget(self.details_view)
 
-        # The properties are the point of this pane; the low-level dump is
-        # supporting detail, so it yields space first when the dock is short.
-        self.splitter.setStretchFactor(0, 4)
-        self.splitter.setStretchFactor(1, 1)
-        self.splitter.setCollapsible(0, False)
-        # Modest floors: these propagate up into the dock's minimum height,
-        # and the dock should not be able to crowd out the file listing.
-        self.property_table.setMinimumHeight(80)
-        self.details_view.setMinimumHeight(40)
-        layout.addWidget(self.splitter)
+        inner.addStretch(1)
+        self.scroll.setWidget(content)
+        layout.addWidget(self.scroll)
+
+    def _fit_to_contents(self):
+        """Size the table and text view to their content.
+
+        Both are inside the shared scroll area, so they must report their full
+        height rather than provide their own scrollbars.
+        """
+        table = self.property_table
+        height = sum(table.rowHeight(r) for r in range(table.rowCount()))
+        table.setFixedHeight(height + 2 * table.frameWidth())
+
+        document = self.details_view.document()
+        document.setTextWidth(-1)
+        lines = max(1, document.blockCount())
+        line_height = QFontMetrics(self.details_view.font()).lineSpacing()
+        self.details_view.setFixedHeight(lines * line_height + 12)
 
     def display_metadata(self, data):
         """Populate the pane for the selected file."""
@@ -67,6 +107,9 @@ class MetadataViewer(QWidget):
             if metadata is None:
                 self.property_table.set_rows([("Status", "No metadata available.")])
                 self.details_view.clear()
+                self.details_view.setVisible(False)
+                self.details_heading.setVisible(False)
+                self._fit_to_contents()
                 return
 
         if is_carved:
@@ -133,6 +176,8 @@ class MetadataViewer(QWidget):
             details = self.get_inode_details(data.get('start_offset'), data.get('inode_number'))
         self.details_view.setPlainText(details or "")
         self.details_view.setVisible(bool(details))
+        self.details_heading.setVisible(bool(details))
+        self._fit_to_contents()
 
     def get_inode_details(self, offset, inode_number):
         """Render low-level filesystem details for an inode.
@@ -253,3 +298,6 @@ class MetadataViewer(QWidget):
     def clear(self):
         self.property_table.clear_rows()
         self.details_view.clear()
+        self.details_view.setVisible(False)
+        self.details_heading.setVisible(False)
+        self._fit_to_contents()

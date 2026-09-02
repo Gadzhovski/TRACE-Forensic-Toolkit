@@ -23,7 +23,7 @@ from fitz import open as fitz_open, Matrix
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.infra.paths import carved_files_dir, resource_path
-from trace_app.infra.constants import PANEL_ICON_SIZE
+from trace_app.infra.constants import (PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Carving')
@@ -133,7 +133,7 @@ class FileCarvingWidget(QWidget):
 
         # Use alternate row colors (matching Listing tab)
         table_widget.setAlternatingRowColors(True)
-        table_widget.setIconSize(QSize(24, 24))
+        table_widget.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
 
         # Enable horizontal scrolling for smaller windows (matching Listing tab)
         table_widget.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)

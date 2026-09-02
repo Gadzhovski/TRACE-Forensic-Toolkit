@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QAppli
                                QFileDialog, QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
 from trace_app.infra.paths import resource_path
+from trace_app.infra.constants import BUTTON_WIDTH
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Verify')
@@ -79,7 +80,7 @@ class VerificationWidget(QWidget):
         self.progress_bar = QProgressBar()
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)  # Set to 100 for percentage display
-        self.progress_bar.setFixedWidth(400)
+        self.progress_bar.setFixedWidth(360)
         self.progress_bar.setAlignment(Qt.AlignCenter)
         self.progress_bar.setObjectName("verifyProgress")
         progress_bar_container.addWidget(self.progress_bar)
@@ -88,19 +89,19 @@ class VerificationWidget(QWidget):
 
         button_layout = QHBoxLayout()
         self.save_button = QPushButton("Save to Text File", self)
-        self.save_button.setFixedWidth(150)
+        self.save_button.setFixedWidth(BUTTON_WIDTH)
         self.save_button.clicked.connect(self.save_hash)
         self.save_button.setEnabled(False)
         button_layout.addWidget(self.save_button)
 
         self.copy_button = QPushButton("Copy", self)
-        self.copy_button.setFixedWidth(150)
+        self.copy_button.setFixedWidth(BUTTON_WIDTH)
         self.copy_button.clicked.connect(self.copy_hash)
         self.copy_button.setEnabled(False)
         button_layout.addWidget(self.copy_button)
 
         self.close_button = QPushButton("Close", self)
-        self.close_button.setFixedWidth(150)
+        self.close_button.setFixedWidth(BUTTON_WIDTH)
         self.close_button.clicked.connect(self.close)
         button_layout.addWidget(self.close_button)
         layout.addLayout(button_layout)
