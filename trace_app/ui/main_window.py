@@ -385,6 +385,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tree_viewer = QTreeWidget(self)
         self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
+        # No frame. A selected row runs the full width of the viewport, and the
+        # frame sits immediately left of it -- lighter than the selection, so it
+        # read as a white line down the edge of the highlight rather than as the
+        # widget's border. It is a QFrame shape, not a QSS border, so it has to
+        # come off here. The dock already separates the tree from its
+        # surroundings.
+        self.tree_viewer.setFrameShape(QTreeWidget.NoFrame)
         # Tighter than Qt's default 20px. That default leaves a visible gap
         # between the expand arrow and the icon beside it, which reads as the
         # two being unrelated.

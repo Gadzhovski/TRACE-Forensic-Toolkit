@@ -99,8 +99,16 @@ QFrame {
     border: none; /* Remove border from all QFrames by default */
 }
 
-/* Only apply borders to specific frames where needed */
-QFrame#search_results_frame, QDockWidget > QFrame {
+/* Only apply borders to specific frames where needed.
+
+   The tree is excluded. A QTreeWidget is a QFrame and sits directly inside a
+   dock, so it matched here -- and this selector outranks a plain QTreeWidget
+   rule, so the border could not be turned off from there. A selected row runs
+   the full width of the viewport, putting that border immediately against the
+   selection colour: being lighter, it read as a white line down the edge of
+   the highlight rather than as the widget's frame. */
+QFrame#search_results_frame,
+QDockWidget > QFrame:not(QTreeWidget) {
     border: 1px solid #E5E5E5;
 }
 
@@ -338,8 +346,12 @@ QLineEdit:focus {
 }
 
 QTreeWidget {
-    border: 1px solid #E5E5E5;
-    border-radius: 4px;
+    /* No frame. A selected row runs the full width of the view, so a border
+       sat directly against the selection colour -- and being lighter than it,
+       read as a white line down the left of the highlight rather than as the
+       widget's edge. The tree lives in a dock, which already separates it from
+       what is beside it. */
+    border: none;
     background-color: #ffffff;
 }
 
@@ -400,7 +412,7 @@ QGroupBox {
 
 
 /* General styles for all QTableWidgets, QTreeWidgets, and QListWidgets in light theme */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QListWidget {
     gridline-color: #E5E5E5;  /* Light gridline color */
     font-size: 13px;
     background-color: #FFFFFF;  /* Light background for tables */

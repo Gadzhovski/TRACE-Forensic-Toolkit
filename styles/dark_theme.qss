@@ -278,8 +278,12 @@ QLineEdit:focus {
 }
 
 QTreeWidget {
-    border: 1px solid #5A5A5A;
-    border-radius: 4px;
+    /* No frame. A selected row runs the full width of the view, so a border
+       sat directly against the selection colour -- and being lighter than it,
+       read as a white line down the left of the highlight rather than as the
+       widget's edge. The tree lives in a dock, which already separates it from
+       what is beside it. */
+    border: none;
     background-color: #2E2E2E;
     color: #E0E0E0;
 }
@@ -449,7 +453,7 @@ QMenu::separator {
 
 
 /* General styles for all QTableWidgets in dark theme */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QListWidget {
     gridline-color: #5A5A5A;  /* Gridline color for dark mode */
     font-size: 13px;
     background-color: #2E2E2E;  /* Dark background for tables */
