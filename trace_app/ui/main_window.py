@@ -33,6 +33,7 @@ from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
 from trace_app.infra.paths import config_file, resource_path
 from trace_app.ui import icons
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.viewers.registry_hive import RegistryExtractor
 from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
@@ -221,6 +222,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not getattr(self, '_layout_applied', False):
             self._layout_applied = True
             self._apply_default_layout()
+            self._align_toolbars()
+
+    def _align_toolbars(self):
+        """Give every toolbar in the window the same control geometry.
+
+        Done centrally, and after the widgets exist, because Qt sizes a
+        QToolButton from its icon and ignores a stylesheet max-height -- so
+        heights set only in QSS came out as 26, 28, 34 and 36px side by side.
+        """
+        for toolbar in self.findChildren(QToolBar):
+            prepare_toolbar(toolbar)
+            align_controls(toolbar)
 
     def _apply_default_layout(self):
         """Give the file listing most of the window on first run.
@@ -335,6 +348,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_toolbar(self):
         """Main toolbar actions."""
         self.main_toolbar = QToolBar()
+        prepare_toolbar(self.main_toolbar)
         # Named so the toolbar/dock context menu has a label for it; an unnamed
         # toolbar shows there as a tick box with no text. objectName lets Qt
         # save and restore its position.
@@ -406,6 +420,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # ==================== CREATE UNIFIED TOOLBAR (like File Carving tab) ====================
         self.listing_toolbar = QToolBar()
+        prepare_toolbar(self.listing_toolbar)
         self.listing_toolbar.setContentsMargins(0, 0, 0, 0)
         self.listing_toolbar.setMovable(False)
 
@@ -452,7 +467,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "Search the image for files by name.\n"
             "Press Enter to run the search.\n"
             "Wildcards are supported, for example *.pdf or report.*")
-        self.listing_search_bar.setFixedHeight(CONTROL_HEIGHT)
         self.listing_search_bar.setMinimumWidth(220)
         self.listing_search_bar.setMaximumWidth(380)
         # Only search when user presses Enter
@@ -467,7 +481,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_toolbar.addWidget(end_spacer)
 
         # Add the single toolbar and listing table to the layout
-        self.listing_layout.addWidget(self.listing_toolbar)  # Single unified toolbar
+        # Every control in this toolbar gets the shared height, once it is built.
+        align_controls(self.listing_toolbar)
+        self.listing_layout.addWidget(self.listing_toolbar)
         self.listing_layout.addWidget(self.listing_table)  # Table below toolbar
 
         # Create a widget to hold the layout

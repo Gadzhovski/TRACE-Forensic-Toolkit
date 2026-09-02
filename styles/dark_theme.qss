@@ -878,29 +878,43 @@ QLabel#emptyStateLabel {
 }
 
 /* ==================== Controls ==================== */
-/* One corner radius for inputs and buttons, and real horizontal padding so
-   text and placeholders are not clipped against the border. */
+/* Height is set here and nowhere else. Qt adds padding and border on top of
+   min-height, so these values are chosen to total the same rendered height for
+   every control: 6px padding + 2px border + 16px content = 24px.
+   Python must not also call setFixedHeight, or the two disagree and the larger
+   wins -- which is what left toolbars with 24, 32, 34, 36 and 38px controls
+   sitting side by side. */
 
-QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {
-    padding: 3px 8px;
+QLineEdit, QComboBox, QSpinBox {
+    padding: 0px 8px;
     border-radius: 4px;
-    min-height: 24px;
+    min-height: 26px;
+    max-height: 26px;
 }
 
 QPushButton {
-    padding: 4px 14px;
+    padding: 0px 14px;
     border-radius: 4px;
-    min-height: 24px;
+    min-height: 26px;
+    max-height: 26px;
+    min-width: 80px;
 }
 
-/* Toolbar buttons: a square hit area so the icon sits centred in its hover
-   highlight rather than floating in a wide rectangle. */
+QComboBox::drop-down {
+    width: 20px;
+    border-left: none;
+}
+
+/* Toolbar buttons: square, so an icon sits centred in its hover highlight
+   rather than floating in a wide rectangle. */
 QToolBar QToolButton {
-    padding: 4px;
+    padding: 0px;
     margin: 0px 1px;
     border-radius: 4px;
     min-width: 28px;
+    max-width: 28px;
     min-height: 28px;
+    max-height: 28px;
 }
 
 QToolBar QToolButton:hover {
@@ -911,8 +925,18 @@ QToolBar QToolButton:pressed {
     background-color: #454545;
 }
 
-/* A button carrying text needs room for it, so drop the square minimum. */
+/* Buttons that carry a label need room for it. */
 QToolBar QToolButton[popupMode="1"],
-QToolBar QToolButton#clearSearchBtn {
+QToolBar QToolButton#clearSearchBtn,
+QToolBar QPushButton {
     min-width: 0px;
+    max-width: 16777215px;
+}
+
+/* Labels inside a toolbar: match the control height so text baselines line up
+   with the fields beside them. */
+QToolBar QLabel {
+    min-height: 26px;
+    max-height: 26px;
+    padding: 0px 2px;
 }

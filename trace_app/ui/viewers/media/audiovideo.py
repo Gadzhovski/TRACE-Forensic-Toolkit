@@ -369,7 +369,6 @@ class AudioVideoPlayer(QWidget):
             self.play_button.setText("Play")
 
         self.play_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
-        self.play_button.setFixedHeight(CONTROL_HEIGHT)
         self.play_button.setFlat(True)
         self.play_button.setToolTip("Play/Pause")
 
@@ -390,22 +389,18 @@ class AudioVideoPlayer(QWidget):
             self.stop_button.setText("Stop")
 
         self.stop_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
-        self.stop_button.setFixedHeight(CONTROL_HEIGHT)
         self.stop_button.setFlat(True)
         self.stop_button.setToolTip("Stop")
 
         # Position slider
         self.position_slider = QSlider(Qt.Horizontal, self)
-        self.position_slider.setFixedHeight(CONTROL_HEIGHT)
         self.position_slider.setRange(0, 0)  # Will be updated when media is loaded
         self.position_slider.setToolTip("Position")
 
         # Time labels
         self.current_time_label = QLabel("00:00", self)
-        self.current_time_label.setFixedHeight(CONTROL_HEIGHT)
         self.current_time_label.setMinimumWidth(40)
         self.total_time_label = QLabel("00:00", self)
-        self.total_time_label.setFixedHeight(CONTROL_HEIGHT)
         self.total_time_label.setMinimumWidth(40)
 
         # Volume button with fallback icon paths
@@ -425,12 +420,10 @@ class AudioVideoPlayer(QWidget):
             self.volume_button.setText("Vol")
 
         self.volume_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
-        self.volume_button.setFixedHeight(CONTROL_HEIGHT)
         self.volume_button.setFlat(True)
         self.volume_button.setToolTip("Mute/Unmute")
 
         self.volume_slider = QSlider(Qt.Horizontal, self)
-        self.volume_slider.setFixedHeight(CONTROL_HEIGHT)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(self._current_volume)
         self.volume_slider.setMaximumWidth(80)

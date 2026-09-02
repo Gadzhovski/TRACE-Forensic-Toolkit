@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayo
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Hex')
 
@@ -211,7 +212,6 @@ class HexViewer(QWidget):
 
         self.search_results_title = QLabel("Search Results", self.search_results_frame)
         self.search_results_title.setAlignment(Qt.AlignCenter)
-        self.search_results_title.setFixedHeight(CONTROL_HEIGHT)
         self.search_results_title.setObjectName("search_results_title")  # Set object name for stylesheet targeting
         self.search_results_layout.addWidget(self.search_results_title)
 
@@ -249,10 +249,10 @@ class HexViewer(QWidget):
 
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
+        prepare_toolbar(self.toolbar)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
-        self.toolbar.setFixedHeight(TOOLBAR_HEIGHT)
         self.toolbar.setObjectName("compactToolbar")
         # disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
@@ -269,14 +269,12 @@ class HexViewer(QWidget):
         # Page entry
         self.page_entry = QLineEdit(self)
         self.page_entry.setMaximumWidth(40)
-        self.page_entry.setFixedHeight(CONTROL_HEIGHT)
         self.page_entry.setPlaceholderText("1")
         self.page_entry.returnPressed.connect(self.go_to_page_by_entry)
         self.toolbar.addWidget(self.page_entry)
 
         # Total pages label
         self.total_pages_label = QLabel(" of ")
-        self.total_pages_label.setFixedHeight(CONTROL_HEIGHT)
         self.toolbar.addWidget(self.total_pages_label)
 
         self.next_action = icons.action(icons.FORWARD, "Next", self)
@@ -294,11 +292,9 @@ class HexViewer(QWidget):
 
         # Add a QLabel and a QComboBox for font size to the toolbar
         font_label = QLabel("Font Size: ")
-        font_label.setFixedHeight(CONTROL_HEIGHT)
         self.toolbar.addWidget(font_label)
 
         self.font_size_combobox = QComboBox(self)
-        self.font_size_combobox.setFixedHeight(CONTROL_HEIGHT)
         self.font_size_combobox.setFixedWidth(64)
         self.font_size_combobox.addItems(["8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36"])
         self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
@@ -313,7 +309,6 @@ class HexViewer(QWidget):
         self.export_button.setObjectName("exportButton")  # Assign a unique object name
         self.export_button.setText("Export")
         self.export_button.setToolButtonStyle(Qt.ToolButtonTextOnly)  # Change to text only since no icon is used
-        self.export_button.setFixedHeight(CONTROL_HEIGHT)
         self.export_button.setFixedWidth(BUTTON_WIDTH)
         self.export_button.setPopupMode(QToolButton.MenuButtonPopup)  # Set the popup mode
 
@@ -341,10 +336,11 @@ class HexViewer(QWidget):
         # Wide enough for the placeholder: at 100px it was clipped mid-word.
         self.search_bar.setMinimumWidth(150)
         self.search_bar.setMaximumWidth(220)
-        self.search_bar.setFixedHeight(CONTROL_HEIGHT)
         self.search_bar.setPlaceholderText("Search...")
         self.search_bar.returnPressed.connect(self.trigger_search)
         self.toolbar.addWidget(self.search_bar)
+        # Every control in this toolbar gets the shared height, once it is built.
+        align_controls(self.toolbar)
 
     def update_font_size(self):
         # Get the current font size from the combobox

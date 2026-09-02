@@ -14,6 +14,7 @@ from fitz import open as fitz_open, Matrix
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Viewer.PDF')
 
@@ -67,10 +68,10 @@ class PDFViewer(QWidget):
 
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
+        prepare_toolbar(self.toolbar)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
-        self.toolbar.setFixedHeight(TOOLBAR_HEIGHT)
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
@@ -86,14 +87,12 @@ class PDFViewer(QWidget):
         # Page entry
         self.page_entry = QLineEdit(self)
         self.page_entry.setMaximumWidth(40)
-        self.page_entry.setFixedHeight(CONTROL_HEIGHT)
         self.page_entry.setAlignment(Qt.AlignRight)
         self.page_entry.returnPressed.connect(self.go_to_page)
         self.toolbar.addWidget(self.page_entry)
 
         # Total pages label
         self.total_pages_label = QLabel(f"of {len(self.pdf)}" if self.pdf else "of 0")
-        self.total_pages_label.setFixedHeight(CONTROL_HEIGHT)
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
@@ -118,7 +117,6 @@ class PDFViewer(QWidget):
         # QLineEdit for zoom percentage
         self.zoom_percentage_entry = QLineEdit(self)
         self.zoom_percentage_entry.setFixedWidth(64)
-        self.zoom_percentage_entry.setFixedHeight(CONTROL_HEIGHT)
         self.zoom_percentage_entry.setAlignment(Qt.AlignRight)
         self.zoom_percentage_entry.setPlaceholderText("100%")  # Default zoom is 100%
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
@@ -177,6 +175,8 @@ class PDFViewer(QWidget):
         self.save_pdf_action = icons.action(icons.SAVE_AS, "Save PDF", self)
         self.save_pdf_action.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.save_pdf_action)
+        # Every control in this toolbar gets the shared height, once it is built.
+        align_controls(self.toolbar)
 
     def setup_pdf_display_area(self):
         self.page_label = QLabel(self)

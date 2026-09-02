@@ -25,6 +25,7 @@ from trace_app.core.carving_signatures import (extract_original_timestamp,
 from trace_app.infra.paths import carved_files_dir, resource_path
 from trace_app.infra.constants import (PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Carving')
 
@@ -70,6 +71,8 @@ class FileCarvingWidget(QWidget):
         self.layout.setSpacing(0)  # Set the spacing to zero
 
         self.toolbar = QToolBar()
+
+        prepare_toolbar(self.toolbar)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.layout.addWidget(self.toolbar)
 
@@ -118,6 +121,8 @@ class FileCarvingWidget(QWidget):
         self.layout.addWidget(self.tab_widget)
 
         self.file_carved.connect(self.display_carved_file)
+        # Every control in this toolbar gets the shared height, once it is built.
+        align_controls(self.toolbar)
 
     def create_table_widget(self):
         table_widget = QTableWidget()

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QToolBar, QScrollAr
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Viewer.Picture')
 
@@ -56,10 +57,10 @@ class PictureViewer(QWidget):
 
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
+        prepare_toolbar(self.toolbar)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
-        self.toolbar.setFixedHeight(TOOLBAR_HEIGHT)
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
@@ -91,6 +92,8 @@ class PictureViewer(QWidget):
         self.toolbar.addAction(rotate_right_action)
         self.toolbar.addAction(reset_action)
         self.toolbar.addAction(self.export_action)
+        # Every control in this toolbar gets the shared height, once it is built.
+        align_controls(self.toolbar)
 
     def display(self, content):
         self.original_image_bytes = content  # Save the original image bytes

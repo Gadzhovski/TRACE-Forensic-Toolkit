@@ -11,6 +11,7 @@ from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import PANEL_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.property_table import PropertyTable
 
 logger = logging.getLogger('TRACE.Registry')
@@ -37,6 +38,8 @@ class RegistryExtractor(QWidget):
         self.setLayout(main_layout)
 
         self.toolbar = QToolBar("Toolbar")
+
+        prepare_toolbar(self.toolbar)
         self.toolbar.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.toolbar)
 
@@ -93,6 +96,8 @@ class RegistryExtractor(QWidget):
 
         # Connect the click event
         self.treeWidget.itemClicked.connect(self.on_item_clicked)
+        # Every control in this toolbar gets the shared height, once it is built.
+        align_controls(self.toolbar)
 
     def onCustomContextMenuRequested(self, position):
         # Create the context menu
