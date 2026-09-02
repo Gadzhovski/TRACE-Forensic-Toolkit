@@ -28,24 +28,25 @@ Inkscape editing metadata, with no author, project or licence fields. Most such
 themes are distributed under the GPL or CC BY-SA, both of which require
 attribution and, for GPL, that the icon sources remain available.
 
-`apps/` (161 files), `status/` (16) and `animations/` (12) are no longer
-referenced by any code path — the mapping table used to carry entries for them
-that nothing ever queried. They are kept for now in case more file types are
-mapped later; excluding them would save roughly 1.3 MB in a packaged build.
+Only the icons the application actually references are committed. `status/` and
+`animations/` are gone entirely, and `apps/` is down to the one icon still in
+use. A complete copy of the original set is kept locally in `Icons_archive/`
+(gitignored), so an icon can be recovered without going through git history.
 
 **If you redistribute TRACE, identify this set and record its licence here.**
 The likely candidates are Papirus, Breeze or a derivative.
 
-## icons8 — `Icons/icons8-*.png`
+## icons8 — removed
 
-No longer referenced by the application; retained so the previous look can be
-restored by editing `trace_app/ui/icons.py`.
+The toolbar icons were originally icons8 PNGs. They are no longer referenced or
+committed; the originals are in `Icons_archive/` if the previous look is ever
+wanted back.
 
 - Source: <https://icons8.com>
 - The free tier requires a visible link back to icons8. TRACE never carried
   that attribution, which is one reason these were replaced.
 
-**If you revert to these icons, add the required icons8 link** to the
+**If you restore these icons, add the required icons8 link** to the
 application's About dialog and to the README.
 
 ## Logos — `Icons/logo.png`, `Icons/logo_prev_ui.png`

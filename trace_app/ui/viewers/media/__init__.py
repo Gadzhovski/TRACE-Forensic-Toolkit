@@ -37,7 +37,6 @@ class UnifiedViewer(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         # Check if Icons directory exists and create it if needed
-        self.ensure_icons_directory()
 
         # Create placeholder widget to show when nothing is loaded
         self.placeholder = QLabel("No content loaded")
@@ -56,72 +55,6 @@ class UnifiedViewer(QWidget):
         # Store stream device and file object for streaming playback from disk images
         self._media_stream_device = None
         self._media_file_obj = None
-
-    def ensure_icons_directory(self):
-        """Check if Icons directory exists and create it if needed"""
-        # Resolve against the bundled resource dir, not the working directory --
-        # a bare "Icons" created a stray folder wherever the app happened to be
-        # launched from. In a normal install this directory always exists, so
-        # the placeholder-generation below is a no-op.
-        icons_dir = resource_path("Icons")
-        if not os.path.exists(icons_dir):
-            try:
-                os.makedirs(icons_dir)
-                logger.debug(f"Created missing Icons directory: {icons_dir}")
-
-                # Create missing default icons
-                self.create_default_icon(os.path.join(icons_dir, "play.png"), (50, 50), (0, 255, 0))
-                self.create_default_icon(os.path.join(icons_dir, "pause.png"), (50, 50), (255, 165, 0))
-                self.create_default_icon(os.path.join(icons_dir, "stop.png"), (50, 50), (255, 0, 0))
-                self.create_default_icon(os.path.join(icons_dir, "volume.png"), (50, 50), (0, 0, 255))
-                self.create_default_icon(os.path.join(icons_dir, "mute.png"), (50, 50), (128, 128, 128))
-            except Exception as e:
-                logger.error(f"Error creating Icons directory: {e}")
-
-    def create_default_icon(self, path, size, color):
-        """Create a simple colored square icon at the specified path"""
-        try:
-            image = QImage(size[0], size[1], QImage.Format_ARGB32)
-            # Use literal transparent color instead of Qt.transparent
-            image.fill(QColor(0, 0, 0, 0))
-
-            painter = QPainter(image)
-            painter.setPen(QPen(QColor(*color)))
-            # Create a QColor with proper alpha channel
-            brush_color = QColor(*color)
-            brush_color.setAlpha(128)  # Semi-transparent
-            painter.setBrush(brush_color)
-
-            if "play" in path:
-                # Draw play triangle
-                points = [
-                    QPoint(10, 10),
-                    QPoint(10, 40),
-                    QPoint(40, 25)
-                ]
-                painter.drawPolygon(points)
-            elif "pause" in path:
-                # Draw pause symbol
-                painter.drawRect(15, 10, 8, 30)
-                painter.drawRect(27, 10, 8, 30)
-            elif "stop" in path:
-                # Draw stop symbol
-                painter.drawRect(15, 15, 20, 20)
-            elif "volume" in path:
-                # Draw volume symbol
-                painter.drawRect(10, 20, 10, 10)
-                painter.drawArc(20, 10, 20, 30, -45 * 16, 90 * 16)
-            elif "mute" in path:
-                # Draw mute symbol
-                painter.drawRect(10, 20, 10, 10)
-                painter.drawLine(25, 15, 35, 35)
-                painter.drawLine(35, 15, 25, 35)
-
-            painter.end()
-            image.save(path)
-        except Exception as e:
-            logger.error(f"Error creating default icon {path}: {e}")
-
 
     def get_pdf_viewer(self):
         """Lazy initialization of PDF viewer"""

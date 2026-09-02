@@ -37,3 +37,8 @@ __pycache__/
 
 # docs folder
 /docs/
+
+# Full local copy of the original icon set, kept so an icon can be recovered
+# without going through git history. Only the icons the application actually
+# uses are committed.
+/Icons_archive/
