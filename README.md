@@ -1,222 +1,275 @@
-<h1 align="center">Toolkit for Retrieval and Analysis of Cyber Evidence (TRACE)</h1>
+<h1 align="center">TRACE</h1>
 
 <p align="center">
-  TRACE is a digital forensic tool I developed as my final year project. It provides an intuitive interface for analyzing disk images and includes a range of functionalities to assist forensic examiners in extracting and viewing the contents of various image file formats.
+  <strong>Toolkit for Retrieval and Analysis of Cyber Evidence</strong>
 </p>
 
 <p align="center">
-  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="400"/>
+  A cross-platform desktop tool for examining forensic disk images — browse the
+  file system of an acquired image, inspect file contents and metadata, recover
+  deleted files from unallocated space, and read Windows registry hives, without
+  mounting or altering the evidence.
 </p>
 
-## Navigation 🧭 
-
-- [Preview 👀](#preview-)
-- [Features 🌟](#features-)
-- [Screenshots 📸](#screenshots-)
-- [Supported Image Formats 💾](#supported-image-formats-)
-- [Tested File Systems 🗂️](#tested-file-systems-%EF%B8%8F)
-- [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-%EF%B8%8F)
-- [Getting Started 🚀](#getting-started-)
-  - [Prerequisites 🛠️](#prerequisites-)
-  - [Configuration ⚙️](#configuration-%EF%B8%8F)
-  - [Running the Tool ▶️](#running-the-tool-%EF%B8%8F)
-- [Built With 🧱](#built-with-)
-- [Work in Progress 🛠️](#work-in-progress-)
-- [Testing & Feedback 🧪](#testing--feedback-)
-- [Contributing 🤝](#contributing-)
-- [Socials 👨‍💻](#socials-)
-
-
-## Preview 👀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-<p>
-  <br/>
-  <img src="Icons/readme/Preview_Dark.png" alt="TRACE Preview" width="100%"/>
-  <br/>
+<p align="center">
+  <img src="Icons/logo_prev_ui.png" alt="TRACE" width="360"/>
 </p>
 
-<br>
-
-## Features 🌟 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
-✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
-✅ **EXIF Data Extraction**: Extract and display EXIF metadata from photos.\
-✅ **Registry Viewer**: View and examine Windows registry files.\
-✅ **Basic File Carving**: Recover deleted files from disk images.\
-✅ **Virus Total API Integration**: Check files for malware using the Virus Total API.\
-✅ **E01 Image Verification**: Verify the integrity of E01 disk images.\
-✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
-✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
-
-<br>
-
-## Screenshots 📸 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-### Registry Browser 🗂️
-
-<p>
-  <br/>
-  <img src="Icons/readme/registry.png" alt="Registry Browser" width="90%"/>
-  <br/>
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.2.0-blue.svg" alt="Version"/>
+  <img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python"/>
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/>
 </p>
 
+---
 
-### File Carving 🔪
+## Contents
 
-<p>
-  <br/>
-  <img src="Icons/readme/carving.png" alt="File Carving" width="90%"/>
-  <br/>
+- [Overview](#overview)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Supported formats](#supported-formats)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [How it works](#how-it-works)
+- [Limitations](#limitations)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
+## Overview
+
+TRACE reads disk images directly through [The Sleuth Kit](https://www.sleuthkit.org/)
+(via `pytsk3`) and [libewf](https://github.com/libyal/libewf). Evidence is opened
+read-only and is never mounted, so the image is not modified and no write-blocker
+configuration is required.
+
+It began as a final-year project and is intended for learning, lab work, and
+triage rather than as a replacement for a commercial forensic suite. See
+[Limitations](#limitations) before relying on it for casework.
+
+<p align="center">
+  <img src="Icons/readme/Preview_Dark.png" alt="TRACE main window" width="100%"/>
 </p>
 
-### File Search 🔍
-<p>
-  <br/>
-  <img src="Icons/readme/file_search.png" alt="Image Verification" width="80%"/>
-  <br/>
-</p>
+---
 
-### Image Verification ✅
+## Features
 
-<p>
-  <br/>
-  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="70%"/>
-  <br/>
-</p>
+**File system browsing**
+Navigate partitions and directories in a tree view with a detailed listing pane
+showing inode, size, and the MAC timestamps (modified, accessed, created,
+changed). Includes back/forward/up navigation and wildcard search (`*.pdf`)
+across the image.
 
-<br>
+**Content viewers**
+Selected files can be examined through six tabs:
 
+| Tab | Purpose |
+|---|---|
+| Hex | Paginated hex and ASCII view with search and an address bar |
+| Text | Text extraction with automatic encoding detection; decodes Base64, hex, URL, HTML, octal and binary from a selection |
+| Application | Renders images, PDFs, audio and video. Large media streams directly from the image rather than being loaded into memory |
+| File Metadata | Timestamps, size, MD5 and SHA-256, MIME type, and low-level filesystem detail (MFT entry, attributes, resident/non-resident sizes) |
+| Exif Data | EXIF metadata from photographs |
+| VirusTotal | Hash lookup and file submission via the VirusTotal API |
 
+**File carving**
+Recovers deleted files from unallocated space by signature: PDF, JPG, PNG, GIF,
+BMP, WAV, MOV, WMV and ZIP. An allocation map built from the file system is used
+to skip space occupied by existing files, so carving covers only genuinely
+unallocated regions. Results are shown as a list or a thumbnail gallery.
 
-## Supported Image Formats 💾 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+**Registry viewer**
+Extracts and browses Windows registry hives from the image, showing the key tree
+alongside value names, types and data.
 
-| Image Format                                   | Extensions             | Split   |  Unsplit |
-|------------------------------------------------|------------------------|---------|----------|
-| EnCase® Image File (EVF / Expert Witness Format)| `*.E01` `*.Ex01`       | ✔️      | ✔️       |
-| SMART/Expert Witness Image File                | `*.s01`                | ✔️      | ✔️       |
-| Single Image Unix / Linux DD / Raw             | `*.dd`, `*.img`, `*.raw` | ✔️      | ✔️       |
-| ISO Image File                                 | `*.iso`                |         | ✔️       |
-| AccessData Image File                          | `*.ad1`                | ✔️       | ✔️        |
+**Image verification**
+Recomputes MD5 and SHA-1 for an E01 image and compares them against the hashes
+stored in the EWF metadata, reporting whether the acquisition still verifies.
 
-<br>
+**Export**
+Files and whole directory trees can be exported out of the image to a chosen
+destination, with progress reporting and cancellation.
 
-## Tested File Systems 🗂️ &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+---
 
-| File System | Tested |
-|-------------|--------|
-| NTFS        | ✔️     |
-| FAT32       |        |
-| exFAT       |        |
-| HFS+        |        |
-| APFS        |        |
-| EXT2,3,4    |        |
+## Screenshots
 
-<br>
+<table>
+  <tr>
+    <td width="50%"><img src="Icons/readme/registry.png" alt="Registry viewer"/><br/><sub><b>Registry viewer</b> — browsing a hive extracted from the image</sub></td>
+    <td width="50%"><img src="Icons/readme/carving.png" alt="File carving"/><br/><sub><b>File carving</b> — recovered files as a thumbnail gallery</sub></td>
+  </tr>
+  <tr>
+    <td><img src="Icons/readme/file_search.png" alt="File search"/><br/><sub><b>Search</b> — wildcard search across the image</sub></td>
+    <td><img src="Icons/readme/trace_verify.png" alt="Image verification"/><br/><sub><b>Verification</b> — stored vs. recomputed hashes</sub></td>
+  </tr>
+</table>
 
+---
 
-## Cross-Platform Compatibility 🍏🐧🗔  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+## Supported formats
 
-| Operating System                   | Screenshot                                                                                                           |
-|------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| **macOS Sonoma** 🍏                | <a href="Icons/readme/macos.png"><img src="Icons/readme/macos.png" alt="macOS Screenshot" width="900"/></a>          |
-| **Kali Linux 2024** 🐧             | <a href="Icons/readme/kali.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>       |
-| **\*WSL2 - Ubuntu 22.04.3 LTS** 🐧 | <a href="Icons/readme/wsl3.png"><img src="Icons/readme/wsl3.png" alt="Kali Linux Screenshot" width="900"/></a>        |
-| **Windows 10** 🗔                  | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
+### Image formats
 
+| Format | Extensions | Notes |
+|---|---|---|
+| EnCase / Expert Witness | `.E01`, `.Ex01`, `.s01`, `.L01` | Split segments supported |
+| Raw / dd | `.dd`, `.raw`, `.img`, `.001` | |
+| ISO | `.iso` | |
+| Apple Disk Image | `.dmg`, `.sparse`, `.sparseimage` | Read as raw |
+| AccessData | `.ad1` | Read as raw |
 
+### File systems
 
-## Getting Started 🚀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+File system support comes from The Sleuth Kit, which handles NTFS, FAT12/16/32,
+exFAT, Ext2/3/4, HFS+, APFS, UFS, ISO 9660 and YAFFS2.
 
-### Installation ⚙️
+**NTFS is the only file system this project has been tested against.** Others
+should work through TSK but have not been verified here — see
+[Limitations](#limitations).
 
-TRACE needs **Python 3.9 or newer**. The installer scripts handle the system
-libraries, the virtual environment and the Python packages for you.
+---
 
-#### **Windows:**
+## Installation
 
-1.  Install Python from [python.org](https://www.python.org/downloads/), ticking
-    **"Add python.exe to PATH"** during setup.
+TRACE requires **Python 3.9 or newer**. The install scripts handle the system
+libraries, the virtual environment and the Python packages.
 
-2.  Run the installer from PowerShell in the project folder:
+`pytsk3` and `libewf-python` are distributed as source and are compiled during
+installation, so a C/C++ toolchain is needed unless a prebuilt wheel is available
+for your platform. The scripts check for this and tell you what is missing.
 
-    ```powershell
-    powershell -ExecutionPolicy Bypass -File install_windows.ps1
-    ```
+### Windows
 
-    It checks your Python version, warns if the
-    [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-    are missing (`pytsk3` and `libewf-python` are compiled from source and need
-    them), creates the virtual environment, and installs everything.
+```powershell
+git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+cd TRACE-Forensic-Toolkit
+powershell -ExecutionPolicy Bypass -File install_windows.ps1
+```
 
-3.  Start the tool:
+If the installer reports that the Microsoft C++ Build Tools are missing, install
+them from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/visual-cpp-build-tools/),
+selecting **Desktop development with C++**, then run the script again.
 
-    ```powershell
-    venv\Scriptsctivate
-    python main.py
-    ```
+Then:
 
-#### **macOS & Linux (including WSL):**
+```powershell
+venv\Scripts\activate
+python main.py
+```
 
-1.  Make the installer executable and run it:
+### macOS, Linux and WSL
 
-    ```bash
-    chmod +x install.sh
-    ./install.sh
-    ```
+```bash
+git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+cd TRACE-Forensic-Toolkit
+chmod +x install.sh
+./install.sh
+```
 
-    It detects your platform and installs the system dependencies
-    (`libmagic`, plus the `libewf`/`sleuthkit` headers and a compiler needed to
-    build `pytsk3`), creates the virtual environment, and installs the Python
-    packages.
+The script detects the platform and installs the required system packages —
+Xcode Command Line Tools and Homebrew packages on macOS, or `build-essential`,
+`libewf-dev`, `libtsk-dev`, `libmagic1` and the Qt runtime libraries on
+Debian-based Linux.
 
-2.  Start the tool:
+Then:
 
-    ```bash
-    source venv/bin/activate
-    python main.py
-    ```
+```bash
+source venv/bin/activate
+python main.py
+```
 
-Type `deactivate` when you are finished.
+Run `deactivate` when finished.
 
+### Manual installation
 
-### Configuration ⚙️ 
+With a virtual environment already active:
 
-**API Keys Configuration**: The tool integrates with the VirusTotal API, and you will need to provide your own API key to use that feature. To set the key, go to the Options menu and select the API Keys submenu.
+```bash
+pip install -r requirements.txt
+```
 
+A single `requirements.txt` covers all platforms; Windows-only packages carry
+environment markers.
 
+---
 
+## Configuration
 
-## Built With 🧱  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+**VirusTotal API key.** Set it under **Options → API Keys**. Without a key, the
+VirusTotal tab reports that one is required and the rest of the application is
+unaffected.
 
-- [pytsk3](https://pypi.org/project/pytsk3/) - Python bindings for the SleuthKit
-- [libewf-python](https://github.com/libyal/libewf) - Library to access the Expert Witness Compression Format (EWF)
-- [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
+Settings and application data are stored outside the source tree:
 
+| | Configuration | Data (carved files, log) |
+|---|---|---|
+| Windows | `%APPDATA%\TRACE` | `%LOCALAPPDATA%\TRACE` |
+| macOS | `~/Library/Application Support/TRACE` | `~/Library/Application Support/TRACE` |
+| Linux | `$XDG_CONFIG_HOME/TRACE` | `$XDG_DATA_HOME/TRACE` |
 
-## Work in Progress 🧑‍🔧  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+Diagnostics are written to `trace.log` in the data directory.
 
-- **File Carving**: The verification of carved files needs improvement, as it may carve data fragments that are not actual files.
-- **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
+---
 
+## How it works
 
-## Contributing 🤝 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+| Layer | Module | Responsibility |
+|---|---|---|
+| Image access | `modules/image_handler.py` | Opens EWF and raw images, enumerates partitions, walks file systems, reads file content, builds the allocation map |
+| Viewers | `modules/viewer_registry.py` | Adapts each viewer tab to a common `display` / `clear` interface |
+| Carving | `modules/file_carving.py` | Signature scanning of unallocated space, thumbnail generation |
+| Background work | `modules/workers.py` | Export and file-read threads |
+| Paths | `modules/paths.py` | Resolves bundled resources and per-user data directories |
 
-I welcome contributions from the community to help improve TRACE! If you're interested in contributing, here’s how you can get involved:
+Large media files are streamed to the player through a custom `QIODevice` that
+reads on demand from the image, so playback does not require loading the whole
+file into memory.
 
+Built with [PySide6](https://pypi.org/project/PySide6/),
+[pytsk3](https://pypi.org/project/pytsk3/),
+[libewf-python](https://github.com/libyal/libewf),
+[python-registry](https://github.com/williballenthin/python-registry) and
+[PyMuPDF](https://pymupdf.readthedocs.io/).
 
-1. **Report Issues**: If you find any bugs or have suggestions for improvements, please [open an issue](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/issues) on GitHub. Provide as much detail as possible to help address the issue effectively.
-2. **Submit a Pull Request**: If you have a fix or feature you’d like to contribute, please [fork the repository](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/fork), make your changes, and submit a pull request. Ensure your code adheres to the coding standards and includes tests where applicable.
+---
 
+## Limitations
 
-## Socials 👨‍💻 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+Worth knowing before you rely on it:
 
+- **Only NTFS has been tested.** Other file systems are supported by The Sleuth
+  Kit and should work, but have not been verified in this project.
+- **Only E01 and raw/dd images have been tested.** The other listed formats are
+  accepted and handled by the underlying libraries, not independently verified.
+- **Carving produces false positives.** Signature-based recovery cannot always
+  determine where a file ends, so carved output may include fragments that are
+  not complete files. Verify anything recovered this way.
+- **No image mounting or acquisition.** TRACE reads existing images; it does not
+  create them and does not mount them as drives.
+- **Not validated for evidentiary use.** This is a learning and triage tool. It
+  has not been through the validation a court-admissible workflow requires.
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
+---
 
-<br>
+## Contributing
 
-![Version](https://img.shields.io/badge/version-1.2.0-purple.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+Bug reports and pull requests are welcome.
 
+- **Issues** — [open an issue](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/issues)
+  describing what you did, what happened, and what you expected. Include your OS,
+  Python version, the image format involved, and the relevant part of `trace.log`.
+- **Pull requests** — keep changes focused, match the surrounding style, and
+  describe how you verified the change. Testing against a file system other than
+  NTFS is especially useful.
 
+---
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+Developed by [Radoslav Gadzhovski](https://linkedin.com/in/radoslav-gadzhovski).
