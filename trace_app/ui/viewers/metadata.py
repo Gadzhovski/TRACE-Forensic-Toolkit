@@ -1,8 +1,10 @@
 import datetime
-import html
 
 import pytsk3
-from PySide6.QtWidgets import QTextEdit, QSizePolicy, QWidget, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QPlainTextEdit, QSplitter, QWidget, QVBoxLayout
+
+from trace_app.ui.widgets.property_table import PropertyTable
 import hashlib
 from magic import Magic
 
@@ -18,117 +20,107 @@ class MetadataViewer(QWidget):
         self.image_handler = image_handler
 
     def init_ui(self):
-        # Add the text edit to the layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.metadata_text_edit = QTextEdit()
-        self.metadata_text_edit.setReadOnly(True)
-        self.metadata_text_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.splitter = QSplitter(Qt.Vertical, self)
+        self.splitter.setObjectName("metadataSplitter")
 
-        layout.addWidget(self.metadata_text_edit)
+        # Summary properties. A real table rather than generated HTML, so it
+        # follows the theme and an examiner can select and copy a hash.
+        self.property_table = PropertyTable("Property", "Value", self)
+        self.splitter.addWidget(self.property_table)
+
+        # Low-level filesystem output is preformatted text, so it stays a text
+        # view -- but a themed, monospaced one rather than an HTML <pre>.
+        self.details_view = QPlainTextEdit(self)
+        self.details_view.setObjectName("monoDetailView")
+        self.details_view.setReadOnly(True)
+        self.details_view.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.splitter.addWidget(self.details_view)
+
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        layout.addWidget(self.splitter)
 
     def display_metadata(self, data):
-        # Check if this is a carved file with content already provided
+        """Populate the pane for the selected file."""
         is_carved = data.get('is_carved', False)
         file_content = data.get('file_content')
 
         if is_carved and file_content:
-            # Carved file - use provided content, no filesystem metadata available
+            # Carved file: no filesystem metadata is available for it.
             metadata = None
         else:
-            # Regular file - read from filesystem
             inode_number = data.get('inode_number')
             offset = data.get('start_offset')
             file_content, metadata = self.image_handler.get_file_content(inode_number, offset)
 
             if metadata is None:
-                self.metadata_text_edit.setHtml("<b>No metadata available.</b>")
+                self.property_table.set_rows([("Status", "No metadata available.")])
+                self.details_view.clear()
                 return
 
-        def format_time(timestamp):
-            if timestamp is None or timestamp == 0:
-                return "N/A"
-            try:
-                return datetime.datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') + " UTC"
-            except Exception:
-                return "N/A"
-
-        # Handle timestamps - use filesystem metadata if available, otherwise use carved timestamp
         if is_carved:
-            # For carved files, use the extracted/preserved timestamp
             carved_timestamp = data.get('carved_timestamp', 'N/A')
             created_time = 'N/A (carved file)'
             modified_time = carved_timestamp if carved_timestamp != 'N/A' else 'N/A (carved file)'
             accessed_time = 'N/A (carved file)'
             changed_time = 'N/A (carved file)'
         else:
-            # For regular files, use filesystem metadata
-            created_time = format_time(metadata.crtime) if hasattr(metadata, 'crtime') else 'N/A'
-            modified_time = format_time(metadata.mtime) if hasattr(metadata, 'mtime') else 'N/A'
-            accessed_time = format_time(metadata.atime) if hasattr(metadata, 'atime') else 'N/A'
-            changed_time = format_time(metadata.ctime) if hasattr(metadata, 'ctime') else 'N/A'
+            created_time = self._format_timestamp(getattr(metadata, 'crtime', None))
+            modified_time = self._format_timestamp(getattr(metadata, 'mtime', None))
+            accessed_time = self._format_timestamp(getattr(metadata, 'atime', None))
+            changed_time = self._format_timestamp(getattr(metadata, 'ctime', None))
 
         md5_hash = hashlib.md5(file_content).hexdigest() if file_content else "N/A"
         sha256_hash = hashlib.sha256(file_content).hexdigest() if file_content else "N/A"
         mime_type = Magic().from_buffer(file_content) if file_content else "N/A"
 
-        # Ensure size is an integer before passing to get_readable_size
         if is_carved:
-            # For carved files, use size from data dict
-            size = data.get('size', 0)
-            size = self.image_handler.get_readable_size(size)
+            size = self.image_handler.get_readable_size(data.get('size', 0))
         else:
-            # For regular files, use filesystem metadata
             size = metadata.size if metadata.size else 'N/A'
             if isinstance(size, str):
                 try:
-                    size = int(size)  # Convert size to int if it's a string
+                    size = int(size)
                 except ValueError:
-                    size = 'N/A'  # Keep as 'N/A' if conversion fails
+                    size = 'N/A'
             else:
-                size = self.image_handler.get_readable_size(size)  # Convert size to a readable format
+                size = self.image_handler.get_readable_size(size)
 
-        # extended_metadata = f"<b>Metadata</b>"
-        extended_metadata = f"<b style='font-size: 20px; font-family: Courier New;'>Metadata</b>"
-
-        # Add carved file indicator if applicable
+        rows = []
         if is_carved:
-            extended_metadata += f"<p style='margin-left: 10px; font-family: Courier New; color: #ff6600;'><b>⚠ Carved File</b> (recovered from unallocated space)</p>"
+            rows.append(("Carved File", "Recovered from unallocated space", "warning"))
 
-        extended_metadata += f"<table style='margin-left: 10px; font-family: Courier New;'>"
-        extended_metadata += f"<tr><th style='text-align: left;'>Name:</th><td style='padding-left: 20px;'>{data.get('name', 'N/A')}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>Type:</th><td style='padding-left: 20px;'>{data.get('type')}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>MIME Type:</th><td style='padding-left: 20px;'>{mime_type}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>Size:</th><td style='padding-left: 20px;'>{size}</td></tr>"
+        rows += [
+            ("Name", data.get('name', 'N/A')),
+            ("Type", data.get('type')),
+            ("MIME Type", mime_type),
+            ("Size", size),
+        ]
 
-        # Add disk offset for carved files
         if is_carved:
             offset_value = data.get('offset', 0)
-            extended_metadata += f"<tr><th style='text-align: left;'>Disk Offset:</th><td style='padding-left: 20px;'>{hex(offset_value)} ({offset_value} bytes)</td></tr>"
+            rows.append(("Disk Offset", f"{hex(offset_value)} ({offset_value} bytes)"))
 
-        extended_metadata += f"<tr><th style='text-align: left;'>Modified:</th><td style='padding-left: 20px;'>{modified_time}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>Accessed:</th><td style='padding-left: 20px;'>{accessed_time}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>Created:</th><td style='padding-left: 20px;'>{created_time}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>Changed:</th><td style='padding-left: 20px;'>{changed_time}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>MD5:</th><td style='padding-left: 20px;'>{md5_hash}</td></tr>"
-        extended_metadata += f"<tr><th style='text-align: left;'>SHA-256:</th><td style='padding-left: 20px;'>{sha256_hash}</td></tr>"
-        extended_metadata += f"</table>"
-        extended_metadata += f"<br>"
-        extended_metadata += f"<br>"
+        rows += [
+            ("Modified", modified_time),
+            ("Accessed", accessed_time),
+            ("Created", created_time),
+            ("Changed", changed_time),
+            ("MD5", md5_hash),
+            ("SHA-256", sha256_hash),
+        ]
+        self.property_table.set_rows(rows)
 
-        # Skip for carved files (no inode available)
+        # Carved files have no inode, so there is nothing low-level to show.
+        details = None
         if not is_carved:
             details = self.get_inode_details(data.get('start_offset'), data.get('inode_number'))
-            if details:
-                extended_metadata += (
-                    f"<b style='font-size: 20px; font-family: Courier New;'>Filesystem Details</b>")
-                extended_metadata += (f"<div style='margin-left: 15px; font-family: Courier New;'>")
-                extended_metadata += (f"<pre>{html.escape(details)}</pre>")
-                extended_metadata += (f"</div>")
-
-        self.metadata_text_edit.setHtml(extended_metadata)
+        self.details_view.setPlainText(details or "")
+        self.details_view.setVisible(bool(details))
 
     def get_inode_details(self, offset, inode_number):
         """Render low-level filesystem details for an inode.
@@ -247,4 +239,5 @@ class MetadataViewer(QWidget):
     }
 
     def clear(self):
-        self.metadata_text_edit.clear()
+        self.property_table.clear_rows()
+        self.details_view.clear()

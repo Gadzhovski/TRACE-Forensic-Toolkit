@@ -768,3 +768,65 @@ QProgressBar#verifyProgress::chunk {
 QTextEdit#borderlessView {
     border: 0px;
 }
+
+/* ==================== Property tables (was inline HTML) ==================== */
+/* The metadata, EXIF, registry-detail and VirusTotal panes used to build HTML
+   strings inside a QTextEdit. Qt rich text ignores this stylesheet, so those
+   panes could not follow the theme. They are real tables now. */
+
+QTableWidget#propertyTable {
+    border: 1px solid #ced4da;
+    gridline-color: transparent;
+    alternate-background-color: #f7f8fa;
+    background-color: #ffffff;
+    color: #212529;
+    selection-background-color: #2F81F7;
+    selection-color: #ffffff;
+}
+
+QTableWidget#propertyTable::item {
+    padding: 4px 8px;
+}
+
+QTableWidget#propertyTable::item:selected {
+    background-color: #2F81F7;
+    color: #ffffff;
+}
+
+QHeaderView#propertyTableHeader::section {
+    background-color: #eef0f3;
+    color: #495057;
+    padding: 5px 8px;
+    border: none;
+    border-bottom: 1px solid #ced4da;
+    font-weight: 600;
+}
+
+QPlainTextEdit#monoDetailView {
+    border: 1px solid #ced4da;
+    background-color: #ffffff;
+    color: #212529;
+    font-family: 'Courier New', Courier, monospace;
+    padding: 6px;
+}
+
+QLabel#vtVerdict {
+    font-size: 15px;
+    font-weight: 600;
+    padding: 6px 2px;
+    color: #495057;
+}
+
+QLabel#vtVerdict[state="malicious"] {
+    color: #c02b2b;
+}
+
+QLabel#vtVerdict[state="clean"] {
+    color: #1a7f37;
+}
+
+QLabel#vtSectionLabel {
+    font-weight: 600;
+    color: #495057;
+    padding-top: 4px;
+}

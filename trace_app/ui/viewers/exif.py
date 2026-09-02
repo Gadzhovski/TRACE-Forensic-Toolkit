@@ -3,7 +3,9 @@ from io import BytesIO as io_BytesIO
 
 from PIL import Image
 from PIL.ExifTags import TAGS
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
+from PySide6.QtWidgets import QWidget, QVBoxLayout
+
+from trace_app.ui.widgets.property_table import PropertyTable
 
 logger = logging.getLogger('TRACE.Exif')
 
@@ -58,66 +60,25 @@ class ExifViewer(QWidget):
 
     def init_ui(self):
         """Initialize the user interface components."""
-        # Set up a read-only text edit for displaying the EXIF data
-        self.text_edit = QTextEdit(self)
-        self.text_edit.setObjectName("borderlessView")
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setContentsMargins(0, 0, 0, 0)
+        self.table = PropertyTable("Tag", "Value", self)
 
-        # Create the layout and add the text edit to it
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.text_edit)
-
-        # Set the layout for the widget
+        layout.addWidget(self.table)
         self.setLayout(layout)
 
     def display_exif_data(self, exif_data):
-        """Display the provided EXIF data in the text edit."""
-        if exif_data:
-            # Format the EXIF data as an HTML table with CSS styling
-            exif_table = f"""
-                <style>
-                    body {{
-                        margin: 0;
-                        padding: 0;
-                        font-family: Arial, sans-serif;
-                    }}
-                    table {{
-                        width: 100%;
-                        border-collapse: collapse;
-                        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-                    }}
-                    td, th {{
-                        border: 1px solid #ddd;
-                        padding: 8px;
-                        word-wrap: break-word;
-                        text-align: left;
-                    }}
-                    th {{
-                        background-color: #ddd;  /* Changed color to a light gray */
-                        color: black;  /* Changed color to black */
-                    }}
-                    tr:nth-child(even) {{
-                        background-color: #f2f2f2;
-                    }}
-                    tr:hover {{
-                        background-color: #ddd;
-                    }}
-                </style>
-                <table>
-            """
-            for key, value in exif_data:
-                exif_table += f"<tr><td><b>{key}</b></td><td>{value}</td></tr>"
-            exif_table += "</table>"
-            self.text_edit.setHtml(exif_table)
-        else:
-            # Clear the text edit if there's no EXIF data to display
-            self.text_edit.clear()
+        """Display the provided EXIF tags.
+
+        Previously rendered as an HTML table with an inline stylesheet whose
+        colours were hardcoded for a light background, so this pane was
+        unreadable in dark mode. A real table follows the application theme.
+        """
+        self.table.set_rows(list(exif_data) if exif_data else [])
 
     def clear_content(self):
         """Clear the displayed content."""
-        self.text_edit.clear()
+        self.table.clear_rows()
 
     def load_and_display_exif_data(self, file_content):
         """Load the EXIF data from the file content and display it."""

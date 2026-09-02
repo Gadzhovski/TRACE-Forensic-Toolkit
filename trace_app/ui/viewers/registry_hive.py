@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.paths import resource_path
+from trace_app.ui.widgets.property_table import PropertyTable
 
 logger = logging.getLogger('TRACE.Registry')
 
@@ -70,9 +71,9 @@ class RegistryExtractor(QWidget):
         self.detailsSplitter = QSplitter(Qt.Vertical)
         self.splitter.addWidget(self.detailsSplitter)
 
-        # Metadata Panel Setup
-        self.metadataPanel = QTextEdit()
-        self.metadataPanel.setReadOnly(True)
+        # Key metadata. A table rather than generated HTML, so it matches the
+        # values table below it and follows the application theme.
+        self.metadataPanel = PropertyTable("Field", "Value")
         self.detailsSplitter.addWidget(self.metadataPanel)
 
         # Table Setup for displaying values
@@ -172,15 +173,7 @@ class RegistryExtractor(QWidget):
         }
 
         # Start with an HTML structure for styling
-        details = '<html><head/><body>'
-        details += '<p style="font-size:14px; font-family: Courier New; "><b>Metadata Information</b></p>'
-
-        for key, value in metadata.items():
-            details += f'<p style="margin-left: 10px; font-size: 12px; font-family: Courier New;"><b>{key}:</b> {value}</p>'
-
-        details += '</body></html>'
-
-        self.metadataPanel.setHtml(details)
+        self.metadataPanel.set_rows(list(metadata.items()))
 
     def setup_table(self, values):
         # Reset and set up table
@@ -222,5 +215,5 @@ class RegistryExtractor(QWidget):
     # clear the window
     def clear(self):
         self.treeWidget.clear()
-        self.metadataPanel.clear()
+        self.metadataPanel.clear_rows()
         self.tableWidget.clear()
