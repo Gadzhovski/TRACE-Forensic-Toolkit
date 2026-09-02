@@ -60,7 +60,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         super().__init__()
 
         # Create a database manager for icon lookup
-        self.db_manager = DatabaseManager(resource_path('tools/new_database_mappings.db'))
+        self.db_manager = DatabaseManager()
 
         # Initialize variables for tracking
         self.current_selected_data = None

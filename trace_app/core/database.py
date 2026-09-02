@@ -1,94 +1,60 @@
-"""Icon-mapping lookups.
+"""Icon lookups for file types, folders and devices.
 
-Maps a file extension to the SVG used for it in the tree and listing views.
+Resolves an extension (or a folder/device name) to the icon shown for it in the
+tree and listing views.
+
+This was backed by a SQLite table, opened at startup and queried once per
+rendered row. The table had grown to 308 rows of which only 72 were reachable:
+161 "app" icons, 16 "status", 12 "animation" and 21 entirely empty rows were
+never queried by any code path, and only one of its 13 folder variants was ever
+requested. The mapping now lives in trace_app/infra/file_icons.py as a plain dict --
+easier to read, extend and grep, with no connection to manage and no way to
+drift from the files on disk.
+
+The class name and get_icon_path() signature are unchanged so the call sites in
+the tree and listing builders did not need touching.
 """
 
 import logging
-from sqlite3 import connect as sqlite3_connect
 
+from trace_app.infra import file_icons
 from trace_app.infra.paths import resource_path
 
-logger = logging.getLogger('TRACE.Database')
+logger = logging.getLogger('TRACE.Icons')
 
 
 class DatabaseManager:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        self.db_conn = None
-        self._icon_cache = {}  # Cache for icon paths
-        self._connect()
+    """Resolves icon paths for file types, folders and devices."""
 
-    def _connect(self):
-        """Establish a connection to the database with proper error handling."""
-        try:
-            self.db_conn = sqlite3_connect(self.db_path)
-            # Enable foreign keys
-            self.db_conn.execute("PRAGMA foreign_keys = ON")
-        except Exception as e:
-            logger.error(f"Error connecting to database: {e}")
-            self.db_conn = None
-
-    def __del__(self):
-        """Ensure connection is closed when object is destroyed."""
-        self.close()
-
-    def close(self):
-        """Explicitly close the database connection."""
-        if self.db_conn:
-            try:
-                self.db_conn.close()
-                self.db_conn = None
-            except Exception as e:
-                logger.error(f"Error closing database connection: {e}")
+    def __init__(self, db_path=None):
+        # db_path is accepted and ignored: kept so existing construction sites
+        # keep working while the SQLite table is retired.
+        self._cache = {}
 
     def get_icon_path(self, icon_type, identifier):
-        """Get icon path with caching for performance."""
-        # Check cache first
-        cache_key = f"{icon_type}_{identifier}"
-        if cache_key in self._icon_cache:
-            return self._icon_cache[cache_key]
+        """Absolute path to the icon for `identifier` of kind `icon_type`.
 
-        if not self.db_conn:
-            self._connect()
-            if not self.db_conn:
-                return resource_path('Icons/mimetypes/application-x-zerosize.svg')
+        `icon_type` is 'file', 'folder' or 'device'. Unknown identifiers fall
+        back to a neutral placeholder rather than failing, so an unrecognised
+        extension shows a generic file icon instead of a blank cell.
+        """
+        key = (icon_type, identifier)
+        if key in self._cache:
+            return self._cache[key]
 
-        try:
-            c = self.db_conn.cursor()
-            # First, try to get the icon for the specific identifier
-            c.execute("SELECT path FROM icons WHERE type = ? AND extention = ?", (icon_type, identifier))
-            result = c.fetchone()
+        identifier = (identifier or '').lower().lstrip('.')
 
-            # If a specific icon exists for the identifier, cache and return it
-            if result:
-                icon_path = resource_path(result[0])
-                self._icon_cache[cache_key] = icon_path
-                return icon_path
+        if icon_type == 'folder':
+            relative = file_icons.FOLDER_ICONS.get(identifier, file_icons.FOLDER)
+        elif icon_type == 'device':
+            relative = file_icons.DEVICE_ICONS.get(identifier, file_icons.UNKNOWN)
+        else:
+            relative = file_icons.FILE_ICONS.get(identifier, file_icons.UNKNOWN)
 
-            # If no specific icon exists, check for default icons
-            if icon_type == 'folder':
-                c.execute("SELECT path FROM icons WHERE type = ? AND extention = 'folder'", (icon_type,))
-                result = c.fetchone()
-                default_path = resource_path(result[0]) if result else resource_path(
-                    'Icons/mimetypes/application-x-zerosize.svg')
-            else:
-                # Try to find a generic icon for the file type first
-                generic_key = f"{icon_type}_generic"
-                if generic_key not in self._icon_cache:
-                    c.execute("SELECT path FROM icons WHERE type = ? AND extention = 'generic'", (icon_type,))
-                    result = c.fetchone()
-                    self._icon_cache[generic_key] = resource_path(result[0]) if result else resource_path(
-                        'Icons/mimetypes/application-x-zerosize.svg')
+        resolved = resource_path(relative)
+        self._cache[key] = resolved
+        return resolved
 
-                default_path = self._icon_cache[generic_key]
-
-            # Cache the result before returning
-            self._icon_cache[cache_key] = default_path
-            return default_path
-
-        except Exception as e:
-            logger.error(f"Error fetching icon: {e}")
-            return resource_path('Icons/mimetypes/application-x-zerosize.svg')
-        finally:
-            if 'c' in locals():
-                c.close()
+    def close(self):
+        """No-op, kept for callers that used to close the database."""
+        self._cache.clear()

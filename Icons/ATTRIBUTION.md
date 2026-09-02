@@ -20,13 +20,18 @@ runtime. That is why one set works on both the light and dark themes.
 ## File-type and folder icons — `Icons/mimetypes/`, `places/`, `devices/`, `apps/`, `status/`, `animations/`
 
 Used for the file-type icons in the tree and listing views, resolved through
-the mapping table in `tools/new_database_mappings.db`.
+the mapping table in `trace_app/infra/file_icons.py`.
 
 These are SVGs from a Linux desktop icon theme. The original upstream project
 and its licence have not been positively identified — the files carry only
 Inkscape editing metadata, with no author, project or licence fields. Most such
 themes are distributed under the GPL or CC BY-SA, both of which require
 attribution and, for GPL, that the icon sources remain available.
+
+`apps/` (161 files), `status/` (16) and `animations/` (12) are no longer
+referenced by any code path — the mapping table used to carry entries for them
+that nothing ever queried. They are kept for now in case more file types are
+mapped later; excluding them would save roughly 1.3 MB in a packaged build.
 
 **If you redistribute TRACE, identify this set and record its licence here.**
 The likely candidates are Papirus, Breeze or a derivative.

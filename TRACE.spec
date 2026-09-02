@@ -11,7 +11,7 @@ a = Analysis(
     ['main.py'],
     pathex=['.'],
     binaries=[],
-    datas=[('Icons', 'Icons'), ('styles', 'styles'), ('tools/new_database_mappings.db', 'tools')],
+    datas=[('Icons', 'Icons'), ('styles', 'styles')],
     hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtCharts',
                    'PySide6.QtSvg', 'PySide6.QtSvgWidgets', 'PySide6.QtMultimedia',
                    'PySide6.QtMultimediaWidgets', 'PySide6.QtPrintSupport', 'pytsk3', 'pyewf',

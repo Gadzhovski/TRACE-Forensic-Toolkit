@@ -79,7 +79,6 @@ def build_executable():
     data_items = [
         ("Icons", "Icons"),
         ("styles", "styles"),
-        ("tools/new_database_mappings.db", "tools"),
     ]
 
     # PyInstaller's --add-data separator is platform-specific: ';' on Windows,
