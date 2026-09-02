@@ -5,7 +5,6 @@ that the rest of the application talks to: partition enumeration, filesystem
 traversal, file content reads, and the allocation map used by file carving.
 """
 
-import gc
 import hashlib
 import logging
 import os
@@ -16,7 +15,7 @@ import pyewf
 import pytsk3
 from Registry import Registry
 
-from modules.constants import CHUNK_SIZE, FILE_BUFFER_SIZE, SECTOR_SIZE
+from modules.constants import CHUNK_SIZE, SECTOR_SIZE
 from modules.utils import FileSystemUtils, safe_datetime
 
 logger = logging.getLogger('TRACE.ImageHandler')

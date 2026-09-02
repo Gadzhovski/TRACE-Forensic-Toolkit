@@ -1,51 +1,43 @@
 import configparser
-import os
 import datetime
-import pyewf
-import pytsk3
-import tempfile
-import gc
-import time
 import logging
+import os
 import re
-from typing import Optional, Dict, Any, List
+import tempfile
+import time
+from typing import Any, Dict, List, Optional
+
+import pytsk3
 from Registry import Registry
-from sqlite3 import connect as sqlite3_connect
-from contextlib import contextmanager
-from functools import lru_cache
-from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QMargins
-from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup, QPixmap, QPainter, QColor
-from PySide6.QtCharts import QChart, QChartView, QPieSeries
+from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer
+from PySide6.QtGui import QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap, QColor
+from PySide6.QtCharts import QChart
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QHBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
-                               QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy, QGroupBox,
-                               QCheckBox, QGridLayout, QScrollArea, QPushButton, QToolButton)
+                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
+                               QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
 from modules.about import AboutDialog
-from modules.converter import Main
+from modules.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
+                               DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
+                               INPUT_FIELD_MIN_WIDTH, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
+                               SECTOR_SIZE, TABLE_BATCH_SIZE, VIEWER_DOCK_MAX_WIDTH,
+                               VIEWER_DOCK_MIN_HEIGHT)
+from modules.database import DatabaseManager
 from modules.exif_tab import ExifViewer
 from modules.file_carving import FileCarvingWidget
 from modules.hex_tab import HexViewer
+from modules.image_handler import ImageHandler
 from modules.metadata_tab import MetadataViewer
+from modules.paths import config_file, resource_path
 from modules.registry import RegistryExtractor
 from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.verification import VerificationWidget
-from modules.virus_total_tab import VirusTotal
-from modules.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
-                               DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
-                               INPUT_FIELD_MIN_WIDTH, PROGRESS_DIALOG_WIDTH, PROGRESS_MIN_DURATION,
-                               QT_MAX_SIZE, SECTOR_SIZE, TABLE_BATCH_SIZE, TABLE_COLUMN_COUNT,
-                               TABLE_ICON_SIZE, TOOLBAR_ICON_SIZE, TREE_ICON_SIZE,
-                               VIEWER_DOCK_MAX_SIZE, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
-from modules.database import DatabaseManager
-from modules.image_handler import EWFImgInfo, ImageHandler
-from modules.paths import config_file, resource_path
-from modules.utils import FileSystemUtils, safe_datetime
-from modules.volume_info import VolumeInfoMixin
 from modules.viewer_registry import (ApplicationAdapter, ExifAdapter, HexAdapter,
                                      MetadataAdapter, TextAdapter, VirusTotalAdapter)
+from modules.virus_total_tab import VirusTotal
+from modules.volume_info import VolumeInfoMixin
 from modules.workers import ExportWorker
 
 logger = logging.getLogger('TRACE.MainWindow')
@@ -294,10 +286,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         verify_image_action = QAction("Verify Image", self)
         verify_image_action.triggered.connect(self.verify_image)
         tools_menu.addAction(verify_image_action)
-
-        conversion_action = QAction("Convert E01 to DD/RAW", self)
-        conversion_action.triggered.connect(self.show_conversion_widget)
-        tools_menu.addAction(conversion_action)
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
@@ -624,11 +612,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Pass the updated API keys to the appropriate modules
         self.virus_total_api.set_api_key(virus_total_key)
-
-    def show_conversion_widget(self):
-        """Show the conversion widget."""
-        self.select_dialog = Main()
-        self.select_dialog.show()
 
     def verify_image(self):
         if self.image_handler is None:

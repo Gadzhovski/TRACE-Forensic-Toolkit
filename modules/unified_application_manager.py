@@ -4,13 +4,13 @@ import mimetypes
 import platform
 import time
 
-from PySide6.QtCore import Qt, QUrl, Slot, QSize, QTimer, QPoint, QBuffer, QByteArray, QIODevice
+from PySide6.QtCore import Qt, QUrl, QSize, QTimer, QPoint, QBuffer, QByteArray, QIODevice
 from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout, QPainter, QColor, QPen, QTransform
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QFileDialog, QApplication)
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel, QHBoxLayout, QComboBox, \
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel, QHBoxLayout, \
     QSizePolicy
 
 from fitz import open as fitz_open, Matrix
