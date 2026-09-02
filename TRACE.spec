@@ -1,15 +1,22 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+from PyInstaller.utils.hooks import collect_submodules
+
+# main.py is a thin launcher; the real code is imported from the
+# trace_app package, so collect it explicitly.
+_trace_modules = collect_submodules('trace_app')
+
 a = Analysis(
     ['main.py'],
-    pathex=[],
+    pathex=['.'],
     binaries=[],
     datas=[('Icons', 'Icons'), ('styles', 'styles'), ('tools/new_database_mappings.db', 'tools')],
     hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtCharts',
                    'PySide6.QtSvg', 'PySide6.QtSvgWidgets', 'PySide6.QtMultimedia',
                    'PySide6.QtMultimediaWidgets', 'PySide6.QtPrintSupport', 'pytsk3', 'pyewf',
-                   'PIL', 'PIL.Image', 'requests', 'Registry', 'fitz', 'magic', 'chardet'],
+                   'PIL', 'PIL.Image', 'requests', 'Registry', 'fitz', 'magic',
+                   'chardet'] + _trace_modules,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

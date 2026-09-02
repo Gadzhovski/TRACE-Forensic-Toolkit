@@ -119,6 +119,10 @@ def build_executable():
     for module in hidden_imports:
         cmd.extend(["--hidden-import", module])
 
+    # main.py is a thin launcher; make sure the package next to it is found
+    # and fully collected.
+    cmd.extend(["--paths", ".", "--collect-submodules", "trace_app"])
+
     cmd.extend(["--noconfirm", "--log-level", "INFO", MAIN_SCRIPT])
 
     print("\nRunning PyInstaller with command:")

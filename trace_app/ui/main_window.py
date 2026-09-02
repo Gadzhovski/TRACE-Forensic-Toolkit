@@ -17,28 +17,28 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
-from modules.about import AboutDialog
-from modules.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
+from trace_app.ui.dialogs.about import AboutDialog
+from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, DEFAULT_WINDOW_HEIGHT,
                                DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
                                INPUT_FIELD_MIN_WIDTH, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
                                SECTOR_SIZE, TABLE_BATCH_SIZE, VIEWER_DOCK_MAX_WIDTH,
                                VIEWER_DOCK_MIN_HEIGHT)
-from modules.database import DatabaseManager
-from modules.exif_tab import ExifViewer
-from modules.file_carving import FileCarvingWidget
-from modules.hex_tab import HexViewer
-from modules.image_handler import ImageHandler
-from modules.metadata_tab import MetadataViewer
-from modules.paths import config_file, resource_path
-from modules.registry import RegistryExtractor
-from modules.text_tab import TextViewer
-from modules.unified_application_manager import UnifiedViewer
-from modules.verification import VerificationWidget
-from modules.viewer_registry import (ApplicationAdapter, ExifAdapter, HexAdapter,
+from trace_app.core.database import DatabaseManager
+from trace_app.ui.viewers.exif import ExifViewer
+from trace_app.ui.viewers.carving import FileCarvingWidget
+from trace_app.ui.viewers.hex import HexViewer
+from trace_app.core.image_handler import ImageHandler
+from trace_app.ui.viewers.metadata import MetadataViewer
+from trace_app.infra.paths import config_file, resource_path
+from trace_app.ui.viewers.registry_hive import RegistryExtractor
+from trace_app.ui.viewers.text import TextViewer
+from trace_app.ui.viewers.media import UnifiedViewer
+from trace_app.ui.dialogs.verification import VerificationWidget
+from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, ExifAdapter, HexAdapter,
                                      MetadataAdapter, TextAdapter, VirusTotalAdapter)
-from modules.virus_total_tab import VirusTotal
-from modules.volume_info import VolumeInfoMixin
-from modules.workers import ExportWorker
+from trace_app.ui.viewers.virustotal import VirusTotal
+from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
+from trace_app.core.workers import ExportWorker
 
 logger = logging.getLogger('TRACE.MainWindow')
 

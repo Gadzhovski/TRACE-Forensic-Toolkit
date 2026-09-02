@@ -6,7 +6,7 @@ Maps a file extension to the SVG used for it in the tree and listing views.
 import logging
 from sqlite3 import connect as sqlite3_connect
 
-from modules.paths import resource_path
+from trace_app.infra.paths import resource_path
 
 logger = logging.getLogger('TRACE.Database')
 

@@ -15,8 +15,8 @@ import pyewf
 import pytsk3
 from Registry import Registry
 
-from modules.constants import CHUNK_SIZE, SECTOR_SIZE
-from modules.utils import FileSystemUtils, safe_datetime
+from trace_app.infra.constants import CHUNK_SIZE, SECTOR_SIZE
+from trace_app.infra.utils import FileSystemUtils, safe_datetime
 
 logger = logging.getLogger('TRACE.ImageHandler')
 

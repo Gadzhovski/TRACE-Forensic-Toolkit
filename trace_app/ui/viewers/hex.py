@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayo
                                QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QListWidget,
                                QSizePolicy, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
                                QToolButton, QComboBox, QSplitter)
-from modules.paths import resource_path
+from trace_app.infra.paths import resource_path
 
 logger = logging.getLogger('TRACE.Hex')
 

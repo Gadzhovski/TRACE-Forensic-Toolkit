@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QIcon, QTextCursor, QTextCharFormat, QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QSizePolicy, QComboBox, QLabel, \
     QMessageBox, QToolTip, QToolButton
-from modules.paths import resource_path
+from trace_app.infra.paths import resource_path
 
 
 class SearchDirection(Enum):

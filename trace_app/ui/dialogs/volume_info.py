@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushB
                                QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout,
                                QWidget)
 
-from modules.utils import FileSystemUtils
+from trace_app.infra.utils import FileSystemUtils
 
 logger = logging.getLogger('TRACE.VolumeInfo')
 

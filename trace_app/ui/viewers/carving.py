@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
 from fitz import open as fitz_open, Matrix
 
-from modules.paths import carved_files_dir, resource_path
+from trace_app.infra.paths import carved_files_dir, resource_path
 
 logger = logging.getLogger('TRACE.Carving')
 

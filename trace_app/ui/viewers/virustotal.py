@@ -13,7 +13,7 @@ from datetime import datetime
 
 from requests import get as requests_get, post as requests_post
 from requests.exceptions import RequestException
-from modules.paths import resource_path
+from trace_app.infra.paths import resource_path
 
 logger = logging.getLogger('TRACE.VirusTotal')
 

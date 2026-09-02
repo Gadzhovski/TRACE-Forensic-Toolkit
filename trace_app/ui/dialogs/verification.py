@@ -3,7 +3,7 @@ from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
                                QFileDialog, QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
-from modules.paths import resource_path
+from trace_app.infra.paths import resource_path
 
 logger = logging.getLogger('TRACE.Verify')
 

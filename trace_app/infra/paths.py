@@ -23,9 +23,12 @@ import sys
 
 APP_NAME = "TRACE"
 
-# Project root: the directory containing main.py, i.e. the parent of modules/.
-_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_MODULE_DIR)
+# Project root: the directory that holds Icons/ and styles/, i.e. the parent of
+# the trace_app package. Derived from the package's own location rather than by
+# counting '..' from this file, so moving this module deeper cannot silently
+# break every resource lookup.
+_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PROJECT_ROOT = os.path.dirname(_PACKAGE_ROOT)
 
 
 def is_frozen():
