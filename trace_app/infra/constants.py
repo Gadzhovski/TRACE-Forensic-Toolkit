@@ -83,10 +83,12 @@ TABLE_ROW_HEIGHT = 26
 # --- Icon sizes -----------------------------------------------------------
 TREE_ICON_SIZE = 16
 
-#: Horizontal step per tree level. Qt defaults to 20, which leaves a gap
-#: between a row's expand arrow and its icon wide enough to read as a
-#: separation; this closes it while keeping the arrow's hit area usable.
-TREE_INDENTATION = 14
+#: Horizontal step per tree level, and so the width of the strip the expand
+#: arrow is drawn into. This was 14 for a while, to close the gap between the
+#: arrow and the icon beside it; the gap did close, but a 24px chevron fitted
+#: into a 14px strip lands on fractional pixels and its diagonals break up.
+#: Qt's default is worth the few pixels -- a legible arrow beats a tight one.
+TREE_INDENTATION = 20
 
 TABLE_ICON_SIZE = 20
 TOOLBAR_ICON_SIZE = 18

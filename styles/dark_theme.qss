@@ -1118,12 +1118,8 @@ QTreeWidget::branch:selected {
     background: #505050;
 }
 
-QTreeWidget::branch:has-children:!has-siblings:closed,
-QTreeWidget::branch:closed:has-children:has-siblings {
-    image: url('Icons/tabler/themed/chevron-right-dark-branch.svg');
-}
-
-QTreeWidget::branch:open:has-children:!has-siblings,
-QTreeWidget::branch:open:has-children:has-siblings {
-    image: url('Icons/tabler/themed/chevron-down-dark-branch.svg');
-}
+/* No branch image here. Qt rasterises a stylesheet image: without
+   antialiasing, which turned the chevron into a staircase of hard squares --
+   three grey levels across the strip, against eleven when the same vector is
+   painted with QPainter. BranchTreeWidget draws the arrow instead; the
+   :selected rule above still paints the background behind it. */

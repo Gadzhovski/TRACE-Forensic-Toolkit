@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
                                        GROUP_SPACING,
@@ -382,7 +383,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _build_central_widgets(self):
         """Tree viewer, listing table and its toolbar."""
-        self.tree_viewer = QTreeWidget(self)
+        self.tree_viewer = BranchTreeWidget(self)
         self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
         # No frame. A selected row runs the full width of the viewport, and the
@@ -391,17 +392,21 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # widget's border. It is a QFrame shape, not a QSS border, so it has to
         # come off here. The dock already separates the tree from its
         # surroundings.
-        self.tree_viewer.setFrameShape(QTreeWidget.NoFrame)
-        # Tighter than Qt's default 20px. That default leaves a visible gap
-        # between the expand arrow and the icon beside it, which reads as the
-        # two being unrelated.
+        self.tree_viewer.setFrameShape(BranchTreeWidget.NoFrame)
+        # Qt's default indentation. It was narrowed to 14 for a while, which
+        # left the branch strip too small for the expand arrow to be drawn
+        # cleanly -- a 24px glyph fitted into 14px lands on fractional pixels
+        # and the diagonals break up. The default gives the arrow room.
         self.tree_viewer.setIndentation(TREE_INDENTATION)
-        # Selection spans the full row, branch strip included. Without this Qt
-        # highlights only the item cell, so the colour started part-way across
-        # and left the expand arrow sitting outside it.
-        self.tree_viewer.setAllColumnsShowFocus(True)
         # No dotted focus rectangle around the current item: the selection
         # colour already shows which row is current.
+        #
+        # setAllColumnsShowFocus is deliberately NOT set. It makes Qt draw the
+        # focus rectangle across the whole row, which is painted by the style
+        # outside the item delegate -- so the delegate below cannot suppress
+        # it, and it showed as a dashed box around the selected row. The tree
+        # is single-column and QTreeWidget::branch:selected already carries the
+        # highlight across the indentation strip, so nothing needs it.
         self.tree_viewer.setItemDelegate(NoFocusDelegate(self.tree_viewer))
         self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
@@ -642,6 +647,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         icons.set_theme(theme)
 
         self._apply_palette(theme)
+
+        # The tree paints its own expand arrows, so it needs the current
+        # theme's chevrons handed to it. Guarded: the first stylesheet is
+        # applied during construction, before the tree exists.
+        if hasattr(self, 'tree_viewer'):
+            suffix = 'dark' if theme == 'dark' else 'light'
+            self.tree_viewer.set_branch_icons(
+                f'Icons/tabler/themed/chevron-right-{suffix}.svg',
+                f'Icons/tabler/themed/chevron-down-{suffix}.svg')
 
         # A verified image's icon is a recoloured pixmap built once, not a
         # registry icon, so set_theme does not reach it. The green and amber
