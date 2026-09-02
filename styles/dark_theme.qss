@@ -135,52 +135,7 @@ QMessageBox {
     color: #E0E0E0;
 }
 
-/* ScrollBar Styles */
-QScrollBar:vertical {
-    border: none;
-    background: #3C3C3C;
-    width: 10px;
-    margin: 0px;
-    border-radius: 0px;
-}
-QScrollBar::handle:vertical {
-    background: #5A5A5A;
-    min-height: 20px;
-    border-radius: 6px;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    border: none;
-    background: none;
-    height: 0px;
-}
-
-QScrollBar:horizontal {
-    border: none;
-    background: #3C3C3C;
-    height: 10px;
-    margin: 0px;
-    border-radius: 0px;
-}
-QScrollBar::handle:horizontal {
-    background: #5A5A5A;
-    min-width: 20px;
-    border-radius: 6px;
-}
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-    border: none;
-    background: none;
-    width: 0px;
-}
-
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-    background: none;
-}
-
-QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical,
-QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
-    background: none;
-}
+/* Scrollbars are defined once, further down. */
 
 /* Slider Styles */
 QSlider::groove:horizontal {
@@ -500,16 +455,33 @@ QHeaderView::section:vertical {
     color: #E0E0E0;  /* Light text color */
 }
 
-/* Styles for scrollbars in dark theme */
+/* Scrollbars. See the light theme for why the track is transparent and the
+   handle is a true pill rather than a 10px bar with a radius it cannot use. */
 QScrollBar:vertical, QScrollBar:horizontal {
-    background: #3C3C3C;  /* Darker background for scrollbars */
-    width: 10px;
-    height: 10px;
+    background: transparent;
+    width: 12px;
+    height: 12px;
+    margin: 0px;
+    border: none;
 }
 
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    background: #5A5A5A;  /* Scroll handle color */
-    border-radius: 6px;
+    background: #5A5A5A;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 32px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 32px;
+}
+
+QScrollBar::handle:hover {
+    background: #6E6E6E;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,

@@ -172,79 +172,7 @@ QMessageBox {
     border: 1px solid #E5E5E5;
 }
 
-QScrollBar:vertical {
-    border: none;
-    background: #F8F8F8;
-    width: 10px;
-    margin: 0px;
-    border-radius: 0px;
-}
-
-QScrollBar::handle:vertical {
-    background: #C1C1C1;
-    min-height: 20px;
-    border-radius: 6px;
-}
-
-QScrollBar::add-line:vertical {
-    border: none;
-    background: none;
-    height: 0px;
-    subcontrol-position: bottom;
-    subcontrol-origin: margin;
-}
-
-QScrollBar::sub-line:vertical {
-    border: none;
-    background: none;
-    height: 0px;
-    subcontrol-position: top;
-    subcontrol-origin: margin;
-}
-
-QScrollBar:horizontal {
-    border: none;
-    background: #F8F8F8;
-    height: 10px;
-    margin: 0px;
-    border-radius: 0px;
-}
-
-QScrollBar::handle:horizontal {
-    background: #C1C1C1;
-    min-width: 20px;
-    border-radius: 6px;
-}
-
-QScrollBar::add-line:horizontal {
-    border: none;
-    background: none;
-    width: 0px;
-    subcontrol-position: right;
-    subcontrol-origin: margin;
-}
-
-QScrollBar::sub-line:horizontal {
-    border: none;
-    background: none;
-    width: 0px;
-    subcontrol-position: left;
-    subcontrol-origin: margin;
-}
-
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-    background: none;
-}
-
-QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical,
-QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
-    background: none;
-}
-
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-    background: none;
-}
+/* Scrollbars are defined once, further down. */
 
 
 
@@ -466,16 +394,41 @@ QHeaderView::section:vertical {
     color: #000000;  /* Dark text color */
 }
 
-/* Styles for scrollbars in light theme */
+/* Scrollbars.
+
+   The handle was #C0C0C0 on an #F0F0F0 track -- 48 points of luminance apart,
+   where the dark theme's handle sits only 30 from its track. That is why this
+   one read as noticeably heavier than the dark one rather than as the same
+   control in a different theme. #D0D0D0 puts it at 32.
+
+   The track is transparent and the handle is a true pill: a radius has to be
+   half the width or the corners clip square, so the 6px radius the old rule
+   asked for did nothing at 10px wide. */
 QScrollBar:vertical, QScrollBar:horizontal {
-    background: #F0F0F0;  /* Light background for scrollbars */
-    width: 10px;
-    height: 10px;
+    background: transparent;
+    width: 12px;
+    height: 12px;
+    margin: 0px;
+    border: none;
 }
 
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    background: #C0C0C0;  /* Scroll handle color */
-    border-radius: 6px;
+    background: #D0D0D0;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 32px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 32px;
+}
+
+QScrollBar::handle:hover {
+    background: #B8B8B8;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
