@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QTextEdit, QSizePolicy, QWidget, QVBoxLayout
 import hashlib
 from magic import Magic
 import re
+from modules.paths import resource_path
 
 
 class MetadataViewer(QWidget):
@@ -132,7 +133,7 @@ class MetadataViewer(QWidget):
         if inode_number is None:
             raise ValueError("Inode number value is None!")
 
-        metadata_cmd = ["tools/sleuthkit-4.12.1-win32/bin/istat.exe"]
+        metadata_cmd = [resource_path("tools/sleuthkit-4.12.1-win32/bin/istat.exe")]
 
         if offset is not None:
             metadata_cmd.extend(["-o", str(offset)])

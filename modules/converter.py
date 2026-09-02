@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QPushButton, QWidget, QRadioButton,
     QGroupBox, QVBoxLayout, QMessageBox, QStackedWidget
 )
+from modules.paths import resource_path
 
 
 # Helper Function to List Drives (For Physical and Logical Drive Selection)
@@ -37,7 +38,7 @@ class Main(QMainWindow):
         self.setWindowTitle("Convert E01 to DD/RAW")
         self.setGeometry(100, 100, 400, 400)
         # set logo
-        self.setWindowIcon(QIcon('Icons/logo.png'))
+        self.setWindowIcon(QIcon(resource_path('Icons/logo.png')))
 
         self.stacked_widget = QStackedWidget()
         self.setCentralWidget(self.stacked_widget)
@@ -160,7 +161,7 @@ class ConversionWidget(QWidget):
         super().__init__(parent)
         self.setGeometry(100, 100, 400, 400)
         self.setWindowTitle("Convert E01 to DD/RAW")
-        self.setWindowIcon(QIcon('Icons/logo.png'))
+        self.setWindowIcon(QIcon(resource_path('Icons/logo.png')))
         self.init_ui()
 
     def init_ui(self):

@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QAction, QIcon, QTextCursor, QTextCharFormat, QColor
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QSizePolicy, QComboBox, QLabel, \
     QMessageBox, QToolTip, QToolButton, QMenu
+from modules.paths import resource_path
 
 
 class SearchDirection(Enum):
@@ -161,11 +162,11 @@ class TextViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "Jump to Start", self)
+        self.first_action = QAction(QIcon(resource_path("Icons/icons8-thick-arrow-pointing-up-50.png")), "Jump to Start", self)
         self.first_action.triggered.connect(self.manager.jump_to_start)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon("Icons/icons8-left-arrow-50.png"), "Previous Page", self)
+        self.prev_action = QAction(QIcon(resource_path("Icons/icons8-left-arrow-50.png")), "Previous Page", self)
         self.prev_action.triggered.connect(lambda: self.manager.change_page(-1))
         self.toolbar.addAction(self.prev_action)
 
@@ -182,11 +183,11 @@ class TextViewer(QWidget):
         self.total_pages_label.setFixedHeight(25)  # Set fixed height for label
         self.toolbar.addWidget(self.total_pages_label)
 
-        self.next_action = QAction(QIcon("Icons/icons8-right-arrow-50.png"), "Next Page", self)
+        self.next_action = QAction(QIcon(resource_path("Icons/icons8-right-arrow-50.png")), "Next Page", self)
         self.next_action.triggered.connect(lambda: self.manager.change_page(1))
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon("Icons/icons8-down-50.png"), "Jump to End", self)
+        self.last_action = QAction(QIcon(resource_path("Icons/icons8-down-50.png")), "Jump to End", self)
         self.last_action.triggered.connect(self.manager.jump_to_end)
         self.toolbar.addAction(self.last_action)
 

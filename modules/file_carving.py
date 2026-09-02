@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
 from moviepy.editor import VideoFileClip
 from pdf2image import convert_from_path
+from modules.paths import carved_files_dir, resource_path
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -63,7 +64,7 @@ class FileCarvingWidget(QWidget):
         self.layout.addWidget(self.toolbar)
 
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QPixmap('Icons/icons8-carving-64.png'))
+        self.icon_label.setPixmap(QPixmap(resource_path('Icons/icons8-carving-64.png')))
         self.icon_label.setFixedSize(48, 48)
         self.toolbar.addWidget(self.icon_label)
 
@@ -183,13 +184,13 @@ class FileCarvingWidget(QWidget):
 
         # Define actions
         action_small_size = (QAction("Small Size", self))
-        action_small_size.setIcon(QIcon('Icons/icons8-small-icons-50.png'))
+        action_small_size.setIcon(QIcon(resource_path('Icons/icons8-small-icons-50.png')))
 
         action_medium_size = (QAction("Medium Size", self))
-        action_medium_size.setIcon(QIcon('Icons/icons8-medium-icons-50.png'))
+        action_medium_size.setIcon(QIcon(resource_path('Icons/icons8-medium-icons-50.png')))
 
         action_large_size = (QAction("Large Size", self))
-        action_large_size.setIcon(QIcon('Icons/icons8-large-icons-50.png'))
+        action_large_size.setIcon(QIcon(resource_path('Icons/icons8-large-icons-50.png')))
 
         # Set icons
 
@@ -283,12 +284,11 @@ class FileCarvingWidget(QWidget):
         self.carved_files.clear()
         self.carved_file_names.clear()
 
-        # Ensure the 'carved_files' and 'thumbnails' directories exist
-        if not os.path.exists("carved_files"):
-            os.makedirs("carved_files")
-        thumbnail_folder = os.path.join("carved_files", "thumbnails")
-        if not os.path.exists(thumbnail_folder):
-            os.makedirs(thumbnail_folder)
+        # Carved output goes to the per-user data dir, not the working
+        # directory -- the CWD is not reliably writable (a macOS .app bundle
+        # runs with CWD '/') and output does not belong in the source tree.
+        carved_dir = carved_files_dir()
+        thumbnail_folder = os.path.join(carved_dir, "thumbnails")
 
         # Build allocation map for all partitions to skip allocated files
         print("Building allocation map for allocated files...")
@@ -924,13 +924,11 @@ class FileCarvingWidget(QWidget):
         return None
 
     def save_file(self, file_content, file_type, file_path, offset):
-        # Ensure the 'carved_files' directory exists
-        if not os.path.exists("carved_files"):
-            os.makedirs("carved_files")
+        carved_dir = carved_files_dir()
 
         offset_hex = format(offset, 'x')
         file_name = f"{offset_hex}.{file_type}"
-        file_path = os.path.join("carved_files", file_name)
+        file_path = os.path.join(carved_dir, file_name)
 
         # Write file content to disk
         with open(file_path, "wb") as f:
@@ -980,11 +978,9 @@ class FileCarvingWidget(QWidget):
 
         # Only proceed if the file type is one of the supported formats
         if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp', 'zip', 'wav']:
-            file_full_path = os.path.join("carved_files", name)
-            thumbnail_folder = os.path.join("carved_files", "thumbnails")  # Folder to save thumbnails
-
-            if not os.path.exists(thumbnail_folder):
-                os.makedirs(thumbnail_folder)  # Create the thumbnail folder if it doesn't exist
+            carved_dir = carved_files_dir()
+            file_full_path = os.path.join(carved_dir, name)
+            thumbnail_folder = os.path.join(carved_dir, "thumbnails")
 
             if type_.lower() == 'mov':
                 thumbnail_path = os.path.join(thumbnail_folder, name.replace('.mov', '.png'))
@@ -1013,11 +1009,11 @@ class FileCarvingWidget(QWidget):
 
             elif type_.lower() == 'zip':
                 # Render ZIP icon at target size for crisp display
-                pixmap = self.render_svg_to_pixmap('Icons/mimetypes/application-zip.svg', 120)
+                pixmap = self.render_svg_to_pixmap(resource_path('Icons/mimetypes/application-zip.svg'), 120)
 
             elif type_.lower() == 'wav':
                 # Render audio icon at target size for crisp display
-                pixmap = self.render_svg_to_pixmap('Icons/mimetypes/audio-x-generic.svg', 120)
+                pixmap = self.render_svg_to_pixmap(resource_path('Icons/mimetypes/audio-x-generic.svg'), 120)
 
             else:
                 # For image files, use the original file path

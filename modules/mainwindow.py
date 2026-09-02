@@ -34,6 +34,7 @@ from modules.text_tab import TextViewer
 from modules.unified_application_manager import UnifiedViewer
 from modules.verification import VerificationWidget
 from modules.virus_total_tab import VirusTotal
+from modules.paths import config_file, resource_path
 
 SECTOR_SIZE = 512
 CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks for processing
@@ -971,7 +972,7 @@ class DatabaseManager:
         if not self.db_conn:
             self._connect()
             if not self.db_conn:
-                return 'Icons/mimetypes/application-x-zerosize.svg'
+                return resource_path('Icons/mimetypes/application-x-zerosize.svg')
 
         try:
             c = self.db_conn.cursor()
@@ -981,22 +982,24 @@ class DatabaseManager:
 
             # If a specific icon exists for the identifier, cache and return it
             if result:
-                self._icon_cache[cache_key] = result[0]
-                return result[0]
+                icon_path = resource_path(result[0])
+                self._icon_cache[cache_key] = icon_path
+                return icon_path
 
             # If no specific icon exists, check for default icons
             if icon_type == 'folder':
                 c.execute("SELECT path FROM icons WHERE type = ? AND extention = 'folder'", (icon_type,))
                 result = c.fetchone()
-                default_path = result[0] if result else 'Icons/mimetypes/application-x-zerosize.svg'
+                default_path = resource_path(result[0]) if result else resource_path(
+                    'Icons/mimetypes/application-x-zerosize.svg')
             else:
                 # Try to find a generic icon for the file type first
                 generic_key = f"{icon_type}_generic"
                 if generic_key not in self._icon_cache:
                     c.execute("SELECT path FROM icons WHERE type = ? AND extention = 'generic'", (icon_type,))
                     result = c.fetchone()
-                    self._icon_cache[generic_key] = result[
-                        0] if result else 'Icons/mimetypes/application-x-zerosize.svg'
+                    self._icon_cache[generic_key] = resource_path(result[0]) if result else resource_path(
+                        'Icons/mimetypes/application-x-zerosize.svg')
 
                 default_path = self._icon_cache[generic_key]
 
@@ -1006,7 +1009,7 @@ class DatabaseManager:
 
         except Exception as e:
             logger.error(f"Error fetching icon: {e}")
-            return 'Icons/mimetypes/application-x-zerosize.svg'
+            return resource_path('Icons/mimetypes/application-x-zerosize.svg')
         finally:
             if 'c' in locals():
                 c.close()
@@ -1029,7 +1032,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         # Create a database manager for icon lookup
-        self.db_manager = DatabaseManager('tools/new_database_mappings.db')
+        self.db_manager = DatabaseManager(resource_path('tools/new_database_mappings.db'))
 
         # Initialize variables for tracking
         self.current_selected_data = None
@@ -1057,7 +1060,10 @@ class MainWindow(QMainWindow):
         # Load configuration
         self.api_keys = configparser.ConfigParser()
         try:
-            self.api_keys.read('config.ini')
+            # Read from the per-user config dir. 'config.ini' is also read so a
+            # config left in the working directory by an older version still
+            # applies; the next save writes to the user dir.
+            self.api_keys.read([config_file(), 'config.ini'])
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
 
@@ -1172,7 +1178,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('Trace 1.2.0')
 
         # Set application icon for all platforms
-        app_icon = QIcon('Icons/logo_prev_ui.png')
+        app_icon = QIcon(resource_path('Icons/logo_prev_ui.png'))
         self.setWindowIcon(app_icon)
 
         # Set taskbar/dock icon for different platforms
@@ -1268,13 +1274,13 @@ class MainWindow(QMainWindow):
         self.main_toolbar.setMovable(False)
         self.main_toolbar.setFloatable(False)
         self.main_toolbar.addAction(
-            self.create_action('Icons/icons8-evidence-48.png', "Load Image", self.load_image_evidence))
+            self.create_action(resource_path('Icons/icons8-evidence-48.png'), "Load Image", self.load_image_evidence))
         self.main_toolbar.addAction(
-            self.create_action('Icons/icons8-evidence-96.png', "Remove Image", self.remove_image_evidence))
+            self.create_action(resource_path('Icons/icons8-evidence-96.png'), "Remove Image", self.remove_image_evidence))
         self.main_toolbar.addSeparator()
 
         # Create verify_image_button as an attribute of MainWindow
-        self.verify_image_button = self.create_action('Icons/icons8-verify-blue.png', "Verify Image", self.verify_image)
+        self.verify_image_button = self.create_action(resource_path('Icons/icons8-verify-blue.png'), "Verify Image", self.verify_image)
         self.main_toolbar.addAction(self.verify_image_button)
 
 
@@ -1332,7 +1338,7 @@ class MainWindow(QMainWindow):
 
         # LEFT SIDE: Icon and Title
         self.listing_icon_label = QLabel()
-        self.listing_icon_label.setPixmap(QPixmap('Icons/icons8-search-in-browser-50.png'))
+        self.listing_icon_label.setPixmap(QPixmap(resource_path('Icons/icons8-search-in-browser-50.png')))
         self.listing_icon_label.setFixedSize(48, 48)
         self.listing_toolbar.addWidget(self.listing_icon_label)
 
@@ -1353,17 +1359,17 @@ class MainWindow(QMainWindow):
         self.listing_toolbar.addWidget(title_spacer)
 
         # MIDDLE: Navigation buttons (Back, Forward, Up) - next to title
-        self.back_action = QAction(QIcon("Icons/icons8-left-arrow-50.png"), "Back", self)
+        self.back_action = QAction(QIcon(resource_path("Icons/icons8-left-arrow-50.png")), "Back", self)
         self.back_action.triggered.connect(self.navigate_back)
         self.back_action.setEnabled(False)
         self.listing_toolbar.addAction(self.back_action)
 
-        self.forward_action = QAction(QIcon("Icons/icons8-right-arrow-50.png"), "Forward", self)
+        self.forward_action = QAction(QIcon(resource_path("Icons/icons8-right-arrow-50.png")), "Forward", self)
         self.forward_action.triggered.connect(self.navigate_forward)
         self.forward_action.setEnabled(False)
         self.listing_toolbar.addAction(self.forward_action)
 
-        self.go_up_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "Go Up Directory", self)
+        self.go_up_action = QAction(QIcon(resource_path("Icons/icons8-thick-arrow-pointing-up-50.png")), "Go Up Directory", self)
         self.go_up_action.triggered.connect(self.navigate_up_directory)
         self.go_up_action.setEnabled(False)
         self.listing_toolbar.addAction(self.go_up_action)
@@ -1495,9 +1501,9 @@ class MainWindow(QMainWindow):
 
     def apply_stylesheet(self, theme='light'):
         if theme == 'dark':
-            qss_file = 'styles/dark_theme.qss'
+            qss_file = resource_path('styles/dark_theme.qss')
         else:
-            qss_file = 'styles/light_theme.qss'  # Ensure your existing QSS file is named 'light_theme.qss'
+            qss_file = resource_path('styles/light_theme.qss')  # Ensure your existing QSS file is named 'light_theme.qss'
 
         try:
             with open(qss_file, 'r') as f:
@@ -1520,6 +1526,7 @@ class MainWindow(QMainWindow):
         # VirusTotal API Key
         virus_total_label = QLabel("VirusTotal API Key:")
         virus_total_input = QLineEdit()
+        virus_total_input.setEchoMode(QLineEdit.Password)
         virus_total_input.setText(self.api_keys.get('API_KEYS', 'virustotal', fallback=''))
         virus_total_input.setMinimumWidth(INPUT_FIELD_MIN_WIDTH)  # Set a minimum width for the input field
         layout.addRow(virus_total_label, virus_total_input)
@@ -1542,8 +1549,16 @@ class MainWindow(QMainWindow):
 
         self.api_keys.set('API_KEYS', 'virustotal', virus_total_key)
 
-        with open('config.ini', 'w') as config_file:
-            self.api_keys.write(config_file)
+        try:
+            with open(config_file(), 'w') as fh:
+                self.api_keys.write(fh)
+        except OSError as e:
+            # Previously this raised straight out of the button's slot.
+            logger.error(f"Could not save API keys: {e}")
+            QMessageBox.warning(
+                self, "Could not save API key",
+                f"The API key could not be written to disk:\n{e}\n\n"
+                "It will be used for this session only.")
 
         dialog.accept()
 
@@ -1574,9 +1589,9 @@ class MainWindow(QMainWindow):
         # Make sure verify_image_button exists before trying to change its icon
         if hasattr(self, 'verify_image_button'):
             if hasattr(self.verification_widget, 'is_verified') and self.verification_widget.is_verified:
-                self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-48_gren.png'))
+                self.verify_image_button.setIcon(QIcon(resource_path('Icons/icons8-verify-48_gren.png')))
             else:
-                self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-blue.png'))
+                self.verify_image_button.setIcon(QIcon(resource_path('Icons/icons8-verify-blue.png')))
 
         # Call the original closeEvent to close the widget
         QWidget.closeEvent(self.verification_widget, event)
@@ -1814,7 +1829,7 @@ class MainWindow(QMainWindow):
             self.enable_tabs(False)
             # set the icon back to the original - only if verify_image_button exists
             if hasattr(self, 'verify_image_button'):
-                self.verify_image_button.setIcon(QIcon('Icons/icons8-verify-blue.png'))
+                self.verify_image_button.setIcon(QIcon(resource_path('Icons/icons8-verify-blue.png')))
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()

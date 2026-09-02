@@ -48,20 +48,20 @@ removed entirely**; **no test/CI scaffolding in this plan**.
 
 The working tree currently carries ~1.4 GB that shouldn't be there.
 
-- [ ] `tools/Arsenal-Image-Mounter-v3.10.257/` and `tools/sleuthkit-4.12.1-win32/` are **tracked in
+- [x] `tools/Arsenal-Image-Mounter-v3.10.257/` and `tools/sleuthkit-4.12.1-win32/` are **tracked in
       git** (246 files, 138 MB). Remove from tracking (`git rm -r --cached`) and add to
       `.gitignore`. Arsenal ships its own EULA — redistributing it in the repo is a licensing
       question you don't need to carry. (Phases 1 and 2 remove the code that uses them.)
-- [ ] `.gitignore` currently ignores `*.spec` and `build_exe.py`, yet `TRACE.spec` and
+- [x] `.gitignore` currently ignores `*.spec` and `build_exe.py`, yet `TRACE.spec` and
       `build_exe.py` are committed. Resolve the contradiction: keep both files tracked (they're
       real build inputs) and drop those two ignore lines.
-- [ ] `dist/` (520 MB) and `build/` (33 MB) are stale PyInstaller output in the working tree.
+- [x] `dist/` (520 MB) and `build/` (33 MB) are stale PyInstaller output in the working tree.
       Delete locally; already gitignored.
-- [ ] `carved_files/` (152 MB) is app output sitting in the repo root. Already gitignored — see
+- [x] `carved_files/` (152 MB) is app output sitting in the repo root. Already gitignored — see
       Phase 3, which moves the write location out of the repo entirely.
-- [ ] `requirements.txt` starts with a UTF-8 BOM, which breaks `pip install -r` on some setups.
+- [x] `requirements.txt` starts with a UTF-8 BOM, which breaks `pip install -r` on some setups.
       Rewrite without it.
-- [ ] Note: `.git` is already 80 MB because the `tools/` binaries are in history. Un-tracking them
+- [x] Note: `.git` is already 80 MB because the `tools/` binaries are in history. Un-tracking them
       stops it growing; actually shrinking it needs a history rewrite (`git filter-repo`), which is
       **out of scope** — it breaks every existing clone and fork. Flagging it, not doing it.
 
@@ -78,46 +78,48 @@ Smallest-risk phase; it shrinks the surface area everything later has to move.
 
 Cleanly isolated — one self-contained module, one import, one menu entry, one settings key.
 
-- [ ] Delete `modules/veriphone_api.py` (133 lines) and `Icons/logo_veriphone.png`.
-- [ ] `modules/mainwindow.py`: remove the import (`:38`), the Tools-menu entry (`:1712-1714`), and
+- [x] Delete `modules/veriphone_api.py` (133 lines) and `Icons/logo_veriphone.png`.
+- [x] `modules/mainwindow.py`: remove the import (`:38`), the Tools-menu entry (`:1712-1714`), and
       the lazy-init slot `show_veriphone_widget` (`:2041-2048`).
-- [ ] `modules/mainwindow.py:1980-2034`: drop the Veriphone row from the API-key dialog and change
+- [x] `modules/mainwindow.py:1980-2034`: drop the Veriphone row from the API-key dialog and change
       `save_api_keys(virus_total_key, veriphone_key, dialog)` to take only the VirusTotal key.
       Remove the `[API_KEYS] veriphone` read/write (`:2001`, `:2022`, `:2046`).
-- [ ] Update `README.md:202` and `CLAUDE.md:164`, which both still document it.
+- [x] Update `README.md:202` and `CLAUDE.md:164`, which both still document it.
 
 ### 1b. Remove image mounting
 
-- [ ] Delete `class ImageManager(QThread)` — `modules/mainwindow.py:1020-1438`, all six
+- [x] Delete `class ImageManager(QThread)` — `modules/mainwindow.py:1020-1438`, all six
       `_mount_*`/`_dismount_*` methods (~420 lines).
-- [ ] Remove the File-menu "Image Mounting"/"Image Unmounting" entries and the two toolbar buttons
+- [x] Remove the File-menu "Image Mounting"/"Image Unmounting" entries and the two toolbar buttons
       (`:1650-1657`, `:1743-1749`), plus `_handle_mount_operation_complete` (`:1504`) and
       `_handle_dismount_if_needed` (`:1536`), and the mount-related bits of `closeEvent`/
       `cleanup_resources`.
-- [ ] Delete `tools/Arsenal-Image-Mounter-v3.10.257/` from disk.
-- [ ] Update README: remove the "Image Mounting (Windows only)" feature bullet, the Arsenal entry
+- [x] Delete `tools/Arsenal-Image-Mounter-v3.10.257/` from disk.
+- [x] Update README: remove the "Image Mounting (Windows only)" feature bullet, the Arsenal entry
       under *Built With*, and the "Cross-Platform Image Mounting" work-in-progress item.
 
 ### 1c. Delete confirmed dead code
 
-- [ ] **`on_listing_table_item_clicked` is defined twice in `MainWindow`** — `:3946` and `:4432`,
+- [x] **`on_listing_table_item_clicked` is defined twice in `MainWindow`** — `:3946` and `:4432`,
       with no class boundary between them. Python keeps the second, so the ~486-line first
       definition is unreachable. It handles *search-mode tree navigation*, so that behaviour is
       silently missing today. **Decide deliberately:** either delete `:3946-4051`, or merge its
       search-mode branch into the live `:4432` handler to restore the feature. Recommend merging —
       the code was clearly written on purpose.
-- [ ] Remove never-referenced symbols: `use_api_key` (`virus_total_tab.py:73`),
+- [x] Remove never-referenced symbols: `use_api_key` (`virus_total_tab.py:73`),
       `_format_partition_text` (`mainwindow.py:1519`), `_get_partition_info` (`:3728`),
       `apply_browse_filter` (`:4333`), `clear_listing_search` (`:4085`),
-      `FileSystemUtils.get_readable_size` (`:116`, shadowed by `ImageHandler`'s at `:932`),
-      `SizeTableWidgetItem` (`:1440`, never instantiated), `setup_buttons`
-      (`file_carving.py:479`), `update_total_pages_label` (`hex_tab.py:635`).
-- [ ] `file_carving.py` has **two parallel sets of button handlers** — `start_carving`/
+      `setup_buttons` (`file_carving.py:479`), `update_total_pages_label`
+      (`hex_tab.py:635`).
+      **Correction (verified during implementation):** `SizeTableWidgetItem` and
+      `FileSystemUtils.get_readable_size` are NOT dead — the former is used by the
+      search-results row builder, the latter has six callers. Both kept.
+- [x] `file_carving.py` has **two parallel sets of button handlers** — `start_carving`/
       `stop_carving` (`:278`/`:329`) and `start_carving_thread`/`stop_carving_thread` (`:485`/
       `:491`) — wired in two places with *different* `shutdown(wait=)` semantics. This is a
       half-finished refactor. Keep one set (the `:278`/`:329` pair, which `init_ui` wires), delete
       the other.
-- [ ] Unused imports: `Tuple` and `QPieSlice` (`mainwindow.py:12`, `:21`), `sqlite3`
+- [x] Unused imports: `Tuple` and `QPieSlice` (`mainwindow.py:12`, `:21`), `sqlite3`
       (`text_tab.py:4`), `WeakValueDictionary` and `QSpacerItem`
       (`unified_application_manager.py:3`, `:14`).
 

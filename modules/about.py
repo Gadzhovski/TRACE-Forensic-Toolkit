@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap, QFont, QPalette, QColor
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+from modules.paths import resource_path
 
 
 class AboutDialog(QDialog):
@@ -12,7 +13,7 @@ class AboutDialog(QDialog):
 
         # Load and scale the logo
         logo = QLabel(self)
-        pixmap = QPixmap('Icons/logo.png')  # Ensure 'Icons/logo.png' is the correct path
+        pixmap = QPixmap(resource_path('Icons/logo.png'))  # Ensure resource_path('Icons/logo.png') is the correct path
         # Adjust the logo size here
         scaled_pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         logo.setPixmap(scaled_pixmap)

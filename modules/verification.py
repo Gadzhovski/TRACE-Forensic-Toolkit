@@ -2,6 +2,7 @@ from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
                                QFileDialog, QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
+from modules.paths import resource_path
 
 
 class HashCalculationThread(QThread):
@@ -47,7 +48,7 @@ class VerificationWidget(QWidget):
         self.image_handler = image_handler
         self.thread = None
         self.setWindowTitle("Trace - Image Verification")
-        self.setWindowIcon(QIcon('Icons/logo.png'))
+        self.setWindowIcon(QIcon(resource_path('Icons/logo.png')))
         self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
         self._verified = False  # Track verification status
 

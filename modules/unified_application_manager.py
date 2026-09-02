@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel
     QSizePolicy
 
 from fitz import open as fitz_open, Matrix
+from modules.paths import resource_path
 
 if os.name == "nt":  # Windows
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
@@ -127,7 +128,11 @@ class UnifiedViewer(QWidget):
 
     def ensure_icons_directory(self):
         """Check if Icons directory exists and create it if needed"""
-        icons_dir = "Icons"
+        # Resolve against the bundled resource dir, not the working directory --
+        # a bare "Icons" created a stray folder wherever the app happened to be
+        # launched from. In a normal install this directory always exists, so
+        # the placeholder-generation below is a no-op.
+        icons_dir = resource_path("Icons")
         if not os.path.exists(icons_dir):
             try:
                 os.makedirs(icons_dir)
@@ -548,12 +553,12 @@ class PictureViewer(QWidget):
         # Disable right click
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
-        zoom_in_icon = QIcon("Icons/icons8-zoom-in-50.png")
-        zoom_out_icon = QIcon("Icons/icons8-zoom-out-50.png")
-        rotate_left_icon = QIcon("Icons/icons8-rotate-left-50.png")
-        rotate_right_icon = QIcon("Icons/icons8-rotate-right-50.png")
-        reset_icon = QIcon("Icons/icons8-no-rotation-50.png")
-        export_icon = QIcon("Icons/icons8-save-as-50.png")
+        zoom_in_icon = QIcon(resource_path("Icons/icons8-zoom-in-50.png"))
+        zoom_out_icon = QIcon(resource_path("Icons/icons8-zoom-out-50.png"))
+        rotate_left_icon = QIcon(resource_path("Icons/icons8-rotate-left-50.png"))
+        rotate_right_icon = QIcon(resource_path("Icons/icons8-rotate-right-50.png"))
+        reset_icon = QIcon(resource_path("Icons/icons8-no-rotation-50.png"))
+        export_icon = QIcon(resource_path("Icons/icons8-save-as-50.png"))
 
         zoom_in_action = QAction(zoom_in_icon, 'Zoom In', self)
         zoom_out_action = QAction(zoom_out_icon, 'Zoom Out', self)
@@ -686,11 +691,11 @@ class PDFViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = QAction(QIcon("Icons/icons8-thick-arrow-pointing-up-50.png"), "First", self)
+        self.first_action = QAction(QIcon(resource_path("Icons/icons8-thick-arrow-pointing-up-50.png")), "First", self)
         self.first_action.triggered.connect(self.show_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = QAction(QIcon("Icons/icons8-left-arrow-50.png"), "Previous", self)
+        self.prev_action = QAction(QIcon(resource_path("Icons/icons8-left-arrow-50.png")), "Previous", self)
         self.prev_action.triggered.connect(self.show_previous_page)
         self.toolbar.addAction(self.prev_action)
 
@@ -708,11 +713,11 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(self.total_pages_label)
 
         # Navigation buttons
-        self.next_action = QAction(QIcon("Icons/icons8-right-arrow-50.png"), "Next", self)
+        self.next_action = QAction(QIcon(resource_path("Icons/icons8-right-arrow-50.png")), "Next", self)
         self.next_action.triggered.connect(self.show_next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = QAction(QIcon("Icons/icons8-down-50.png"), "Last", self)
+        self.last_action = QAction(QIcon(resource_path("Icons/icons8-down-50.png")), "Last", self)
         self.last_action.triggered.connect(self.show_last_page)
         self.toolbar.addAction(self.last_action)
 
@@ -722,7 +727,7 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Zoom actions
-        self.zoom_in_action = QAction(QIcon("Icons/icons8-zoom-in-50.png"), "Zoom In", self)
+        self.zoom_in_action = QAction(QIcon(resource_path("Icons/icons8-zoom-in-50.png")), "Zoom In", self)
         self.zoom_in_action.triggered.connect(self.zoom_in)
         self.toolbar.addAction(self.zoom_in_action)
 
@@ -735,12 +740,12 @@ class PDFViewer(QWidget):
         self.zoom_percentage_entry.returnPressed.connect(self.set_zoom_from_entry)
         self.toolbar.addWidget(self.zoom_percentage_entry)
 
-        self.zoom_out_action = QAction(QIcon("Icons/icons8-zoom-out-50.png"), "Zoom Out", self)
+        self.zoom_out_action = QAction(QIcon(resource_path("Icons/icons8-zoom-out-50.png")), "Zoom Out", self)
         self.zoom_out_action.triggered.connect(self.zoom_out)
         self.toolbar.addAction(self.zoom_out_action)
 
         # Create a reset zoom button with its icon and add it to the toolbar
-        reset_zoom_icon = QIcon("Icons/icons8-zoom-to-actual-size-50.png")
+        reset_zoom_icon = QIcon(resource_path("Icons/icons8-zoom-to-actual-size-50.png"))
         self.reset_zoom_action = QAction(reset_zoom_icon, "Reset Zoom", self)
         self.reset_zoom_action.triggered.connect(self.reset_zoom)
         self.toolbar.addAction(self.reset_zoom_action)
@@ -751,13 +756,13 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Fit in window
-        fit_window_icon = QIcon("Icons/icons8-enlarge-50.png")
+        fit_window_icon = QIcon(resource_path("Icons/icons8-enlarge-50.png"))
         self.fit_window_action = QAction(fit_window_icon, "Fit in Window", self)
         self.fit_window_action.triggered.connect(self.fit_window)
         self.toolbar.addAction(self.fit_window_action)
 
         # Fit in width
-        fit_width_icon = QIcon("Icons/icons8-resize-horizontal-50.png")
+        fit_width_icon = QIcon(resource_path("Icons/icons8-resize-horizontal-50.png"))
         self.fit_width_action = QAction(fit_width_icon, "Fit in Width", self)
         self.fit_width_action.triggered.connect(self.fit_width)
         self.toolbar.addAction(self.fit_width_action)
@@ -768,7 +773,7 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Pan tool button
-        self.pan_tool_icon = QIcon("Icons/icons8-drag-50.png")
+        self.pan_tool_icon = QIcon(resource_path("Icons/icons8-drag-50.png"))
         self.pan_tool_action = QAction(self.pan_tool_icon, "Pan Tool", self)
         self.pan_tool_action.setCheckable(True)
         self.pan_tool_action.toggled.connect(self.toggle_pan_mode)
@@ -780,12 +785,12 @@ class PDFViewer(QWidget):
         self.toolbar.addWidget(spacer)
 
         # Print button
-        self.print_icon = QIcon("Icons/icons8-print-50.png")
+        self.print_icon = QIcon(resource_path("Icons/icons8-print-50.png"))
         self.print_action = QAction(self.print_icon, "Print", self)
         self.print_action.triggered.connect(self.print_pdf)
         self.toolbar.addAction(self.print_action)
 
-        self.save_pdf_action = QAction(QIcon("Icons/icons8-save-as-50.png"), "Save PDF", self)
+        self.save_pdf_action = QAction(QIcon(resource_path("Icons/icons8-save-as-50.png")), "Save PDF", self)
         self.save_pdf_action.triggered.connect(self.save_pdf)
         self.toolbar.addAction(self.save_pdf_action)
 
@@ -1329,9 +1334,9 @@ class AudioVideoPlayer(QWidget):
         if self._is_playing:
             # Try different pause icon paths
             pause_icon_paths = [
-                "Icons/icons8-pause-50.png",
-                "Icons/pause.png",
-                "Icons/icons8-pause-button-50.png"
+                resource_path("Icons/icons8-pause-50.png"),
+                resource_path("Icons/pause.png"),
+                resource_path("Icons/icons8-pause-button-50.png")
             ]
             icon_set = False
             for path in pause_icon_paths:
@@ -1345,9 +1350,9 @@ class AudioVideoPlayer(QWidget):
         else:
             # Try different play icon paths
             play_icon_paths = [
-                "Icons/icons8-play-50.png",
-                "Icons/play.png",
-                "Icons/icons8-circled-play-50.png"
+                resource_path("Icons/icons8-play-50.png"),
+                resource_path("Icons/play.png"),
+                resource_path("Icons/icons8-circled-play-50.png")
             ]
             icon_set = False
             for path in play_icon_paths:
@@ -1388,8 +1393,8 @@ class AudioVideoPlayer(QWidget):
             self.set_volume(0)
             # Try different mute icon paths
             mute_icon_paths = [
-                "Icons/icons8-mute-50.png",
-                "Icons/mute.png"
+                resource_path("Icons/icons8-mute-50.png"),
+                resource_path("Icons/mute.png")
             ]
             icon_set = False
             for path in mute_icon_paths:
@@ -1404,9 +1409,9 @@ class AudioVideoPlayer(QWidget):
             self.set_volume(self._previous_volume)
             # Try different volume icon paths
             volume_icon_paths = [
-                "Icons/icons8-audio-50.png",
-                "Icons/volume.png",
-                "Icons/audio.png"
+                resource_path("Icons/icons8-audio-50.png"),
+                resource_path("Icons/volume.png"),
+                resource_path("Icons/audio.png")
             ]
             icon_set = False
             for path in volume_icon_paths:
@@ -1435,8 +1440,8 @@ class AudioVideoPlayer(QWidget):
             self._is_muted = True
             # Try different mute icon paths
             mute_icon_paths = [
-                "Icons/icons8-mute-50.png",
-                "Icons/mute.png"
+                resource_path("Icons/icons8-mute-50.png"),
+                resource_path("Icons/mute.png")
             ]
             icon_set = False
             for path in mute_icon_paths:
@@ -1451,9 +1456,9 @@ class AudioVideoPlayer(QWidget):
             self._is_muted = False
             # Try different volume icon paths
             volume_icon_paths = [
-                "Icons/icons8-audio-50.png",
-                "Icons/volume.png",
-                "Icons/audio.png"
+                resource_path("Icons/icons8-audio-50.png"),
+                resource_path("Icons/volume.png"),
+                resource_path("Icons/audio.png")
             ]
             icon_set = False
             for path in volume_icon_paths:
@@ -1501,9 +1506,9 @@ class AudioVideoPlayer(QWidget):
         self.play_button = QPushButton(self)
         # Try different icon paths
         play_icon_paths = [
-            "Icons/icons8-play-50.png",
-            "Icons/play.png",
-            "Icons/icons8-circled-play-50.png"
+            resource_path("Icons/icons8-play-50.png"),
+            resource_path("Icons/play.png"),
+            resource_path("Icons/icons8-circled-play-50.png")
         ]
         for path in play_icon_paths:
             if os.path.exists(path):
@@ -1522,9 +1527,9 @@ class AudioVideoPlayer(QWidget):
         self.stop_button = QPushButton(self)
         # Try different icon paths
         stop_icon_paths = [
-            "Icons/icons8-stop-50.png",
-            "Icons/stop.png",
-            "Icons/icons8-stop-circled-50.png"
+            resource_path("Icons/icons8-stop-50.png"),
+            resource_path("Icons/stop.png"),
+            resource_path("Icons/icons8-stop-circled-50.png")
         ]
         for path in stop_icon_paths:
             if os.path.exists(path):
@@ -1557,9 +1562,9 @@ class AudioVideoPlayer(QWidget):
         self.volume_button = QPushButton(self)
         # Try different icon paths
         volume_icon_paths = [
-            "Icons/icons8-audio-50.png",
-            "Icons/volume.png",
-            "Icons/audio.png"
+            resource_path("Icons/icons8-audio-50.png"),
+            resource_path("Icons/volume.png"),
+            resource_path("Icons/audio.png")
         ]
         for path in volume_icon_paths:
             if os.path.exists(path):

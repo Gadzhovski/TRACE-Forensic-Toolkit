@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem
     QSplitter, QTableWidget, QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
+from modules.paths import resource_path
 
 
 
@@ -14,9 +15,9 @@ class RegistryExtractor(QWidget):
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
-        self.hive_icon = QIcon("Icons/icons8-hive-48.png")
-        self.key_icon = QIcon("Icons/icons8-key-48_blue.png")
-        self.value_icon = QIcon("Icons/icons8-wasp-48.png")
+        self.hive_icon = QIcon(resource_path("Icons/icons8-hive-48.png"))
+        self.key_icon = QIcon(resource_path("Icons/icons8-key-48_blue.png"))
+        self.value_icon = QIcon(resource_path("Icons/icons8-wasp-48.png"))
         self.init_ui()
 
     def init_ui(self):
@@ -30,7 +31,7 @@ class RegistryExtractor(QWidget):
         main_layout.addWidget(self.toolbar)
 
         self.icon_label = QLabel()
-        self.icon_label.setPixmap(QIcon("Icons/icons8-registry-editor-96.png").pixmap(48, 48))
+        self.icon_label.setPixmap(QIcon(resource_path("Icons/icons8-registry-editor-96.png")).pixmap(48, 48))
         self.toolbar.addWidget(self.icon_label)
 
         self.label = QLabel("Registry Browser")
