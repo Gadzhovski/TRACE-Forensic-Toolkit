@@ -1064,8 +1064,26 @@ QTextEdit#textContentView {
    platform default is a violet that matches nothing else here. Only QComboBox
    overrode it, so every other pane -- hex, text, metadata, the hash box --
    highlighted in that violet. These are the same colours the themes already
-   use for a selected row, so selecting text and selecting a row now agree. */
-QWidget {
+   use for a selected row, so selecting text and selecting a row now agree.
+
+   Listed by widget rather than set on QWidget: on QWidget it also reached the
+   tree's branch area, which paints with the selection colour, and drew a solid
+   blue block to the left of every selected row. */
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QAbstractSpinBox {
     selection-background-color: #1E90FF;
     selection-color: #FFFFFF;
+}
+
+/* Tree rows sit tighter than table rows: a 5px pad on every side pushed each
+   row's icon away from its expand arrow, on top of the indentation step. The
+   vertical pad stays so rows keep their height; only the horizontal one goes. */
+QTreeWidget::item {
+    padding-left: 1px;
+    padding-right: 4px;
+}
+
+/* The branch column carries the expand arrow. Qt's default leaves it
+   background-filled, which showed as a block beside a selected row. */
+QTreeWidget::branch {
+    background: transparent;
 }

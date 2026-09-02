@@ -258,6 +258,35 @@ def _tinted(source, colour):
     return tinted
 
 
+def badged(base_path, badge_name, size, gap=3):
+    """A QIcon of `badge_name` followed by the image at `base_path`.
+
+    The verification mark used to live in a second tree column, which put it
+    after the row's text. Reading left to right, the state of a thing belongs
+    before the thing, so the two are composited into one pixmap and drawn in
+    column 0 -- the badge first, then the disk icon.
+
+    `base_path` is a filesystem path (the tree gets its icons from the icon
+    database, not this registry); `badge_name` is a registry entry, so the
+    badge is tinted for the current theme.
+    """
+    badge = icon(badge_name).pixmap(size, size)
+    base = QIcon(base_path).pixmap(size, size)
+
+    width = size * 2 + gap
+    canvas = QPixmap(width, size)
+    canvas.fill(Qt.transparent)
+
+    painter = QPainter(canvas)
+    painter.drawPixmap(0, 0, badge)
+    painter.drawPixmap(size + gap, 0, base)
+    painter.end()
+
+    result = QIcon()
+    result.addPixmap(canvas)
+    return result
+
+
 def clear_cache():
     """Drop cached icons, e.g. after a theme change alters the tint."""
     _cache.clear()

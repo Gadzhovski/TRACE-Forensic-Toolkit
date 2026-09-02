@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
+from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
                                        GROUP_SPACING,
@@ -26,7 +27,7 @@ from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_
                                        DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
                                        PANEL_ICON_SIZE, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
                                        SECTOR_SIZE, TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
-                                       TREE_ICON_SIZE, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
+                                       TREE_ICON_SIZE, TREE_ICON_WIDTH, TREE_INDENTATION, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
 from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.exif import ExifViewer
@@ -382,16 +383,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_central_widgets(self):
         """Tree viewer, listing table and its toolbar."""
         self.tree_viewer = QTreeWidget(self)
-        self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
+        self.tree_viewer.setIconSize(QSize(TREE_ICON_WIDTH, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
-        # A second, narrow column holds the verification badge, so an image can
-        # show it without losing its own disk icon. It stays collapsed to the
-        # badge width and is empty for every row that is not a disk image.
-        self.tree_viewer.setColumnCount(2)
-        self.tree_viewer.header().setStretchLastSection(False)
-        self.tree_viewer.header().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.tree_viewer.header().setSectionResizeMode(1, QHeaderView.Fixed)
-        self.tree_viewer.setColumnWidth(1, TREE_ICON_SIZE + 8)
+        # Tighter than Qt's default 20px. That default leaves a visible gap
+        # between the expand arrow and the icon beside it, which reads as the
+        # two being unrelated.
+        self.tree_viewer.setIndentation(TREE_INDENTATION)
+        # No dotted focus rectangle around the current item: the selection
+        # colour already shows which row is current.
+        self.tree_viewer.setItemDelegate(NoFocusDelegate(self.tree_viewer))
         self.tree_viewer.itemExpanded.connect(self.on_item_expanded)
         self.tree_viewer.itemClicked.connect(self.on_item_clicked)
         self.tree_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -417,6 +417,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Use alternate row colors
         self.listing_table.setAlternatingRowColors(True)
         self.listing_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.listing_table.setItemDelegate(NoFocusDelegate(self.listing_table))
         self.listing_table.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
         self.listing_table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
         self.listing_table.setColumnCount(10)  # 10 columns: Name, Inode, Type, Size, 4 timestamps, Path, Info
@@ -549,10 +550,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.customContextMenuRequested.connect(self.open_listing_context_menu)
         self.listing_table.setSelectionBehavior(QTableWidget.SelectRows)
 
-        # Set the color of the selected row
-        palette = self.listing_table.palette()
-        palette.setBrush(QPalette.Highlight, QBrush(Qt.lightGray))  # Change Qt.lightGray to your preferred color
-        self.listing_table.setPalette(palette)
+        # The selected-row colour comes from the theme, via _apply_palette and
+        # the ::item:selected rules. This used to pin it to Qt.lightGray here,
+        # which ignored the active theme and stayed light grey in dark mode.
 
         header = self.listing_table.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignLeft)
@@ -630,12 +630,43 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # for an icon.
         icons.set_theme(theme)
 
+        self._apply_palette(theme)
+
+        # The verification badges are composited pixmaps, not registry icons,
+        # so set_theme does not re-tint them; rebuild them at the new tint.
+        for path, result in getattr(self, 'verification_results', {}).items():
+            self.mark_image_verified(path, result.get('verified', False))
+
         try:
             with open(qss_file, 'r') as f:
                 stylesheet = f.read()
             QApplication.instance().setStyleSheet(self._resolve_qss_urls(stylesheet))
         except Exception as e:
             logger.error(f"Error loading stylesheet {qss_file}: {e}")
+
+    #: Selection colours per theme: (highlight, highlighted text). These match
+    #: the ::item:selected rules in the corresponding stylesheet.
+    _PALETTE_SELECTION = {
+        'dark': ('#505050', '#E0E0E0'),
+        'light': ('#CCE8FF', '#212529'),
+    }
+
+    def _apply_palette(self, theme):
+        """Align the palette's selection colours with the stylesheet's.
+
+        A stylesheet cannot reach everything. The tree's branch area -- the
+        indentation strip holding the expand arrows -- is painted by the style
+        using the palette's Highlight role, so a selected row showed the Qt
+        default (#308cc6) there while the row itself used the themed colour
+        from ::item:selected. The result was a blue block down the left of
+        every selected row that no ::branch rule could remove.
+        """
+        highlight, text = self._PALETTE_SELECTION.get(
+            theme, self._PALETTE_SELECTION['light'])
+        palette = QApplication.instance().palette()
+        palette.setColor(QPalette.Highlight, QColor(highlight))
+        palette.setColor(QPalette.HighlightedText, QColor(text))
+        QApplication.instance().setPalette(palette)
 
     #: Matches url('Icons/...') / url("styles/...") / url(Icons/...) in QSS.
     _QSS_URL = re.compile(r"""url\(\s*(['"]?)((?:Icons|styles)/[^'")]+)\1\s*\)""")
@@ -746,16 +777,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         both were verified. The mark belongs beside the image it describes.
         """
         root = self.tree_viewer.invisibleRootItem()
+        disk_icon = self.db_manager.get_icon_path('device', 'media-optical')
         for i in range(root.childCount()):
             item = root.child(i)
             if item.text(0) != image_path:
                 continue
-            if verified:
-                item.setIcon(1, icons.icon(icons.VERIFY_OK))
-                item.setToolTip(1, "Hashes verified against those stored in the image")
-            else:
-                item.setIcon(1, icons.icon(icons.VERIFY))
-                item.setToolTip(1, "Checked this session: hashes did not match")
+            badge = icons.VERIFY_OK if verified else icons.VERIFY
+            item.setIcon(0, icons.badged(disk_icon, badge, TREE_ICON_SIZE))
+            item.setToolTip(0,
+                            "Hashes verified against those stored in the image"
+                            if verified else
+                            "Checked this session: hashes did not match")
             return
 
     def verification_state(self, image_path):

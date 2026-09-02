@@ -82,6 +82,17 @@ TABLE_ROW_HEIGHT = 26
 
 # --- Icon sizes -----------------------------------------------------------
 TREE_ICON_SIZE = 16
+
+#: Horizontal step per tree level. Qt defaults to 20, which leaves a gap
+#: between a row's expand arrow and its icon wide enough to read as a
+#: separation; this closes it while keeping the arrow's hit area usable.
+TREE_INDENTATION = 14
+
+#: Width reserved for a tree icon. Taller-than-wide is the normal case (a
+#: single 16px glyph), but a verified image draws a badge before its disk icon,
+#: and a QTreeWidget scales every icon into this box -- so it has to be wide
+#: enough for the pair or the composite is squashed.
+TREE_ICON_WIDTH = TREE_ICON_SIZE * 2 + 3
 TABLE_ICON_SIZE = 20
 TOOLBAR_ICON_SIZE = 18
 #: Icon beside a panel heading (File System Browser, File Carving, Registry).
