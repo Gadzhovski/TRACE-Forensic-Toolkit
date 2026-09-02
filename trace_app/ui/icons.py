@@ -16,8 +16,8 @@ import logging
 from weakref import WeakKeyDictionary
 
 from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import (QAction, QColor, QIcon, QIconEngine, QPainter,
-                           QPixmap)
+from PySide6.QtGui import (QAction, QColor, QIcon, QIconEngine, QImage,
+                           QPainter, QPixmap)
 from PySide6.QtSvg import QSvgRenderer
 
 from trace_app.infra.paths import resource_path
@@ -301,49 +301,45 @@ class _TintedSvgEngine(QIconEngine):
         return out
 
 
-def badged(base_path, badge_name, size, scale=0.6):
-    """The image at `base_path` with `badge_name` overlaid in its corner.
+#: Hue applied to a disk image's icon once its hashes verify. Green rather
+#: than a separate mark: the icon itself carries the state, so nothing is
+#: added beside it to shift the row out of line.
+VERIFIED_HUE = '#3FB950'
 
-    The badge marks the state of the thing the icon represents -- a verified
-    disk image -- the way a shortcut or sync marker does. It is drawn into the
-    bottom-right corner of the base icon rather than beside it, so the result
-    is still `size` square: putting it alongside made the icon wider, which
-    pushed the disk image's row out of line with the volume rows beneath it.
+#: Hue for an image whose stored and computed hashes did not match. Amber, the
+#: colour the property tables already use for [state="warning"].
+UNVERIFIED_HUE = '#E3A008'
 
-    A disc of background is cleared under the badge first, so the mark stays
-    legible over whatever detail the base icon has in that corner.
 
-    `base_path` is a filesystem path (the tree gets its icons from the icon
-    database, not this registry); `badge_name` is a registry entry, so the
-    badge is tinted for the current theme.
+def recoloured(base_path, colour, size):
+    """The image at `base_path` recoloured to `colour`, keeping its shading.
+
+    Used to show that a disk image has been verified. An overlaid badge was
+    tried first and read poorly at 16px -- a second glyph crammed into the
+    corner of an already small icon. Recolouring the icon itself says the same
+    thing with no extra marks and no change in size.
+
+    The artwork is near-greyscale, so each pixel keeps its own lightness and
+    takes the target hue and saturation. A flat fill would turn the icon into
+    a silhouette; this keeps the disc readable as a disc.
     """
-    canvas = QPixmap(size, size)
-    canvas.fill(Qt.transparent)
+    source = QIcon(base_path).pixmap(size, size).toImage()
+    source = source.convertToFormat(QImage.Format_ARGB32)
+    target = QColor(colour)
+    hue = target.hue()
+    saturation = target.saturation()
 
-    base = QIcon(base_path).pixmap(size, size)
-    badge_size = max(8, int(size * scale))
-    badge = icon(badge_name).pixmap(badge_size, badge_size)
-
-    # Bottom-right, flush with the icon's edge.
-    x = size - badge_size
-    y = size - badge_size
-
-    painter = QPainter(canvas)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.drawPixmap(0, 0, base)
-
-    # Punch a hole for the badge so it does not blend into the base artwork.
-    painter.setCompositionMode(QPainter.CompositionMode_Clear)
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(Qt.black)
-    painter.drawEllipse(x - 1, y - 1, badge_size + 2, badge_size + 2)
-
-    painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-    painter.drawPixmap(x, y, badge)
-    painter.end()
+    for x in range(source.width()):
+        for y in range(source.height()):
+            pixel = source.pixelColor(x, y)
+            if pixel.alpha() == 0:
+                continue
+            recolour = QColor.fromHsv(hue, saturation, pixel.value(),
+                                      pixel.alpha())
+            source.setPixelColor(x, y, recolour)
 
     result = QIcon()
-    result.addPixmap(canvas)
+    result.addPixmap(QPixmap.fromImage(source))
     return result
 
 

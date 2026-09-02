@@ -457,13 +457,13 @@ QTableWidget, QTreeWidget, QListWidget {
 }
 
 /* Table items */
-QTableWidget::item, QTreeWidget::item, QListWidget::item {
+QTableWidget::item, QListWidget::item {
     padding: 5px;
     color: #E0E0E0;  /* Light text color */
     background-color: #3C3C3C;  /* Darker background for table rows */
 }
 
-QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
+QTableWidget::item:selected, QListWidget::item:selected {
     background-color: #505050;  /* Highlight selected items with a contrasting color */
 }
 
@@ -1080,6 +1080,12 @@ QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QAbstractSpinBox {
 QTreeWidget::item {
     padding-left: 1px;
     padding-right: 4px;
+    /* Transparent, so a row shows the tree's own background. It used to share
+       the table-item rule, which paints a panel colour -- in dark mode that
+       was lighter than the tree behind it, so every unselected row sat on a
+       visible block, and the block next to a selected row's branch strip made
+       the highlight look like it was breaking apart. */
+    background-color: transparent;
 }
 
 /* The branch column carries the expand arrow.

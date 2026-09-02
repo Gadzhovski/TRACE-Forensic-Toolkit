@@ -632,8 +632,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self._apply_palette(theme)
 
-        # The verification badges are composited pixmaps, not registry icons,
-        # so set_theme does not re-tint them; rebuild them at the new tint.
+        # A verified image's icon is a recoloured pixmap built once, not a
+        # registry icon, so set_theme does not reach it. The green and amber
+        # are the same in both themes, but rebuilding here keeps the icon
+        # correct if the underlying artwork is ever theme-dependent.
         for path, result in getattr(self, 'verification_results', {}).items():
             self.mark_image_verified(path, result.get('verified', False))
 
@@ -772,9 +774,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def mark_image_verified(self, image_path, verified):
         """Show an image verification state on its own row in the tree.
 
-        This used to swap the toolbar button icon, which is a property of the
-        window rather than of an image -- with two images loaded it claimed
-        both were verified. The mark belongs beside the image it describes.
+        The image's own icon carries the state: green once its hashes verify,
+        amber when they do not. Two earlier attempts put a separate mark beside
+        the icon -- first in its own column, then overlaid in its corner -- and
+        both were worse. The column pushed the row out of line with the volumes
+        beneath it; the overlay crammed a second glyph into a 16px icon.
+
+        This used to swap the toolbar button icon instead, which is a property
+        of the window rather than of an image: with two images loaded it
+        claimed both were verified.
         """
         root = self.tree_viewer.invisibleRootItem()
         disk_icon = self.db_manager.get_icon_path('device', 'media-optical')
@@ -782,8 +790,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             item = root.child(i)
             if item.text(0) != image_path:
                 continue
-            badge = icons.VERIFY_OK if verified else icons.VERIFY
-            item.setIcon(0, icons.badged(disk_icon, badge, TREE_ICON_SIZE))
+            hue = icons.VERIFIED_HUE if verified else icons.UNVERIFIED_HUE
+            item.setIcon(0, icons.recoloured(disk_icon, hue, TREE_ICON_SIZE))
             item.setToolTip(0,
                             "Hashes verified against those stored in the image"
                             if verified else
