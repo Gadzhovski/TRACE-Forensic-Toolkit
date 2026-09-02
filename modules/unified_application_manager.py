@@ -1,6 +1,5 @@
 import os
 from ctypes import cast, POINTER
-from weakref import WeakValueDictionary
 import mimetypes
 import platform
 import time
@@ -12,7 +11,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 from PySide6.QtWidgets import (QToolBar, QMessageBox, QScrollArea, QLineEdit, QFileDialog, QApplication)
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSlider, QLabel, QHBoxLayout, QComboBox, \
-    QSpacerItem, QSizePolicy
+    QSizePolicy
 
 from fitz import open as fitz_open, Matrix
 

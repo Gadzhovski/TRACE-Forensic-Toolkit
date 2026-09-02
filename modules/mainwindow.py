@@ -9,14 +9,14 @@ import gc
 import time
 import logging
 import re
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from Registry import Registry
 from sqlite3 import connect as sqlite3_connect
 from contextlib import contextmanager
 from functools import lru_cache
 from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QMargins
 from PySide6.QtGui import QIcon, QFont, QPalette, QBrush, QAction, QActionGroup, QPixmap, QPainter, QColor
-from PySide6.QtCharts import QChart, QChartView, QPieSeries, QPieSlice
+from PySide6.QtCharts import QChart, QChartView, QPieSeries
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
                                QDialog, QVBoxLayout, QHBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
@@ -1078,13 +1078,6 @@ class MainWindow(QMainWindow):
             icon_path = self.db_manager.get_icon_path('file', file_extension)
             self._icon_cache[file_extension] = QIcon(icon_path)
         return self._icon_cache[file_extension]
-
-    def _format_partition_text(self, addr: int, desc: bytes, start: int, end: int, length: int, fs_type: str) -> str:
-        """Format partition display text."""
-        size_in_bytes = length * SECTOR_SIZE
-        readable_size = self.image_handler.get_readable_size(size_in_bytes)
-        desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
-        return f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
 
     def _confirm_exit(self) -> bool:
         """Ask user to confirm exit."""
@@ -3237,76 +3230,6 @@ class MainWindow(QMainWindow):
 
         return info
 
-    def _get_partition_info(self, partition):
-        """Extract detailed partition information."""
-        info = {}
-
-        try:
-            addr, desc, start, length = partition
-
-            # Basic partition info (skip description as it's in the group box title)
-            info["Start Offset (Sectors)"] = f"{start:,}"
-            info["Start Offset (Bytes)"] = f"{start * 512:,}"
-            info["Length (Sectors)"] = f"{length:,}"
-            info["Length (Bytes)"] = f"{length * 512:,}"
-            info["Size"] = FileSystemUtils.get_readable_size(length * 512)
-
-            # Filesystem information
-            try:
-                fs_info = self.image_handler.get_fs_info(start)
-                if fs_info:
-                    fs_type = self.image_handler.get_fs_type(start)
-                    info["File System"] = fs_type or "Unknown"
-
-                    # Block/cluster information
-                    if hasattr(fs_info.info, 'block_size'):
-                        info["Block Size"] = f"{fs_info.info.block_size:,} bytes"
-                    if hasattr(fs_info.info, 'block_count'):
-                        info["Block Count"] = f"{fs_info.info.block_count:,}"
-
-                    # First and last block
-                    if hasattr(fs_info.info, 'first_block'):
-                        info["First Block"] = f"{fs_info.info.first_block:,}"
-                    if hasattr(fs_info.info, 'last_block'):
-                        info["Last Block"] = f"{fs_info.info.last_block:,}"
-
-                    # Inode information
-                    if hasattr(fs_info.info, 'inum_count'):
-                        info["Inode Count"] = f"{fs_info.info.inum_count:,}"
-                    if hasattr(fs_info.info, 'root_inum'):
-                        info["Root Inode"] = f"{fs_info.info.root_inum}"
-
-                    # OS detection for NTFS
-                    if fs_type == "NTFS":
-                        os_version = self.image_handler.get_windows_version(start)
-                        if os_version:
-                            info["Operating System"] = os_version
-
-                    # Try to get volume label
-                    try:
-                        root_dir = fs_info.open_dir(path="/")
-                        for entry in root_dir:
-                            if hasattr(entry, 'info') and hasattr(entry.info, 'name'):
-                                name = entry.info.name.name.decode('utf-8', errors='ignore')
-                                if name in ["$VOLUME", "volume", ".volume"]:
-                                    # Found volume label
-                                    break
-                    except:
-                        pass
-
-                else:
-                    info["File System"] = "Could not open filesystem"
-
-            except Exception as e:
-                info["File System"] = f"Error: {str(e)}"
-                logger.debug(f"Error getting filesystem info for partition: {e}")
-
-        except Exception as e:
-            logger.error(f"Error getting partition info: {e}")
-            info["Error"] = str(e)
-
-        return info
-
     def _get_filesystem_colors(self):
         """Return consistent color mapping for filesystem types."""
         return {
@@ -3455,30 +3378,6 @@ class MainWindow(QMainWindow):
 
     # ==================== SEARCH AND FILTER HANDLERS ====================
 
-    def on_listing_table_item_clicked(self, item):
-        """Handle clicks on listing table items - navigate tree view in search mode."""
-        # Only handle navigation if we're in search mode
-        if not self._search_mode:
-            return
-
-        # Get the file data from the clicked item
-        row = item.row()
-        name_item = self.listing_table.item(row, 0)  # Name column
-        if not name_item:
-            return
-
-        file_data = name_item.data(Qt.UserRole)
-        if not file_data:
-            return
-
-        # Get the path from the file data
-        file_path = file_data.get('path', '')
-        if not file_path:
-            return
-
-        # Navigate the tree view to show this file's location
-        self.navigate_tree_to_path(file_path, file_data)
-
     def navigate_tree_to_path(self, path, file_data):
         """Navigate and expand the tree view to show the specified path."""
         if not path or not self.tree_viewer:
@@ -3593,13 +3492,6 @@ class MainWindow(QMainWindow):
         if self._search_query:
             # Switch to search mode and perform search
             self.switch_to_search_mode()
-
-    def clear_listing_search(self):
-        """Clear the search bar and return to browse mode."""
-        self.listing_search_bar.clear()  # This will trigger on_listing_search_text_changed
-        # Return to browse mode
-        if self._search_mode:
-            self.switch_to_browse_mode()
 
     def switch_to_search_mode(self):
         """Switch from Browse mode to Search mode."""
@@ -3842,41 +3734,6 @@ class MainWindow(QMainWindow):
         self.listing_table.setItem(row_position, 7, changed_item)
         self.listing_table.setItem(row_position, 8, path_item)
 
-    def apply_browse_filter(self, extensions):
-        """Apply file type filter to current directory in browse mode."""
-        if not self.image_handler or self.current_offset is None:
-            return
-
-        try:
-            statusbar = self.statusBar()
-            statusbar.showMessage("Applying filter...")
-
-            if extensions is None:
-                # No filter - show all files in current directory (need to get current inode)
-                # For simplicity, refresh the current view
-                # This requires tracking current inode - for now, we'll just clear the message
-                statusbar.showMessage("Show all files in current directory")
-                # TODO: Implement proper directory refresh
-            else:
-                # Get all files from current directory and filter by extension
-                # This requires getting the current inode and filtering results
-                # For now, we'll use the list_files method from ImageHandler
-                files = self.image_handler.list_files(extensions)
-
-                # Clear and populate table with filtered results
-                self.listing_table.setRowCount(0)
-                self.listing_table.setSortingEnabled(False)
-
-                for file in files:
-                    self.insert_search_result_row(file)
-
-                self.listing_table.setSortingEnabled(True)
-                statusbar.showMessage(f"{len(files)} file(s) matching selected types")
-
-        except Exception as e:
-            logger.error(f"Filter error: {str(e)}")
-            self.statusBar().showMessage(f"Filter error: {str(e)}")
-
     def open_search_result_file(self, file_data):
         """Open a file from search results in the viewer tabs."""
         # This is the same as double-clicking - open in viewer
@@ -4008,8 +3865,13 @@ class MainWindow(QMainWindow):
 
                 statusbar.clearMessage()
             else:
-                # Find and select the corresponding file in the tree view if possible
-                self.select_tree_item_by_inode(data.get("inode_number"), data["start_offset"])
+                # Reveal the file's location in the tree view. In search mode the
+                # result may live in a directory the tree has not expanded yet, so
+                # navigate by path; otherwise select by inode.
+                if getattr(self, '_search_mode', False) and data.get('path'):
+                    self.navigate_tree_to_path(data['path'], data)
+                else:
+                    self.select_tree_item_by_inode(data.get("inode_number"), data["start_offset"])
 
                 # Files are processed in a background thread
                 inode_number = data.get("inode_number", 0)

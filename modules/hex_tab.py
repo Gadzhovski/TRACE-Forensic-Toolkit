@@ -632,11 +632,6 @@ class HexViewer(QWidget):
         self.page_entry.setText(str(self.current_page + 1))
         self.total_pages_label.setText(f"of {self.hex_viewer_manager.total_pages()}")
 
-    def update_total_pages_label(self):
-        total_pages = self.hex_viewer_manager.total_pages()
-        current_page = self.current_page + 1
-        self.total_pages_label.setText(f"{current_page} of {total_pages}")
-
     def trigger_search(self):
         query = self.search_bar.text()
         if not query:

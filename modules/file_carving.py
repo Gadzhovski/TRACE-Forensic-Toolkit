@@ -47,6 +47,7 @@ class FileCarvingWidget(QWidget):
         self.main_window = parent  # Store reference to MainWindow before it gets reparented by tab widget
         self.image_handler = None
         self.executor = ThreadPoolExecutor(max_workers=4)  # ThreadPoolExecutor for background tasks
+        self._stop_requested = False  # cooperative cancellation flag for carve_files()
         self.carved_files = []
         self.carved_file_names = set()  # Track carved file names to avoid duplicates
         self.allocation_map = []  # Map of allocated disk regions to skip during carving
@@ -327,9 +328,15 @@ class FileCarvingWidget(QWidget):
         self.executor.submit(self.carve_files, selected_file_types)
 
     def stop_carving(self):
-        self.executor.shutdown(wait=True)  # Properly shutdown the executor
-        self.start_button.setEnabled(True)  # Re-enable the start button
-        self.stop_button.setEnabled(False)  # Disable the stop button
+        """Ask the running carve to stop.
+
+        Cooperative: carve_files() checks _stop_requested once per chunk. The
+        executor is deliberately not shut down here -- shutdown() does not
+        cancel a running task, it blocks until that task finishes (freezing the
+        UI), and it is terminal, so the widget could never carve again.
+        """
+        self._stop_requested = True
+        self.stop_button.setEnabled(False)
 
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler
@@ -475,23 +482,6 @@ class FileCarvingWidget(QWidget):
                     traceback.print_exc()
 
                 break
-
-    def setup_buttons(self):
-        self.start_button.setEnabled(False)
-        self.start_button.clicked.connect(self.start_carving_thread)
-        self.stop_button.setEnabled(False)
-        self.stop_button.clicked.connect(self.stop_carving_thread)
-
-    def start_carving_thread(self):
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        # Launch carving in a background thread
-        self.executor.submit(self.carve_files)
-
-    def stop_carving_thread(self):
-        self.executor.shutdown(wait=False)
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
 
     def is_valid_file(self, data, file_type):
         try:
@@ -816,7 +806,7 @@ class FileCarvingWidget(QWidget):
 
     def carve_files(self, selected_file_types):
         try:
-            self.stop_carving = False
+            self._stop_requested = False
             chunk_size = 1024 * 1024 * 100
             offset = 0
             chunks_processed = 0
@@ -836,8 +826,8 @@ class FileCarvingWidget(QWidget):
                 if not chunk:
                     break
 
-                if self.stop_carving:
-                    self.stop_carving = False
+                if self._stop_requested:
+                    self._stop_requested = False
                     self.start_button.setEnabled(True)
                     self.stop_button.setEnabled(False)
                     print(f"Carving stopped. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")

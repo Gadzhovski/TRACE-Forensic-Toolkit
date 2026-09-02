@@ -1,7 +1,6 @@
 import base64
 import html
 import re
-import sqlite3
 import urllib
 import urllib.parse
 from enum import Enum

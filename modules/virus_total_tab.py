@@ -70,10 +70,6 @@ class VirusTotal(QWidget):
     def set_api_key(self, key):
         self.api_key = key
 
-    def use_api_key(self):
-        if not self.api_key:
-            raise ValueError("API key not set")
-
     def spacer(self, policy1, policy2):
         spacer = QWidget(self)
         spacer.setSizePolicy(policy1, policy2)
