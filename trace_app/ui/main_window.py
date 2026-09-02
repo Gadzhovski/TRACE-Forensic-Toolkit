@@ -213,6 +213,30 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._build_central_widgets()
         self._build_viewer_dock()
 
+    def showEvent(self, event):
+        """Apply the default dock proportions once, on first show."""
+        super().showEvent(event)
+        if not getattr(self, '_layout_applied', False):
+            self._layout_applied = True
+            self._apply_default_layout()
+
+    def _apply_default_layout(self):
+        """Give the file listing most of the window on first run.
+
+        Qt otherwise sizes docks from their content's sizeHint, which left the
+        Utils dock and the tree taking far more room than they need -- the
+        listing is what an examiner actually reads. Done on first show, when
+        the window finally knows how big it is.
+        """
+        width = self.width() or DEFAULT_WINDOW_WIDTH
+        height = self.height() or DEFAULT_WINDOW_HEIGHT
+
+        # Tree on the left: enough for a path, not a third of the window.
+        self.resizeDocks([self.tree_dock], [int(width * 0.22)], Qt.Horizontal)
+
+        # Utils along the bottom: tall enough to read a viewer, no more.
+        self.resizeDocks([self.viewer_dock], [int(height * 0.30)], Qt.Vertical)
+
     def _build_window(self):
         """Window title, icon, geometry and platform taskbar identity."""
         self.setWindowTitle('Trace 1.2.0')
@@ -309,6 +333,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_toolbar(self):
         """Main toolbar actions."""
         self.main_toolbar = QToolBar()
+        # Named so the toolbar/dock context menu has a label for it; an unnamed
+        # toolbar shows there as a tick box with no text. objectName lets Qt
+        # save and restore its position.
+        self.main_toolbar.setWindowTitle("Main Toolbar")
+        self.main_toolbar.setObjectName("mainToolbar")
         self.main_toolbar.setMovable(False)
         self.main_toolbar.setFloatable(False)
         self.main_toolbar.addAction(
@@ -337,7 +366,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tree_viewer.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_viewer.customContextMenuRequested.connect(self.open_tree_context_menu)
 
-        tree_dock = QDockWidget('Tree View', self)
+        self.tree_dock = tree_dock = QDockWidget('Tree View', self)
+        tree_dock.setObjectName('treeDock')
 
         tree_dock.setWidget(self.tree_viewer)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
@@ -530,12 +560,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.virus_total_api.set_api_key(virus_total_key)
 
         self.viewer_dock = QDockWidget('Utils', self)
+        self.viewer_dock.setObjectName('utilsDock')
         self.viewer_dock.setWidget(self.viewer_tab)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
 
-        self.viewer_dock.setMinimumSize(VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
-        self.viewer_dock.setMaximumSize(VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
-        self.viewer_dock.visibilityChanged.connect(self.on_viewer_dock_focus)
+        # A floor, not a fixed size: the dock stays usable but the user can
+        # drag the splitter. Setting minimum == maximum (as this did) pinned it
+        # and made the splitter inert.
+        self.viewer_dock.setMinimumHeight(VIEWER_DOCK_MIN_HEIGHT)
+
+        # The viewer must never be sized by what it happens to be showing.
+        # Without this, opening a large image grew the dock and squeezed the
+        # file listing.
+        self.viewer_tab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
 
         # disable all tabs before loading an image file
@@ -684,12 +721,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return item
 
     def on_viewer_dock_focus(self, visible):
-        if visible:  # If the QDockWidget is focused/visible
-            self.viewer_dock.setMaximumSize(QT_MAX_SIZE, QT_MAX_SIZE)  # Remove size constraints
-        else:  # If the QDockWidget loses focus
-            current_height = self.viewer_dock.size().height()  # Get the current height
-            self.viewer_dock.setMinimumSize(VIEWER_DOCK_MAX_WIDTH, current_height)
-            self.viewer_dock.setMaximumSize(VIEWER_DOCK_MAX_WIDTH, current_height)
+        """Kept for the visibilityChanged connection; no longer resizes.
+
+        This used to strip the dock's size constraints when it became visible
+        and re-pin them when it did not, which is how a large image in the
+        Application tab ended up resizing the whole dock. The dock now keeps a
+        simple minimum height and is otherwise the user's to size.
+        """
+        return
 
     def clear_ui(self):
         self.listing_table.clearContents()

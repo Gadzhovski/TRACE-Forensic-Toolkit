@@ -12,7 +12,9 @@ DEFAULT_WINDOW_X = 100
 DEFAULT_WINDOW_Y = 100
 
 # Dock sizes
-VIEWER_DOCK_MIN_HEIGHT = 222
+# Floor for the bottom Utils dock. Kept modest so the file listing, which
+# is what an examiner reads, keeps the bulk of the window.
+VIEWER_DOCK_MIN_HEIGHT = 160
 VIEWER_DOCK_MAX_WIDTH = 1200
 VIEWER_DOCK_MAX_SIZE = 16777215  # Qt maximum size value
 

@@ -722,12 +722,14 @@ QChartView#volumeInfoChartView {
 
 /* Panel titles: File System Browser / File Carving / Registry Browser.
    Previously three copies of the same inline rule using a teal (#37c6d0)
-   that clashed with the blue used for selection. One accent now. */
+   that clashed with the blue used for selection. Headings are plain
+   foreground text now -- blue is reserved for selection and progress,
+   where it means something. */
 QLabel#panelTitle {
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
-    color: #58A6FF;
-    margin-left: 8px;
+    color: #E8E8E8;
+    margin-left: 6px;
     padding: 2px 0;
 }
 
@@ -814,7 +816,7 @@ QTableWidget#propertyTable::item[state="label"] {
 
 /* Section headings ("File", "Timestamps", "Hashes"). */
 QTableWidget#propertyTable::item[state="section"] {
-    color: #58A6FF;
+    color: #C8C8C8;
     padding-top: 10px;
     padding-bottom: 3px;
 }

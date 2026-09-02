@@ -45,8 +45,10 @@ class MetadataViewer(QWidget):
         self.splitter.setStretchFactor(0, 4)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setCollapsible(0, False)
-        self.property_table.setMinimumHeight(140)
-        self.details_view.setMinimumHeight(60)
+        # Modest floors: these propagate up into the dock's minimum height,
+        # and the dock should not be able to crowd out the file listing.
+        self.property_table.setMinimumHeight(80)
+        self.details_view.setMinimumHeight(40)
         layout.addWidget(self.splitter)
 
     def display_metadata(self, data):
