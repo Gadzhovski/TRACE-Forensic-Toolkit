@@ -17,7 +17,8 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QToolBar, QSizePolicy, QHBoxLayout, \
     QCheckBox, QHeaderView
 from PySide6.QtWidgets import QMenu
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
+                               QPushButton, QLabel, QTabWidget, QMessageBox)
 from fitz import open as fitz_open, Matrix
 
 from trace_app.core.carving_signatures import (extract_original_timestamp,
@@ -25,9 +26,14 @@ from trace_app.core.carving_signatures import (extract_original_timestamp,
 from trace_app.infra.paths import carved_files_dir, resource_path
 from trace_app.infra.constants import (PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
+from trace_app.ui.widgets.multi_select import MultiSelectButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Carving')
+
+
+#: File signatures the carver can search for. Order is the menu order.
+CARVABLE_TYPES = ["PDF", "JPG", "PNG", "GIF", "BMP", "WAV", "MOV", "WMV", "ZIP"]
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -94,19 +100,14 @@ class FileCarvingWidget(QWidget):
 
         self.list_widget = self.create_list_widget()
 
-        self.fileTypeLayout = QHBoxLayout()
-        self.fileTypes = {"All": QCheckBox("All"), "PDF": QCheckBox("PDF"), "JPG": QCheckBox("JPG"),
-                          "PNG": QCheckBox("PNG"), "GIF": QCheckBox("GIF"), "WAV": QCheckBox("WAV"),
-                          "MOV": QCheckBox("MOV"), "WMV": QCheckBox("WMV"), "ZIP": QCheckBox("ZIP"),
-                          'BMP': QCheckBox("BMP")}
-
-        for fileType, checkBox in self.fileTypes.items():
-            self.fileTypeLayout.addWidget(checkBox)
-
-        # Adding a widget to contain the file type checkboxes
-        self.fileTypeWidget = QWidget()
-        self.fileTypeWidget.setLayout(self.fileTypeLayout)
-        self.toolbar.addWidget(self.fileTypeWidget)
+        # One dropdown instead of ten check boxes. The old row also carried an
+        # "All" check box that was treated as a file type in its own right, so
+        # ticking it searched for a signature named "all"; select-all is now a
+        # menu command rather than an option.
+        self.file_type_button = MultiSelectButton(CARVABLE_TYPES, self, noun="types")
+        self.file_type_button.set_selected(CARVABLE_TYPES)
+        self.toolbar.addWidget(QLabel("Carve:"))
+        self.toolbar.addWidget(self.file_type_button)
 
         self.start_button = QPushButton("Start")
         self.start_button.clicked.connect(self.start_carving)
@@ -331,8 +332,13 @@ class FileCarvingWidget(QWidget):
             logger.debug("Will carve from entire disk (may include duplicates)")
             self.allocation_map = []
 
-        selected_file_types = [fileType.lower() for fileType, checkbox in self.fileTypes.items() if
-                               checkbox.isChecked()]
+        selected_file_types = [name.lower() for name in self.file_type_button.selected()]
+        if not selected_file_types:
+            QMessageBox.information(self, "Nothing to carve",
+                                    "Select at least one file type to search for.")
+            self.start_button.setEnabled(True)
+            self.stop_button.setEnabled(False)
+            return
         self.executor.submit(self.carve_files, selected_file_types)
 
     def stop_carving(self):

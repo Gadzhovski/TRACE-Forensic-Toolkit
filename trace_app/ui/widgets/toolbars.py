@@ -56,8 +56,13 @@ def align_controls(toolbar):
     widgets added after the initial pass.
     """
     for child in toolbar.findChildren(QToolButton):
-        # Square, so the icon sits centred in its hover highlight.
-        child.setFixedSize(CONTROL_HEIGHT + 4, CONTROL_HEIGHT + 4)
+        if child.text() and child.toolButtonStyle() != Qt.ToolButtonIconOnly:
+            # Carries a label, so it needs room for the text: fix the height
+            # only and let the width follow the content.
+            child.setFixedHeight(CONTROL_HEIGHT)
+        else:
+            # Icon only: square, so the glyph sits centred in its highlight.
+            child.setFixedSize(CONTROL_HEIGHT + 4, CONTROL_HEIGHT + 4)
 
     for cls in (QLineEdit, QComboBox, QPushButton):
         for child in toolbar.findChildren(cls):

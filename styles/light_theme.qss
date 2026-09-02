@@ -954,3 +954,36 @@ QLabel#aboutMetaQuiet {
     color: #868e96;
     padding-top: 6px;
 }
+
+/* ==================== Multi-select and menu buttons ==================== */
+/* A dropdown that replaces a row of check boxes. Styled like a combo box so
+   it reads as a control rather than a toolbar icon. */
+
+QToolButton#multiSelectButton,
+QToolButton#exportButton {
+    background-color: #ffffff;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    color: #212529;
+    padding: 0px 10px;
+    min-width: 92px;
+    max-width: 140px;
+    text-align: center;
+}
+
+QToolButton#multiSelectButton:hover,
+QToolButton#exportButton:hover {
+    background-color: #f1f3f5;
+}
+
+QToolButton#multiSelectButton:pressed,
+QToolButton#exportButton:pressed,
+QToolButton#multiSelectButton::menu-indicator,
+QToolButton#exportButton::menu-indicator {
+    background-color: transparent;
+}
+
+QToolButton#multiSelectButton:pressed,
+QToolButton#exportButton:pressed {
+    background-color: #e9ecef;
+}

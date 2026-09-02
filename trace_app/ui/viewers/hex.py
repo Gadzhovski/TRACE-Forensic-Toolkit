@@ -305,12 +305,15 @@ class HexViewer(QWidget):
         spacer.setFixedSize(GROUP_SPACING, 0)
         self.toolbar.addWidget(spacer)
 
+        # A single button that opens its menu, rather than MenuButtonPopup,
+        # which splits the control into a text half and a separate arrow half
+        # and reads as two misaligned buttons.
         self.export_button = QToolButton(self)
-        self.export_button.setObjectName("exportButton")  # Assign a unique object name
+        self.export_button.setObjectName("exportButton")
         self.export_button.setText("Export")
-        self.export_button.setToolButtonStyle(Qt.ToolButtonTextOnly)  # Change to text only since no icon is used
-        self.export_button.setFixedWidth(BUTTON_WIDTH)
-        self.export_button.setPopupMode(QToolButton.MenuButtonPopup)  # Set the popup mode
+        self.export_button.setToolTip("Save the current page as text or HTML")
+        self.export_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.export_button.setPopupMode(QToolButton.InstantPopup)
 
         # Add format options to the menu
         self.export_menu = QMenu(self)

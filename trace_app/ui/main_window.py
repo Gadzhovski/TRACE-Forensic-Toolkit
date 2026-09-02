@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
+                                       GROUP_SPACING,
                                        TABLE_ROW_HEIGHT,
                                        CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
                                        DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
@@ -476,10 +477,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_search_bar.textChanged.connect(self.on_listing_search_text_changed)
         self.listing_toolbar.addWidget(self.listing_search_bar)
 
-        # Add small end spacer
-        end_spacer = QWidget()
-        end_spacer.setFixedWidth(CONTROL_SPACING)
-        self.listing_toolbar.addWidget(end_spacer)
+        # A trailing gap so the search field does not sit flush against the
+        # panel edge. A zero-height spacer widget is collapsed by the toolbar,
+        # so this is set as contents margins instead.
+        margins = self.listing_toolbar.contentsMargins()
+        self.listing_toolbar.setContentsMargins(
+            margins.left(), margins.top(), GROUP_SPACING, margins.bottom())
 
         # Add the single toolbar and listing table to the layout
         # Every control in this toolbar gets the shared height, once it is built.
