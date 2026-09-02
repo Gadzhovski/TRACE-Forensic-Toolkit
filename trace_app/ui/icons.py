@@ -268,11 +268,32 @@ class _TintedSvgEngine(QIconEngine):
     def paint(self, painter, rect, mode, state):
         painter.drawPixmap(rect, self.pixmap(rect.size(), mode, state))
 
-    def pixmap(self, size, mode, state):
-        width = max(1, size.width())
-        height = max(1, size.height())
+    def scaledPixmap(self, size, mode, state, scale):
+        """Render for a display scale factor.
 
-        out = QPixmap(width, height)
+        Qt calls this instead of pixmap() when the screen is scaled -- 125% or
+        150% on Windows, a Retina display on macOS. Without it Qt falls back to
+        pixmap() at the logical size and stretches the result, so a 20px icon
+        on a 150% display is a 20px raster blown up to 30: exactly the
+        stair-stepped edges these icons were showing. This renders at the
+        device resolution and labels the pixmap so Qt draws it at the right
+        logical size.
+        """
+        return self._render(size.width(), size.height(), scale)
+
+    def pixmap(self, size, mode, state):
+        return self._render(size.width(), size.height(), 1.0)
+
+    def _render(self, logical_width, logical_height, scale):
+        # The pixmap is allocated in device pixels, but once it carries a
+        # device pixel ratio QPainter addresses it in logical ones -- so
+        # everything painted below works in logical units.
+        width = max(1, logical_width)
+        height = max(1, logical_height)
+
+        out = QPixmap(max(1, int(round(width * scale))),
+                      max(1, int(round(height * scale))))
+        out.setDevicePixelRatio(scale)
         out.fill(Qt.transparent)
 
         renderer = QSvgRenderer(self._path)
@@ -282,12 +303,14 @@ class _TintedSvgEngine(QIconEngine):
         painter = QPainter(out)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        # Keep the aspect ratio and centre, as QIcon would.
+        # Keep the aspect ratio and centre, as QIcon would. width and height
+        # are already device pixels, so this fits the glyph to the full
+        # rendered surface -- do not reuse the `scale` parameter here.
         bounds = renderer.viewBoxF()
         if bounds.width() > 0 and bounds.height() > 0:
-            scale = min(width / bounds.width(), height / bounds.height())
-            drawn_w = bounds.width() * scale
-            drawn_h = bounds.height() * scale
+            fit = min(width / bounds.width(), height / bounds.height())
+            drawn_w = bounds.width() * fit
+            drawn_h = bounds.height() * fit
             target = QRectF((width - drawn_w) / 2, (height - drawn_h) / 2,
                             drawn_w, drawn_h)
         else:
@@ -296,7 +319,7 @@ class _TintedSvgEngine(QIconEngine):
 
         if self._colour:
             painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-            painter.fillRect(out.rect(), QColor(self._colour))
+            painter.fillRect(QRectF(0, 0, width, height), QColor(self._colour))
         painter.end()
         return out
 
