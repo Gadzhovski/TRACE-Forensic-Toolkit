@@ -414,22 +414,44 @@ content for a selected file, carving runs, registry hive opens, export works.
 Not the chosen primary install route, but the current build files are broken and worth fixing if
 you ever want binaries.
 
-- [ ] `build_exe.py:82` uses `--add-data f"{src};{dst}"`. The `;` separator is **Windows-only** —
+- [x] `build_exe.py:82` uses `--add-data f"{src};{dst}"`. The `;` separator is **Windows-only** —
       macOS/Linux need `:`. As written, the build script cannot produce a Mac or Linux build.
-- [ ] `TRACE.spec:7` has `datas=[('Icons', '.'), ('styles', '.')]`. A `'.'` destination for a
+- [x] `TRACE.spec:7` has `datas=[('Icons', '.'), ('styles', '.')]`. A `'.'` destination for a
       *directory* source flattens `Icons/*` into the bundle root, so `Icons/logo.png` becomes
       `logo.png` and every lookup breaks. `build_exe.py:80-88` computes the same wrong value.
       Should be `('Icons', 'Icons')`.
-- [ ] Neither the spec nor `build_exe.py` bundles `tools/` — so in a packaged build the Metadata
+- [x] Neither the spec nor `build_exe.py` bundles `tools/` — so in a packaged build the Metadata
       tab's istat call raises `FileNotFoundError` (unguarded). Phase 2b removes that dependency
       entirely, which fixes this by construction.
-- [ ] `build_exe.py:21` points at `Icons/logo_prev_ui.ico`, which doesn't exist — only the `.png`.
+- [x] `build_exe.py:21` points at `Icons/logo_prev_ui.ico`, which doesn't exist — only the `.png`.
       The exe currently ships with the default PyInstaller icon.
-- [ ] Exclude `Icons/readme/` (2.3 MB of README screenshots) and `Icons/animations/` (referenced
+- [x] Exclude `Icons/readme/` (2.3 MB of README screenshots) and `Icons/animations/` (referenced
       nowhere in code) from the bundle.
-- [ ] Phase 2a's `resource_path()` is a prerequisite for any `--onefile` build to work at all.
+- [x] Phase 2a's `resource_path()` is a prerequisite for any `--onefile` build to work at all.
 
 ---
+
+
+### Phase 5 notes
+
+Done as part of the final cleanup. Two items were deliberately **not** actioned:
+
+- **`Icons/readme/` and `Icons/animations/` are still bundled.** Excluding them
+  saves ~2.4 MB in a build; left in at the user's request to keep the icon set
+  intact.
+- **The 62 unreferenced icons were kept** — they are coherent variants of the
+  bundled theme and may be wanted when more filetype mappings are added.
+
+## Post-plan work
+
+- [x] **Removed the E01-to-RAW converter.** Its physical/logical drive branches
+      were empty placeholders, and raw conversion of a mounted drive is not
+      something this codebase can do reliably from Python.
+- [x] **Rewrote README.md** around what the tool actually does, with every claim
+      checked against the code, plus an honest Limitations section.
+- [x] **Brought CLAUDE.md up to date** with the new module layout and the
+      conventions established during the refactor.
+- [x] **Tidied 30 dangling imports** left by the extractions and removals.
 
 ## Critical files
 
