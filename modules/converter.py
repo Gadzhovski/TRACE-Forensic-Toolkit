@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 
 import pyewf
 from PySide6.QtCore import Signal
@@ -17,18 +18,30 @@ from modules.paths import resource_path
 
 # Helper Function to List Drives (For Physical and Logical Drive Selection)
 def list_drives():
-    if os.name == "nt":
-        # Using PowerShell command to list drives on Windows
-        command = ["powershell", "-NoProfile", "Get-WmiObject Win32_DiskDrive | Select-Object Model, DeviceID"]
-    elif os.name == "darwin":
-        # Using diskutil to list drives on macOS
-        command = ["diskutil", "list"]
-    else:
-        raise Exception("Unsupported OS")
+    """Return a human-readable listing of the machine's physical drives.
 
-    result = subprocess.run(command, capture_output=True, text=True)
+    Dispatches on sys.platform, not os.name: os.name is 'posix' on both macOS
+    and Linux and is never 'darwin', so the previous macOS branch was
+    unreachable and macOS fell through to "Unsupported OS".
+    """
+    if sys.platform == "win32":
+        # Get-CimInstance supersedes the deprecated Get-WmiObject, which is
+        # absent from PowerShell 7+.
+        command = ["powershell", "-NoProfile",
+                   "Get-CimInstance Win32_DiskDrive | Select-Object Model, DeviceID"]
+    elif sys.platform == "darwin":
+        command = ["diskutil", "list"]
+    elif sys.platform.startswith("linux"):
+        command = ["lsblk", "-d", "-o", "NAME,MODEL,SIZE,TYPE"]
+    else:
+        raise Exception(f"Listing drives is not supported on this platform ({sys.platform})")
+
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise Exception(f"Could not run '{command[0]}' - is it installed and on PATH?")
     if result.returncode != 0:
-        raise Exception("Failed to list drives")
+        raise Exception(f"Failed to list drives: {result.stderr.strip() or result.stdout.strip()}")
     return result.stdout
 
 

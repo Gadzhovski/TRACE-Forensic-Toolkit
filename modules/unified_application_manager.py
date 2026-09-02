@@ -1,5 +1,4 @@
 import os
-from ctypes import cast, POINTER
 import mimetypes
 import platform
 import time
@@ -17,6 +16,9 @@ from fitz import open as fitz_open, Matrix
 from modules.paths import resource_path
 
 if os.name == "nt":  # Windows
+    # cast/POINTER are only used by the pycaw volume interface below, so they
+    # belong inside the Windows guard alongside it.
+    from ctypes import cast, POINTER
     from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
     from comtypes import CLSCTX_ALL
 
