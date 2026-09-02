@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
-                                       DIALOG_ICON_SIZE,
                                        GROUP_SPACING,
                                        TABLE_ROW_HEIGHT,
                                        CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
@@ -47,6 +46,7 @@ from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, ExifAdap
 from trace_app.ui.viewers.virustotal import VirusTotal
 from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
 from trace_app.core.workers import ExportWorker
+from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.MainWindow')
 
@@ -127,24 +127,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return self._icon_cache[file_extension]
 
     def _confirm_exit(self) -> bool:
-        """Ask user to confirm exit.
-
-        Built rather than taken from QMessageBox.question, which supplies Qt's
-        own blue question mark -- the one piece of stock platform art left in
-        the window, and out of place beside the themed line icons. Setting the
-        icon explicitly also lets the text sit against it properly; the stock
-        dialog packs the two tight together.
-        """
-        box = QMessageBox(self)
-        box.setWindowTitle('Exit Confirmation')
-        box.setText('Are you sure you want to exit?')
-        box.setInformativeText('Any unsaved work will be lost.')
-        box.setIconPixmap(icons.icon(icons.HELP).pixmap(DIALOG_ICON_SIZE,
-                                                        DIALOG_ICON_SIZE))
-        box.setStandardButtons(QMessageBox.StandardButton.Yes
-                               | QMessageBox.StandardButton.No)
-        box.setDefaultButton(QMessageBox.StandardButton.No)
-        return box.exec() == QMessageBox.StandardButton.Yes
+        """Ask user to confirm exit."""
+        return message.question(self, 'Exit Confirmation',
+                                'Are you sure you want to exit?',
+                                'Any unsaved work will be lost.')
 
     def _create_tree_item_for_entry(self, parent_item: QTreeWidgetItem, entry: Dict[str, Any],
                                     start_offset: int) -> QTreeWidgetItem:
@@ -713,7 +699,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         except OSError as e:
             # Previously this raised straight out of the button's slot.
             logger.error(f"Could not save API keys: {e}")
-            QMessageBox.warning(
+            message.warning(
                 self, "Could not save API key",
                 f"The API key could not be written to disk:\n{e}\n\n"
                 "It will be used for this session only.")
@@ -731,7 +717,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         whole image again.
         """
         if self.image_handler is None:
-            QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
+            message.warning(self, "Verify Image", "No image is currently loaded.")
             return
 
         path = image_path or self.current_image_path
@@ -786,7 +772,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         menu is the only place that says which of them have been verified.
         """
         if not self.evidence_files:
-            QMessageBox.warning(self, "Verify Image", "No image is currently loaded.")
+            message.warning(self, "Verify Image", "No image is currently loaded.")
             return
 
         if len(self.evidence_files) == 1:
@@ -1018,14 +1004,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.enable_tabs(True)
 
             except Exception as e:
-                QMessageBox.critical(self, "Error Loading Image", f"Failed to load image: {str(e)}")
+                message.critical(self, "Error Loading Image", f"Failed to load image: {str(e)}")
                 # Remove the image from evidence files if it was added but failed to load
                 if image_path in self.evidence_files:
                     self.evidence_files.remove(image_path)
 
     def remove_image_evidence(self):
         if not self.evidence_files:
-            QMessageBox.warning(self, "Remove Evidence", "No evidence is currently loaded.")
+            message.warning(self, "Remove Evidence", "No evidence is currently loaded.")
             return
 
         # Prepare the options for the dialog
@@ -1039,13 +1025,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Remove all evidence files
                 self.tree_viewer.invisibleRootItem().takeChildren()  # Remove all children from the tree viewer
                 self.clear_ui()  # Clear the UI
-                QMessageBox.information(self, "Remove Evidence", "All evidence files have been removed.")
+                message.information(self, "Remove Evidence", "All evidence files have been removed.")
             else:
                 # Remove the selected evidence file
                 self.evidence_files.remove(selected_option)
                 self.remove_from_tree_viewer(selected_option)
                 self.clear_ui()
-                QMessageBox.information(self, "Remove Evidence", f"{selected_option} has been removed.")
+                message.information(self, "Remove Evidence", f"{selected_option} has been removed.")
         # clear all tabs if there are no evidence files loaded
         if not self.evidence_files:
             self.clear_ui()
@@ -2012,7 +1998,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 lambda current, total: progress_dialog.setValue(int(current * 100 / total) if total > 0 else 0)
             )
             self.export_worker.status_update.connect(progress_dialog.setLabelText)
-            self.export_worker.error.connect(lambda msg: QMessageBox.warning(self, "Export Error", msg))
+            self.export_worker.error.connect(lambda msg: message.warning(self, "Export Error", msg))
             self.export_worker.finished.connect(progress_dialog.close)
 
             # Connect the cancel button
@@ -2025,7 +2011,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.export_worker.start()
 
         except Exception as e:
-            QMessageBox.critical(self, "Export Error", f"Error starting export: {str(e)}")
+            message.critical(self, "Export Error", f"Error starting export: {str(e)}")
 
     def log_error(self, message):
         """Log an error message to the console and potentially to a log file."""

@@ -17,12 +17,13 @@ Monochrome SVG on a 24×24 grid with a 2px stroke. They are authored with
 `trace_app/ui/icons.py` tints them to the active theme's foreground colour at
 runtime. That is why one set works on both the light and dark themes.
 
-Two files in this directory are **not** from the Tabler set, and are covered by
-this project's own licence rather than the one above:
+Every icon in this directory is an unmodified upstream file, downloaded from
+the tag above. The one exception is `virustotal-wordmark.svg` — see the
+VirusTotal section below.
 
-- `help-circle.svg` — drawn for the exit-confirmation dialog in Tabler's idiom
-  (24×24 grid, 2px stroke, `currentColor`) so it sits with the rest.
-- `virustotal-wordmark.svg` — see the VirusTotal section below.
+The directory holds more icons than the interface currently uses. They are kept
+so that adding a control does not mean going back to the upstream repository
+and risking a mixed set of versions.
 
 ## File-type and folder icons — `Icons/mimetypes/`, `places/`, `devices/`, `apps/`, `status/`, `animations/`
 

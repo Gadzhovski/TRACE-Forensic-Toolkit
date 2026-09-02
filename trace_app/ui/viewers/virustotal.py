@@ -19,6 +19,7 @@ from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH_WIDE, TOOLBAR_HEIGHT
 from trace_app.ui import icons
 from trace_app.ui.widgets.property_table import PropertyTable
+from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.VirusTotal')
 
@@ -183,7 +184,7 @@ class VirusTotal(QWidget):
     def upload_file(self):
         """Prepares the file content and name for upload."""
         if not self.api_key:
-            QMessageBox.warning(self, "API Key Not Set",
+            message.warning(self, "API Key Not Set",
                                 "Please set the API key in the Options menu before uploading a file.")
             return
 
@@ -234,7 +235,7 @@ class VirusTotal(QWidget):
 
     def pass_hash(self):
         if not self.api_key:
-            QMessageBox.warning(self, "API Key Not Set",
+            message.warning(self, "API Key Not Set",
                                 "Please set the API key in the Options menu before passing a hash.")
             return
 

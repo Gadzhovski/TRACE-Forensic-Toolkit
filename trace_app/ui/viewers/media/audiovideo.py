@@ -1,3 +1,4 @@
+from trace_app.ui.dialogs import message
 """Audio and video player.
 
 Plays either from a QBuffer or straight from the disk image via
@@ -325,7 +326,7 @@ class AudioVideoPlayer(QWidget):
 
     def handle_error(self, error, error_string):
         if error != QMediaPlayer.NoError:
-            QMessageBox.warning(self, "Media Error", f"Error: {error_string}")
+            message.warning(self, "Media Error", f"Error: {error_string}")
 
     def closeEvent(self, event):
         # Clean up resources

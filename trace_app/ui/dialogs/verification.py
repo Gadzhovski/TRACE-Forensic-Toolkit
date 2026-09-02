@@ -103,6 +103,9 @@ class VerificationWidget(QWidget):
         self.close_button.setFixedWidth(BUTTON_WIDTH)
         self.close_button.clicked.connect(self.close)
         button_layout.addWidget(self.close_button)
+        # Stretch on both sides: with only one button left, right-aligning it
+        # stranded it in the corner of a 750px dialog.
+        button_layout.addStretch()
         layout.addLayout(button_layout)
 
         if cached:

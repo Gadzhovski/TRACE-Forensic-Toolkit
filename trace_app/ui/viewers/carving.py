@@ -28,6 +28,7 @@ from trace_app.infra.constants import (PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
 from trace_app.ui.widgets.multi_select import MultiSelectButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Carving')
 
@@ -334,7 +335,7 @@ class FileCarvingWidget(QWidget):
 
         selected_file_types = [name.lower() for name in self.file_type_button.selected()]
         if not selected_file_types:
-            QMessageBox.information(self, "Nothing to carve",
+            message.information(self, "Nothing to carve",
                                     "Select at least one file type to search for.")
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)

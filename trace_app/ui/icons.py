@@ -28,6 +28,13 @@ LOGO_LARGE = "Icons/logo_prev_ui.png"
 VIRUSTOTAL_LOGO = "Icons/tabler/virustotal-wordmark.svg"
 HELP = "Icons/tabler/help-circle.svg"
 
+# --- Dialogs ---------------------------------------------------------------
+# Used by trace_app/ui/dialogs/message.py in place of Qt's own platform icons.
+ALERT = "Icons/tabler/alert-triangle.svg"
+ERROR = "Icons/tabler/alert-circle.svg"
+INFO = "Icons/tabler/info-circle.svg"
+SUCCESS = "Icons/tabler/circle-check.svg"
+
 # --- Evidence --------------------------------------------------------------
 EVIDENCE_ADD = "Icons/tabler/file-plus.svg"
 EVIDENCE_REMOVE = "Icons/tabler/file-minus.svg"

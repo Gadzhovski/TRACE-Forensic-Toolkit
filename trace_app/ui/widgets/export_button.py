@@ -1,3 +1,4 @@
+from trace_app.ui.dialogs import message
 """A toolbar button that saves the current view as text, PDF or HTML.
 
 The Hex viewer had an Export button offering text and HTML; the Text viewer had
@@ -76,7 +77,7 @@ class ExportButton(QToolButton):
     def export(self, suffix):
         content = self._provider()
         if not content:
-            QMessageBox.warning(self, "Nothing to export",
+            message.warning(self, "Nothing to export",
                                 "There is no content to export yet.")
             return
 
@@ -102,10 +103,10 @@ class ExportButton(QToolButton):
                 self._write_html(path, content)
         except OSError as e:
             logger.error("Export to %s failed: %s", path, e)
-            QMessageBox.critical(self, "Export failed", f"Could not write the file:\n{e}")
+            message.critical(self, "Export failed", f"Could not write the file:\n{e}")
             return
 
-        QMessageBox.information(self, "Exported",
+        message.information(self, "Exported",
                                 f"Saved to {os.path.basename(path)}.")
 
     def _write_text(self, path, content):

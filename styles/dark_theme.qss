@@ -767,7 +767,11 @@ QProgressBar#verifyProgress {
 }
 
 QProgressBar#verifyProgress::chunk {
-    background-color: #2F81F7;
+    /* Green because the bar reports a hash verification completing, and the
+       theme's amber [state="warning"] already establishes that colour carries
+       meaning in this app. The previous #2F81F7 was a blue used nowhere else
+       and said nothing about the outcome. */
+    background-color: #3FB950;
     border-radius: 4px;
 }
 

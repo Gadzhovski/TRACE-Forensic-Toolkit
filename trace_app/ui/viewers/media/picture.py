@@ -1,3 +1,4 @@
+from trace_app.ui.dialogs import message
 """Image viewer with zoom, rotation and save."""
 
 import logging
@@ -142,7 +143,7 @@ class PictureViewer(QWidget):
     def export_original_image(self):
         # Ensure that an image is currently loaded
         if not self.original_image_bytes:
-            QMessageBox.warning(self, "Export Error", "No image is currently loaded.")
+            message.warning(self, "Export Error", "No image is currently loaded.")
             return
 
         # Ask the user where to save the exported image
@@ -153,4 +154,4 @@ class PictureViewer(QWidget):
         if file_name:
             with open(file_name, 'wb') as f:
                 f.write(self.original_image_bytes)
-            QMessageBox.information(self, "Export Success", "Image exported successfully!")
+            message.information(self, "Export Success", "Image exported successfully!")

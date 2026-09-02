@@ -1,3 +1,4 @@
+from trace_app.ui.dialogs import message
 """Application entry point: logging, startup checks, and the main window."""
 
 import logging
@@ -52,7 +53,7 @@ def main():
     if missing:
         logging.getLogger('TRACE').warning("Missing dependencies: %s",
                                            ", ".join(n for n, _, _ in missing))
-        QMessageBox.warning(
+        message.warning(
             None, "Missing dependencies",
             "TRACE started, but some features will not work:\n\n"
             + format_report(missing))

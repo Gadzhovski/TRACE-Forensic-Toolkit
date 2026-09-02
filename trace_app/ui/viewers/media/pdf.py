@@ -1,3 +1,4 @@
+from trace_app.ui.dialogs import message
 """PDF viewer: paging, zoom, fit modes, pan and print."""
 
 import logging
@@ -234,7 +235,7 @@ class PDFViewer(QWidget):
             page_num = int(self.page_entry.text()) - 1  # Minus 1 because pages start from 0
             self.set_current_page(page_num)
         except ValueError:
-            QMessageBox.warning(self, "Invalid Page Number", "Please enter a valid page number.")
+            message.warning(self, "Invalid Page Number", "Please enter a valid page number.")
 
     def update_navigation_states(self):
         """Update UI elements based on current PDF and page."""
@@ -297,7 +298,7 @@ class PDFViewer(QWidget):
 
             self.update_navigation_states()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to render page: {e}")
+            message.critical(self, "Error", f"Failed to render page: {e}")
 
     def display(self, content):
         """Load and display a PDF from content bytes."""
@@ -428,11 +429,11 @@ class PDFViewer(QWidget):
                 self._page_cache.clear()
                 self.show_page(self.current_page)
             else:
-                QMessageBox.warning(self, "Invalid Zoom", "Please enter a zoom percentage between 10% and 500%.")
+                message.warning(self, "Invalid Zoom", "Please enter a zoom percentage between 10% and 500%.")
                 # Reset the entry to the current zoom
                 self.zoom_percentage_entry.setText(f"{int(self.zoom_factor * 100)}%")
         except ValueError:
-            QMessageBox.warning(self, "Invalid Zoom", "Please enter a valid zoom percentage.")
+            message.warning(self, "Invalid Zoom", "Please enter a valid zoom percentage.")
             # Reset the entry to the current zoom
             self.zoom_percentage_entry.setText(f"{int(self.zoom_factor * 100)}%")
 
@@ -530,14 +531,14 @@ class PDFViewer(QWidget):
         for searching or quoting in a report.
         """
         if not self.pdf:
-            QMessageBox.warning(self, "No Document", "No document available to export.")
+            message.warning(self, "No Document", "No document available to export.")
             return
 
         try:
             text = "\n\n".join(page.get_text() for page in self.pdf)
         except Exception as e:
             logger.error("Could not extract text from PDF: %s", e)
-            QMessageBox.critical(self, "Export failed", f"Could not read the document:\n{e}")
+            message.critical(self, "Export failed", f"Could not read the document:\n{e}")
             return
 
         button = ExportButton(lambda: text, "PDF Text", self)
@@ -547,7 +548,7 @@ class PDFViewer(QWidget):
     def print_pdf(self):
         """Print the current PDF."""
         if not self.pdf:
-            QMessageBox.warning(self, "No Document", "No document available to print.")
+            message.warning(self, "No Document", "No document available to print.")
             return
 
         printer = QPrinter()
@@ -561,7 +562,7 @@ class PDFViewer(QWidget):
             try:
                 painter = QPainter()
                 if not painter.begin(printer):
-                    QMessageBox.critical(self, "Error", "Failed to initialize printer.")
+                    message.critical(self, "Error", "Failed to initialize printer.")
                     return
 
                 num_pages = len(self.pdf)
@@ -585,16 +586,16 @@ class PDFViewer(QWidget):
                     painter.drawPixmap(0, 0, pixmap)
 
                 painter.end()
-                QMessageBox.information(self, "Print Complete", "Document was sent to the printer.")
+                message.information(self, "Print Complete", "Document was sent to the printer.")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to print document: {e}")
+                message.critical(self, "Error", f"Failed to print document: {e}")
                 if painter.isActive():
                     painter.end()
 
     def save_pdf(self):
         """Save the current PDF to a file."""
         if not self.pdf:
-            QMessageBox.warning(self, "No Document", "No document available to save.")
+            message.warning(self, "No Document", "No document available to save.")
             return
 
         options = QFileDialog.Options()
@@ -609,6 +610,6 @@ class PDFViewer(QWidget):
 
         try:
             self.pdf.save(filePath)  # save the PDF to the specified path
-            QMessageBox.information(self, "Success", "PDF saved successfully!")
+            message.information(self, "Success", "PDF saved successfully!")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save PDF: {e}")
+            message.critical(self, "Error", f"Failed to save PDF: {e}")

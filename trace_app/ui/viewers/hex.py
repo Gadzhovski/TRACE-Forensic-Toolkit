@@ -13,6 +13,7 @@ from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT, GROUP_SPACIN
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
+from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Hex')
 
@@ -542,9 +543,9 @@ class HexViewer(QWidget):
                 self.display_current_page()
                 self.update_navigation_states()
             else:
-                QMessageBox.warning(self, "Invalid Page", "Page number out of range.")
+                message.warning(self, "Invalid Page", "Page number out of range.")
         except ValueError:
-            QMessageBox.warning(self, "Invalid Page", "Please enter a valid page number.")
+            message.warning(self, "Invalid Page", "Please enter a valid page number.")
 
     def update_navigation_states(self):
         if not self.hex_viewer_manager:
@@ -560,7 +561,7 @@ class HexViewer(QWidget):
     def trigger_search(self):
         query = self.search_bar.text()
         if not query:
-            QMessageBox.warning(self, "Search Error", "Please enter a search query.")
+            message.warning(self, "Search Error", "Please enter a search query.")
             return
 
         # Check if a search is already ongoing. If so, stop it before starting a new one.
@@ -608,7 +609,7 @@ class HexViewer(QWidget):
             self.splitter.setSizes([self.width() * 0.6, self.width() * 0.4])  # Adjust sizes dynamically
 
         else:
-            QMessageBox.warning(self, "Search Result", "No matches found.")
+            message.warning(self, "Search Result", "No matches found.")
             # Even if no matches are found, the search results frame will still be shown
             self.splitter.setSizes([self.width() * 0.75, self.width() * 0.25])
 
@@ -633,4 +634,4 @@ class HexViewer(QWidget):
                     item.setBackground(Qt.yellow)
             self.update_navigation_states()
         except ValueError:
-            QMessageBox.warning(self, "Navigation Error", "Invalid address.")
+            message.warning(self, "Navigation Error", "Invalid address.")

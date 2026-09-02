@@ -16,6 +16,7 @@ from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEI
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
+from trace_app.ui.dialogs import message
 
 
 class SearchDirection(Enum):
@@ -290,9 +291,9 @@ class TextViewer(QWidget):
                 self.manager.current_page = page_num
                 self.refresh_content()
             else:
-                QMessageBox.warning(self, "Invalid Page", "Page number out of range.")
+                message.warning(self, "Invalid Page", "Page number out of range.")
         except ValueError:
-            QMessageBox.warning(self, "Invalid Page", "Please enter a valid page number.")
+            message.warning(self, "Invalid Page", "Please enter a valid page number.")
 
     def refresh_content(self):
         text_content = self.manager.get_text_content_for_current_page()
