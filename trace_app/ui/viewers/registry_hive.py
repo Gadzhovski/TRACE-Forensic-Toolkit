@@ -85,6 +85,9 @@ class _HiveLoader(QThread):
 
 
 class RegistryExtractor(QWidget):
+    #: Item data slot recording whether a node's children have been built.
+    POPULATED_ROLE = Qt.UserRole + 1
+
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
@@ -178,6 +181,7 @@ class RegistryExtractor(QWidget):
 
         # Connect the click event
         self.treeWidget.itemClicked.connect(self.on_item_clicked)
+        self.treeWidget.itemExpanded.connect(self._on_item_expanded)
         # Every control in this toolbar gets the shared height, once it is built.
         align_controls(self.toolbar)
 
@@ -232,28 +236,77 @@ class RegistryExtractor(QWidget):
         self._on_load_finished()
 
     def display_registry_hive(self, hive_name, root_key):
-        self.treeWidget.clear()  # Clear the tree before displaying a new hive
+        """Show the hive's root. Everything below it fills in on demand.
+
+        This used to walk the entire hive up front, building a QTreeWidgetItem
+        for every key and value it contained. A SOFTWARE hive holds tens of
+        thousands of those, all created on the UI thread, which is what froze
+        the window even after the file reading moved to a worker -- and almost
+        all of it was thrown away unread, since an examiner opens a handful of
+        branches.
+        """
+        self.treeWidget.clear()
         hive_item = QTreeWidgetItem(self.treeWidget, [hive_name])
         hive_item.setIcon(0, icons.icon(icons.REGISTRY_HIVE))
         hive_item.setData(0, Qt.UserRole, root_key)
-        self.display_registry_keys(hive_item, root_key)
+        self._mark_unpopulated(hive_item, root_key)
+        hive_item.setExpanded(True)
+
+    def _mark_unpopulated(self, item, registry_key):
+        """Give a node an expand arrow without building its children yet."""
+        try:
+            has_content = bool(registry_key.subkeys()) or bool(registry_key.values())
+        except Exception:
+            has_content = False
+        item.setChildIndicatorPolicy(
+            QTreeWidgetItem.ShowIndicator if has_content
+            else QTreeWidgetItem.DontShowIndicator)
+        item.setData(0, self.POPULATED_ROLE, False)
+
+    def _on_item_expanded(self, item):
+        """Fill in a node's children the first time it is opened."""
+        if item.data(0, self.POPULATED_ROLE):
+            return
+        item.setData(0, self.POPULATED_ROLE, True)
+
+        registry_key = item.data(0, Qt.UserRole)
+        if registry_key is None:
+            return
+
+        self.treeWidget.setUpdatesEnabled(False)
+        try:
+            self.display_registry_keys(item, registry_key)
+            self.display_registry_values(item, registry_key)
+        finally:
+            self.treeWidget.setUpdatesEnabled(True)
 
     def display_registry_keys(self, parent_item, registry_key):
-        subkeys = registry_key.subkeys()  # Call the method once and store the result
-        items = [QTreeWidgetItem(parent_item, [subkey.name()]) for subkey in subkeys]  # Use list comprehension
-        for item, subkey in zip(items, subkeys):
-            item.setData(0, Qt.UserRole, subkey)  # Store the key object for later retrieval
-            item.setIcon(0, icons.icon(icons.REGISTRY_KEY))
-            self.display_registry_keys(item, subkey)
-            self.display_registry_values(item, subkey)
+        """Add one level of subkeys. Their own children wait until expanded."""
+        try:
+            subkeys = registry_key.subkeys()
+        except Exception as e:
+            logger.error("Could not read subkeys of %s: %s", parent_item.text(0), e)
+            return
+        key_icon = icons.icon(icons.REGISTRY_KEY)
+        for subkey in subkeys:
+            item = QTreeWidgetItem(parent_item, [subkey.name()])
+            item.setData(0, Qt.UserRole, subkey)
+            item.setIcon(0, key_icon)
+            self._mark_unpopulated(item, subkey)
 
     def display_registry_values(self, parent_key_item, registry_key):
-        values = registry_key.values()  # Call the method once and store the result
-        items = [QTreeWidgetItem(parent_key_item, [value.name() or "(Default)"]) for value in
-                 values]  # Use list comprehension
-        for item, value in zip(items, values):
-            item.setData(0, Qt.UserRole, value)  # Store the value object for later retrieval
-            item.setIcon(0, icons.icon(icons.REGISTRY_VALUE))
+        try:
+            values = registry_key.values()
+        except Exception as e:
+            logger.error("Could not read values of %s: %s", parent_key_item.text(0), e)
+            return
+        value_icon = icons.icon(icons.REGISTRY_VALUE)
+        for value in values:
+            item = QTreeWidgetItem(parent_key_item, [value.name() or "(Default)"])
+            item.setData(0, Qt.UserRole, value)
+            item.setIcon(0, value_icon)
+            item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+            item.setData(0, self.POPULATED_ROLE, True)
 
     def display_metadata(self, registry_object):
         metadata = {
