@@ -258,28 +258,45 @@ def _tinted(source, colour):
     return tinted
 
 
-def badged(base_path, badge_name, size, gap=3):
-    """A QIcon of `badge_name` followed by the image at `base_path`.
+def badged(base_path, badge_name, size, scale=0.6):
+    """The image at `base_path` with `badge_name` overlaid in its corner.
 
-    The verification mark used to live in a second tree column, which put it
-    after the row's text. Reading left to right, the state of a thing belongs
-    before the thing, so the two are composited into one pixmap and drawn in
-    column 0 -- the badge first, then the disk icon.
+    The badge marks the state of the thing the icon represents -- a verified
+    disk image -- the way a shortcut or sync marker does. It is drawn into the
+    bottom-right corner of the base icon rather than beside it, so the result
+    is still `size` square: putting it alongside made the icon wider, which
+    pushed the disk image's row out of line with the volume rows beneath it.
+
+    A disc of background is cleared under the badge first, so the mark stays
+    legible over whatever detail the base icon has in that corner.
 
     `base_path` is a filesystem path (the tree gets its icons from the icon
     database, not this registry); `badge_name` is a registry entry, so the
     badge is tinted for the current theme.
     """
-    badge = icon(badge_name).pixmap(size, size)
-    base = QIcon(base_path).pixmap(size, size)
-
-    width = size * 2 + gap
-    canvas = QPixmap(width, size)
+    canvas = QPixmap(size, size)
     canvas.fill(Qt.transparent)
 
+    base = QIcon(base_path).pixmap(size, size)
+    badge_size = max(8, int(size * scale))
+    badge = icon(badge_name).pixmap(badge_size, badge_size)
+
+    # Bottom-right, flush with the icon's edge.
+    x = size - badge_size
+    y = size - badge_size
+
     painter = QPainter(canvas)
-    painter.drawPixmap(0, 0, badge)
-    painter.drawPixmap(size + gap, 0, base)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.drawPixmap(0, 0, base)
+
+    # Punch a hole for the badge so it does not blend into the base artwork.
+    painter.setCompositionMode(QPainter.CompositionMode_Clear)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(Qt.black)
+    painter.drawEllipse(x - 1, y - 1, badge_size + 2, badge_size + 2)
+
+    painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+    painter.drawPixmap(x, y, badge)
     painter.end()
 
     result = QIcon()

@@ -27,7 +27,7 @@ from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_
                                        DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
                                        PANEL_ICON_SIZE, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
                                        SECTOR_SIZE, TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
-                                       TREE_ICON_SIZE, TREE_ICON_WIDTH, TREE_INDENTATION, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
+                                       TREE_ICON_SIZE, TREE_INDENTATION, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
 from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.exif import ExifViewer
@@ -383,7 +383,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_central_widgets(self):
         """Tree viewer, listing table and its toolbar."""
         self.tree_viewer = QTreeWidget(self)
-        self.tree_viewer.setIconSize(QSize(TREE_ICON_WIDTH, TREE_ICON_SIZE))
+        self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
         # Tighter than Qt's default 20px. That default leaves a visible gap
         # between the expand arrow and the icon beside it, which reads as the

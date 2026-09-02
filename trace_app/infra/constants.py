@@ -88,11 +88,6 @@ TREE_ICON_SIZE = 16
 #: separation; this closes it while keeping the arrow's hit area usable.
 TREE_INDENTATION = 14
 
-#: Width reserved for a tree icon. Taller-than-wide is the normal case (a
-#: single 16px glyph), but a verified image draws a badge before its disk icon,
-#: and a QTreeWidget scales every icon into this box -- so it has to be wide
-#: enough for the pair or the composite is squashed.
-TREE_ICON_WIDTH = TREE_ICON_SIZE * 2 + 3
 TABLE_ICON_SIZE = 20
 TOOLBAR_ICON_SIZE = 18
 #: Icon beside a panel heading (File System Browser, File Carving, Registry).
