@@ -925,3 +925,32 @@ QToolBar QLabel {
     max-height: 26px;
     padding: 0px 2px;
 }
+
+/* ==================== About dialog ==================== */
+QDialog#aboutDialog {
+    background-color: #ffffff;
+}
+
+QLabel#aboutTitle {
+    font-size: 19px;
+    font-weight: 600;
+    color: #212529;
+    padding-bottom: 2px;
+}
+
+QLabel#aboutSubtitle {
+    font-size: 13px;
+    color: #6b7480;
+}
+
+QLabel#aboutMeta {
+    font-size: 13px;
+    color: #495057;
+    padding: 1px 0;
+}
+
+QLabel#aboutMetaQuiet {
+    font-size: 11px;
+    color: #868e96;
+    padding-top: 6px;
+}

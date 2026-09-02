@@ -1,54 +1,98 @@
+"""The About dialog."""
+
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap, QFont, QPalette, QColor
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
-from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import BUTTON_WIDTH, TOOLBAR_HEIGHT
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+
+from trace_app import __version__
+from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT
 from trace_app.ui import icons
+
+#: Rendered size of the logo. The source art is 1024x1024, so this is a
+#: reduction and stays sharp; it is also doubled for the device pixel ratio
+#: below, which keeps it crisp on a hi-DPI display.
+LOGO_SIZE = 160
 
 
 class AboutDialog(QDialog):
+    """Application name, version and author."""
+
     def __init__(self, parent=None):
-        super(AboutDialog, self).__init__(parent)
+        super().__init__(parent)
 
-        self.setWindowTitle("About Trace")
+        self.setWindowTitle("About TRACE")
+        self.setObjectName("aboutDialog")
+
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 28, 32, 24)
+        layout.setSpacing(0)
 
-        # Load and scale the logo
-        logo = QLabel(self)
-        pixmap = icons.icon(icons.LOGO).pixmap(24, 24)  # Ensure icons.path(icons.LOGO) is the correct path
-        # Adjust the logo size here
-        scaled_pixmap = pixmap.scaled(400, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        logo.setPixmap(scaled_pixmap)
-        logo.setAlignment(Qt.AlignCenter)  # Center the logo
-        layout.addWidget(logo)
+        layout.addWidget(self._logo(), 0, Qt.AlignCenter)
+        layout.addSpacing(20)
 
-        # Software information
-        title_label = QLabel("Trace - Toolkit for Retrieval and Analysis of Cyber Evidence")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setFont(QFont('Arial', 20, QFont.Bold))  # Set the font, size, and weight
-        title_label.setPalette(QPalette(QColor('blue')))  # Set the text color
-        layout.addWidget(title_label)
+        name = QLabel("TRACE", self)
+        name.setObjectName("aboutTitle")
+        name.setAlignment(Qt.AlignCenter)
+        layout.addWidget(name)
 
-        version_label = QLabel("Version 1.0.0")
-        version_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(version_label)
+        subtitle = QLabel("Toolkit for Retrieval and Analysis of Cyber Evidence", self)
+        subtitle.setObjectName("aboutSubtitle")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
 
-        author_label = QLabel("Author: Radoslav Gadzhovski")
-        author_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(author_label)
+        layout.addSpacing(18)
 
-        # Add a button to close the dialog
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()  # Add stretchable space on the left
-        close_button = QPushButton("Close")
-        close_button.setFixedSize(BUTTON_WIDTH, TOOLBAR_HEIGHT)
+        version = QLabel(f"Version {__version__}", self)
+        version.setObjectName("aboutMeta")
+        version.setAlignment(Qt.AlignCenter)
+        layout.addWidget(version)
+
+        author = QLabel("Radoslav Gadzhovski", self)
+        author.setObjectName("aboutMeta")
+        author.setAlignment(Qt.AlignCenter)
+        layout.addWidget(author)
+
+        licence = QLabel("Released under the MIT License", self)
+        licence.setObjectName("aboutMetaQuiet")
+        licence.setAlignment(Qt.AlignCenter)
+        layout.addWidget(licence)
+
+        layout.addSpacing(24)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close_button = QPushButton("Close", self)
+        close_button.setFixedSize(BUTTON_WIDTH, CONTROL_HEIGHT)
+        close_button.setDefault(True)
         close_button.clicked.connect(self.close)
-        button_layout.addWidget(close_button)  # Add the button to the layout
-        button_layout.addStretch()  # Add stretchable space on the right
+        buttons.addWidget(close_button)
+        buttons.addStretch()
+        layout.addLayout(buttons)
 
-        # Add the QHBoxLayout to the main QVBoxLayout
-        layout.addLayout(button_layout)
+        self.setFixedWidth(420)
 
-        self.setLayout(layout)
-        # Set the size of the dialog
-        self.setFixedSize(500, 700)
+    def _logo(self):
+        """The application logo, rendered from the full-resolution source.
+
+        This previously asked the icon registry for a 24x24 pixmap and then
+        scaled that up to 400x400 -- a 16x enlargement of a thumbnail, which is
+        why it looked blocky. Loading the file directly uses all 1024x1024
+        pixels of the source, and rendering at the device pixel ratio keeps it
+        sharp on a hi-DPI screen.
+        """
+        label = QLabel(self)
+        label.setAlignment(Qt.AlignCenter)
+
+        ratio = self.devicePixelRatioF() or 1.0
+        source = QPixmap(icons.path(icons.LOGO))
+        if source.isNull():
+            return label
+
+        pixmap = source.scaled(
+            int(LOGO_SIZE * ratio), int(LOGO_SIZE * ratio),
+            Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pixmap.setDevicePixelRatio(ratio)
+        label.setPixmap(pixmap)
+        label.setFixedHeight(LOGO_SIZE)
+        return label

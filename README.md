@@ -10,7 +10,7 @@ Browse the file system of a forensic disk image, inspect file contents and metad
 recover deleted files, and read Windows registry hives — read-only, without mounting.
 
 <p>
-  <img src="https://img.shields.io/badge/version-1.2.0-4c8eda?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-2.0.0-4c8eda?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.9%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="PySide6"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>

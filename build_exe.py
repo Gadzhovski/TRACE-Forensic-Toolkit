@@ -19,7 +19,7 @@ from pathlib import Path
 APP_NAME = "TRACE"
 MAIN_SCRIPT = "main.py"
 ICON_FILE = "Icons/logo_prev_ui.ico"  # optional; generate from the PNG if wanted
-VERSION = "1.2.0"
+VERSION = "2.0.0"
 
 # Build type: 'onefile' or 'onedir'
 BUILD_TYPE = "onedir"  # "onedir" (folder build) or "onefile" (single exe)

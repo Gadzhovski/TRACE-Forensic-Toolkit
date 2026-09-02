@@ -8,4 +8,4 @@ Layout:
 The rule worth keeping: nothing in core/ may import from ui/.
 """
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"

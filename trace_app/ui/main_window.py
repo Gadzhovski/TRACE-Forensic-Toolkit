@@ -25,6 +25,7 @@ from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_
                                        PANEL_ICON_SIZE, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
                                        SECTOR_SIZE, TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
                                        TREE_ICON_SIZE, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
+from trace_app import __version__
 from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.exif import ExifViewer
 from trace_app.ui.viewers.carving import FileCarvingWidget
@@ -254,7 +255,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _build_window(self):
         """Window title, icon, geometry and platform taskbar identity."""
-        self.setWindowTitle('Trace 1.2.0')
+        self.setWindowTitle(f'TRACE {__version__}')
 
         # Set application icon for all platforms
         app_icon = icons.icon(icons.LOGO_LARGE)
