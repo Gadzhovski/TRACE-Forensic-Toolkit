@@ -280,12 +280,15 @@ committable.
 
 Pure moves — no logic changes, so any breakage is an import error, not a subtle bug.
 
-| Move | From | To |
-|---|---|---|
-| `EWFImgInfo`, `ImageHandler` (32 methods, ~780 lines) | `mainwindow.py:142-937` | `modules/image_handler.py` |
-| `DatabaseManager` | `mainwindow.py:938-1018` | `modules/database.py` |
-| `ExportWorker` + the 3 nested workers | `mainwindow.py:4518`, `:2400`, `:2422`, `:2460` | `modules/workers.py` |
-| `FileSystemUtils`, `safe_datetime`, ~60 constants | `mainwindow.py:100-141` | `modules/constants.py`, `modules/utils.py` |
+- [x] `EWFImgInfo`, `ImageHandler` → `modules/image_handler.py` (820 lines)
+- [x] `DatabaseManager` → `modules/database.py`
+- [x] `ExportWorker` → `modules/workers.py`
+- [x] `FileSystemUtils`, `safe_datetime`, constants → `modules/utils.py`, `modules/constants.py`
+- [ ] The 3 workers nested inside `MainWindow` — deferred to 3b, since they are
+      called as `self.FileContentWorker(...)` and moving them is a behavioural
+      change rather than a pure move.
+
+**Result:** `mainwindow.py` 4,623 → 2,938 lines.
 
 `FileContentWorker`, `MediaStreamWorker`, and `UnallocatedSpaceWorker` are currently **nested class
 definitions inside `MainWindow`** (instantiated as `self.FileContentWorker(...)`). They take
