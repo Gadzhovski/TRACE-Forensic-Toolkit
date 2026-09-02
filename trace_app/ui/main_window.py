@@ -545,7 +545,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if theme == 'dark':
             qss_file = resource_path('styles/dark_theme.qss')
         else:
-            qss_file = resource_path('styles/light_theme.qss')  # Ensure your existing QSS file is named 'light_theme.qss'
+            qss_file = resource_path('styles/light_theme.qss')
+
+        # Monochrome icons are tinted to the theme's foreground colour, so the
+        # registry needs to know which theme is active before anything asks it
+        # for an icon.
+        icons.set_theme(theme)
+        self._refresh_icons()
 
         try:
             with open(qss_file, 'r') as f:
@@ -553,6 +559,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             QApplication.instance().setStyleSheet(stylesheet)
         except Exception as e:
             logger.error(f"Error loading stylesheet {qss_file}: {e}")
+
+    def _refresh_icons(self):
+        """Re-apply icons after a theme change so their tint updates."""
+        if not hasattr(self, 'main_toolbar'):
+            return  # called during construction, before the UI exists
+        for action, name in getattr(self, '_themed_actions', ()):
+            action.setIcon(icons.icon(name))
 
     def show_api_key_dialog(self):
         # Create a dialog to get API keys from the user

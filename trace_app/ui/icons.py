@@ -27,54 +27,54 @@ LOGO_LARGE = "Icons/logo_prev_ui.png"
 VIRUSTOTAL_LOGO = "Icons/VirusTotal_logo.svg"
 
 # --- Evidence --------------------------------------------------------------
-EVIDENCE_ADD = "Icons/icons8-evidence-48.png"
-EVIDENCE_REMOVE = "Icons/icons8-evidence-96.png"
-VERIFY = "Icons/icons8-verify-blue.png"
-VERIFY_OK = "Icons/icons8-verify-48_gren.png"
+EVIDENCE_ADD = "Icons/tabler/file-plus.svg"
+EVIDENCE_REMOVE = "Icons/tabler/file-minus.svg"
+VERIFY = "Icons/tabler/shield-check.svg"
+VERIFY_OK = "Icons/tabler/shield-check-filled.svg"
 
 # --- Navigation ------------------------------------------------------------
-BACK = "Icons/icons8-left-arrow-50.png"
-FORWARD = "Icons/icons8-right-arrow-50.png"
-UP = "Icons/icons8-thick-arrow-pointing-up-50.png"
-DOWN = "Icons/icons8-down-50.png"
+BACK = "Icons/tabler/arrow-left.svg"
+FORWARD = "Icons/tabler/arrow-right.svg"
+UP = "Icons/tabler/arrow-up.svg"
+DOWN = "Icons/tabler/arrow-down.svg"
 
 # --- Media transport -------------------------------------------------------
 # The media player previously tried several filenames in turn and fell back to
 # a text label, because names like "Icons/play.png" were referenced but had
 # never existed in the repository. These point at the files that are actually
 # present, so the buttons render.
-PLAY = "Icons/icons8-circled-play-50.png"
-PAUSE = "Icons/icons8-pause-button-50.png"
-STOP = "Icons/icons8-stop-circled-50.png"
-VOLUME = "Icons/icons8-low-volume-50.png"
-MUTE = "Icons/icons8-mute-50.png"
-AUDIO = "Icons/icons8-audio-50.png"
+PLAY = "Icons/tabler/player-play.svg"
+PAUSE = "Icons/tabler/player-pause.svg"
+STOP = "Icons/tabler/player-stop.svg"
+VOLUME = "Icons/tabler/volume.svg"
+MUTE = "Icons/tabler/volume-off.svg"
+AUDIO = "Icons/tabler/music.svg"
 
 # --- View / zoom -----------------------------------------------------------
-ZOOM_IN = "Icons/icons8-zoom-in-50.png"
-ZOOM_OUT = "Icons/icons8-zoom-out-50.png"
-ZOOM_ACTUAL = "Icons/icons8-zoom-to-actual-size-50.png"
-FIT_WIDTH = "Icons/icons8-resize-horizontal-50.png"
-FIT_WINDOW = "Icons/icons8-enlarge-50.png"
-ICONS_SMALL = "Icons/icons8-small-icons-50.png"
-ICONS_MEDIUM = "Icons/icons8-medium-icons-50.png"
-ICONS_LARGE = "Icons/icons8-large-icons-50.png"
+ZOOM_IN = "Icons/tabler/zoom-in.svg"
+ZOOM_OUT = "Icons/tabler/zoom-out.svg"
+ZOOM_ACTUAL = "Icons/tabler/zoom-reset.svg"
+FIT_WIDTH = "Icons/tabler/arrows-horizontal.svg"
+FIT_WINDOW = "Icons/tabler/arrows-maximize.svg"
+ICONS_SMALL = "Icons/tabler/layout-grid.svg"
+ICONS_MEDIUM = "Icons/tabler/layout-grid.svg"
+ICONS_LARGE = "Icons/tabler/layout-board.svg"
 
 # --- Editing / actions -----------------------------------------------------
-ROTATE_LEFT = "Icons/icons8-rotate-left-50.png"
-ROTATE_RIGHT = "Icons/icons8-rotate-right-50.png"
-ROTATE_RESET = "Icons/icons8-no-rotation-50.png"
-PRINT = "Icons/icons8-print-50.png"
-SAVE_AS = "Icons/icons8-save-as-50.png"
-SEARCH_BROWSER = "Icons/icons8-search-in-browser-50.png"
-PAN = "Icons/icons8-drag-50.png"
+ROTATE_LEFT = "Icons/tabler/rotate-2.svg"
+ROTATE_RIGHT = "Icons/tabler/rotate-clockwise-2.svg"
+ROTATE_RESET = "Icons/tabler/rotate-rectangle.svg"
+PRINT = "Icons/tabler/printer.svg"
+SAVE_AS = "Icons/tabler/device-floppy.svg"
+SEARCH_BROWSER = "Icons/tabler/world-search.svg"
+PAN = "Icons/tabler/hand-move.svg"
 
 # --- Domain ----------------------------------------------------------------
-CARVING = "Icons/icons8-carving-64.png"
-REGISTRY = "Icons/icons8-registry-editor-96.png"
-REGISTRY_HIVE = "Icons/icons8-hive-48.png"
-REGISTRY_KEY = "Icons/icons8-key-48_blue.png"
-REGISTRY_VALUE = "Icons/icons8-wasp-48.png"
+CARVING = "Icons/tabler/file-search.svg"
+REGISTRY = "Icons/tabler/database.svg"
+REGISTRY_HIVE = "Icons/tabler/folder.svg"
+REGISTRY_KEY = "Icons/tabler/key.svg"
+REGISTRY_VALUE = "Icons/tabler/tag.svg"
 
 # --- Generic fallbacks (resolved through the icon database elsewhere) ------
 FILE_UNKNOWN = "Icons/mimetypes/application-x-zerosize.svg"
@@ -85,6 +85,34 @@ WEB_BROWSER = "Icons/apps/internet-web-browser.svg"
 
 
 _cache = {}
+
+# Foreground colour icons are tinted to, per theme. Monochrome SVGs (Tabler
+# uses stroke="currentColor", which Qt renders as black) would otherwise be
+# invisible on a dark background.
+_THEME_TINTS = {
+    'light': '#3C3C3C',
+    'dark': '#D0D0D0',
+}
+_theme = 'light'
+
+
+def set_theme(theme):
+    """Tell the registry which theme is active, so tints follow it."""
+    global _theme
+    if theme != _theme:
+        _theme = theme
+        clear_cache()
+
+
+def _auto_tint(name):
+    """Tint for `name` under the current theme, or None to leave it alone.
+
+    Only monochrome line art is tinted. Anything that carries its own colours
+    -- logos, the file-type icons from the themed set -- is left as authored.
+    """
+    if not name.startswith('Icons/tabler/'):
+        return None
+    return _THEME_TINTS.get(_theme)
 
 
 def path(name):
@@ -99,6 +127,9 @@ def icon(name, tint=None):
     ignored for icons that carry their own colours. Results are cached, since
     the same icon is often requested for every row of a table.
     """
+    if tint is None:
+        tint = _auto_tint(name)
+
     key = (name, tint)
     if key in _cache:
         return _cache[key]
