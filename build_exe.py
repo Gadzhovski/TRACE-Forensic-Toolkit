@@ -18,7 +18,7 @@ from pathlib import Path
 # Configuration
 APP_NAME = "TRACE"
 MAIN_SCRIPT = "main.py"
-ICON_FILE = "Icons/logo_prev_ui.ico"  # Convert your PNG to ICO for Windows
+ICON_FILE = "Icons/logo_prev_ui.ico"  # optional; generate from the PNG if wanted
 VERSION = "1.2.0"
 
 # Build type: 'onefile' or 'onedir'
@@ -79,12 +79,21 @@ def build_executable():
     data_items = [
         ("Icons", "Icons"),
         ("styles", "styles"),
-        ("tools/new_database_mappings.db", "tools/new_database_mappings.db"),
+        ("tools/new_database_mappings.db", "tools"),
     ]
+
+    # PyInstaller's --add-data separator is platform-specific: ';' on Windows,
+    # ':' everywhere else. Hardcoding ';' meant this script could not produce a
+    # macOS or Linux build at all.
+    separator = ";" if os.name == "nt" else ":"
 
     for src, dst in data_items:
         if os.path.exists(src):
-            cmd.extend(["--add-data", f"{src};{os.path.dirname(dst) or '.'}"])
+            # dst is the destination *directory* inside the bundle. Passing '.'
+            # for a directory source flattens its contents into the bundle root,
+            # so 'Icons/logo.png' would become 'logo.png' and every lookup would
+            # fail.
+            cmd.extend(["--add-data", f"{src}{separator}{dst}"])
             print(f"Including data: {src} -> {dst}")
         else:
             print(f"Warning: Data '{src}' not found, skipping.")
@@ -101,9 +110,10 @@ def build_executable():
         "PIL",
         "PIL.Image",
         "requests",
-        "openpyxl",
-        "xlsxwriter",
         "Registry",
+        "fitz",
+        "magic",
+        "chardet",
     ]
 
     for module in hidden_imports:
