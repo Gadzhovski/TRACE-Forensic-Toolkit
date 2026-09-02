@@ -268,13 +268,19 @@ class HexViewer(QWidget):
 
         # Page entry
         self.page_entry = QLineEdit(self)
-        self.page_entry.setMaximumWidth(40)
+        self.page_entry.setFixedWidth(48)
+        self.page_entry.setAlignment(Qt.AlignCenter)
         self.page_entry.setPlaceholderText("1")
         self.page_entry.returnPressed.connect(self.go_to_page_by_entry)
         self.toolbar.addWidget(self.page_entry)
 
         # Total pages label
-        self.total_pages_label = QLabel(" of ")
+        self.total_pages_label = QLabel("of —")
+        # Fixed width: the page count grows from "of 1" to "of 1024" as a
+        # file is paged through, and without this every control to its
+        # right shifts when it does -- and differs between the Hex and
+        # Text tabs, which show different totals for the same file.
+        self.total_pages_label.setFixedWidth(64)
         self.toolbar.addWidget(self.total_pages_label)
 
         self.next_action = icons.action(icons.FORWARD, "Next", self)

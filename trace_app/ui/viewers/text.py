@@ -168,13 +168,19 @@ class TextViewer(QWidget):
 
         # Page entry
         self.page_entry = QLineEdit(self)
-        self.page_entry.setMaximumWidth(40)
+        self.page_entry.setFixedWidth(48)
+        self.page_entry.setAlignment(Qt.AlignCenter)
         self.page_entry.setPlaceholderText("1")
         self.page_entry.returnPressed.connect(self.go_to_page_by_entry)
         self.toolbar.addWidget(self.page_entry)
 
         # Total pages label
-        self.total_pages_label = QLabel(" of ")
+        self.total_pages_label = QLabel("of —")
+        # Fixed width: the page count grows from "of 1" to "of 1024" as a
+        # file is paged through, and without this every control to its
+        # right shifts when it does -- and differs between the Hex and
+        # Text tabs, which show different totals for the same file.
+        self.total_pages_label.setFixedWidth(64)
         self.toolbar.addWidget(self.total_pages_label)
 
         self.next_action = icons.action(icons.FORWARD, "Next Page", self)
@@ -200,7 +206,12 @@ class TextViewer(QWidget):
         self.font_size_combobox.currentTextChanged.connect(self.update_font_size)
         self.toolbar.addWidget(self.font_size_combobox)
 
-        # Add a spacer to push the search bar to the right
+        # Matches the fixed gap the Hex toolbar has after the font combo,
+        # so the two bars line up when switching between the tabs.
+        spacer = QWidget(self)
+        spacer.setFixedSize(GROUP_SPACING, 0)
+        self.toolbar.addWidget(spacer)
+
         spacer = QWidget(self)
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
@@ -276,7 +287,7 @@ class TextViewer(QWidget):
         current_page = self.manager.current_page + 1  # Pages start from 1
         total_pages = self.manager.get_total_pages()
         self.page_entry.setText(str(current_page))
-        self.total_pages_label.setText(f" of {total_pages}")
+        self.total_pages_label.setText(f"of {total_pages}")
 
 
 class CustomTextEdit(QTextEdit):
