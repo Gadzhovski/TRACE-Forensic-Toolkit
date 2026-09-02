@@ -1094,3 +1094,53 @@ QLineEdit#propertyCellEditor {
     selection-background-color: #CCE8FF;
     selection-color: #212529;
 }
+
+/* ==================== Panel separation ====================
+
+   The light theme was very nearly all #FFFFFF, so adjoining panels ran into
+   one another: no line between the tree and the listing, none between the
+   registry's key tree and its detail pane, and the only visible division was
+   wherever a scrollbar happened to sit.
+
+   Rather than outlining every widget, the window behind them is a shade
+   darker than the panels on it. Panels then read as raised surfaces, and the
+   gaps between them read as deliberate. Splitter handles and dock separators
+   take a visible rule so a boundary the user can drag looks like one. */
+
+QMainWindow, QMainWindow > QWidget {
+    background-color: #F2F3F5;
+}
+
+QSplitter::handle {
+    background-color: #DDE1E6;
+}
+
+QSplitter::handle:horizontal {
+    width: 1px;
+    margin: 0px 3px;
+}
+
+QSplitter::handle:vertical {
+    height: 1px;
+    margin: 3px 0px;
+}
+
+QSplitter::handle:hover {
+    background-color: #B9C0C8;
+}
+
+QMainWindow::separator {
+    background-color: #DDE1E6;
+    width: 1px;
+    height: 1px;
+}
+
+QMainWindow::separator:hover {
+    background-color: #B9C0C8;
+}
+
+/* The panels themselves stay white, so content sits on a clean ground and
+   the window colour only shows in the gaps between them. */
+QTreeWidget, QTableWidget, QListWidget, QTextEdit, QPlainTextEdit {
+    background-color: #FFFFFF;
+}

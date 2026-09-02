@@ -1117,3 +1117,34 @@ QLineEdit#propertyCellEditor {
     selection-background-color: #1E90FF;
     selection-color: #FFFFFF;
 }
+
+/* Panel separation. See the light theme for the reasoning; the dark theme
+   already had enough contrast between its panels, but the splitter handles
+   and dock separators were unstyled there too. */
+QSplitter::handle {
+    background-color: #4A4A4A;
+}
+
+QSplitter::handle:horizontal {
+    width: 1px;
+    margin: 0px 3px;
+}
+
+QSplitter::handle:vertical {
+    height: 1px;
+    margin: 3px 0px;
+}
+
+QSplitter::handle:hover {
+    background-color: #6E6E6E;
+}
+
+QMainWindow::separator {
+    background-color: #4A4A4A;
+    width: 1px;
+    height: 1px;
+}
+
+QMainWindow::separator:hover {
+    background-color: #6E6E6E;
+}

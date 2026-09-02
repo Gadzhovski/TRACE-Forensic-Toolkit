@@ -2,15 +2,18 @@ import logging
 import os
 import tempfile
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QTextEdit, QToolBar, QLabel, \
     QSplitter, QTableWidget, QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import PANEL_ICON_SIZE
+from trace_app.infra.constants import (PANEL_ICON_SIZE, TREE_ICON_SIZE,
+                                       TREE_INDENTATION)
 from trace_app.ui import icons
+from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.property_table import PropertyTable
 
@@ -22,9 +25,9 @@ class RegistryExtractor(QWidget):
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
-        self.hive_icon = icons.icon(icons.REGISTRY_HIVE)
-        self.key_icon = icons.icon(icons.REGISTRY_KEY)
-        self.value_icon = icons.icon(icons.REGISTRY_VALUE)
+        # Looked up on each use rather than cached here: an icon fetched once
+        # keeps the tint of whatever theme was active at construction, so
+        # these stayed light-theme grey after a switch to dark.
         self.init_ui()
 
     def set_image_handler(self, image_handler):
@@ -68,9 +71,17 @@ class RegistryExtractor(QWidget):
         self.splitter = QSplitter(Qt.Horizontal)
         main_layout.addWidget(self.splitter)
 
-        # Tree Widget Setup
-        self.treeWidget = QTreeWidget()
+        # Tree Widget Setup. The same class and treatment as the evidence tree
+        # in the main window: expand arrows painted rather than taken from a
+        # stylesheet image (Qt rasterises those without antialiasing), no
+        # dotted focus rectangle, and an explicit icon size so a 24px glyph is
+        # not squeezed into whatever the platform style happens to pick.
+        self.treeWidget = BranchTreeWidget()
         self.treeWidget.header().hide()
+        self.treeWidget.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
+        self.treeWidget.setIndentation(TREE_INDENTATION)
+        self.treeWidget.setFrameShape(BranchTreeWidget.NoFrame)
+        self.treeWidget.setItemDelegate(NoFocusDelegate(self.treeWidget))
         self.splitter.addWidget(self.treeWidget)
 
         # Details Panel and Table Setup
@@ -151,7 +162,7 @@ class RegistryExtractor(QWidget):
     def display_registry_hive(self, hive_name, root_key):
         self.treeWidget.clear()  # Clear the tree before displaying a new hive
         hive_item = QTreeWidgetItem(self.treeWidget, [hive_name])
-        hive_item.setIcon(0, self.hive_icon)
+        hive_item.setIcon(0, icons.icon(icons.REGISTRY_HIVE))
         hive_item.setData(0, Qt.UserRole, root_key)
         self.display_registry_keys(hive_item, root_key)
 
@@ -160,7 +171,7 @@ class RegistryExtractor(QWidget):
         items = [QTreeWidgetItem(parent_item, [subkey.name()]) for subkey in subkeys]  # Use list comprehension
         for item, subkey in zip(items, subkeys):
             item.setData(0, Qt.UserRole, subkey)  # Store the key object for later retrieval
-            item.setIcon(0, self.key_icon)
+            item.setIcon(0, icons.icon(icons.REGISTRY_KEY))
             self.display_registry_keys(item, subkey)
             self.display_registry_values(item, subkey)
 
@@ -170,7 +181,7 @@ class RegistryExtractor(QWidget):
                  values]  # Use list comprehension
         for item, value in zip(items, values):
             item.setData(0, Qt.UserRole, value)  # Store the value object for later retrieval
-            item.setIcon(0, self.value_icon)
+            item.setIcon(0, icons.icon(icons.REGISTRY_VALUE))
 
     def display_metadata(self, registry_object):
         metadata = {
