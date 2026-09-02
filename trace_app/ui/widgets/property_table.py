@@ -13,18 +13,22 @@ be resized.
 
 The presentation is deliberately quiet. A properties pane is read, not
 navigated, so it drops the column headers, the grid and the alternating row
-stripes that a data table wants, and instead leans on a right-aligned label
-column against a left-aligned value column. Long identifiers -- hashes,
-offsets -- are shown in a monospaced font so digits line up and a mistyped
-character is visible.
+stripes that a data table wants. The label column is sized to its content and
+both columns read left to right, which keeps each label beside the value it
+names. Long identifiers -- hashes, offsets -- are shown in a monospaced font so
+digits line up and a mistyped character is visible.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QFontDatabase, QGuiApplication, QKeySequence, QShortcut
+from PySide6.QtGui import (QFont, QFontDatabase, QFontMetrics, QGuiApplication,
+                           QKeySequence, QShortcut)
 from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QTableWidget,
                                QTableWidgetItem)
 
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
+
+#: Gap between the end of a label and the start of its value.
+LABEL_PADDING = 18
 
 #: Values shown in a monospaced font: anything where character alignment helps.
 MONO_LABELS = {
@@ -56,10 +60,19 @@ class PropertyTable(QTableWidget):
 
         header = self.horizontalHeader()
         header.setObjectName("propertyTableHeader")
+        # The label column follows its longest label instead of sitting at a
+        # fixed 160px. Fixed, it left "MD5" and "Name" stranded a long way from
+        # their values, with a ragged channel of empty space down the middle of
+        # the pane -- and it took width the values needed, so hashes were
+        # elided while the gap beside them went unused.
+        #
+        # Sized in _size_label_column rather than by ResizeToContents: that
+        # mode measures every cell in the column, and a section heading is put
+        # in column 0 before it is spanned across both, so a long heading
+        # widened the labels past anything they contain.
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
         header.setHighlightSections(False)
-        self.setColumnWidth(0, 160)
 
         self.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
         self.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
@@ -102,7 +115,7 @@ class PropertyTable(QTableWidget):
                 continue
 
             key_item = QTableWidgetItem(f"{name}")
-            key_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            key_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             key_item.setData(Qt.UserRole + 1, tag or "label")
             key_item.setToolTip(str(name))
 
@@ -120,6 +133,18 @@ class PropertyTable(QTableWidget):
 
             self.setItem(index, 0, key_item)
             self.setItem(index, 1, val_item)
+
+        self._size_label_column(rows)
+
+    def _size_label_column(self, rows):
+        """Widen the label column to its longest label, and no further."""
+        metrics = QFontMetrics(self.font())
+        widest = 0
+        for row in rows:
+            if row[0] is None:
+                continue          # a section heading spans both columns
+            widest = max(widest, metrics.horizontalAdvance(str(row[0])))
+        self.setColumnWidth(0, widest + LABEL_PADDING)
 
     def copy_selection(self):
         """Copy selected cells as tab-separated rows."""

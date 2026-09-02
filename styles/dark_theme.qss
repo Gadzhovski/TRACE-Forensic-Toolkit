@@ -783,11 +783,12 @@ QTableWidget#propertyTable::item[state="label"] {
     color: #9aa4b0;
 }
 
-/* Section headings ("File", "Timestamps", "Hashes"). */
+/* Section headings. See the light theme for why they are set apart. */
 QTableWidget#propertyTable::item[state="section"] {
-    color: #C8C8C8;
-    padding-top: 10px;
-    padding-bottom: 3px;
+    color: #F0F0F0;
+    padding-top: 14px;
+    padding-bottom: 5px;
+    letter-spacing: 0.6px;
 }
 
 QTableWidget#propertyTable::item[state="warning"] {

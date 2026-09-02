@@ -757,11 +757,15 @@ QTableWidget#propertyTable::item[state="label"] {
     color: #6b7480;
 }
 
-/* Section headings ("File", "Timestamps", "Hashes"). */
+/* Section headings ("File", "Timestamps", "Hashes"). Set apart from the
+   labels beneath them: at #495057 against the labels' #6b7480 the two were
+   almost the same grey, so the groups did not read as groups. Darker, spaced,
+   and letter-spaced so a heading is recognisable as one at a glance. */
 QTableWidget#propertyTable::item[state="section"] {
-    color: #495057;
-    padding-top: 10px;
-    padding-bottom: 3px;
+    color: #1f2937;
+    padding-top: 14px;
+    padding-bottom: 5px;
+    letter-spacing: 0.6px;
 }
 
 QTableWidget#propertyTable::item[state="warning"] {

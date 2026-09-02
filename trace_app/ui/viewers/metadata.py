@@ -3,8 +3,8 @@ import datetime
 import pytsk3
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics
-from PySide6.QtWidgets import (QLabel, QPlainTextEdit, QScrollArea, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QLabel, QPlainTextEdit, QScrollArea, QSizePolicy,
+                               QVBoxLayout, QWidget)
 
 from trace_app.ui.widgets.property_table import PropertyTable
 import hashlib
@@ -52,7 +52,12 @@ class MetadataViewer(QWidget):
         # Properties. A real table rather than generated HTML, so it follows
         # the theme and an examiner can select and copy a hash.
         self.property_table = PropertyTable("Property", "Value", content)
-        self.property_table.setSizeAdjustPolicy(PropertyTable.AdjustToContents)
+        # Not AdjustToContents: that sizes the table to its content width, so
+        # the value column stayed about 100px and elided almost every value
+        # while the rest of the pane sat empty. The table fills the pane and
+        # the stretching value column takes whatever the labels do not.
+        self.property_table.setSizePolicy(QSizePolicy.Expanding,
+                                          QSizePolicy.Fixed)
         self.property_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.property_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         inner.addWidget(self.property_table)
@@ -84,6 +89,13 @@ class MetadataViewer(QWidget):
         table = self.property_table
         height = sum(table.rowHeight(r) for r in range(table.rowCount()))
         table.setFixedHeight(height + 2 * table.frameWidth())
+
+        if not self.details_view.isVisible():
+            # A hidden view still reports a line of text, so sizing it left a
+            # block of empty space below the properties for every file with no
+            # low-level detail.
+            self.details_view.setFixedHeight(0)
+            return
 
         document = self.details_view.document()
         document.setTextWidth(-1)
