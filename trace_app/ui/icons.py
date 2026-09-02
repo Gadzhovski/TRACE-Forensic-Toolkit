@@ -15,8 +15,10 @@ Two practical consequences:
 import logging
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import (QAction, QColor, QIcon, QIconEngine, QPainter,
+                           QPixmap)
+from PySide6.QtSvg import QSvgRenderer
 
 from trace_app.infra.paths import resource_path
 
@@ -229,33 +231,74 @@ def icon(name, tint=None):
         return _cache[key]
 
     resolved = resource_path(name)
-    result = QIcon(resolved)
-    if result.isNull():
-        # A missing icon otherwise shows as a blank button with no clue why.
-        logger.warning("Icon not found: %s", resolved)
-    elif tint:
-        result = _tinted(result, tint)
+    if tint and name.lower().endswith('.svg'):
+        # Scalable: rendered from the vector at whatever size is requested.
+        result = QIcon(_TintedSvgEngine(resolved, tint))
+    else:
+        result = QIcon(resolved)
+        if result.isNull():
+            # A missing icon otherwise shows as a blank button with no clue why.
+            logger.warning("Icon not found: %s", resolved)
 
     _cache[key] = result
     return result
 
 
-def _tinted(source, colour):
-    """Recolour an icon's opaque pixels, preserving its alpha channel."""
-    tinted = QIcon()
-    for size in (16, 24, 32, 48, 64):
-        pixmap = source.pixmap(QSize(size, size))
-        if pixmap.isNull():
-            continue
-        out = QPixmap(pixmap.size())
+class _TintedSvgEngine(QIconEngine):
+    """Renders an SVG at whatever size is asked for, then tints it.
+
+    The previous approach baked the icon into pixmaps at five fixed sizes
+    (16/24/32/48/64) and let QIcon pick the nearest. Anything in between was a
+    scaled bitmap rather than a fresh render -- an 18px toolbar glyph came from
+    the 16px bitmap -- and anything above 64px was silently capped, so a 40px
+    dialog icon on a hi-DPI screen was a 64px bitmap stretched to 80.
+
+    Rendering from the vector on demand keeps every size sharp, including the
+    fractional sizes a device pixel ratio asks for.
+    """
+
+    def __init__(self, path, colour):
+        super().__init__()
+        self._path = path
+        self._colour = colour
+
+    def clone(self):
+        return _TintedSvgEngine(self._path, self._colour)
+
+    def paint(self, painter, rect, mode, state):
+        painter.drawPixmap(rect, self.pixmap(rect.size(), mode, state))
+
+    def pixmap(self, size, mode, state):
+        width = max(1, size.width())
+        height = max(1, size.height())
+
+        out = QPixmap(width, height)
         out.fill(Qt.transparent)
+
+        renderer = QSvgRenderer(self._path)
+        if not renderer.isValid():
+            return out
+
         painter = QPainter(out)
-        painter.drawPixmap(0, 0, pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        painter.fillRect(out.rect(), QColor(colour))
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        # Keep the aspect ratio and centre, as QIcon would.
+        bounds = renderer.viewBoxF()
+        if bounds.width() > 0 and bounds.height() > 0:
+            scale = min(width / bounds.width(), height / bounds.height())
+            drawn_w = bounds.width() * scale
+            drawn_h = bounds.height() * scale
+            target = QRectF((width - drawn_w) / 2, (height - drawn_h) / 2,
+                            drawn_w, drawn_h)
+        else:
+            target = QRectF(0, 0, width, height)
+        renderer.render(painter, target)
+
+        if self._colour:
+            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            painter.fillRect(out.rect(), QColor(self._colour))
         painter.end()
-        tinted.addPixmap(out)
-    return tinted
+        return out
 
 
 def badged(base_path, badge_name, size, scale=0.6):
