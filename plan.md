@@ -140,40 +140,40 @@ stylesheets, the icon database, and `config.ini` are bare relative paths resolve
 desktop launcher, a macOS `.app` (CWD is `/`), or any packaged build, the app opens unthemed with
 blank icons — and file carving can't even create its output directory.
 
-- [ ] Add `modules/paths.py` with two helpers:
+- [x] Add `modules/paths.py` with two helpers:
       - `resource_path(rel)` → `os.path.join(getattr(sys, '_MEIPASS', <project root>), rel)`,
         where project root is derived from `os.path.dirname(os.path.abspath(__file__))`.
       - `user_data_dir()` / `user_config_dir()` → per-OS standard locations
         (`%APPDATA%\TRACE`, `~/Library/Application Support/TRACE`,
         `$XDG_CONFIG_HOME`-or-`~/.config/TRACE`). Create on demand.
-- [ ] Route every resource literal through `resource_path()`. There are ~100 across
+- [x] Route every resource literal through `resource_path()`. There are ~100 across
       `mainwindow.py` (icons at `:1635`, `:1737-1749`, `:1806-1837`; stylesheets at `:1969-1971`;
       icon DB at `:1456`), `unified_application_manager.py` (~43 sites), `file_carving.py`,
       `hex_tab.py`, `registry.py`, `about.py`, `converter.py`, `virus_total_tab.py`.
       Same pattern each time — mechanical, but touch every file.
-- [ ] `DatabaseManager.get_icon_path` (`mainwindow.py:968-1013`) returns paths **stored as data in
+- [x] `DatabaseManager.get_icon_path` (`mainwindow.py:968-1013`) returns paths **stored as data in
       the SQLite DB** (e.g. `Icons/mimetypes/application-7zip.svg`). Wrap the return value in
       `resource_path()` rather than rewriting 308 DB rows. Its four hardcoded fallbacks
       (`:978`, `:995`, `:1003`, `:1013`) need the same.
-- [ ] Move `config.ini` to `user_config_dir()` (`mainwindow.py:1484`, `:2024`) and wrap the write
+- [x] Move `config.ini` to `user_config_dir()` (`mainwindow.py:1484`, `:2024`) and wrap the write
       in try/except — today a `PermissionError` propagates unhandled out of a Qt slot.
       Also set `setEchoMode(QLineEdit.Password)` on the key field, which currently shows in clear.
 
 ### 2b. Fix the platform bugs
 
-- [ ] **`converter.py:22`** — `elif os.name == "darwin"` is never true (`os.name` is `'posix'` on
+- [x] **`converter.py:22`** — `elif os.name == "darwin"` is never true (`os.name` is `'posix'` on
       macOS; `'darwin'` is a `sys.platform` value). macOS falls through to
       `raise Exception("Unsupported OS")`. Switch this function to `sys.platform`/
       `platform.system()` and add a real Linux branch (`lsblk -o NAME,MODEL,SIZE`).
       Also replace the deprecated `Get-WmiObject` with `Get-CimInstance`.
-- [ ] **`metadata_tab.py:117-157`** — the Metadata tab shells out to the bundled
+- [x] **`metadata_tab.py:117-157`** — the Metadata tab shells out to the bundled
       `tools/sleuthkit-4.12.1-win32/bin/istat.exe`, gated on `os.name == 'nt'`. macOS/Linux users
       silently get a lesser tab with no explanation. **Replace `run_istat` with native pytsk3
       calls** — the same attribute/run-list data is available from the `pytsk3.File` object the
       code already holds. This deletes the 75 MB binary bundle *and* makes the tab identical on
       all three platforms. This is the main reason `tools/sleuthkit-4.12.1-win32/` can go.
-- [ ] Delete `tools/sleuthkit-4.12.1-win32/` once the above lands.
-- [ ] `unified_application_manager.py:2` — move `from ctypes import cast, POINTER` inside the
+- [x] Delete `tools/sleuthkit-4.12.1-win32/` once the above lands.
+- [x] `unified_application_manager.py:2` — move `from ctypes import cast, POINTER` inside the
       existing `os.name == "nt"` guard at `:19`; the symbols are only used in the Windows-only
       volume path at `:1295`.
 
@@ -186,7 +186,7 @@ stack (`openpyxl`, `python-docx`, `python-pptx`, `xlrd`, `XlsxWriter`) are all d
 `docx` **and** `python-docx` conflict (both provide the `docx` package); `pypdf` and `PyPDF2` are
 both declared, only `PyPDF2` used; `PyMuPDF`/`PyMuPDFb` are pinned to *mismatched* versions.
 
-- [ ] **Replace the four heavy thumbnail-only dependencies.** `opencv-python` (~90 MB), `moviepy`,
+- [x] **Replace the four heavy thumbnail-only dependencies.** `opencv-python` (~90 MB), `moviepy`,
       `pdf2image`, and `PyPDF2` are used *only* in `file_carving.py`, and only for thumbnails and
       PDF validation:
       - `pdf2image.convert_from_path` (`:1007`) → **PyMuPDF**, already a dependency. Also drops
@@ -197,7 +197,7 @@ both declared, only `PyPDF2` used; `PyMuPDF`/`PyMuPDFb` are pinned to *mismatche
       - `PyPDF2.PdfReader` validation (`:500`, `:910`) → PyMuPDF's parser.
       Poppler and ffmpeg are the two most common install failures for non-technical users; this
       removes both, plus ~100 MB of wheels.
-- [ ] **Collapse to one `requirements.txt` using environment markers**, replacing both files
+- [x] **Collapse to one `requirements.txt` using environment markers**, replacing both files
       (`install_macos_linux_WSL.sh` currently uses the *macOS* file for Linux and WSL too, which
       contradicts the README):
       ```
@@ -217,16 +217,16 @@ both declared, only `PyPDF2` used; `PyMuPDF`/`PyMuPDFb` are pinned to *mismatche
       Markers are the fix for the "`pip install` fails on Linux" bug — `pycaw`, `comtypes`, and
       `python-magic-bin` are currently declared unconditionally, and `pycaw`/`comtypes` are even
       in the macOS file.
-- [ ] Bump `PySide6` off `6.5.2`. That pin is *why* the README says Python 3.12 is unsupported;
+- [x] Bump `PySide6` off `6.5.2`. That pin is *why* the README says Python 3.12 is unsupported;
       a current PySide6 has wheels for 3.12/3.13 and widens the supported Python range
       considerably. Test the media player and QtCharts after bumping — those are the two areas
       most likely to shift.
-- [ ] Add `pyinstaller` as a documented build-time dependency (`build_exe.py` needs it; it's in no
+- [x] Add `pyinstaller` as a documented build-time dependency (`build_exe.py` needs it; it's in no
       requirements file).
 
 ### 2d. Fix the installer
 
-- [ ] Rewrite `install_macos_linux_WSL.sh` package lists:
+- [x] Rewrite `install_macos_linux_WSL.sh` package lists:
       - **Linux/WSL are missing** `libmagic1` (Metadata tab crashes without it),
         `build-essential`, `libewf-dev`, and `libtsk-dev`/`sleuthkit` — without the last three,
         `pip install pytsk3 libewf-python` *fails to compile on a clean Ubuntu*.
@@ -237,15 +237,15 @@ both declared, only `PyPDF2` used; `PyMuPDF`/`PyMuPDFb` are pinned to *mismatche
       - `RED` is used at three points but never defined; those messages render uncolourless.
       - The script claims to create a Python 3.11 venv but just calls `python3 -m venv` — either
         enforce a version or stop claiming it.
-- [ ] Point all three branches at the single `requirements.txt`.
-- [ ] Add `install_windows.ps1` — there is **no Windows install script at all** today, despite
+- [x] Point all three branches at the single `requirements.txt`.
+- [x] Add `install_windows.ps1` — there is **no Windows install script at all** today, despite
       Windows being the primary platform. Should check the Python version, warn clearly if MSVC
       Build Tools are missing (the biggest Windows install barrier), create the venv, and install.
-- [ ] Add a startup preflight: check for `libmagic` and other externals with `shutil.which` /
+- [x] Add a startup preflight: check for `libmagic` and other externals with `shutil.which` /
       import guards and show one clear dialog naming what's missing, instead of the current
       behaviour where a missing library surfaces as an unhandled exception inside a Qt slot.
       (`shutil.which` is used nowhere in the codebase today.)
-- [ ] Rewrite the README install section to match reality.
+- [x] Rewrite the README install section to match reality.
 
 **Verify:** on each OS available to you — fresh clone, run the install script, launch from a
 *different working directory* (`python "D:\path\to\TRACE\main.py"` from `C:\`), confirm the theme
@@ -254,6 +254,22 @@ confirm the istat-equivalent data now appears on macOS/Linux too, run a carve an
 thumbnails still render.
 
 ---
+
+
+### Phase 2 notes (discovered during implementation)
+
+- The venv was already running **PySide6 6.8.3**, not the pinned 6.5.2, so the
+  "Python 3.12 unsupported" claim was already stale. Pins are now lower bounds.
+- `ensure_icons_directory()` (`unified_application_manager.py`) had a hardcoded
+  relative `"Icons"` and created a stray folder with 5 placeholder PNGs in
+  whatever directory the app was launched from. Reproduced (`C:\Icons`) and fixed.
+- `file_carving.carve_files()` did `self.stop_carving = False`, overwriting the
+  bound method with a bool — Stop raised `TypeError` after the first carve.
+  Fixed alongside the executor bug (was scheduled for Phase 4).
+- `save_file()` ignored its `file_path` argument and rebuilt the path, so most
+  of the `'carved_files'` call-site strings were inert; only 3 sites mattered.
+- The double `menu_bar.addMenu(view_menu)` is **benign** — Qt de-duplicates the
+  same QMenu object, so "View" appears once. Left alone.
 
 ## Phase 3 — Structural refactor
 
