@@ -247,10 +247,10 @@ QTabBar::tab:!selected {
 QToolBar {
     background-color: #2B2B2B;
     border-bottom: 1px solid #3C3C3C;
-    /* One height and one spacing for every toolbar in the app.
-       These were previously set per widget, so a toolbar with an
-       explicit setFixedHeight sat 6px taller than one without. */
-    padding: 4px 6px;
+    /* Symmetric vertical padding so controls sit centred rather than
+       pushed against the top edge. TOOLBAR_HEIGHT in constants.py is
+       derived from these numbers -- change one and change the other. */
+    padding: 5px 8px;
     spacing: 6px;
 }
 QToolBar::item:hover {
@@ -1009,4 +1009,13 @@ QToolButton#exportButton::menu-indicator,
 QToolButton#multiSelectButton::menu-indicator {
     image: none;
     width: 0px;
+}
+
+/* Group divider inside a toolbar. A visible rule makes it obvious where one
+   group of controls ends and the next begins -- the blank spacers these
+   replaced left the bars reading as one long undifferentiated row. */
+QToolBar::separator:horizontal {
+    background-color: #4A4A4A;
+    width: 1px;
+    margin: 6px 8px;
 }

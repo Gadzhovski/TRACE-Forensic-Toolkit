@@ -159,11 +159,11 @@ class TextViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = icons.action(icons.UP, "Jump to Start", self)
+        self.first_action = icons.action(icons.UP, "First page", self)
         self.first_action.triggered.connect(self.manager.jump_to_start)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = icons.action(icons.BACK, "Previous Page", self)
+        self.prev_action = icons.action(icons.BACK, "Previous page", self)
         self.prev_action.triggered.connect(lambda: self.manager.change_page(-1))
         self.toolbar.addAction(self.prev_action)
 
@@ -184,18 +184,18 @@ class TextViewer(QWidget):
         self.total_pages_label.setFixedWidth(64)
         self.toolbar.addWidget(self.total_pages_label)
 
-        self.next_action = icons.action(icons.FORWARD, "Next Page", self)
+        self.next_action = icons.action(icons.FORWARD, "Next page", self)
         self.next_action.triggered.connect(lambda: self.manager.change_page(1))
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = icons.action(icons.DOWN, "Jump to End", self)
+        self.last_action = icons.action(icons.DOWN, "Last page", self)
         self.last_action.triggered.connect(self.manager.jump_to_end)
         self.toolbar.addAction(self.last_action)
 
         # Add a small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # Font size controls
         font_label = QLabel("Font Size: ")
@@ -209,9 +209,9 @@ class TextViewer(QWidget):
 
         # Matches the fixed gap the Hex toolbar has after the font combo,
         # so the two bars line up when switching between the tabs.
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # The Text tab had no export at all; it now offers the same three
         # formats as Hex, from the same shared widget.

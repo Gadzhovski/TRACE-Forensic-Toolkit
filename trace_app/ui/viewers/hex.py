@@ -259,11 +259,11 @@ class HexViewer(QWidget):
         self.toolbar.setContextMenuPolicy(Qt.PreventContextMenu)
 
         # Navigation buttons
-        self.first_action = icons.action(icons.UP, "First", self)
+        self.first_action = icons.action(icons.UP, "First page", self)
         self.first_action.triggered.connect(self.load_first_page)
         self.toolbar.addAction(self.first_action)
 
-        self.prev_action = icons.action(icons.BACK, "Previous", self)
+        self.prev_action = icons.action(icons.BACK, "Previous page", self)
         self.prev_action.triggered.connect(self.previous_page)
         self.toolbar.addAction(self.prev_action)
 
@@ -284,18 +284,18 @@ class HexViewer(QWidget):
         self.total_pages_label.setFixedWidth(64)
         self.toolbar.addWidget(self.total_pages_label)
 
-        self.next_action = icons.action(icons.FORWARD, "Next", self)
+        self.next_action = icons.action(icons.FORWARD, "Next page", self)
         self.next_action.triggered.connect(self.next_page)
         self.toolbar.addAction(self.next_action)
 
-        self.last_action = icons.action(icons.DOWN, "Last", self)
+        self.last_action = icons.action(icons.DOWN, "Last page", self)
         self.last_action.triggered.connect(self.load_last_page)
         self.toolbar.addAction(self.last_action)
 
         # Add a small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # Add a QLabel and a QComboBox for font size to the toolbar
         font_label = QLabel("Font Size: ")
@@ -308,9 +308,9 @@ class HexViewer(QWidget):
         self.toolbar.addWidget(self.font_size_combobox)
 
         # Add small spacer
-        spacer = QWidget(self)
-        spacer.setFixedSize(GROUP_SPACING, 0)
-        self.toolbar.addWidget(spacer)
+        # A visible rule, so it is obvious where one group of controls
+        # ends and the next begins.
+        self.toolbar.addSeparator()
 
         # Icon button, matching the rest of the toolbar. Text, PDF and HTML
         # come from the shared widget so the Hex and Text tabs export the same

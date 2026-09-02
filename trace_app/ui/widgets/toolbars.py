@@ -40,6 +40,7 @@ def prepare_toolbar(toolbar):
     toolbar.setFixedHeight(TOOLBAR_HEIGHT)
     toolbar.setMovable(False)
     toolbar.setFloatable(False)
+
     if not toolbar.property("_aligned"):
         toolbar.setProperty("_aligned", True)
         toolbar.installEventFilter(_aligner)
@@ -62,7 +63,12 @@ def align_controls(toolbar):
             child.setFixedHeight(CONTROL_HEIGHT)
         else:
             # Icon only: square, so the glyph sits centred in its highlight.
+            # setFixedSize alone pins the button to the top of the toolbar,
+            # because a fixed size policy stops the layout centring it -- the
+            # explicit Qt.AlignVCenter is what balances the space above and
+            # below.
             child.setFixedSize(CONTROL_HEIGHT + 4, CONTROL_HEIGHT + 4)
+            _centre(toolbar, child)
 
     for cls in (QLineEdit, QComboBox, QPushButton):
         for child in toolbar.findChildren(cls):
@@ -86,3 +92,19 @@ def stretch():
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
     return widget
+
+
+def separator(toolbar):
+    """Add a vertical rule, marking the end of a group of related controls."""
+    toolbar.addSeparator()
+    return toolbar
+
+
+def _centre(toolbar, widget):
+    """Vertically centre a fixed-size widget inside a toolbar."""
+    layout = toolbar.layout()
+    if layout is None:
+        return
+    index = layout.indexOf(widget)
+    if index >= 0:
+        layout.itemAt(index).setAlignment(Qt.AlignVCenter)
