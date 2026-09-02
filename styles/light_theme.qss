@@ -1107,8 +1107,22 @@ QLineEdit#propertyCellEditor {
    gaps between them read as deliberate. Splitter handles and dock separators
    take a visible rule so a boundary the user can drag looks like one. */
 
-QMainWindow, QMainWindow > QWidget {
+QMainWindow {
     background-color: #F2F3F5;
+}
+
+/* Panels are separated by a rule on the panel itself, not by a darker ground
+   showing through the gaps. Colouring the ground meant colouring every direct
+   child of the window, which also caught the containers holding search fields
+   -- so a field sat on grey while its neighbours sat on white.
+
+   A border on the dock and the tab pane is narrower in scope and does not
+   touch anything inside them. */
+
+
+/* Input controls always sit on white, wherever they are placed. */
+QLineEdit, QComboBox, QSpinBox, QAbstractSpinBox {
+    background-color: #FFFFFF;
 }
 
 QSplitter::handle {
@@ -1147,4 +1161,12 @@ QMainWindow::separator:hover {
    the window colour only shows in the gaps between them. */
 QTreeWidget, QTableWidget, QListWidget, QTextEdit, QPlainTextEdit {
     background-color: #FFFFFF;
+}
+
+/* The evidence tree needs a visible edge against the listing beside it, or
+   the two panels run together. A right border only -- a full frame reappears
+   as a pale line down the left of a selected row, which is what it was
+   removed for. */
+QTreeWidget#evidenceTree {
+    border-right: 1px solid #DDE1E6;
 }

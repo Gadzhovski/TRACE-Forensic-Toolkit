@@ -1152,3 +1152,11 @@ QMainWindow::separator {
 QMainWindow::separator:hover {
     background-color: #6E6E6E;
 }
+
+/* The evidence tree needs a visible edge against the listing beside it, or
+   the two panels run together. A right border only -- a full frame reappears
+   as a pale line down the left of a selected row, which is what it was
+   removed for. */
+QTreeWidget#evidenceTree {
+    border-right: 1px solid #4A4A4A;
+}

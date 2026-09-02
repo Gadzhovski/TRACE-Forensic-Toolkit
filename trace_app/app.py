@@ -1,4 +1,3 @@
-from trace_app.ui.dialogs import message
 """Application entry point: logging, startup checks, and the main window."""
 
 import logging
@@ -9,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from trace_app import __version__
 from trace_app.infra.paths import log_file
 from trace_app.infra.preflight import check_dependencies, format_report
+from trace_app.ui.dialogs import message
 from trace_app.ui.main_window import MainWindow
 
 

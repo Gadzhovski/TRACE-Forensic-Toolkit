@@ -384,6 +384,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_central_widgets(self):
         """Tree viewer, listing table and its toolbar."""
         self.tree_viewer = BranchTreeWidget(self)
+        self.tree_viewer.setObjectName("evidenceTree")
         self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
         # No frame. A selected row runs the full width of the viewport, and the
