@@ -9,7 +9,9 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QToolBar, QWidgetAction, QSizePolicy, QTextBrowser, QPushButton, \
     QHBoxLayout, QMessageBox
-from requests import post as requests_post
+from datetime import datetime
+
+from requests import get as requests_get, post as requests_post
 from requests.exceptions import RequestException
 from modules.paths import resource_path
 
@@ -244,19 +246,78 @@ class VirusTotal(QWidget):
         self.last_request_time = current_time
         self.daily_requests_made += 1
 
-        headers = {
-            "Accept-Encoding": "gzip, deflate",
-            "User-Agent": "gzip, My Python requests library example client or username"
-        }
-        params = {'apikey': self.api_key, 'resource': hashes}
-        response = requests_post('https://www.virustotal.com/vtapi/v2/file/report', params=params, headers=headers)
+        # v3, matching the upload path. The v2 endpoint this used to call has
+        # been retired, and it passed the API key in the query string, where it
+        # ends up in proxy and server logs; v3 sends it in a header.
+        headers = {"x-apikey": self.api_key, "Accept": "application/json"}
+        url = f"https://www.virustotal.com/api/v3/files/{hashes}"
 
-        # Handle the case where the response is not a valid JSON (for example, if the rate limit is exceeded)
         try:
-            return response.json()
-        except RequestException:
-            self.info_text_edit.setPlainText("Error decoding JSON from the response. Please try again.")
+            response = requests_get(url, headers=headers, timeout=30)
+        except RequestException as e:
+            logger.error("VirusTotal request failed: %s", e)
+            self.info_text_edit.setPlainText(f"Could not reach VirusTotal: {e}")
             return {}
+
+        if response.status_code == 404:
+            self.info_text_edit.setPlainText(
+                "This file is not in the VirusTotal database. Upload it to have it scanned.")
+            return {}
+        if response.status_code == 401:
+            self.info_text_edit.setPlainText("VirusTotal rejected the API key. Check it in Options > API Keys.")
+            return {}
+        if response.status_code != 200:
+            logger.error("VirusTotal returned HTTP %s", response.status_code)
+            self.info_text_edit.setPlainText(f"VirusTotal returned an error (HTTP {response.status_code}).")
+            return {}
+
+        try:
+            payload = response.json()
+        except ValueError as e:
+            logger.error("Could not decode VirusTotal response: %s", e)
+            self.info_text_edit.setPlainText("Error decoding the response from VirusTotal. Please try again.")
+            return {}
+
+        return self._normalise_v3_report(payload, hashes)
+
+    @staticmethod
+    def _normalise_v3_report(payload, resource):
+        """Map a v3 file report onto the flat shape the HTML renderer expects.
+
+        v3 nests everything under data.attributes and renames the per-engine
+        fields (engine_version -> version, engine_update -> update, and
+        `category` carries the verdict instead of a boolean `detected`).
+        Converting here keeps format_data_as_html() unchanged.
+        """
+        attributes = (payload.get('data') or {}).get('attributes') or {}
+        results = attributes.get('last_analysis_results') or {}
+        stats = attributes.get('last_analysis_stats') or {}
+
+        scans = {}
+        for engine, result in results.items():
+            category = result.get('category')
+            scans[engine] = {
+                'detected': category in ('malicious', 'suspicious'),
+                'version': result.get('engine_version') or 'N/A',
+                'update': result.get('engine_update') or 'N/A',
+                'result': result.get('result') or 'N/A',
+            }
+
+        scan_date = attributes.get('last_analysis_date')
+        if scan_date:
+            scan_date = datetime.utcfromtimestamp(scan_date).strftime('%Y-%m-%d %H:%M:%S')
+
+        sha256 = attributes.get('sha256', resource)
+        return {
+            'md5': attributes.get('md5', 'N/A'),
+            'sha1': attributes.get('sha1', 'N/A'),
+            'sha256': sha256,
+            'scan_date': scan_date or 'N/A',
+            'positives': stats.get('malicious', 0) + stats.get('suspicious', 0),
+            'total': sum(v for v in stats.values() if isinstance(v, int)),
+            'permalink': f"https://www.virustotal.com/gui/file/{sha256}/detection",
+            'scans': scans,
+        }
 
     def format_data_as_html(self, data):
         # Extract main details from the data

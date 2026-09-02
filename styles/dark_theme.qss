@@ -649,3 +649,68 @@ QGroupBox#fileTypeGroup QCheckBox:hover {
     color: #FFFFFF;
 }
 
+
+/* ==================== Volume information dialog ==================== */
+/* Dark-mode counterparts. These selectors are why the inline styles in
+   volume_info.py were removed: hardcoded #ffffff cards and #212529 text left
+   the dialog unreadable here. */
+
+QWidget#volumeInfoHeader {
+    background-color: #2b2b2b;
+    border-bottom: 2px solid #3c3c3c;
+}
+
+QWidget#volumeInfoCard {
+    background-color: #323232;
+    border-radius: 8px;
+    border: 1px solid #3c3c3c;
+}
+
+QWidget#volumeInfoRow {
+    border: none;
+}
+
+QLabel#volumeInfoTitle {
+    font-size: 16pt;
+    font-weight: bold;
+    color: #f0f0f0;
+    border: none;
+}
+
+QLabel#volumeInfoSubtitle {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #f0f0f0;
+    border: none;
+}
+
+QLabel#volumeInfoSectionTitle {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #f0f0f0;
+    padding-bottom: 10px;
+}
+
+QLabel#volumeInfoFieldLabel {
+    font-weight: bold;
+    color: #b0b0b0;
+    font-size: 10pt;
+    border: none;
+}
+
+QLabel#volumeInfoFieldValue {
+    color: #f0f0f0;
+    font-size: 10pt;
+    border: none;
+}
+
+QLabel#volumeInfoLegendLabel {
+    color: #b0b0b0;
+    font-size: 9pt;
+    border: none;
+}
+
+QChartView#volumeInfoChartView {
+    border: none;
+    background: transparent;
+}

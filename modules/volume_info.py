@@ -49,27 +49,21 @@ class VolumeInfoMixin:
 
         # === TOP SECTION: Image Overview with Chart ===
         top_widget = QWidget()
-        top_widget.setStyleSheet("background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;")
+        top_widget.setObjectName("volumeInfoHeader")
         top_layout = QHBoxLayout(top_widget)
         top_layout.setContentsMargins(20, 20, 20, 20)
         top_layout.setSpacing(30)
 
         # Left: Image Summary Card
         summary_card = QWidget()
-        summary_card.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border-radius: 8px;
-                border: 1px solid #dee2e6;
-            }
-        """)
+        summary_card.setObjectName("volumeInfoCard")
         summary_layout = QVBoxLayout(summary_card)
         summary_layout.setContentsMargins(20, 20, 20, 20)
         summary_layout.setSpacing(12)
 
         # Title
         title_label = QLabel("Disk Image Overview")
-        title_label.setStyleSheet("font-size: 16pt; font-weight: bold; color: #212529; border: none;")
+        title_label.setObjectName("volumeInfoTitle")
         summary_layout.addWidget(title_label)
 
         # Key info
@@ -79,17 +73,17 @@ class VolumeInfoMixin:
         for field in key_fields:
             if field in image_info:
                 info_row = QWidget()
-                info_row.setStyleSheet("border: none;")
+                info_row.setObjectName("volumeInfoRow")
                 info_row_layout = QHBoxLayout(info_row)
                 info_row_layout.setContentsMargins(0, 0, 0, 0)
                 info_row_layout.setSpacing(10)
 
                 label = QLabel(f"{field}:")
-                label.setStyleSheet("font-weight: bold; color: #495057; font-size: 10pt; border: none;")
+                label.setObjectName("volumeInfoFieldLabel")
                 label.setMinimumWidth(140)
 
                 value = QLabel(str(image_info[field]))
-                value.setStyleSheet("color: #212529; font-size: 10pt; border: none;")
+                value.setObjectName("volumeInfoFieldValue")
                 value.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 value.setWordWrap(True)
 
@@ -103,19 +97,13 @@ class VolumeInfoMixin:
 
         # Right: Pie Chart with Legend
         chart_widget = QWidget()
-        chart_widget.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border-radius: 8px;
-                border: 1px solid #dee2e6;
-            }
-        """)
+        chart_widget.setObjectName("volumeInfoCard")
         chart_outer_layout = QVBoxLayout(chart_widget)
         chart_outer_layout.setContentsMargins(15, 15, 15, 15)
         chart_outer_layout.setSpacing(10)
 
         chart_title = QLabel("Space Allocation")
-        chart_title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #212529; border: none;")
+        chart_title.setObjectName("volumeInfoSubtitle")
         chart_title.setAlignment(Qt.AlignCenter)
         chart_outer_layout.addWidget(chart_title)
 
@@ -129,14 +117,14 @@ class VolumeInfoMixin:
         # Compact legend on the left
         if partition_info_list:
             legend_widget = QWidget()
-            legend_widget.setStyleSheet("border: none;")
+            legend_widget.setObjectName("volumeInfoRow")
             legend_layout = QVBoxLayout(legend_widget)
             legend_layout.setContentsMargins(5, 5, 5, 5)
             legend_layout.setSpacing(6)
 
             for label_text, color in partition_info_list:
                 legend_row = QWidget()
-                legend_row.setStyleSheet("border: none;")
+                legend_row.setObjectName("volumeInfoRow")
                 legend_row_layout = QHBoxLayout(legend_row)
                 legend_row_layout.setContentsMargins(0, 0, 0, 0)
                 legend_row_layout.setSpacing(8)
@@ -150,7 +138,7 @@ class VolumeInfoMixin:
                 """)
 
                 text_label = QLabel(label_text)
-                text_label.setStyleSheet("color: #495057; font-size: 9pt; border: none;")
+                text_label.setObjectName("volumeInfoLegendLabel")
                 text_label.setWordWrap(True)
 
                 legend_row_layout.addWidget(color_indicator)
@@ -178,7 +166,7 @@ class VolumeInfoMixin:
 
         # Section title
         details_title = QLabel("Volume Details")
-        details_title.setStyleSheet("font-size: 14pt; font-weight: bold; color: #212529; padding-bottom: 10px;")
+        details_title.setObjectName("volumeInfoSectionTitle")
         bottom_layout.addWidget(details_title)
 
         # Professional table view for volume information
@@ -547,6 +535,6 @@ class VolumeInfoMixin:
         chart_view = QChartView(chart)
         chart_view.setRenderHint(QPainter.Antialiasing)
         chart_view.setMinimumSize(350, 350)
-        chart_view.setStyleSheet("border: none; background: transparent;")
+        chart_view.setObjectName("volumeInfoChartView")
 
         return chart_view, legend_items
