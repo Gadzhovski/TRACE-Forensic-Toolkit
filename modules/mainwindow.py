@@ -834,6 +834,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
                 # Create a new ImageHandler with the selected image
                 self.image_handler = ImageHandler(image_path)
+                if not self.image_handler.loaded:
+                    raise ValueError(
+                        "The file could not be opened as a disk image. It may be "
+                        "corrupt, incomplete (a missing .E02 segment, say), or an "
+                        "unsupported format.")
                 progress.setValue(50)
 
                 # Add the image to evidence files list

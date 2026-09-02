@@ -41,7 +41,9 @@ class EWFImgInfo(pytsk3.Img_Info):
 # ImageHandler class with optimizations
 class ImageHandler:
     def __init__(self, image_path):
-        self.image_path = image_path
+        # Normalise here so every consumer gets a well-formed path: libewf's
+        # globbing rejects mixed separators like 'D:/dir/img.E01' on Windows.
+        self.image_path = os.path.normpath(image_path) if image_path else image_path
         self.img_info = None
         self.volume_info = None
         self.fs_info_cache = {}
@@ -50,8 +52,9 @@ class ImageHandler:
         self._directory_cache = {}  # Cache for directory contents
         self._partition_cache = None  # Cache for partitions
 
-        # Load the image with progress tracking
-        self.load_image()
+        #: False when the image could not be opened; callers should check
+        #: this rather than waiting for a later AttributeError.
+        self.loaded = self.load_image()
 
     def __del__(self):
         """Cleanup resources when the object is destroyed."""
@@ -306,7 +309,12 @@ class ImageHandler:
             }
 
     def load_image(self):
-        """Load the image and retrieve volume and filesystem information."""
+        """Load the image and read its volume/filesystem information.
+
+        Returns True if the image opened, False otherwise. Previously this
+        returned None either way and left the handler half-initialised, so a
+        failed load only surfaced later as an AttributeError from get_size().
+        """
         image_type = self.get_image_type()
 
         try:
@@ -331,12 +339,14 @@ class ImageHandler:
                     self.fs_info = None
                     # If no volume info and no filesystem, mark as wiped
                     self.is_wiped_image = True
+            return True
         except Exception as e:
-            logger.error(f"Error loading image: {e}")
+            logger.error("Could not load image %s: %s", self.image_path, e)
             self.img_info = None
             self.volume_info = None
             self.fs_info = None
             self.is_wiped_image = True
+            return False
 
     def has_filesystem(self, start_offset):
         fs_info = self.get_fs_info(start_offset)
