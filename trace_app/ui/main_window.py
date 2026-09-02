@@ -447,9 +447,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Add search bar
         self.listing_search_bar = QLineEdit()
         self.listing_search_bar.setObjectName("listingSearchBar")
-        self.listing_search_bar.setPlaceholderText("Search files (press Enter, supports wildcards: *.pdf, name.*)")
+        self.listing_search_bar.setPlaceholderText("Search files…")
+        self.listing_search_bar.setToolTip(
+            "Search the image for files by name.\n"
+            "Press Enter to run the search.\n"
+            "Wildcards are supported, for example *.pdf or report.*")
         self.listing_search_bar.setFixedHeight(CONTROL_HEIGHT)
-        self.listing_search_bar.setFixedWidth(360)
+        self.listing_search_bar.setMinimumWidth(220)
+        self.listing_search_bar.setMaximumWidth(380)
         # Only search when user presses Enter
         self.listing_search_bar.returnPressed.connect(self.trigger_listing_search)
         # Monitor text changes for auto-clearing results

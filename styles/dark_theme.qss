@@ -8,7 +8,7 @@ QWidget {
 /* Button Styles */
 QPushButton {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 5px 15px;
     background-color: #3C3C3C;
     color: #E0E0E0;
@@ -43,7 +43,7 @@ QCheckBox::indicator:checked {
 /* ComboBox Styles */
 QComboBox {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 5px 10px;
     background-color: #3C3C3C;
     color: #E0E0E0;
@@ -75,7 +75,7 @@ QComboBox::drop-down:hover {
 /* Dock Widget Styles */
 QDockWidget {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #2E2E2E;
 }
 QDockWidget::title {
@@ -86,7 +86,7 @@ QDockWidget::title {
 }
 QDockWidget::close-button, QDockWidget::float-button {
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: 6px;
     background: #3C3C3C;
 }
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {
@@ -99,7 +99,7 @@ QDockWidget::close-button:pressed, QDockWidget::float-button:pressed {
 /* List and Table Widget Styles */
 QListWidget, QTableWidget {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #2E2E2E;
     color: #E0E0E0;
 }
@@ -118,7 +118,7 @@ QMenuBar {
 }
 QMenuBar::item {
     padding: 5px 8px;
-    border-radius: 2px;
+    border-radius: 4px;
     color: #E0E0E0;
 }
 QMenuBar::item:selected {
@@ -146,7 +146,7 @@ QScrollBar:vertical {
 QScrollBar::handle:vertical {
     background: #5A5A5A;
     min-height: 20px;
-    border-radius: 5px;
+    border-radius: 6px;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     border: none;
@@ -164,7 +164,7 @@ QScrollBar:horizontal {
 QScrollBar::handle:horizontal {
     background: #5A5A5A;
     min-width: 20px;
-    border-radius: 5px;
+    border-radius: 6px;
 }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
     border: none;
@@ -195,7 +195,7 @@ QSlider::handle:horizontal {
     border: 1px solid #5A5A5A;
     width: 14px;
     margin: -2px 0;
-    border-radius: 7px;
+    border-radius: 6px;
 }
 QSlider::handle:horizontal:hover {
     background: #6A6A6A;
@@ -213,7 +213,7 @@ QSlider::add-page:horizontal {
 /* TabWidget and TabBar Styles */
 QTabWidget {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #2E2E2E;
 }
 
@@ -265,7 +265,7 @@ QToolBar::item:pressed {
 /* Other Widget Styles */
 QLineEdit, QTextEdit, QAudioWidget {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #3C3C3C;
     color: #E0E0E0;
 }
@@ -278,7 +278,7 @@ QLineEdit:focus {
 
 QTreeWidget {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #2E2E2E;
     color: #E0E0E0;
 }
@@ -337,7 +337,7 @@ QTableWidget::item:selected, QListWidget::item:selected {
 
 #exportButton {
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 5px 30px 5px 5px;  /* Adjust right padding to push text more to the left */
     background-color: #3C3C3C;  /* Dark button background */
     color: #E0E0E0;  /* Light text color */
@@ -504,7 +504,7 @@ QScrollBar:vertical, QScrollBar:horizontal {
 
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
     background: #5A5A5A;  /* Scroll handle color */
-    border-radius: 5px;
+    border-radius: 6px;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
@@ -537,7 +537,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #search_results_frame {
     background-color: #2E2E2E;
     border: 1px solid #5A5A5A;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 1px;
 }
 
@@ -581,10 +581,6 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 
 /* Toolbar Compact Styles - for PictureViewer and PDFViewer */
 
-QToolButton {
-    padding: 2px;
-    margin: 1px;
-}
 
 /* Media Player Sliders - Position and Volume */
 QSlider::groove:horizontal {
@@ -779,7 +775,7 @@ QProgressBar#verifyProgress {
 
 QProgressBar#verifyProgress::chunk {
     background-color: #2F81F7;
-    border-radius: 3px;
+    border-radius: 4px;
 }
 
 QTextEdit#borderlessView {
@@ -879,4 +875,44 @@ QLabel#emptyStateLabel {
     color: #8b949e;
     font-size: 13px;
     padding: 12px 8px;
+}
+
+/* ==================== Controls ==================== */
+/* One corner radius for inputs and buttons, and real horizontal padding so
+   text and placeholders are not clipped against the border. */
+
+QLineEdit, QComboBox, QSpinBox, QPlainTextEdit {
+    padding: 3px 8px;
+    border-radius: 4px;
+    min-height: 24px;
+}
+
+QPushButton {
+    padding: 4px 14px;
+    border-radius: 4px;
+    min-height: 24px;
+}
+
+/* Toolbar buttons: a square hit area so the icon sits centred in its hover
+   highlight rather than floating in a wide rectangle. */
+QToolBar QToolButton {
+    padding: 4px;
+    margin: 0px 1px;
+    border-radius: 4px;
+    min-width: 28px;
+    min-height: 28px;
+}
+
+QToolBar QToolButton:hover {
+    background-color: #3a3a3a;
+}
+
+QToolBar QToolButton:pressed {
+    background-color: #454545;
+}
+
+/* A button carrying text needs room for it, so drop the square minimum. */
+QToolBar QToolButton[popupMode="1"],
+QToolBar QToolButton#clearSearchBtn {
+    min-width: 0px;
 }

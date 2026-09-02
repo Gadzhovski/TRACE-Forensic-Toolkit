@@ -338,9 +338,10 @@ class HexViewer(QWidget):
 
         # Search bar components
         self.search_bar = QLineEdit(self)
-        self.search_bar.setMaximumWidth(180)  # Reduce width to save space
+        # Wide enough for the placeholder: at 100px it was clipped mid-word.
+        self.search_bar.setMinimumWidth(150)
+        self.search_bar.setMaximumWidth(220)
         self.search_bar.setFixedHeight(CONTROL_HEIGHT)
-        self.search_bar.setContentsMargins(5, 0, 5, 0)  # Reduce margins
         self.search_bar.setPlaceholderText("Search...")
         self.search_bar.returnPressed.connect(self.trigger_search)
         self.toolbar.addWidget(self.search_bar)

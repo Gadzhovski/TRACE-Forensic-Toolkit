@@ -209,9 +209,10 @@ class TextViewer(QWidget):
         # Search controls
         self.search_input = QLineEdit(self)
         self.search_input.setPlaceholderText("Search...")
-        self.search_input.setMaximumWidth(180)  # Reduce width to save space
+        # Wide enough for the placeholder: at 100px it was clipped mid-word.
+        self.search_input.setMinimumWidth(150)
+        self.search_input.setMaximumWidth(220)
         self.search_input.setFixedHeight(CONTROL_HEIGHT)
-        self.search_input.setContentsMargins(5, 0, 5, 0)  # Reduce margins
         self.search_input.returnPressed.connect(self.search_next)
         self.toolbar.addWidget(self.search_input)
 
