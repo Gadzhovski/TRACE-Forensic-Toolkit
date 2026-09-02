@@ -18,6 +18,7 @@ class HashCalculationThread(QThread):
         super().__init__()
         self.image_handler = image_handler
         self.isRunning = True
+        self._last_percent = -1
 
     def run(self):
         try:
@@ -33,12 +34,19 @@ class HashCalculationThread(QThread):
                 self.hashCalculated.emit({})  # Empty dict indicates error
 
     def update_progress(self, current, total):
-        """Handle progress updates safely with large values."""
+        """Report progress, at most once per whole percent.
+
+        A 16 GB image is thousands of chunks; emitting on every one queued
+        thousands of cross-thread signals to move a bar that only has a
+        hundred positions.
+        """
         try:
             if total > 0 and self.isRunning:
                 # Convert to float to avoid overflow and limit to 0-100 range
                 percentage = min(100.0, (float(current) / float(total)) * 100.0)
-                self.progressUpdated.emit(percentage)
+                if int(percentage) != self._last_percent:
+                    self._last_percent = int(percentage)
+                    self.progressUpdated.emit(percentage)
         except Exception as e:
             logger.error(f"Progress update error: {e}")
 
@@ -141,10 +149,14 @@ class VerificationWidget(QWidget):
         self.thread.start()
 
     def update_progress(self, percentage):
-        """Update progress bar with the given percentage."""
+        """Update progress bar with the given percentage.
+
+        No processEvents here. The hashing runs in a worker thread, so the
+        event loop is already free; calling it by hand on every chunk only
+        forced a full event pass thousands of times during a long hash.
+        """
         try:
             self.progress_bar.setValue(int(percentage))
-            QApplication.processEvents()  # Keep UI responsive
         except Exception as e:
             logger.error(f"Error updating progress bar: {e}")
 
