@@ -70,6 +70,7 @@ class Main(QMainWindow):
 
         self.select_source_dialog.sourceSelected.connect(self.show_specific_widget)
         self.drive_selection_widget.backRequested.connect(self.show_select_source)
+        self.conversion_widget.backRequested.connect(self.show_select_source)
 
     def show_specific_widget(self, widget_name):
         if widget_name == "conversion":
@@ -214,8 +215,12 @@ class ConversionWidget(QWidget):
         layout.addLayout(buttons_layout)
 
     def on_back_clicked(self):
-        main_window = self.parent().parent()
-        main_window.show_select_source()
+        # backRequested is declared above and connected by Main.init_ui, the
+        # same way DriveSelectionWidget already does it. The previous
+        # self.parent().parent() only resolved to Main by coincidence of the
+        # current QStackedWidget nesting, so adding any wrapper widget would
+        # have silently broken this button.
+        self.backRequested.emit()
 
     def browse_file(self):
         filename, _ = QFileDialog.getOpenFileName(self, "Select E01 File", "", "E01 Files (*.e01)")

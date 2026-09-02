@@ -490,6 +490,10 @@ class MainWindow(QMainWindow):
         self.result_viewer.addTab(self.listing_widget, 'Listing')
 
         self.deleted_files_widget = FileCarvingWidget(self)
+        # Inject what the widget needs rather than letting it reach back up
+        # through a MainWindow reference into db_manager.
+        self.deleted_files_widget.icon_resolver = self.db_manager.get_icon_path
+        self.deleted_files_widget.carved_file_opened.connect(self.update_viewer_with_file_content)
         self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
 
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
@@ -821,9 +825,13 @@ class MainWindow(QMainWindow):
                 progress.setValue(70)
 
                 # Pass the image handler to widgets that need it
-                self.deleted_files_widget.set_image_handler(self.image_handler)
-                self.registry_extractor_widget.image_handler = self.image_handler
-                self.metadata_viewer.image_handler = self.image_handler
+                # One mechanism for every consumer. These widgets are built
+                # before an image is loaded, so they are constructed with
+                # image_handler=None and pointed at the real handler here.
+                for widget in (self.deleted_files_widget,
+                               self.registry_extractor_widget,
+                               self.metadata_viewer):
+                    widget.set_image_handler(self.image_handler)
                 progress.setValue(80)
 
                 # Load partitions into tree view

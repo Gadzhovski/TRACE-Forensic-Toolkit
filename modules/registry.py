@@ -20,6 +20,10 @@ class RegistryExtractor(QWidget):
         self.value_icon = QIcon(resource_path("Icons/icons8-wasp-48.png"))
         self.init_ui()
 
+    def set_image_handler(self, image_handler):
+        """Point this viewer at a newly loaded image."""
+        self.image_handler = image_handler
+
     def init_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)

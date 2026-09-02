@@ -39,11 +39,17 @@ class NumericTableWidgetItem(QTableWidgetItem):
 
 class FileCarvingWidget(QWidget):
     file_carved = Signal(str, str, str, str, str)  # Unified signal for file carving
+    #: Emitted when the user opens a carved file, so the host can show it in a
+    #: viewer. Replaces reaching up into MainWindow directly.
+    carved_file_opened = Signal(bytes, dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.main_window = parent  # Store reference to MainWindow before it gets reparented by tab widget
         self.image_handler = None
+        #: Resolves (type, extension) -> icon path. Injected by the host so
+        #: this widget does not have to reach through a MainWindow reference
+        #: into its DatabaseManager.
+        self.icon_resolver = None
         self.executor = ThreadPoolExecutor(max_workers=4)  # ThreadPoolExecutor for background tasks
         self._stop_requested = False  # cooperative cancellation flag for carve_files()
         self.carved_files = []
@@ -467,11 +473,7 @@ class FileCarvingWidget(QWidget):
                         'carved_timestamp': self.get_carved_timestamp(file_name)  # Get original timestamp if available
                     }
 
-                    # Get MainWindow and call update_viewer_with_file_content
-                    if self.main_window and hasattr(self.main_window, 'update_viewer_with_file_content'):
-                        self.main_window.update_viewer_with_file_content(file_content, data)
-                    else:
-                        print("MainWindow not found or missing update_viewer_with_file_content method")
+                    self.carved_file_opened.emit(file_content, data)
 
                 except Exception as e:
                     print(f"Error opening carved file in viewer: {e}")
@@ -979,7 +981,7 @@ class FileCarvingWidget(QWidget):
 
         # Get file icon based on type/extension
         extension = type_.lower() if type_ else 'unknown'
-        icon_path = self.main_window.db_manager.get_icon_path('file', extension)
+        icon_path = self.icon_resolver('file', extension) if self.icon_resolver else ''
 
         # Set Id column
         self.table_widget.setItem(row, 0, QTableWidgetItem(str(row + 1)))

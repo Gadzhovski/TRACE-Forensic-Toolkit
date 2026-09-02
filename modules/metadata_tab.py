@@ -13,6 +13,10 @@ class MetadataViewer(QWidget):
         self.image_handler = image_handler
         self.init_ui()
 
+    def set_image_handler(self, image_handler):
+        """Point this viewer at a newly loaded image."""
+        self.image_handler = image_handler
+
     def init_ui(self):
         # Add the text edit to the layout
         layout = QVBoxLayout(self)
