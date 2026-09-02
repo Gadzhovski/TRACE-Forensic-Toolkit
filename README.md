@@ -130,70 +130,54 @@
 
 ### Installation ⚙️
 
+TRACE needs **Python 3.9 or newer**. The installer scripts handle the system
+libraries, the virtual environment and the Python packages for you.
 
 #### **Windows:**
-1.  Install Python 3.11<br>
-    (⚠️ Python 3.12 is not supported)<br>
-    [👉 Download from python.org](https://www.python.org/downloads/release/python-3110/)
 
-2.  Install Microsoft C++ Build Tools<br>
-    [👉 Download Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+1.  Install Python from [python.org](https://www.python.org/downloads/), ticking
+    **"Add python.exe to PATH"** during setup.
 
-    During setup, ensure the following workloads are selected:
+2.  Run the installer from PowerShell in the project folder:
 
-    - ✅ Desktop development with C++
-    - ✅ C++ build tools
-
-3.  Create and activate a virtual environment
-
-    ```bash
-    python -m venv venv
-    venv\Scripts\activate
+    ```powershell
+    powershell -ExecutionPolicy Bypass -File install_windows.ps1
     ```
 
-4.  Install dependencies
+    It checks your Python version, warns if the
+    [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+    are missing (`pytsk3` and `libewf-python` are compiled from source and need
+    them), creates the virtual environment, and installs everything.
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+3.  Start the tool:
 
-5.  Run the tool
-
-    ```bash
+    ```powershell
+    venv\Scriptsctivate
     python main.py
     ```
 
+#### **macOS & Linux (including WSL):**
 
-
-#### **macOS (Apple Silicon) & Linux (Ubuntu/WSL):**
-1.  Make the installation script executable:
+1.  Make the installer executable and run it:
 
     ```bash
-    chmod +x install_macos_linux_WSL.sh
+    chmod +x install.sh
+    ./install.sh
     ```
 
-2.  Run the installation script:
+    It detects your platform and installs the system dependencies
+    (`libmagic`, plus the `libewf`/`sleuthkit` headers and a compiler needed to
+    build `pytsk3`), creates the virtual environment, and installs the Python
+    packages.
+
+2.  Start the tool:
 
     ```bash
-    ./install_macos_linux_WSL.sh
-    ```
-
-    The script will:
-    - ✅ Create and activate a Python 3.11 virtual environment
-    - ✅ Detect your system (macOS or Linux)
-    - ✅ Install required system dependencies (via Homebrew or apt)
-    - ✅Install the appropriate Python packages:
-        * `requirements_macos_silicon.txt` → macOS
-        * `requirements.txt` → Linux
-    - ✅ After installation, it will automatically activate your virtual environment and notify you that it’s ready to use.
-
-3.  Run the Tool
-
-    Once the virtual environment is activated (you’ll see `(venv)` in your terminal prompt):
-
-    ```bash
+    source venv/bin/activate
     python main.py
     ```
+
+Type `deactivate` when you are finished.
 
 
 ### Configuration ⚙️ 
