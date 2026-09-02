@@ -22,7 +22,8 @@ digits line up and a mistyped character is visible.
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (QFont, QFontDatabase, QFontMetrics, QGuiApplication,
                            QKeySequence, QShortcut)
-from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QTableWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QLineEdit,
+                               QStyledItemDelegate, QTableWidget,
                                QTableWidgetItem)
 
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
@@ -35,6 +36,31 @@ MONO_LABELS = {
     'md5', 'sha-1', 'sha1', 'sha-256', 'sha256', 'disk offset', 'inode',
     'size', 'offset',
 }
+
+
+class _ReadOnlyTextDelegate(QStyledItemDelegate):
+    """Puts a selectable but unwritable line edit over a cell.
+
+    A QTableWidget can only select whole cells, so copying half a hash out of
+    the properties was impossible while the filesystem-detail view beside it
+    allowed exactly that. Opening a read-only editor closes the gap without
+    making the pane editable: the editor selects and copies like any text
+    field, and setModelData does nothing, so no edit can reach the model.
+    """
+
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        editor.setReadOnly(True)
+        editor.setFrame(False)
+        editor.setObjectName("propertyCellEditor")
+        return editor
+
+    def setEditorData(self, editor, index):
+        editor.setText(index.data() or "")
+        editor.selectAll()
+
+    def setModelData(self, editor, model, index):
+        return  # read-only: never write back
 
 
 class PropertyTable(QTableWidget):
@@ -52,7 +78,14 @@ class PropertyTable(QTableWidget):
         self.setAlternatingRowColors(False)
         self.setFrameShape(QTableWidget.NoFrame)
 
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Double-clicking a value opens a read-only editor over the cell, so
+        # part of a hash or a timestamp can be dragged out -- the same freedom
+        # the filesystem-detail view below gives, which a table's whole-cell
+        # selection does not. The delegate below refuses to write anything
+        # back, so the pane stays read-only.
+        self.setEditTriggers(QAbstractItemView.DoubleClicked
+                             | QAbstractItemView.SelectedClicked)
+        self.setItemDelegate(_ReadOnlyTextDelegate(self))
         self.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setWordWrap(False)
@@ -128,8 +161,11 @@ class PropertyTable(QTableWidget):
             if tag:
                 val_item.setData(Qt.UserRole + 1, tag)
 
-            for item in (key_item, val_item):
-                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            key_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            # Editable only so the read-only editor can open on it; the
+            # delegate discards anything typed.
+            val_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable
+                              | Qt.ItemIsEditable)
 
             self.setItem(index, 0, key_item)
             self.setItem(index, 1, val_item)

@@ -771,6 +771,12 @@ QTableWidget#propertyTable {
 QTableWidget#propertyTable::item {
     padding: 3px 12px 3px 8px;
     border: none;
+    /* Transparent, so a row shows the pane behind it. The widget was already
+       transparent but its items were not: they still took the shared
+       QTableWidget::item colour, which is a panel grey and sat lighter than
+       the pane around it -- a block behind the properties and nothing behind
+       the filesystem detail below. */
+    background-color: transparent;
 }
 
 QTableWidget#propertyTable::item:selected {
@@ -1097,3 +1103,17 @@ QTreeWidget::branch {
    three grey levels across the strip, against eleven when the same vector is
    painted with QPainter. BranchTreeWidget draws the arrow instead; the
    :selected rule above still paints the background behind it. */
+
+/* The read-only editor that opens over a property value, so text inside it
+   can be selected. It has to be invisible: the cell should look identical
+   whether or not the editor is open, or clicking a value would make the row
+   appear to change. */
+QLineEdit#propertyCellEditor {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+    color: #E0E0E0;
+    selection-background-color: #1E90FF;
+    selection-color: #FFFFFF;
+}
