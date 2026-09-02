@@ -50,11 +50,14 @@ class BranchTreeWidget(QTreeWidget):
     def drawBranches(self, painter, rect, index):
         """Draw the row's expand arrow, and nothing else.
 
-        The base implementation still runs, for the selection background that
-        QTreeWidget::branch:selected paints behind the strip; the stylesheet no
-        longer sets a branch image, so it draws no arrow of its own.
+        The base implementation is not called. It paints one branch cell per
+        ancestor level, each inset slightly, so a selected row showed a row of
+        separate boxes stepping out to its depth rather than one continuous
+        highlight. `rect` spans the whole indentation area, so filling it once
+        gives the unbroken strip the row deserves.
         """
-        super().drawBranches(painter, rect, index)
+        if self.selectionModel().isSelected(index):
+            painter.fillRect(rect, self.palette().highlight())
 
         if not self.model().hasChildren(index):
             return

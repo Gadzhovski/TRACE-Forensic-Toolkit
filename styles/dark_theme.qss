@@ -1114,9 +1114,10 @@ QTreeWidget::branch {
     background: transparent;
 }
 
-QTreeWidget::branch:selected {
-    background: #505050;
-}
+/* No ::branch:selected rule. Qt applies it once per ancestor level, each
+   cell inset a little, so a selected row showed a row of separate boxes
+   stepping out to its depth. BranchTreeWidget fills the whole strip in one
+   go instead. */
 
 /* No branch image here. Qt rasterises a stylesheet image: without
    antialiasing, which turned the chevron into a staircase of hard squares --
