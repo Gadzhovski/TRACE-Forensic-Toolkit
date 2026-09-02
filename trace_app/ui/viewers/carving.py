@@ -20,6 +20,8 @@ from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QLabel, QTabWidget
 from fitz import open as fitz_open, Matrix
 
+from trace_app.core.carving_signatures import (extract_original_timestamp,
+                                              is_valid_file)
 from trace_app.infra.paths import carved_files_dir, resource_path
 
 logger = logging.getLogger('TRACE.Carving')
@@ -485,33 +487,6 @@ class FileCarvingWidget(QWidget):
 
                 break
 
-    def is_valid_file(self, data, file_type):
-        try:
-            if file_type == 'pdf':
-                # Validate by parsing with PyMuPDF; a carved fragment that is
-                # not a real PDF raises here.
-                with fitz_open(stream=data, filetype='pdf') as doc:
-                    if doc.page_count < 1:
-                        return False
-            elif file_type in ['jpg', 'jpeg', 'png', 'gif']:
-                # Validate images by attempting to open them with PIL
-                image = Image.open(io.BytesIO(data))
-                image.verify()  # This will not load the image but only parse it
-            elif file_type == 'bmp':
-                return True
-            elif file_type == 'wav':
-                # Basic WAV validation could check for the RIFF header, file size, etc.
-                if not data.startswith(b'RIFF') or not b'WAVE' in data[:12]:
-                    return False
-                # Additional WAV format checks could be implemented here
-            elif file_type == 'mov':
-                return True  # For now, we'll assume all MOV files are valid
-            else:
-                return True
-            return True
-        except (IOError, UnidentifiedImageError, ValueError, RuntimeError) as e:
-            logger.error(f"Error validating file of type {file_type}: {str(e)}")
-            return False
 
     def carve_pdf_files(self, chunk, global_offset):
         pdf_start_signature = b'%PDF-'
@@ -532,7 +507,7 @@ class FileCarvingWidget(QWidget):
                     try:
                         file_size = int(chunk[file_size_start:file_size_end].split()[0])
                         pdf_content = chunk[start_index:start_index + file_size]
-                        if self.is_valid_file(pdf_content, 'pdf'):
+                        if is_valid_file(pdf_content, 'pdf'):
                             self.save_file(pdf_content, 'pdf', global_offset + start_index, file_size)
                             offset = start_index + file_size
                             continue
@@ -542,7 +517,7 @@ class FileCarvingWidget(QWidget):
             if end_index != -1:
                 end_index += len(pdf_end_signature)
                 pdf_content = chunk[start_index:end_index]
-                if self.is_valid_file(pdf_content, 'pdf'):
+                if is_valid_file(pdf_content, 'pdf'):
                     self.save_file(pdf_content, 'pdf', global_offset + start_index, end_index - start_index)
                 offset = end_index
             else:
@@ -570,7 +545,7 @@ class FileCarvingWidget(QWidget):
                 wav_content = chunk[start_index:start_index + file_size]
                 offset = start_index + file_size
 
-            if self.is_valid_file(wav_content, 'wav'):
+            if is_valid_file(wav_content, 'wav'):
                 self.save_file(wav_content, 'wav', 'carved_files', start_index)
 
     def carve_mov_files(self, chunk, offset):
@@ -637,7 +612,7 @@ class FileCarvingWidget(QWidget):
                 jpg_content = chunk[start_index:end_index + len(jpg_end_signature)]
 
                 # Check if it's a valid JPG file
-                if self.is_valid_file(jpg_content, 'jpg'):
+                if is_valid_file(jpg_content, 'jpg'):
                     self.save_file(jpg_content, 'jpg', 'carved_files', start_index)
 
                 offset = end_index + len(jpg_end_signature)
@@ -658,7 +633,7 @@ class FileCarvingWidget(QWidget):
                 gif_content = chunk[start_index:end_index + len(gif_end_signature)]
 
                 # Check if it's a valid GIF file
-                if self.is_valid_file(gif_content, 'gif'):
+                if is_valid_file(gif_content, 'gif'):
                     self.save_file(gif_content, 'gif', 'carved_files', start_index)
 
                 offset = end_index + len(gif_end_signature)
@@ -679,7 +654,7 @@ class FileCarvingWidget(QWidget):
                 png_content = chunk[start_index:end_index + len(png_end_signature)]
 
                 # Check if it's a valid PNG file
-                if self.is_valid_file(png_content, 'png'):
+                if is_valid_file(png_content, 'png'):
                     self.save_file(png_content, 'png', 'carved_files', start_index)
 
                 offset = end_index + len(png_end_signature)
@@ -896,56 +871,6 @@ class FileCarvingWidget(QWidget):
             logger.error(f"Could not render PDF thumbnail for {name}: {e}")
             return QPixmap()
 
-    @staticmethod
-    def extract_original_timestamp(file_content, file_type):
-        """Extract original file timestamp from file headers/metadata.
-
-        Returns:
-            datetime object if timestamp found, None otherwise
-        """
-        try:
-            if file_type.lower() in ['jpg', 'jpeg', 'png']:
-                # Extract EXIF DateTimeOriginal from images
-                try:
-                    img = Image.open(io.BytesIO(file_content))
-                    exif_data = img._getexif()
-                    if exif_data:
-                        # Look for DateTimeOriginal (tag 36867) or DateTime (tag 306)
-                        for tag_id, value in exif_data.items():
-                            tag_name = TAGS.get(tag_id, tag_id)
-                            if tag_name in ['DateTimeOriginal', 'DateTime']:
-                                # Parse format: "2024:01:15 14:30:00"
-                                return datetime.datetime.strptime(str(value), '%Y:%m:%d %H:%M:%S')
-                except Exception:
-                    pass
-
-            elif file_type.lower() == 'pdf':
-                # Extract CreationDate from PDF metadata
-                try:
-                    with fitz_open(stream=file_content, filetype='pdf') as doc:
-                        date_str = (doc.metadata or {}).get('creationDate', '')
-                    # PDF date format: "D:20240115143000"
-                    if date_str and date_str.startswith('D:'):
-                        date_str = date_str[2:16]  # Extract YYYYMMDDHHmmss
-                        return datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S')
-                except Exception:
-                    pass
-
-            elif file_type.lower() == 'zip':
-                # Extract timestamp from ZIP central directory
-                try:
-                    with zipfile.ZipFile(io.BytesIO(file_content)) as zf:
-                        if zf.namelist():
-                            # Get timestamp of first file in archive
-                            first_file_info = zf.getinfo(zf.namelist()[0])
-                            return datetime.datetime(*first_file_info.date_time)
-                except Exception:
-                    pass
-
-        except Exception as e:
-            logger.error(f"Error extracting timestamp for {file_type}: {e}")
-
-        return None
 
     def save_file(self, file_content, file_type, file_path, offset):
         carved_dir = carved_files_dir()
@@ -959,7 +884,7 @@ class FileCarvingWidget(QWidget):
             f.write(file_content)
 
         # Try to extract original timestamp from file metadata
-        original_timestamp = self.extract_original_timestamp(file_content, file_type)
+        original_timestamp = extract_original_timestamp(file_content, file_type)
 
         if original_timestamp:
             # Convert datetime to timestamp (seconds since epoch)
