@@ -77,11 +77,30 @@ CONTROL_SPACING = 6
 #: Wider gap used to separate groups of controls in the same toolbar.
 GROUP_SPACING = 16
 
+#: Space a QSplitter reserves for its drag handle. Qt defaults to 7, wide
+#: enough to read as a grey band between panes; the stylesheet paints a 1px
+#: rule in it, and Qt still widens the hit region so it stays draggable.
+SPLITTER_HANDLE_WIDTH = 1
+
 #: Row height in the listing, tree and property tables.
 TABLE_ROW_HEIGHT = 26
 
 # --- Icon sizes -----------------------------------------------------------
-TREE_ICON_SIZE = 16
+#
+# The icon set is drawn on a 24x24 grid. Rendering at 24, or at a whole
+# division of it, resamples cleanly; anything else lands the strokes on
+# fractional pixels and the diagonals stair-step -- which is what "pixelated"
+# looks like on a line icon. 16px is the worst common case: a 1.5x reduction
+# that halves some strokes and not others.
+#
+# So prefer 24 where there is room, and 12 where there is not. If a size in
+# between is unavoidable, expect the glyph to soften.
+
+#: Icon beside a row in the evidence and registry trees. At 16 the fine detail
+#: in glyphs like the key and the folder broke up visibly; 24 is exact but
+#: leaves a 24px glyph in a 26px row with nothing around it. 20 keeps the
+#: detail legible and the row breathing.
+TREE_ICON_SIZE = 20
 
 #: Horizontal step per tree level, and so the width of the strip the expand
 #: arrow is drawn into. This was 14 for a while, to close the gap between the

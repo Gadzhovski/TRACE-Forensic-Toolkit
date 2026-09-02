@@ -1125,14 +1125,18 @@ QSplitter::handle {
     background-color: #4A4A4A;
 }
 
+/* A hairline, not a bar. The 3px margins either side of the rule made the
+   handle 7px wide in total, which reads as a thick grey band between panes
+   rather than as the edge between them. The handle keeps a usable grab area
+   because QSplitter widens its hit region beyond what it paints. */
 QSplitter::handle:horizontal {
     width: 1px;
-    margin: 0px 3px;
+    margin: 0px;
 }
 
 QSplitter::handle:vertical {
     height: 1px;
-    margin: 3px 0px;
+    margin: 0px;
 }
 
 QSplitter::handle:hover {

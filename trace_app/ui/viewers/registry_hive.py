@@ -2,15 +2,15 @@ import logging
 import os
 import tempfile
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QTextEdit, QToolBar, QLabel, \
     QSplitter, QTableWidget, QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import (PANEL_ICON_SIZE, TREE_ICON_SIZE,
-                                       TREE_INDENTATION)
+from trace_app.infra.constants import (PANEL_ICON_SIZE, SPLITTER_HANDLE_WIDTH,
+                                       TREE_ICON_SIZE, TREE_INDENTATION)
 from trace_app.ui import icons
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
@@ -21,10 +21,75 @@ logger = logging.getLogger('TRACE.Registry')
 
 
 
+class _HiveLoader(QThread):
+    """Reads a registry hive out of the image, off the UI thread.
+
+    Extracting a hive walks every partition, pulls the file out of NTFS and
+    parses it. On a large image that is seconds of work, and it used to run in
+    the click handler -- so the whole window stopped repainting until it
+    finished. Only the reading happens here; the tree is built on the UI
+    thread, where it has to be.
+    """
+
+    #: (hive name, parsed root key) on success.
+    loaded = Signal(str, object)
+    #: A message to show when nothing could be read.
+    failed = Signal(str)
+
+    def __init__(self, image_handler, hive_name, parent=None):
+        super().__init__(parent)
+        self.image_handler = image_handler
+        self.hive_name = hive_name
+
+    def run(self):
+        temp_hive_path = None
+        try:
+            partitions = self.image_handler.get_partitions()
+            if not partitions:
+                self.failed.emit("No partitions found in this image.")
+                return
+
+            for partition in partitions:
+                start_offset = partition[2]
+                if self.isInterruptionRequested():
+                    return
+                if self.image_handler.get_fs_type(start_offset) != "NTFS":
+                    continue
+
+                fs_info = self.image_handler.get_fs_info(start_offset)
+                hive_data = self.image_handler.get_registry_hive(
+                    fs_info, f"/Windows/System32/config/{self.hive_name}")
+                if not hive_data:
+                    continue
+
+                with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
+                    temp_hive.write(hive_data)
+                    temp_hive_path = temp_hive.name
+
+                with open(temp_hive_path, "rb") as hive_file:
+                    reg = Registry.Registry(hive_file)
+                    if not self.isInterruptionRequested():
+                        self.loaded.emit(self.hive_name, reg.root())
+                return
+
+            self.failed.emit(f"{self.hive_name} was not found in this image.")
+        except Exception as e:
+            logger.error("An error occurred while loading the selected hive: %s", e)
+            self.failed.emit(f"Could not read {self.hive_name}: {e}")
+        finally:
+            if temp_hive_path and os.path.exists(temp_hive_path):
+                try:
+                    os.remove(temp_hive_path)
+                except OSError:
+                    pass
+
+
 class RegistryExtractor(QWidget):
     def __init__(self, image_handler):
         super().__init__()
         self.image_handler = image_handler
+        #: The running hive reader, retained so it is not collected mid-read.
+        self._loader = None
         # Looked up on each use rather than cached here: an icon fetched once
         # keeps the tint of whatever theme was active at construction, so
         # these stayed light-theme grey after a switch to dark.
@@ -69,6 +134,11 @@ class RegistryExtractor(QWidget):
 
         # Splitter setup
         self.splitter = QSplitter(Qt.Horizontal)
+        # A hairline between panes. QSplitter reserves handleWidth regardless
+        # of what the stylesheet paints, and the default 7px showed as a thick
+        # grey band; the drag area stays usable because Qt widens the hit
+        # region past the painted rule.
+        self.splitter.setHandleWidth(SPLITTER_HANDLE_WIDTH)
         main_layout.addWidget(self.splitter)
 
         # Tree Widget Setup. The same class and treatment as the evidence tree
@@ -86,6 +156,7 @@ class RegistryExtractor(QWidget):
 
         # Details Panel and Table Setup
         self.detailsSplitter = QSplitter(Qt.Vertical)
+        self.detailsSplitter.setHandleWidth(SPLITTER_HANDLE_WIDTH)
         self.splitter.addWidget(self.detailsSplitter)
 
         # Key metadata. A table rather than generated HTML, so it matches the
@@ -126,38 +197,39 @@ class RegistryExtractor(QWidget):
                 QApplication.clipboard().setText(selectedText)
 
     def load_selected_hive(self):
-        try:
-            selectedHive = self.hiveSelector.currentText()
+        """Start reading the selected hive; the tree fills in when it arrives."""
+        if self.image_handler is None:
+            return
 
-            # Assuming get_partitions returns partitions where Windows is installed
-            partitions = self.image_handler.get_partitions()
+        if self._loader is not None and self._loader.isRunning():
+            self._loader.requestInterruption()
+            self._loader.wait(2000)
 
-            if not partitions:
-                logger.debug("No partitions found.")
-                return
+        hive = self.hiveSelector.currentText()
+        self.loadHiveButton.setEnabled(False)
+        self.treeWidget.clear()
+        placeholder = QTreeWidgetItem(self.treeWidget, [f"Reading {hive}..."])
+        placeholder.setDisabled(True)
 
-            for partition in partitions:
-                start_offset = partition[2]
-                fs_type = self.image_handler.get_fs_type(start_offset)
-                fs_info = self.image_handler.get_fs_info(start_offset)
-                if fs_type == "NTFS":
-                    # Modify to only load the selected hive
-                    hive_data = self.image_handler.get_registry_hive(fs_info,
-                                                                     f"/Windows/System32/config/{selectedHive}")
-                    if hive_data:
-                        # Temporarily save the hive data to a file and load it
-                        with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
-                            temp_hive.write(hive_data)
-                            temp_hive_path = temp_hive.name
+        self._loader = _HiveLoader(self.image_handler, hive, self)
+        self._loader.loaded.connect(self._on_hive_loaded)
+        self._loader.failed.connect(self._on_hive_failed)
+        self._loader.finished.connect(self._on_load_finished)
+        self._loader.start()
 
-                        # Load the hive
-                        with open(temp_hive_path, "rb") as hive_file:
-                            reg = Registry.Registry(hive_file)
-                            self.display_registry_hive(selectedHive, reg.root())  # Display the selected hive
+    def _on_load_finished(self):
+        """Re-enable the button once the reader stops, however it ended."""
+        self.loadHiveButton.setEnabled(True)
 
-                        os.remove(temp_hive_path)
-        except Exception as e:
-            logger.error(f"An error occurred while loading the selected hive: {e}")
+    def _on_hive_loaded(self, hive_name, root_key):
+        self.display_registry_hive(hive_name, root_key)
+        self._on_load_finished()
+
+    def _on_hive_failed(self, message):
+        self.treeWidget.clear()
+        item = QTreeWidgetItem(self.treeWidget, [message])
+        item.setDisabled(True)
+        self._on_load_finished()
 
     def display_registry_hive(self, hive_name, root_key):
         self.treeWidget.clear()  # Clear the tree before displaying a new hive
