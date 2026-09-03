@@ -1,0 +1,11 @@
+# Belt and braces. The repository root .gitignore already excludes every image
+# extension at any depth, but this directory is where evidence actually lives
+# and a new format should never be committable just because nobody remembered
+# to add its extension upstream.
+#
+# Ignore everything here, then allow back only the two documents that let the
+# corpus be rebuilt.
+*
+!.gitignore
+!README.md
+!TEST_RESULTS.md
