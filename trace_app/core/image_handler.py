@@ -610,6 +610,28 @@ class ImageHandler:
                 partitions.append((partition.addr, partition.desc, partition.start, partition.len))
         return partitions
 
+    #: Root inode to fall back on when a filesystem will not say. 5 is NTFS's,
+    #: which is the common case here; FAT uses 2 and ext uses 2 as well, so a
+    #: wrong guess shows an empty volume rather than an error.
+    DEFAULT_ROOT_INODE = 5
+
+    def get_root_inode(self, start_offset):
+        """The root directory's inode for the volume at `start_offset`.
+
+        Every filesystem numbers this differently -- NTFS 5, FAT 2, ext 2 --
+        and TSK reports the right one. It was hardcoded to 5 throughout, so
+        browsing a FAT volume asked for inode 5, got nothing back and showed
+        the volume as empty.
+        """
+        fs_info = self.get_fs_info(start_offset)
+        if fs_info is None:
+            return self.DEFAULT_ROOT_INODE
+        try:
+            root = int(fs_info.info.root_inum)
+        except Exception:
+            return self.DEFAULT_ROOT_INODE
+        return root if root >= 0 else self.DEFAULT_ROOT_INODE
+
     @lru_cache(maxsize=32)
     def get_fs_info(self, start_offset):
         """Retrieve the FS_Info for a partition, initializing it if necessary."""

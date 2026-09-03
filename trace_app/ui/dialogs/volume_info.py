@@ -520,8 +520,14 @@ class VolumeInfoMixin:
         labels = []
         traces = []
 
-        for partition in handler.get_partitions():
-            start = partition[2]
+        # An unpartitioned image -- a formatted USB stick or camera card, which
+        # is most of what this section exists for -- has no partition list, so
+        # its single filesystem sits at offset 0.
+        starts = [p[2] for p in handler.get_partitions()]
+        if not starts:
+            starts = [0]
+
+        for start in starts:
             fs_type = handler.get_fs_type(start)
             if not fs_type or fs_type == 'N/A':
                 continue

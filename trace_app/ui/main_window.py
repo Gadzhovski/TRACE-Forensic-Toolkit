@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy)
 
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
@@ -1595,9 +1596,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 not data.get("type") and
                 not data.get("inode_number") and
                 not data.get("is_unallocated")):
-                # This is the root disk image - display all volumes/partitions
-                self.display_volumes_in_listing()
-                self.result_viewer.setCurrentIndex(self.LISTING_TAB)
+                # The image itself. A partitioned disk lists its volumes; an
+                # image that is one bare filesystem -- a formatted USB stick,
+                # a camera card, most small exhibits -- has no partition table
+                # to list, so its root directory is what to show. Listing
+                # partitions there produced an empty table.
+                if self.image_handler.get_partitions():
+                    self.display_volumes_in_listing()
+                    self.result_viewer.setCurrentIndex(self.LISTING_TAB)
+                elif self.image_handler.has_filesystem(0):
+                    self.current_path = "/"
+                    root_inode = self.image_handler.get_root_inode(0)
+                    self.show_listing_entries(
+                        self.image_handler.get_directory_contents(0, root_inode),
+                        0, "This image")
                 self.clear_status()
                 return
 
@@ -1626,7 +1638,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
                 # Update current path for directory navigation
                 if data.get("name"):
-                    if data.get("inode_number") == 5:  # Root directory
+                    if data.get("inode_number") == self.image_handler.get_root_inode(
+                            data["start_offset"]):
                         self.current_path = "/"
                     else:
                         # If it's a regular directory, update the path
@@ -1668,7 +1681,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 if "type" not in data:
                     data["type"] = "volume"
                 if "inode_number" not in data:
-                    data["inode_number"] = 5
+                    data["inode_number"] = self.image_handler.get_root_inode(
+                        data["start_offset"])
 
                 if not self.show_listing_entries(entries, data["start_offset"],
                                                  data.get("name") or "This volume"):
@@ -1698,8 +1712,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             inode_number = self.current_selected_data.get("inode_number")
             start_offset = self.current_selected_data.get("start_offset")
 
-            # Check if this is root directory (inode 5 in NTFS)
-            is_root = inode_number == 5
+            # At the volume root there is nowhere to go up to. Which inode
+            # that is depends on the filesystem, so ask rather than assume.
+            is_root = (start_offset is not None
+                       and inode_number == self.image_handler.get_root_inode(start_offset))
 
             # If parent_inode isn't set yet, try to find it
             if "parent_inode" not in self.current_selected_data and not is_root and inode_number is not None:
@@ -1716,8 +1732,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def find_parent_inode(self, start_offset, inode_number):
         """Helper method to find the parent inode for a directory from tree view"""
         try:
-            # Root directory (5 is typically root in NTFS) has no parent
-            if inode_number == 5:
+            # The volume root has no parent.
+            if inode_number == self.image_handler.get_root_inode(start_offset):
                 return None
 
             # Get directory entries for the directory
@@ -1897,8 +1913,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             start_offset = history_entry.get("start_offset")
 
             if history_entry.get("type") == "volume":
-                # For volumes, get root directory (inode 5)
-                entries = self.image_handler.get_directory_contents(start_offset, 5)
+                # For volumes, list the root directory.
+                entries = self.image_handler.get_directory_contents(
+                    start_offset, self.image_handler.get_root_inode(start_offset))
             else:
                 # For regular directories, use stored inode
                 entries = self.image_handler.get_directory_contents(start_offset, inode_number)
@@ -2154,6 +2171,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # Re-enable updates and sorting
             self.listing_table.setUpdatesEnabled(True)
             self.listing_table.setSortingEnabled(True)
+            self._fit_listing_columns()
+
+    #: Widest a listing column may grow when fitted. Path and Attributes hold
+    #: strings long enough to push the timestamps off screen, so they elide
+    #: with a tooltip rather than setting the table's width.
+    _LISTING_COLUMN_CAPS = {8: 420, 11: 320}
+
+    def _fit_listing_columns(self):
+        """Size the listing's columns to what the current directory holds.
+
+        The fixed widths this replaces were chosen before any directory was
+        read, so Inode reserved 50px for a four-digit number while Type was too
+        narrow for "Deleted Dir".
+        """
+        try:
+            fit_columns(self.listing_table, self._LISTING_COLUMN_CAPS)
+        except Exception as e:
+            logger.debug("Could not fit the listing columns: %s", e)
 
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
                                       created, accessed, modified, changed, parent_inode=None,
@@ -2857,7 +2892,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             path_parts = file_path.split('/')
             if len(path_parts) < 2:
                 # File is in root
-                parent_inode = 5
+                parent_inode = self.image_handler.get_root_inode(start_offset)
                 self.current_path = "/"
             else:
                 # Need to navigate to parent directory
@@ -2931,8 +2966,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Reset path to root of this volume
                 self.current_path = "/"
 
-                # Get root directory contents of the volume (inode 5 is typically root for NTFS)
-                entries = self.image_handler.get_directory_contents(start_offset, 5)
+                # List the volume's root directory, whichever inode that is.
+                entries = self.image_handler.get_directory_contents(
+                    start_offset, self.image_handler.get_root_inode(start_offset))
 
                 # Update directory up button - should be disabled since we're at volume root
                 self.update_directory_up_button()
@@ -2960,7 +2996,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.current_path = os.path.dirname(self.current_path)
                     if self.current_path == "":
                         self.current_path = "/"
-                elif data.get("inode_number") == 5:  # Root directory
+                elif data.get("inode_number") == self.image_handler.get_root_inode(
+                        data["start_offset"]):
                     self.current_path = "/"
                 else:
                     # Navigate into directory

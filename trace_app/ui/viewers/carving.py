@@ -29,6 +29,7 @@ from trace_app.infra.constants import (CARVE_OVERLAP, CHUNK_SIZE,
                                        PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
 from trace_app.ui.widgets.multi_select import MultiSelectButton
+from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.dialogs import message
 
@@ -99,7 +100,9 @@ class FileCarvingWidget(QWidget):
         self.toolbar.addWidget(self.spacer)
 
         self.table_widget = self.create_table_widget()
-        self.table_widget.resizeEvent = self.handle_resize_event
+        # Column widths come from the content once a scan finishes; the
+        # resize handler that used to split the width between Name and File
+        # Path fought that on every resize.
 
         self.list_widget = self.create_list_widget()
 
@@ -921,6 +924,21 @@ class FileCarvingWidget(QWidget):
         finally:
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
+            # Fitted once the scan is over rather than per recovered file: the
+            # table grows a row at a time and re-measuring on each would cost
+            # far more than doing it once at the end.
+            self._fit_carved_columns()
+
+    #: Widest a carving column may grow. File Path holds a full path, which
+    #: would otherwise set the table's width on its own.
+    _CARVED_COLUMN_CAPS = {5: 420}
+
+    def _fit_carved_columns(self):
+        """Size the recovered-files columns to what was actually found."""
+        try:
+            fit_columns(self.table_widget, self._CARVED_COLUMN_CAPS)
+        except Exception as e:
+            logger.debug("Could not fit the carving columns: %s", e)
 
     @staticmethod
     def render_pdf_thumbnail(pdf_path, thumbnail_folder, name):
@@ -1056,21 +1074,3 @@ class FileCarvingWidget(QWidget):
         self.table_widget.setRowCount(0)
         self.list_widget.clear()
 
-    def handle_resize_event(self, event):
-        # Calculate total width of the table
-        total_width = self.table_widget.width()
-
-        # Fixed columns: Id, Size, Type, Modification Date
-        fixed_width = (self.table_widget.columnWidth(0) +  # Id
-                       self.table_widget.columnWidth(2) +  # Size
-                       self.table_widget.columnWidth(3) +  # Type
-                       self.table_widget.columnWidth(4))  # Modification Date
-
-        # Remaining space for dynamic columns
-        remaining_width = total_width - fixed_width
-
-        # Allocate remaining space proportionally
-        self.table_widget.setColumnWidth(1, remaining_width // 2)  # Name column
-        self.table_widget.setColumnWidth(5, remaining_width // 2)  # File Path column
-
-        super(QTableWidget, self.table_widget).resizeEvent(event)
