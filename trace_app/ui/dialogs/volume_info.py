@@ -1,4 +1,3 @@
-from trace_app.infra.constants import BUTTON_WIDTH, TABLE_ICON_SIZE
 """Volume and image information view.
 
 The "View Image Information" dialog: per-partition tables, filesystem details,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushB
                                QScrollArea, QSizePolicy, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
+from trace_app.infra.constants import BUTTON_WIDTH, TABLE_ICON_SIZE
 from trace_app.infra.utils import FileSystemUtils
 
 logger = logging.getLogger('TRACE.VolumeInfo')
@@ -102,6 +102,18 @@ class VolumeInfoMixin:
         for field in key_fields:
             if field in image_info:
                 add_row(field, image_info[field])
+
+        # Installed system, from whichever volume carries one. It is the first
+        # thing an examiner wants to know about an image and would otherwise be
+        # buried in a column of the table below, off the right edge.
+        installed = self._installed_system_summary()
+        if installed:
+            heading = QLabel("Installed System")
+            heading.setObjectName("volumeInfoSectionHeading")
+            summary_layout.addSpacing(10)
+            summary_layout.addWidget(heading)
+            for field, text in installed.items():
+                add_row(field, text)
 
         # Acquisition record. An E01 carries the case and evidence numbers, the
         # examiner, the date and the tool that wrote it -- the provenance of
@@ -219,16 +231,16 @@ class VolumeInfoMixin:
         volume_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         # Set column count and headers
-        volume_table.setColumnCount(11)
+        volume_table.setColumnCount(14)
         volume_table.setHorizontalHeaderLabels([
             'Volume', 'Filesystem', 'Offset (Sectors)', 'Block Size', 'Volume Size',
             'Total Blocks', 'First Block', 'Last Block', 'Inode Count', 'Root Inode',
-            'Volume Serial'
+            'Volume Serial', 'Operating System', 'Time Zone', 'Computer Name'
         ])
 
         # Configure header - all columns use Interactive mode for horizontal scrolling
         header = volume_table.horizontalHeader()
-        for i in range(11):
+        for i in range(14):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
 
         # Set column widths
@@ -243,6 +255,9 @@ class VolumeInfoMixin:
         volume_table.setColumnWidth(8, 120)   # Inode Count
         volume_table.setColumnWidth(9, 100)   # Root Inode
         volume_table.setColumnWidth(10, 170)  # Volume Serial
+        volume_table.setColumnWidth(11, 180)  # Operating System
+        volume_table.setColumnWidth(12, 170)  # Time Zone
+        volume_table.setColumnWidth(13, 150)  # Computer Name
 
         # Set header alignment
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -363,6 +378,23 @@ class VolumeInfoMixin:
             serial = all_info.get("Volume Serial", "N/A")
             table.setItem(idx, 10, QTableWidgetItem(serial))
 
+            # Columns 11-13: what the registry says about the installation on
+            # this volume. Blank on a data volume, which has no registry.
+            operating_system = all_info.get("Operating System", "")
+            build = all_info.get("Build", "")
+            if operating_system and build:
+                operating_system = f"{operating_system} (build {build})"
+            table.setItem(idx, 11, QTableWidgetItem(operating_system or "N/A"))
+
+            time_zone = all_info.get("Time Zone", "")
+            offset_text = all_info.get("UTC Offset", "")
+            if time_zone and offset_text:
+                time_zone = f"{time_zone} ({offset_text})"
+            table.setItem(idx, 12, QTableWidgetItem(time_zone or offset_text or "N/A"))
+
+            table.setItem(idx, 13,
+                          QTableWidgetItem(all_info.get("Computer Name", "N/A")))
+
         table.setSortingEnabled(True)  # Re-enable sorting after populating
 
     def _extract_comprehensive_volume_info(self, start_offset):
@@ -434,6 +466,23 @@ class VolumeInfoMixin:
             info["basic"]["Error"] = str(e)
 
         return info
+
+    def _installed_system_summary(self):
+        """OS details from the first volume that carries an installation.
+
+        An image usually holds one system volume among several partitions, so
+        the overview reports that one rather than making the reader find which
+        row of the table it is.
+        """
+        for partition in self.image_handler.get_partitions():
+            try:
+                info = self.image_handler.get_os_info(partition[2])
+            except Exception as e:
+                logger.debug("Could not read OS info at %s: %s", partition[2], e)
+                continue
+            if info.get("Operating System"):
+                return info
+        return {}
 
     @staticmethod
     def _format_volume_serial(fs_info_struct):
