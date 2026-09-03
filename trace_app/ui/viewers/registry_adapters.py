@@ -168,6 +168,13 @@ class NotesAdapter(ViewerAdapter):
         return False
 
 
+class ArchiveAdapter(ViewerAdapter):
+    label = 'Archive'
+
+    def display(self, content, data):
+        self.widget.display_archive(content, data)
+
+
 #: Adapter classes in tab order. Adding a viewer means adding one entry here
 #: and constructing the widget in MainWindow -- no index arithmetic anywhere.
 VIEWER_ADAPTERS = (
@@ -179,4 +186,5 @@ VIEWER_ADAPTERS = (
     VirusTotalAdapter,
     CaseAdapter,
     NotesAdapter,
+    ArchiveAdapter,
 )

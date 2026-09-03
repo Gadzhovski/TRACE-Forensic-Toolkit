@@ -46,7 +46,8 @@ from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
 from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, ExifAdapter, HexAdapter,
-                                     CaseAdapter, MetadataAdapter, NotesAdapter,
+                                     ArchiveAdapter, CaseAdapter, MetadataAdapter,
+                                     NotesAdapter,
                                      TextAdapter,
                                      VirusTotalAdapter)
 from trace_app.ui.viewers.virustotal import VirusTotal
@@ -54,6 +55,7 @@ from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
 from trace_app.core.workers import ExportWorker
 from trace_app.ui.dialogs import message
 from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
+from trace_app.ui.viewers.archive_viewer import ArchiveViewer
 from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
 
@@ -849,6 +851,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.notes_panel = NotesPanel()
         self.notes_panel.set_case(self.case)
 
+        self.archive_viewer = ArchiveViewer()
+        self.archive_viewer.member_opened.connect(self.open_archive_member)
+
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
@@ -858,6 +863,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             VirusTotalAdapter(self.virus_total_api),
             CaseAdapter(self.case_panel),
             NotesAdapter(self.notes_panel),
+            ArchiveAdapter(self.archive_viewer),
         ]
         for adapter in self.viewer_adapters:
             self.viewer_tab.addTab(adapter.widget, adapter.label)
@@ -1235,6 +1241,26 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             row_id = self.case.add_evidence(self.current_image_path)
             return row_id
         return row['id']
+
+    def open_archive_member(self, name, content):
+        """Show a file that came out of an archive in the ordinary viewers.
+
+        The member has no inode of its own -- it exists only inside the
+        archive -- so the payload says so rather than inventing a location
+        that would resolve to something else entirely.
+        """
+        data = {
+            'name': name,
+            'type': 'file',
+            'size': len(content),
+            'path': name,
+            'inode_number': None,
+            'start_offset': self.current_offset,
+            'from_archive': True,
+        }
+        self.current_selected_data = data
+        self.update_viewer_with_file_content(content, data)
+        self.set_status(f"{name} — read from inside an archive")
 
     def annotate_with_case_identity(self, data):
         """Add the case's view of an artifact to a selection payload.

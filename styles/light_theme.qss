@@ -946,6 +946,25 @@ QLabel#aboutMetaQuiet {
     padding-top: 6px;
 }
 
+/* ============ Archives ============ */
+
+QLabel#archiveTrail {
+    font-size: 12px;
+    font-weight: 600;
+    color: #5f6368;
+}
+
+QLabel#archiveSummary {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+QTableWidget#archiveTable {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D0D0;
+}
+
 /* ============ Notes ============ */
 
 QLabel#notesScope {
