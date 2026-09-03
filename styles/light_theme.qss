@@ -616,8 +616,18 @@ QWidget#volumeInfoCard {
     border: 1px solid #dee2e6;
 }
 
+/* Rows and legend entries inside the information cards. They set no
+   background of their own, so the global QWidget rule painted each one a
+   panel colour -- a visible block behind every line of text, sitting on top
+   of the card it was meant to be part of. Transparent, so the card shows
+   through. */
 QWidget#volumeInfoRow {
+    background-color: transparent;
     border: none;
+}
+
+QWidget#volumeInfoCard QLabel {
+    background-color: transparent;
 }
 
 QLabel#volumeInfoTitle {

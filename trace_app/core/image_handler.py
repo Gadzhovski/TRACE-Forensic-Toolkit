@@ -10,6 +10,7 @@ import queue
 import threading
 import logging
 import os
+import re
 import time
 from functools import lru_cache
 
@@ -866,32 +867,141 @@ class ImageHandler:
                 return "Error in parsing OS version"
 
     def get_os_info(self, start_offset):
-        """Operating system and timezone for the volume at `start_offset`.
+        """Operating system details for the volume at `start_offset`.
 
-        Both come from the registry, which is where Windows records them: the
-        version from SOFTWARE, the timezone from SYSTEM's CurrentControlSet.
-        The timezone matters more than it looks -- every NTFS timestamp is
-        stored in UTC, so knowing the machine's offset is what turns those into
-        the local times a user would have seen.
+        Windows is read from the registry -- the version from SOFTWARE, the
+        timezone from SYSTEM. The timezone matters more than it looks: NTFS
+        stores every timestamp in UTC, so the machine's offset is what turns
+        those into the local times a user would have seen.
 
-        Returns {} for a volume with no Windows installation, which includes
-        every data volume; there is nothing to report there rather than an
-        error.
+        Linux and macOS keep the same information in files rather than a
+        registry, so those are read too; an image of either was previously
+        reported as having no operating system at all.
+
+        Returns {} for a volume with no installation, which includes every data
+        volume; there is nothing to report there rather than an error.
         """
-        # Cached: reading both hives costs the better part of a second, and
-        # the volume table asks once per partition every time it is drawn.
+        # Cached: reading the hives or release files costs real time, and the
+        # volume table asks once per partition every time it is drawn.
         if start_offset in self._os_info_cache:
             return self._os_info_cache[start_offset]
 
         info = {}
-        if self.get_fs_type(start_offset) == "NTFS":
-            fs_info = self.get_fs_info(start_offset)
-            if fs_info:
+        fs_type = self.get_fs_type(start_offset)
+        fs_info = self.get_fs_info(start_offset)
+
+        if fs_info:
+            if fs_type == "NTFS":
                 info.update(self._read_software_hive(fs_info))
                 info.update(self._read_system_hive(fs_info))
+            else:
+                info.update(self._read_unix_os(fs_info))
 
         self._os_info_cache[start_offset] = info
         return info
+
+    #: Files that name the operating system on a non-Windows volume, with how
+    #: to read each one. Ordered so the most specific wins.
+    _UNIX_MARKERS = (
+        ('/etc/os-release', 'os_release'),
+        ('/usr/lib/os-release', 'os_release'),
+        ('/System/Library/CoreServices/SystemVersion.plist', 'plist'),
+        ('/etc/lsb-release', 'os_release'),
+        ('/etc/redhat-release', 'plain'),
+        ('/etc/debian_version', 'debian'),
+    )
+
+    def _read_unix_os(self, fs_info):
+        """Operating system details from a Linux or macOS volume.
+
+        Neither keeps this in a registry: Linux writes /etc/os-release, macOS a
+        SystemVersion.plist. Reading them means an image of either is described
+        rather than coming back blank, which is what happened while only the
+        Windows registry was consulted.
+        """
+        for path, kind in self._UNIX_MARKERS:
+            try:
+                handle = fs_info.open(path)
+                raw = handle.read_random(0, min(handle.info.meta.size, 65536))
+            except Exception:
+                continue
+            if not raw:
+                continue
+
+            text = raw.decode('utf-8', errors='replace')
+            try:
+                if kind == 'os_release':
+                    fields = self._parse_os_release(text)
+                elif kind == 'plist':
+                    fields = self._parse_system_version(text)
+                elif kind == 'debian':
+                    fields = {'Operating System': 'Debian ' + text.strip()}
+                else:
+                    fields = {'Operating System': text.strip().splitlines()[0]}
+            except Exception as e:
+                logger.debug("Could not parse %s: %s", path, e)
+                continue
+
+            if fields:
+                fields.update(self._read_unix_details(fs_info))
+                return fields
+        return {}
+
+    @staticmethod
+    def _parse_os_release(text):
+        """PRETTY_NAME / NAME / VERSION out of an os-release file."""
+        values = {}
+        for line in text.splitlines():
+            if '=' not in line or line.lstrip().startswith('#'):
+                continue
+            key, _, value = line.partition('=')
+            values[key.strip()] = value.strip().strip(chr(34) + chr(39))
+
+        name = values.get('PRETTY_NAME') or values.get('DISTRIB_DESCRIPTION')
+        if not name:
+            name = values.get('NAME') or values.get('DISTRIB_ID')
+            version = values.get('VERSION') or values.get('DISTRIB_RELEASE')
+            if name and version:
+                name = name + ' ' + version
+        if not name:
+            return {}
+
+        fields = {'Operating System': name}
+        if values.get('VERSION_ID'):
+            fields['Release'] = values['VERSION_ID']
+        if values.get('BUILD_ID'):
+            fields['Build'] = values['BUILD_ID']
+        return fields
+
+    @staticmethod
+    def _parse_system_version(text):
+        """ProductName and version out of macOS's SystemVersion.plist."""
+        pairs = re.findall(r'<key>(.*?)</key>\s*<string>(.*?)</string>', text, re.DOTALL)
+        values = {key.strip(): value.strip() for key, value in pairs}
+        name = values.get('ProductName')
+        if not name:
+            return {}
+        version = (values.get('ProductUserVisibleVersion')
+                   or values.get('ProductVersion') or '')
+        fields = {'Operating System': (name + ' ' + version).strip()}
+        if values.get('ProductBuildVersion'):
+            fields['Build'] = values['ProductBuildVersion']
+        return fields
+
+    def _read_unix_details(self, fs_info):
+        """Hostname and timezone, where the volume records them."""
+        fields = {}
+        for path, label in (('/etc/hostname', 'Computer Name'),
+                            ('/etc/timezone', 'Time Zone')):
+            try:
+                handle = fs_info.open(path)
+                raw = handle.read_random(0, min(handle.info.meta.size, 4096))
+                value = raw.decode('utf-8', errors='replace').strip()
+                if value:
+                    fields[label] = value.splitlines()[0]
+            except Exception:
+                continue
+        return fields
 
     def _read_software_hive(self, fs_info):
         """Windows version details from SOFTWARE."""

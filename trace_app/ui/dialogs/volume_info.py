@@ -17,7 +17,7 @@ import os
 import pytsk3
 from PySide6.QtCharts import QChart, QChartView, QPieSeries
 from PySide6.QtCore import Qt, QMargins, QSize
-from PySide6.QtGui import QBrush, QColor, QIcon, QPainter
+from PySide6.QtGui import QBrush, QColor, QFontMetrics, QIcon, QPainter
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
                                QScrollArea, QSizePolicy, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
@@ -106,13 +106,27 @@ class VolumeInfoMixin:
         # Installed system, from whichever volume carries one. It is the first
         # thing an examiner wants to know about an image and would otherwise be
         # buried in a column of the table below, off the right edge.
-        installed = self._installed_system_summary()
-        if installed:
-            heading = QLabel("Installed System")
+        systems = self._installed_systems()
+        for index, (start_offset, installed) in enumerate(systems):
+            # Name the volume when a disk carries more than one system, so a
+            # dual-boot image says which partition each belongs to.
+            title = "Installed System"
+            if len(systems) > 1:
+                title = f"Installed System {index + 1}  (sector {start_offset:,})"
+            heading = QLabel(title)
             heading.setObjectName("volumeInfoSectionHeading")
             summary_layout.addSpacing(10)
             summary_layout.addWidget(heading)
             for field, text in installed.items():
+                add_row(field, text)
+
+        # Nothing installed: say so, and describe what the media is instead.
+        if not systems:
+            heading = QLabel("Storage Media")
+            heading.setObjectName("volumeInfoSectionHeading")
+            summary_layout.addSpacing(10)
+            summary_layout.addWidget(heading)
+            for field, text in self._media_summary().items():
                 add_row(field, text)
 
         # Acquisition record. An E01 carries the case and evidence numbers, the
@@ -243,21 +257,9 @@ class VolumeInfoMixin:
         for i in range(14):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
 
-        # Set column widths
-        volume_table.setColumnWidth(0, 100)   # Volume
-        volume_table.setColumnWidth(1, 120)   # Filesystem
-        volume_table.setColumnWidth(2, 140)   # Offset
-        volume_table.setColumnWidth(3, 100)   # Block Size
-        volume_table.setColumnWidth(4, 120)   # Volume Size
-        volume_table.setColumnWidth(5, 120)   # Total Blocks
-        volume_table.setColumnWidth(6, 120)   # First Block
-        volume_table.setColumnWidth(7, 120)   # Last Block
-        volume_table.setColumnWidth(8, 120)   # Inode Count
-        volume_table.setColumnWidth(9, 100)   # Root Inode
-        volume_table.setColumnWidth(10, 170)  # Volume Serial
-        volume_table.setColumnWidth(11, 180)  # Operating System
-        volume_table.setColumnWidth(12, 170)  # Time Zone
-        volume_table.setColumnWidth(13, 150)  # Computer Name
+        # Widths are set from the content once the rows exist -- see
+        # _fit_volume_columns. Guessing them here meant anything longer than
+        # the guess was elided and had to be dragged wider by hand.
 
         # Set header alignment
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -396,6 +398,24 @@ class VolumeInfoMixin:
                           QTableWidgetItem(all_info.get("Computer Name", "N/A")))
 
         table.setSortingEnabled(True)  # Re-enable sorting after populating
+        self._fit_volume_columns(table)
+
+    @staticmethod
+    def _fit_volume_columns(table):
+        """Widen every column to its longest cell, header included.
+
+        resizeColumnsToContents measures the cells but leaves the last column
+        to absorb the slack, and it can size a column narrower than its own
+        header, so the width is taken as the larger of the two and the last
+        column is left as measured rather than stretched.
+        """
+        table.resizeColumnsToContents()
+        header = table.horizontalHeader()
+        metrics = QFontMetrics(header.font())
+        for column in range(table.columnCount()):
+            heading = table.horizontalHeaderItem(column)
+            needed = metrics.horizontalAdvance(heading.text()) + 24 if heading else 0
+            table.setColumnWidth(column, max(table.columnWidth(column), needed))
 
     def _extract_comprehensive_volume_info(self, start_offset):
         """Extract basic pytsk3 information from a volume."""
@@ -467,22 +487,115 @@ class VolumeInfoMixin:
 
         return info
 
-    def _installed_system_summary(self):
-        """OS details from the first volume that carries an installation.
+    #: Directories that say what a device was, when it holds no OS. Phones,
+    #: cameras and music players all leave a recognisable top-level layout.
+    _MEDIA_SIGNATURES = (
+        ('/DCIM', 'Camera or phone storage (DCIM present)'),
+        ('/PRIVATE/AVCHD', 'Camcorder storage (AVCHD)'),
+        ('/Android', 'Android device storage'),
+        ('/MP_ROOT', 'Camera storage (Sony MP_ROOT)'),
+        ('/System Volume Information', None),
+        ('/$RECYCLE.BIN', 'Attached to a Windows machine (Recycle Bin present)'),
+        ('/.Trashes', 'Attached to a macOS machine (.Trashes present)'),
+        ('/.Spotlight-V100', 'Indexed by macOS Spotlight'),
+        ('/GARMIN', 'Garmin device storage'),
+        ('/GRMN', 'Garmin device storage'),
+        ('/APPLE', 'Apple device storage'),
+    )
 
-        An image usually holds one system volume among several partitions, so
-        the overview reports that one rather than making the reader find which
-        row of the table it is.
+    def _media_summary(self):
+        """Describe an image with no operating system on it.
+
+        A flash drive, camera card or watch backup is still worth describing:
+        what the volumes are, how they are formatted, how full they are, and
+        any top-level directory that says what wrote them. Without this the
+        dialog simply had nothing to say about the majority of small exhibits.
         """
+        summary = {}
+        handler = self.image_handler
+        if handler is None:
+            return summary
+
+        filesystems = []
+        labels = []
+        traces = []
+
+        for partition in handler.get_partitions():
+            start = partition[2]
+            fs_type = handler.get_fs_type(start)
+            if not fs_type or fs_type == 'N/A':
+                continue
+            if fs_type not in filesystems:
+                filesystems.append(fs_type)
+
+            fs_info = handler.get_fs_info(start)
+            if fs_info is None:
+                continue
+
+            used = self._volume_usage(fs_info)
+            if used:
+                labels.append(f"{fs_type} at sector {start:,}: {used}")
+
+            for path, description in self._MEDIA_SIGNATURES:
+                if description is None:
+                    continue
+                try:
+                    fs_info.open(path)
+                except Exception:
+                    continue
+                if description not in traces:
+                    traces.append(description)
+
+        if filesystems:
+            summary['Filesystems'] = ', '.join(filesystems)
+        else:
+            summary['Filesystems'] = 'None recognised'
+
+        if labels:
+            summary['Usage'] = '   ·   '.join(labels)
+
+        if traces:
+            summary['Indications'] = '; '.join(traces)
+        else:
+            summary['Indications'] = 'No device-specific directories found'
+
+        return summary
+
+    @staticmethod
+    def _volume_usage(fs_info):
+        """How much of a volume is in use, from its own block accounting."""
+        try:
+            block_size = fs_info.info.block_size
+            total = fs_info.info.block_count * block_size
+        except Exception:
+            return ''
+        if total <= 0:
+            return ''
+        return FileSystemUtils.get_readable_size(total) + ' formatted'
+
+    def _installed_systems(self):
+        """Every volume that carries an operating system, in partition order.
+
+        Returned as a list rather than the first match: a dual-boot disk holds
+        more than one, and reporting only the first would hide the rest --
+        exactly the volumes an examiner most wants to know about.
+        """
+        found = []
         for partition in self.image_handler.get_partitions():
+            start = partition[2]
             try:
-                info = self.image_handler.get_os_info(partition[2])
+                info = self.image_handler.get_os_info(start)
             except Exception as e:
-                logger.debug("Could not read OS info at %s: %s", partition[2], e)
+                logger.debug("Could not read OS info at %s: %s", start, e)
                 continue
             if info.get("Operating System"):
-                return info
-        return {}
+                found.append((start, info))
+        return found
+
+    def _installed_system_summary(self):
+        """The first installed system, kept for callers wanting just one."""
+        systems = self._installed_systems()
+        return systems[0][1] if systems else {}
 
     @staticmethod
     def _format_volume_serial(fs_info_struct):
