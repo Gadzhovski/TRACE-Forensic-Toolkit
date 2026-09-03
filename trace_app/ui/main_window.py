@@ -244,6 +244,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._build_toolbar()
         self._build_central_widgets()
         self._build_viewer_dock()
+        self._quieten_table_headers()
+
+    def _quieten_table_headers(self):
+        """Stop headers bolding the column of the selected cell.
+
+        Qt highlights the header section above whatever is selected, which
+        makes a column heading turn bold as soon as a row is clicked. It reads
+        as the heading changing meaning, and the selection already shows where
+        the cursor is. Applied to every table in the window at once, so a table
+        added later is covered without anyone remembering.
+        """
+        for table in self.findChildren(QTableWidget):
+            table.horizontalHeader().setHighlightSections(False)
+            table.verticalHeader().setHighlightSections(False)
 
     def showEvent(self, event):
         """Apply the default dock proportions once, on first show."""
