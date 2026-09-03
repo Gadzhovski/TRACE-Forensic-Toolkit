@@ -26,6 +26,7 @@ import datetime
 import hashlib
 import logging
 import os
+import re
 import sqlite3
 
 logger = logging.getLogger('TRACE.Case')
@@ -42,7 +43,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -50,6 +51,96 @@ STATUS_VERIFIED = 'verified'    # present and matching its recorded hash
 STATUS_MISSING = 'missing'      # the file is not where the case says it is
 STATUS_CHANGED = 'changed'      # present, but no longer the same bytes
 STATUS_UNHASHED = 'unhashed'    # present, but nothing to compare against
+
+
+# --- artifact references --------------------------------------------------
+#
+# Notes, bookmarks and tags all point at "some artifact inside some evidence".
+# That pointer has to survive a case being closed and reopened, and it has to
+# keep meaning the same file afterwards.
+#
+# Inode alone does not: a filesystem reuses inode numbers, and NTFS records the
+# reuse count in the MFT sequence -- image_handler.get_directory_contents
+# already reports it. Two files can share an inode over a volume's life, so a
+# reference without the sequence can silently come to mean a different file.
+# The partition offset is needed because inodes are only unique within a
+# filesystem, and one image holds several.
+
+#: A file inside a filesystem: partition offset, inode, and MFT sequence.
+_FILE_REF = re.compile(r'^p(\d+):i(\d+)(?::s(\d+))?$')
+
+#: A byte range in an image, used for hex selections and carved data.
+_SPAN_REF = re.compile(r'^p(\d+):x([0-9a-fA-F]+)-([0-9a-fA-F]+)$')
+
+#: A registry key or value, identified by hive and key path.
+_REGISTRY_REF = re.compile(r'^reg:([^:]+):(.*)$')
+
+
+def make_artifact_ref(start_offset, inode, sequence=None):
+    """A durable reference to a file within a piece of evidence.
+
+    `sequence` is the MFT record's reuse counter where the filesystem provides
+    one. Omitting it still produces a usable reference, but one that cannot
+    tell two generations of the same inode apart -- so pass it when it is
+    known.
+    """
+    ref = f"p{int(start_offset)}:i{int(inode)}"
+    if sequence is not None:
+        ref += f":s{int(sequence)}"
+    return ref
+
+
+def make_span_ref(start_offset, begin, end):
+    """A reference to a byte range -- a hex selection, or carved data."""
+    return f"p{int(start_offset)}:x{int(begin):x}-{int(end):x}"
+
+
+def make_registry_ref(hive, key_path):
+    """A reference to a registry key or value."""
+    return f"reg:{hive}:{key_path}"
+
+
+def parse_artifact_ref(ref):
+    """Take a reference apart. Returns a dict describing what it points at.
+
+    The `kind` key says which shape it is, so a caller can decide how to
+    resolve it. An unrecognised reference returns kind 'unknown' rather than
+    raising: a case written by a later version of TRACE should still open, with
+    the references it does understand still working.
+    """
+    if not ref:
+        return {'kind': 'unknown', 'ref': ref}
+
+    match = _FILE_REF.match(ref)
+    if match:
+        return {
+            'kind': 'file',
+            'start_offset': int(match.group(1)),
+            'inode': int(match.group(2)),
+            'sequence': int(match.group(3)) if match.group(3) else None,
+            'ref': ref,
+        }
+
+    match = _SPAN_REF.match(ref)
+    if match:
+        return {
+            'kind': 'span',
+            'start_offset': int(match.group(1)),
+            'begin': int(match.group(2), 16),
+            'end': int(match.group(3), 16),
+            'ref': ref,
+        }
+
+    match = _REGISTRY_REF.match(ref)
+    if match:
+        return {
+            'kind': 'registry',
+            'hive': match.group(1),
+            'key_path': match.group(2),
+            'ref': ref,
+        }
+
+    return {'kind': 'unknown', 'ref': ref}
 
 
 class CaseError(Exception):
@@ -298,6 +389,13 @@ class Case:
              results.get('stored_sha1'), _utc_now(), STATUS_VERIFIED,
              evidence_id))
         self._db.commit()
+        # The history is the record: a hash written now does not replace the
+        # fact that one was written before.
+        self.record_verification(
+            evidence_id, 'md5',
+            results.get('stored_md5') or '',
+            results.get('computed_md5') or '',
+            STATUS_VERIFIED, 'Hashes computed and recorded.')
         self._record_activity(
             'evidence hashed',
             f"id={evidence_id} md5={results.get('computed_md5') or '-'}")
@@ -318,14 +416,17 @@ class Case:
             path = row['path']
 
             if not os.path.exists(path):
-                self._set_status(row['id'], STATUS_MISSING)
+                self._note_check(row['id'], '', '', '', STATUS_MISSING,
+                                 'The file is not at its recorded location.')
                 outcomes.append((row, STATUS_MISSING,
                                  'The file is not at its recorded location.'))
                 continue
 
             expected = row['md5'] or row['sha1'] or row['sha256']
             if not expected:
-                self._set_status(row['id'], STATUS_UNHASHED)
+                self._note_check(row['id'], '', '', '', STATUS_UNHASHED,
+                                 'No hash was recorded, so nothing can be '
+                                 'compared.')
                 outcomes.append((row, STATUS_UNHASHED,
                                  'No hash was recorded, so nothing can be '
                                  'compared.'))
@@ -335,12 +436,17 @@ class Case:
             try:
                 size = os.path.getsize(path)
             except OSError as exc:
-                self._set_status(row['id'], STATUS_MISSING)
+                self._note_check(row['id'], '', '', '', STATUS_MISSING,
+                                 str(exc))
                 outcomes.append((row, STATUS_MISSING, str(exc)))
                 continue
 
             if row['size'] is not None and size != row['size']:
-                self._set_status(row['id'], STATUS_CHANGED)
+                self._note_check(
+                    row['id'], 'size', str(row['size']), str(size),
+                    STATUS_CHANGED,
+                    f"The file is {size:,} bytes; the case recorded "
+                    f"{row['size']:,}.")
                 outcomes.append((
                     row, STATUS_CHANGED,
                     f"The file is {size:,} bytes; the case recorded "
@@ -351,15 +457,22 @@ class Case:
                          'sha1' if row['sha1'] else 'sha256')
             digest = _hash_file(path, algorithm, progress)
             if digest is None:
-                self._set_status(row['id'], STATUS_MISSING)
+                self._note_check(row['id'], algorithm, str(expected), '',
+                                 STATUS_MISSING, 'The file could not be read.')
                 outcomes.append((row, STATUS_MISSING,
                                  'The file could not be read.'))
             elif digest.lower() == str(expected).lower():
-                self._set_status(row['id'], STATUS_VERIFIED)
+                self._note_check(row['id'], algorithm, str(expected), digest,
+                                 STATUS_VERIFIED,
+                                 f'{algorithm.upper()} matches.')
                 outcomes.append((row, STATUS_VERIFIED,
                                  f'{algorithm.upper()} matches.'))
             else:
-                self._set_status(row['id'], STATUS_CHANGED)
+                self._note_check(
+                    row['id'], algorithm, str(expected), digest,
+                    STATUS_CHANGED,
+                    f"{algorithm.upper()} is {digest}; the case recorded "
+                    f"{expected}.")
                 outcomes.append((
                     row, STATUS_CHANGED,
                     f"{algorithm.upper()} is {digest}; the case recorded "
@@ -367,11 +480,79 @@ class Case:
 
         return outcomes
 
+    def _note_check(self, evidence_id, algorithm, expected, computed, status,
+                    detail):
+        """Record one verification: its history row, its status, its audit line.
+
+        One method rather than three calls at seven sites, because a check that
+        updates the status but forgets the history leaves a case claiming
+        something it cannot show the working for -- and a re-verification that
+        finds evidence CHANGED previously left nothing in the audit trail at
+        all.
+        """
+        self.record_verification(evidence_id, algorithm, expected, computed,
+                                 status, detail)
+        self._set_status(evidence_id, status)
+        self._record_activity(f'evidence {status}', f'id={evidence_id} {detail}')
+
     def _set_status(self, evidence_id, status):
         self._db.execute(
             "UPDATE evidence SET last_status = ? WHERE id = ?",
             (status, evidence_id))
         self._db.commit()
+
+    # --- verification history --------------------------------------------
+
+    def record_verification(self, evidence_id, algorithm, expected, computed,
+                            status, detail=''):
+        """Append one verification result. Never updates in place.
+
+        Chain of custody is a history, not a current value: "this evidence
+        matched when it was added and again last Tuesday" is a different claim
+        from "this evidence matches", and only the first is defensible in a
+        report.
+        """
+        self._db.execute(
+            "INSERT INTO verifications (evidence_id, utc, algorithm, expected,"
+            " computed, status, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, _utc_now(), algorithm, expected, computed, status,
+             detail))
+        self._db.commit()
+
+    def verifications(self, evidence_id=None, limit=200):
+        """Verification history, newest first."""
+        if evidence_id is None:
+            rows = self._db.execute(
+                "SELECT * FROM verifications ORDER BY id DESC LIMIT ?",
+                (limit,)).fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM verifications WHERE evidence_id = ? "
+                "ORDER BY id DESC LIMIT ?", (evidence_id, limit)).fetchall()
+        return [dict(row) for row in rows]
+
+    # --- read-only status -------------------------------------------------
+
+    def set_evidence_readonly(self, evidence_id, read_only=True):
+        """Mark evidence as read-only, or release it.
+
+        TRACE never writes to evidence, so this records intent rather than
+        enforcing a filesystem permission -- but an examiner who has
+        deliberately released the flag has said so on the record.
+        """
+        self._db.execute(
+            "UPDATE evidence SET read_only = ? WHERE id = ?",
+            (1 if read_only else 0, evidence_id))
+        self._db.commit()
+        self._record_activity(
+            'evidence read-only set' if read_only else
+            'evidence read-only released', f'id={evidence_id}')
+
+    def is_readonly(self, evidence_id):
+        row = self._db.execute(
+            "SELECT read_only FROM evidence WHERE id = ?",
+            (evidence_id,)).fetchone()
+        return bool(row['read_only']) if row else True
 
     # --- audit ------------------------------------------------------------
 
@@ -425,7 +606,8 @@ class Case:
                 stored_sha1   TEXT,
                 added_utc     TEXT,
                 verified_utc  TEXT,
-                last_status   TEXT
+                last_status   TEXT,
+                read_only     INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS notes (
@@ -463,6 +645,17 @@ class Case:
                 PRIMARY KEY (tag_id, evidence_id, artifact_ref)
             );
 
+            CREATE TABLE IF NOT EXISTS verifications (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
+                utc           TEXT NOT NULL,
+                algorithm     TEXT,
+                expected      TEXT,
+                computed      TEXT,
+                status        TEXT NOT NULL,
+                detail        TEXT
+            );
+
             CREATE TABLE IF NOT EXISTS activity (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 utc           TEXT NOT NULL,
@@ -470,6 +663,8 @@ class Case:
                 detail        TEXT
             );
 
+            CREATE INDEX IF NOT EXISTS idx_verifications_evidence
+                ON verifications(evidence_id, id DESC);
             CREATE INDEX IF NOT EXISTS idx_notes_artifact
                 ON notes(evidence_id, artifact_ref);
             CREATE INDEX IF NOT EXISTS idx_bookmarks_artifact
@@ -480,10 +675,10 @@ class Case:
 
     def _migrate(self):
         """Bring an existing case up to the current schema version."""
-        # Tables the case predates are created unconditionally; CREATE TABLE IF
-        # NOT EXISTS makes this safe for a case at the current version too.
-        self._create_schema_tables_only()
-
+        # Read the version the case was written at BEFORE touching the schema.
+        # _create_schema stamps the current version, so asking afterwards would
+        # always report "already up to date" and every migration step would be
+        # skipped -- silently, on exactly the old cases that need them.
         try:
             version = int(self._get('schema_version', 0) or 0)
         except (TypeError, ValueError):
@@ -495,21 +690,26 @@ class Case:
                 f"(schema {version}; this build understands {SCHEMA_VERSION}). "
                 f"Opening it could lose data.")
 
-        # Future steps go here, each guarded by the version it upgrades from:
-        #   if version < 2:
-        #       self._db.execute("ALTER TABLE ...")
-        #       version = 2
+        # Tables the case predates are created unconditionally; CREATE TABLE IF
+        # NOT EXISTS makes this safe for a case at the current version too.
+        self._create_schema()
+
+        if version < 2:
+            # read_only arrived with the integrity work. Existing evidence
+            # defaults to read-only, which is the safe reading: a case written
+            # before the column existed never authorised anything to be
+            # written back to its evidence.
+            try:
+                self._db.execute(
+                    "ALTER TABLE evidence ADD COLUMN read_only "
+                    "INTEGER NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass        # already present
+            self._db.commit()
+            version = 2
 
         if version != SCHEMA_VERSION:
             self._set('schema_version', SCHEMA_VERSION)
-
-    def _create_schema_tables_only(self):
-        """The schema without stamping a version -- used when migrating."""
-        stamp = self._get('schema_version')
-        self._create_schema()
-        if stamp is not None:
-            self._set('schema_version', stamp)
-
 
 # --- module helpers -------------------------------------------------------
 

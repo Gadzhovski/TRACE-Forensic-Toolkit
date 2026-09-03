@@ -56,7 +56,8 @@ class HashCalculationThread(QThread):
 
 
 class VerificationWidget(QWidget):
-    def __init__(self, image_handler, parent=None, cached=None):
+    def __init__(self, image_handler, parent=None, cached=None,
+                 expected_md5=None):
         """Show hashes for `image_handler`.
 
         `cached` is a previous result for this same image, as returned by
@@ -73,6 +74,10 @@ class VerificationWidget(QWidget):
         #: HTML above is for display; a case has to store real hash values, and
         #: it cannot store what this layer threw away.
         self._hash_results = None
+        #: What the case already recorded for this image, if anything. A raw
+        #: image has no internal hash to check against, so this is the only
+        #: thing a second verification can compare with.
+        self._expected_md5 = expected_md5
         self.setWindowTitle("Trace - Image Verification")
         self.setWindowIcon(icons.icon(icons.LOGO))
         self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
@@ -199,9 +204,30 @@ class VerificationWidget(QWidget):
                     verification_results.append(
                         f"<b>SHA1 Verify result:</b> {sha1_result}<br>")  # New line after SHA1 verification result
 
-                else:  # For other image types, only display computed hashes
+                else:
+                    # A raw image carries no hash of its own, so there is
+                    # nothing inside it to verify against. If the case recorded
+                    # one earlier, that is the comparison worth making --
+                    # otherwise this run establishes the baseline. Previously
+                    # _verified stayed False here forever, so a .dd could never
+                    # show as verified no matter how many times it was checked.
                     verification_results.append(f"<b>Computed MD5:</b> {computed_md5}")
                     verification_results.append(f"<b>Computed SHA1:</b> {computed_sha1}")
+
+                    if self._expected_md5:
+                        matches = (computed_md5 or '').lower() == self._expected_md5.lower()
+                        self._verified = matches
+                        verification_results.append(
+                            f"<b>Recorded MD5:</b> {self._expected_md5}")
+                        verification_results.append(
+                            "<b>Case comparison:</b> "
+                            + ("Match" if matches else "MISMATCH — this is not "
+                               "the file the case recorded")
+                            + "<br>")
+                    else:
+                        verification_results.append(
+                            "<b>Case comparison:</b> no hash was recorded "
+                            "before, so this run establishes the baseline.<br>")
 
                 # SHA-256 is only computed when the image stores no hashes of
                 # its own, so there is nothing to show for a verified E01.

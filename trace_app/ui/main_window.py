@@ -1038,8 +1038,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                             f"Could not open {path} for verification.")
             return
 
+        # A raw image has no hash inside it to check against, so the only
+        # meaningful comparison is with what the case recorded earlier.
+        expected = None
+        if self.case:
+            row = self.case.evidence_for_path(path)
+            if row:
+                expected = row.get('md5')
+
         self.verification_widget = VerificationWidget(
-            handler, cached=self.verification_results.get(path))
+            handler, cached=self.verification_results.get(path),
+            expected_md5=expected)
         self.verification_widget.closeEvent = (
             lambda event, p=path: self.on_verification_closed(event, p))
         self.verification_widget.show()
