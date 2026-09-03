@@ -32,12 +32,20 @@ class VolumeInfoMixin:
     """Builds the image/volume information dialog."""
 
     def view_os_information(self, index):
-        """Display comprehensive disk image information with space allocation pie chart."""
+        """Show the image information dialog for the tree's selected image.
+
+        Kept for the tree's context menu, which hands over a model index. The
+        dialog itself is built by show_image_information, so the Tools menu can
+        open it without a tree item.
+        """
         item = self.tree_viewer.itemFromIndex(index)
         if item is None or item.parent() is not None:
             # Ensure that only the root item triggers the information display
             return
+        self.show_image_information()
 
+    def show_image_information(self):
+        """Display comprehensive disk image information with space allocation pie chart."""
         # Create modern dialog
         dialog = QDialog(self)
         dialog.setWindowTitle("Disk Image Information")
@@ -409,6 +417,17 @@ class VolumeInfoMixin:
             if hasattr(fs_info.info, 'endian'):
                 info["filesystem"]["Byte Order"] = (
                     "Little endian" if int(fs_info.info.endian) == 1 else "Big endian")
+
+            # Operating system and timezone, read from the registry when this
+            # volume carries a Windows installation. The timezone is the piece
+            # that makes the rest usable: NTFS stores every timestamp in UTC,
+            # so the machine's offset is what turns them into the local times
+            # the user actually saw. A data volume returns nothing.
+            try:
+                info["filesystem"].update(
+                    self.image_handler.get_os_info(start_offset))
+            except Exception as e:
+                logger.debug("Could not read OS information: %s", e)
 
         except Exception as e:
             logger.error(f"Error extracting volume info: {e}")

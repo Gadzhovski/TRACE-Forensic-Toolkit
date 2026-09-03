@@ -199,8 +199,11 @@ class VerificationWidget(QWidget):
                     verification_results.append(f"<b>Computed MD5:</b> {computed_md5}")
                     verification_results.append(f"<b>Computed SHA1:</b> {computed_sha1}")
 
-                # Display computed SHA256 hash for all image types
-                verification_results.append(f"<b>Computed SHA256:</b> {computed_sha256}")
+                # SHA-256 is only computed when the image stores no hashes of
+                # its own, so there is nothing to show for a verified E01.
+                if computed_sha256:
+                    verification_results.append(
+                        f"<b>Computed SHA256:</b> {computed_sha256}")
 
                 # Convert size from bytes to megabytes
                 size_bytes = hash_results.get('size')

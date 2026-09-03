@@ -111,6 +111,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self.evidence_files = []
 
+        #: Handlers for evidence other than the one on screen, opened on demand
+        #: when a picker asks about an image that is not the current one and
+        #: kept so the second click is instant.
+        self._auxiliary_handlers = {}
+
         #: Verification results, keyed by image path. Verification is a fact
         #: about one image, not about the session, so it is stored per image:
         #: a second image loaded alongside a verified one is not itself
@@ -215,7 +220,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.insert_row_into_listing_table(entry_name, inode_number, description,
                                           icon_name, icon_type, offset,
                                           readable_size, created, accessed,
-                                          modified, changed, parent_inode)
+                                          modified, changed, parent_inode,
+                                          entry.get("sequence"),
+                                          entry.get("attributes", ""))
 
     # ==================== END HELPER METHODS ====================
 
@@ -337,6 +344,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         tools_menu = QMenu('Tools', self)
 
+        # Both entries open a picker when more than one image is loaded, so
+        # they work the same way whether there is one image or several.
+        image_info_action = QAction("Image Information", self)
+        image_info_action.triggered.connect(self.show_image_info_menu)
+        tools_menu.addAction(image_info_action)
+
         verify_image_action = QAction("Verify Image", self)
         verify_image_action.triggered.connect(self.show_verify_menu)
         tools_menu.addAction(verify_image_action)
@@ -443,7 +456,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setItemDelegate(NoFocusDelegate(self.listing_table))
         self.listing_table.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
         self.listing_table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
-        self.listing_table.setColumnCount(10)  # 10 columns: Name, Inode, Type, Size, 4 timestamps, Path, Info
+        # 12 columns. Sequence and Attributes are appended rather than slotted
+        # in beside Inode, because the volume, search and file views each set
+        # column visibility by hardcoded index.
+        self.listing_table.setColumnCount(12)
 
         # Enable horizontal scrolling for smaller windows
         self.listing_table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
@@ -559,6 +575,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setColumnWidth(6, COLUMN_WIDTHS['modified'])  # Modified - 90px (narrower)
         self.listing_table.setColumnWidth(7, COLUMN_WIDTHS['changed'])   # Changed - 90px (narrower)
         self.listing_table.setColumnWidth(8, COLUMN_WIDTHS['path'])      # Path - 300px (wide)
+        self.listing_table.setColumnWidth(10, COLUMN_WIDTHS['sequence'])
+        self.listing_table.setColumnWidth(11, COLUMN_WIDTHS['attributes'])
         self.listing_table.setColumnWidth(9, 250)                        # Info - 250px (for volumes)
 
         # Remove any extra space in the header
@@ -567,7 +585,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Set the header labels
         self.listing_table.setHorizontalHeaderLabels(
-            ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date', 'Modified Date', 'Changed Date', 'Path', 'Info']
+            ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date',
+             'Modified Date', 'Changed Date', 'Path', 'Info', 'Seq', 'Attributes']
         )
 
         self.listing_table.itemDoubleClicked.connect(self.on_listing_table_item_clicked)
@@ -774,6 +793,27 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Pass the updated API keys to the appropriate modules
         self.virus_total_api.set_api_key(virus_total_key)
 
+    def handler_for(self, image_path):
+        """An ImageHandler for `image_path`, reusing the loaded one if it fits.
+
+        Only one image is open at a time, so a picker that offers several has
+        to open the one it was asked for -- otherwise choosing the second image
+        silently described or hashed the first.
+        """
+        if not image_path or image_path == self.current_image_path:
+            return self.image_handler
+
+        handler = self._auxiliary_handlers.get(image_path)
+        if handler is not None:
+            return handler
+
+        handler = ImageHandler(image_path)
+        if not handler.loaded:
+            logger.error("Could not open %s for this operation", image_path)
+            return None
+        self._auxiliary_handlers[image_path] = handler
+        return handler
+
     def verify_image(self, image_path=None):
         """Show the verification dialog for one image.
 
@@ -786,9 +826,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         path = image_path or self.current_image_path
+        handler = self.handler_for(path)
+        if handler is None:
+            message.warning(self, "Verify Image",
+                            f"Could not open {path} for verification.")
+            return
 
         self.verification_widget = VerificationWidget(
-            self.image_handler, cached=self.verification_results.get(path))
+            handler, cached=self.verification_results.get(path))
         self.verification_widget.closeEvent = (
             lambda event, p=path: self.on_verification_closed(event, p))
         self.verification_widget.show()
@@ -862,6 +907,60 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     icons.VERIFY_OK if state == 'verified' else icons.VERIFY))
             entry.triggered.connect(lambda _=False, p=path: self.verify_image(p))
         menu.exec(QCursor.pos())
+
+    def _release_auxiliary_handler(self, image_path):
+        """Close and forget a handler opened for evidence being removed."""
+        handler = self._auxiliary_handlers.pop(image_path, None)
+        if handler is None:
+            return
+        try:
+            handler.close_resources()
+        except Exception as e:
+            logger.error("Error closing handler for %s: %s", image_path, e)
+
+    def show_image_info_menu(self):
+        """Tools > Image Information: pick an image when several are loaded.
+
+        Same shape as show_verify_menu -- straight to the dialog for a single
+        image, a picker otherwise.
+        """
+        if not self.evidence_files:
+            message.warning(self, "Image Information",
+                            "No image is currently loaded.")
+            return
+
+        if len(self.evidence_files) == 1:
+            self.show_image_information_for(self.evidence_files[0])
+            return
+
+        menu = QMenu(self)
+        for path in self.evidence_files:
+            entry = menu.addAction(path)
+            entry.setIcon(icons.icon(icons.EVIDENCE_ADD))
+            entry.triggered.connect(
+                lambda _=False, p=path: self.show_image_information_for(p))
+        menu.exec(QCursor.pos())
+
+    def show_image_information_for(self, image_path):
+        """Open the information dialog against a named image.
+
+        The dialog reads self.image_handler, so an image other than the one on
+        screen is swapped in for the duration and put back afterwards -- the
+        alternative is the dialog describing whichever image happens to be
+        loaded rather than the one that was chosen.
+        """
+        handler = self.handler_for(image_path)
+        if handler is None:
+            message.warning(self, "Image Information",
+                            f"Could not open {image_path}.")
+            return
+
+        original = self.image_handler
+        self.image_handler = handler
+        try:
+            self.show_image_information()
+        finally:
+            self.image_handler = original
 
     def enable_tabs(self, state):
         self.result_viewer.setEnabled(state)
@@ -986,6 +1085,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.image_handler.close_resources()
             except Exception as e:
                 logger.error(f"Error closing image handler: {str(e)}")
+
+        # Handlers opened for other evidence hold file descriptors of their
+        # own, so they have to be closed too.
+        for path, handler in getattr(self, '_auxiliary_handlers', {}).items():
+            try:
+                handler.close_resources()
+            except Exception as e:
+                logger.error("Error closing handler for %s: %s", path, e)
+        if hasattr(self, '_auxiliary_handlers'):
+            self._auxiliary_handlers.clear()
 
         # Close database connection
         if hasattr(self, 'db_manager') and self.db_manager:
@@ -1112,6 +1221,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             else:
                 # Remove the selected evidence file
                 self.evidence_files.remove(selected_option)
+                self._release_auxiliary_handler(selected_option)
                 self.remove_from_tree_viewer(selected_option)
                 self.clear_ui()
                 message.information(self, "Remove Evidence", f"{selected_option} has been removed.")
@@ -1696,11 +1806,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setColumnHidden(7, False)  # Show Changed (for Block Size)
         self.listing_table.setColumnHidden(8, True)   # Hide Path (not relevant for volumes)
         self.listing_table.setColumnHidden(9, False)  # Show Info (for additional details)
+        self.listing_table.setColumnHidden(10, True)  # Seq: per-file, not per-volume
+        self.listing_table.setColumnHidden(11, True)  # Attributes: likewise
 
         # Update column headers for volume context
         self.listing_table.setHorizontalHeaderLabels([
             'Name', 'Volume #', 'Type', 'Size', 'Start Offset', 'End Offset',
-            'Length', 'Block Size', 'Path', 'Details'
+            'Length', 'Block Size', 'Path', 'Details', 'Seq', 'Attributes'
         ])
 
         # Make Info column much wider for detailed information
@@ -1818,7 +1930,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Restore original column headers for file/folder view
         self.listing_table.setHorizontalHeaderLabels([
             'Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date',
-            'Modified Date', 'Changed Date', 'Path', 'Info'
+            'Modified Date', 'Changed Date', 'Path', 'Info', 'Seq', 'Attributes'
         ])
 
         # Show columns relevant for files/folders, hide Info column
@@ -1829,6 +1941,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setColumnHidden(7, False)  # Show Changed
         self.listing_table.setColumnHidden(8, False)  # Show Path
         self.listing_table.setColumnHidden(9, True)   # Hide Info
+        self.listing_table.setColumnHidden(10, False)  # Show Seq
+        self.listing_table.setColumnHidden(11, False)  # Show Attributes
 
         if not entries:
             return
@@ -1863,7 +1977,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.listing_table.setSortingEnabled(True)
 
     def insert_row_into_listing_table(self, entry_name, entry_inode, description, icon_name, icon_type, offset, size,
-                                      created, accessed, modified, changed, parent_inode=None):
+                                      created, accessed, modified, changed, parent_inode=None,
+                                      sequence=None, attributes=""):
         """Insert a row into the listing table with proper caching and error handling."""
         try:
             icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
@@ -1896,6 +2011,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
             self.listing_table.setItem(row_position, 8, QTableWidgetItem(file_path))
             self.listing_table.setItem(row_position, 9, QTableWidgetItem(""))  # Empty Info column for files/folders
+
+            # MFT sequence: which use of this record the row refers to. Sorted
+            # as a number, so 10 does not fall between 1 and 2.
+            sequence_item = QTableWidgetItem()
+            if sequence is not None:
+                sequence_item.setData(Qt.DisplayRole, int(sequence))
+            self.listing_table.setItem(row_position, 10, sequence_item)
+
+            # Attribute list. A named $DATA entry here is an alternate data
+            # stream, which is worth spotting from the listing.
+            attributes_item = QTableWidgetItem(attributes or "")
+            if attributes:
+                attributes_item.setToolTip(attributes)
+            self.listing_table.setItem(row_position, 11, attributes_item)
 
         except Exception as e:
             self.log_error(f"Error adding row to listing table: {str(e)}")
@@ -2113,12 +2242,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             # Check if the selected item is a root item (disk image)
             if selected_item and selected_item.parent() is None:
+                # The row names the image, so describe that one rather than
+                # whichever handler happens to be current.
+                image_path = selected_item.text(0)
                 view_os_info_action = menu.addAction("View Image Information")
-                view_os_info_action.triggered.connect(lambda: self.view_os_information(indexes[0]))
+                view_os_info_action.triggered.connect(
+                    lambda _=False, p=image_path: self.show_image_information_for(p))
 
                 # Verifying is about one image, so it belongs on that image own
                 # row as well as on the toolbar.
-                image_path = selected_item.text(0)
                 state = self.verification_state(image_path)
                 verify_action = menu.addAction(
                     "Verify Image" if state is None else "View Verification Result")

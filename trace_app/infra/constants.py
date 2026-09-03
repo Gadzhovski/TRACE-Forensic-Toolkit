@@ -48,7 +48,9 @@ COLUMN_WIDTHS = {
     'accessed': 160,     # Narrower - timestamps are consistent length
     'modified': 160,     # Narrower - timestamps are consistent length
     'changed': 160,      # Narrower - timestamps are consistent length
-    'path': 1100         # Wide - paths can be long
+    'path': 1100,        # Wide - paths can be long
+    'sequence': 50,      # Compact - MFT sequence is a small number
+    'attributes': 320    # Wide - a list of NTFS attribute names
 }
 
 # Progress dialog settings

@@ -54,6 +54,7 @@ class ImageHandler:
         self._directory_cache = {}  # Cache for directory contents
         self._partition_cache = None  # Cache for partitions
         self._sector_size = None  # Read from the image on first use
+        self._os_info_cache = {}  # Registry-derived OS details, per partition
 
         #: False when the image could not be opened; callers should check
         #: this rather than waiting for a later AttributeError.
@@ -407,10 +408,19 @@ class ImageHandler:
         return size
 
     def calculate_hashes(self, progress_callback=None):
-        """Calculate the MD5, SHA1, and SHA256 hashes for the image with progress reporting."""
+        """Hash the image for verification, reporting progress as it goes.
+
+        SHA-256 is computed only when the image carries no stored hashes to
+        verify against. An E01 records MD5 and SHA-1 at acquisition, and those
+        are what the result is checked against; a third digest that nothing
+        compares to costs about 9% of the hashing time -- roughly 17 seconds on
+        a 16 GB image -- for a number no one looks at. A raw image stores
+        nothing, so there SHA-256 is the only durable identifier and is worth
+        having.
+        """
         hash_md5 = hashlib.md5()
         hash_sha1 = hashlib.sha1()
-        hash_sha256 = hashlib.sha256()
+        hash_sha256 = None
         size = 0
         total_size = 0
         stored_md5, stored_sha1 = None, None
@@ -433,22 +443,29 @@ class ImageHandler:
                     except Exception as e:
                         logger.warning(f"Unable to retrieve stored hash values: {e}")
 
+                    # Nothing to check a SHA-256 against when the image
+                    # already carries its own hashes.
+                    if not (stored_md5 or stored_sha1):
+                        hash_sha256 = hashlib.sha256()
+
                     # Decompressing the image is the expensive part -- on a
                     # compressed E01 it is ~94% of the work, hashing only ~6%
                     # -- and libewf offers no threading of its own. Several
                     # handles reading disjoint ranges do decompress in
                     # parallel, though, so the read is split across workers
                     # while one hasher consumes their output in order.
+                    hashers = [hash_md5, hash_sha1]
+                    if hash_sha256 is not None:
+                        hashers.append(hash_sha256)
                     size = self._hash_ewf_parallel(
-                        filenames, total_size,
-                        (hash_md5, hash_sha1, hash_sha256),
-                        progress_callback)
+                        filenames, total_size, hashers, progress_callback)
                 finally:
                     ewf_handle.close()
 
             elif image_type == "raw":
                 try:
                     total_size = os.path.getsize(self.image_path)
+                    hash_sha256 = hashlib.sha256()
                     with open(self.image_path, "rb") as f:
                         while True:
                             chunk = f.read(CHUNK_SIZE)
@@ -473,7 +490,7 @@ class ImageHandler:
             hashes = {
                 'computed_md5': hash_md5.hexdigest(),
                 'computed_sha1': hash_sha1.hexdigest(),
-                'computed_sha256': hash_sha256.hexdigest(),
+                'computed_sha256': hash_sha256.hexdigest() if hash_sha256 else None,
                 'size': size,
                 'path': self.image_path,
                 'stored_md5': stored_md5,
@@ -695,6 +712,15 @@ class ImageHandler:
                         # The directory this entry belongs to, which is what
                         # locates a file when only its inode is known.
                         "parent_inode": getattr(entry.info.name, 'par_addr', None),
+                        # How many times this MFT record has been reused. Two
+                        # files can share an inode over a volume's life, and
+                        # the sequence is what tells them apart -- which
+                        # matters when correlating a deleted entry against a
+                        # later allocation of the same record.
+                        "sequence": getattr(entry.info.meta, 'seq', None),
+                        # The NTFS attributes present, which is where alternate
+                        # data streams show up.
+                        "attributes": self._describe_attributes(fs, entry),
                     })
 
                 # Cache results
@@ -706,6 +732,49 @@ class ImageHandler:
                 logger.error(f"Error in get_directory_contents: {e}")
                 return []
         return []
+
+    #: NTFS attribute identifiers, as the Sleuth Kit tools label them.
+    _ATTRIBUTE_NAMES = {
+        16: '$STANDARD_INFORMATION', 32: '$ATTRIBUTE_LIST', 48: '$FILE_NAME',
+        64: '$OBJECT_ID', 80: '$SECURITY_DESCRIPTOR', 96: '$VOLUME_NAME',
+        112: '$VOLUME_INFORMATION', 128: '$DATA', 144: '$INDEX_ROOT',
+        160: '$INDEX_ALLOCATION', 176: '$BITMAP', 192: '$REPARSE_POINT',
+        256: '$LOGGED_UTILITY_STREAM',
+    }
+
+    @classmethod
+    def _describe_attributes(cls, fs, entry):
+        """Short summary of an entry's NTFS attributes.
+
+        A named $DATA attribute is an alternate data stream -- a place to hide
+        content that a plain listing does not show -- so the names are kept,
+        not just the types.
+        """
+        meta = getattr(entry.info, 'meta', None)
+        if meta is None:
+            return ""
+
+        try:
+            file_obj = fs.open_meta(inode=meta.addr)
+        except Exception:
+            return ""
+
+        parts = []
+        try:
+            for attribute in file_obj:
+                info = attribute.info
+                label = cls._ATTRIBUTE_NAMES.get(int(info.type), str(int(info.type)))
+                name = info.name
+                if isinstance(name, bytes):
+                    name = name.decode('utf-8', errors='replace')
+                if name:
+                    label = f"{label}:{name}"
+                if label not in parts:
+                    parts.append(label)
+        except Exception as e:
+            logger.debug("Could not list attributes: %s", e)
+
+        return ", ".join(parts)
 
     @staticmethod
     def _entry_is_deleted(entry):
@@ -785,6 +854,127 @@ class ImageHandler:
             except Exception as e:
                 logger.error(f"Error parsing SOFTWARE hive: {e}")
                 return "Error in parsing OS version"
+
+    def get_os_info(self, start_offset):
+        """Operating system and timezone for the volume at `start_offset`.
+
+        Both come from the registry, which is where Windows records them: the
+        version from SOFTWARE, the timezone from SYSTEM's CurrentControlSet.
+        The timezone matters more than it looks -- every NTFS timestamp is
+        stored in UTC, so knowing the machine's offset is what turns those into
+        the local times a user would have seen.
+
+        Returns {} for a volume with no Windows installation, which includes
+        every data volume; there is nothing to report there rather than an
+        error.
+        """
+        # Cached: reading both hives costs the better part of a second, and
+        # the volume table asks once per partition every time it is drawn.
+        if start_offset in self._os_info_cache:
+            return self._os_info_cache[start_offset]
+
+        info = {}
+        if self.get_fs_type(start_offset) == "NTFS":
+            fs_info = self.get_fs_info(start_offset)
+            if fs_info:
+                info.update(self._read_software_hive(fs_info))
+                info.update(self._read_system_hive(fs_info))
+
+        self._os_info_cache[start_offset] = info
+        return info
+
+    def _read_software_hive(self, fs_info):
+        """Windows version details from SOFTWARE."""
+        data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
+        if not data:
+            return {}
+
+        fields = {}
+        with FileSystemUtils.temp_file() as temp_path:
+            try:
+                with open(temp_path, 'wb') as handle:
+                    handle.write(data)
+                key = Registry.Registry(temp_path).open(
+                    "Microsoft\\Windows NT\\CurrentVersion")
+                for value_name, label in (("ProductName", "Operating System"),
+                                          ("CurrentBuild", "Build"),
+                                          ("DisplayVersion", "Release"),
+                                          ("RegisteredOwner", "Registered Owner"),
+                                          ("RegisteredOrganization", "Organisation"),
+                                          ("ProductId", "Product ID"),
+                                          ("InstallDate", "Installed")):
+                    try:
+                        value = key.value(value_name).value()
+                    except Exception:
+                        continue
+                    if value in (None, ""):
+                        continue
+                    if value_name == "InstallDate":
+                        value = safe_datetime(value)
+                    fields[label] = str(value)
+            except Exception as e:
+                logger.debug("Could not read the SOFTWARE hive: %s", e)
+        return fields
+
+    def _read_system_hive(self, fs_info):
+        """Timezone and computer name from SYSTEM."""
+        data = self.get_registry_hive(fs_info, "/Windows/System32/config/SYSTEM")
+        if not data:
+            return {}
+
+        fields = {}
+        with FileSystemUtils.temp_file() as temp_path:
+            try:
+                with open(temp_path, 'wb') as handle:
+                    handle.write(data)
+                registry = Registry.Registry(temp_path)
+
+                # Which control set was in use is recorded in Select\Current;
+                # reading ControlSet001 blindly can pick the wrong one.
+                try:
+                    current = registry.open("Select").value("Current").value()
+                except Exception:
+                    current = 1
+                control_set = f"ControlSet{int(current):03d}"
+
+                try:
+                    tz = registry.open(f"{control_set}\\Control\\TimeZoneInformation")
+                    for value_name, label in (("TimeZoneKeyName", "Time Zone"),
+                                              ("StandardName", "Time Zone (Standard)"),
+                                              ("Bias", "UTC Offset")):
+                        try:
+                            value = tz.value(value_name).value()
+                        except Exception:
+                            continue
+                        if value in (None, ""):
+                            continue
+                        # StandardName is often an unresolved resource
+                        # reference such as '@tzres.dll,-112', which means
+                        # nothing to a reader; TimeZoneKeyName already carries
+                        # the readable name.
+                        if isinstance(value, str) and value.startswith('@'):
+                            continue
+                        if value_name == "Bias":
+                            # Bias is minutes to ADD to local time to reach
+                            # UTC, so the offset a reader expects is its
+                            # negation.
+                            offset = -int(value)
+                            sign = '+' if offset >= 0 else '-'
+                            value = f"UTC{sign}{abs(offset) // 60:02d}:{abs(offset) % 60:02d}"
+                        fields[label] = str(value)
+                except Exception as e:
+                    logger.debug("No timezone information: %s", e)
+
+                try:
+                    name_key = registry.open(
+                        f"{control_set}\\Control\\ComputerName\\ComputerName")
+                    fields["Computer Name"] = str(
+                        name_key.value("ComputerName").value())
+                except Exception:
+                    pass
+            except Exception as e:
+                logger.debug("Could not read the SYSTEM hive: %s", e)
+        return fields
 
     def read_unallocated_space(self, start_offset, end_offset):
         try:
