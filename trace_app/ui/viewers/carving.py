@@ -28,6 +28,7 @@ from trace_app.core.carving_signatures import (extract_original_timestamp,
 from trace_app.core.image_handler import ImageHandler
 from trace_app.infra.paths import carved_files_dir, resource_path
 from trace_app.infra.constants import (CARVE_MAX_FOOTER_CANDIDATES,
+                                       SECTOR_SIZE,
                                        CARVE_MAX_SIZE, CARVE_MIN_SIZE,
                                        CARVE_OVERLAP, CHUNK_SIZE,
                                        PANEL_ICON_SIZE, TABLE_ICON_SIZE,
@@ -709,7 +710,13 @@ class FileCarvingWidget(QWidget):
                 if is_valid_file(content, file_type):
                     self.save_file(content, file_type,
                                    base_offset + start_index)
-                    cursor = end_index + len(footer)
+                    # Resume just past this header rather than past the file.
+                    # A file carved across a fragmentation gap can contain a
+                    # whole other file of the same type -- DFRWS scenario 3g
+                    # plants one JPEG inside another's gap -- and skipping to
+                    # the end loses it. Re-scanning the span costs a little
+                    # time; losing evidence inside it does not show up at all.
+                    cursor = start_index + len(header)
                     carved = True
                     break
 
@@ -1048,11 +1055,14 @@ class FileCarvingWidget(QWidget):
 
     @staticmethod
     def _ole_size(chunk, start_index, cap):
-        """Length of the OLE compound file starting at `start_index`.
+        """Exact length of the OLE compound file starting at `start_index`.
 
-        Derived from the highest sector the header's FAT accounts for. This is
-        an upper bound on a well-formed file, which is what carving wants: the
-        alternative is guessing, and a short guess truncates a document.
+        Read from the file's own allocation table: the FAT marks every sector
+        the document occupies, so the highest allocated entry is its last
+        sector. An earlier version estimated an upper bound from the FAT's
+        sector count instead, which overshot 2a.doc on the DFRWS 2006 image by
+        41 KB -- close enough to open, but not the file that was there, and it
+        could not reproduce the published hash.
         """
         if start_index + 512 > len(chunk):
             return None
@@ -1060,29 +1070,49 @@ class FileCarvingWidget(QWidget):
         try:
             shift = struct.unpack('<H', header[30:32])[0]
             fat_sectors = struct.unpack('<I', header[44:48])[0]
-            dir_sectors = struct.unpack('<I', header[40:44])[0]
-            mini_sectors = struct.unpack('<I', header[64:68])[0]
         except struct.error:
             return None
 
-        if shift not in (9, 12):
+        if shift not in (9, 12) or not 0 < fat_sectors < 65536:
             return None
         sector = 1 << shift
-        if not 0 < fat_sectors < 65536:
+
+        # The header's DIFAT lists the first 109 FAT sectors. Beyond that the
+        # chain continues in the file, which a carve may not have whole; 109
+        # sectors already map a document far larger than the size cap.
+        highest = -1
+        entries_per_sector = sector // 4
+        for n in range(min(fat_sectors, 109)):
+            try:
+                fat_sector = struct.unpack(
+                    '<I', header[76 + 4 * n:80 + 4 * n])[0]
+            except struct.error:
+                break
+            if fat_sector >= 0xFFFFFFFE:     # free or end-of-chain marker
+                continue
+
+            base = start_index + 512 + fat_sector * sector
+            if base + sector > len(chunk):
+                return None
+            for i in range(entries_per_sector):
+                try:
+                    value = struct.unpack(
+                        '<I', chunk[base + 4 * i:base + 4 * i + 4])[0]
+                except struct.error:
+                    return None
+                if value != 0xFFFFFFFF:      # 0xFFFFFFFF marks a free sector
+                    highest = max(highest, n * entries_per_sector + i)
+
+        if highest < 0:
             return None
 
-        # Each FAT sector maps sector/4 sectors of file.
-        mapped = fat_sectors * (sector // 4)
-        size = (1 + mapped) * sector
-        if dir_sectors or mini_sectors:
-            size += (dir_sectors + mini_sectors) * sector
-
+        size = 512 + (highest + 1) * sector
         if size < CARVE_MIN_SIZE:
             return None
         if cap and size > cap:
             return None
         if start_index + size > len(chunk):
-            size = len(chunk) - start_index
+            return None
         return size
 
     def carve_tiff_files(self, chunk, base_offset):
@@ -1234,29 +1264,65 @@ class FileCarvingWidget(QWidget):
             cursor = start_index + len(header)
 
     def carve_html_files(self, chunk, base_offset):
-        """Recover HTML documents between <html and </html>."""
+        """Recover HTML documents, starting at the DOCTYPE where there is one.
+
+        A real page usually opens with a DOCTYPE or an XML declaration, not
+        with `<html`. Carving from the `<html` tag drops those leading bytes,
+        which is enough to make the recovered file a different file: on the
+        DFRWS 2006 image it started 83 bytes into 1a.html, so the hash could
+        never match the evidence.
+        """
         cap = CARVE_MAX_SIZE.get('html')
         lowered = chunk.lower()
         cursor = 0
         while cursor < len(chunk):
-            start_index = lowered.find(b'<html', cursor)
-            if start_index == -1:
+            tag = lowered.find(b'<html', cursor)
+            if tag == -1:
                 break
 
-            end_index = lowered.find(b'</html>', start_index)
+            start_index = self._html_start(lowered, tag)
+
+            end_index = lowered.find(b'</html>', tag)
             if end_index == -1:
-                cursor = start_index + 5
+                cursor = tag + 5
                 continue
 
             end = end_index + len(b'</html>')
             if cap and end - start_index > cap:
-                cursor = start_index + 5
+                cursor = tag + 5
                 continue
 
             content = chunk[start_index:end]
             if len(content) >= CARVE_MIN_SIZE:
                 self.save_file(content, 'html', base_offset + start_index)
-            cursor = end
+            cursor = tag + 5
+
+    @staticmethod
+    def _html_start(lowered, tag):
+        """Where the document really begins, at or before its `<html` tag.
+
+        Looks back a short way for a DOCTYPE or XML declaration. Bounded,
+        because everything before the tag is unallocated data that happens to
+        precede it, and following it far enough would swallow the file before.
+        """
+        window = max(0, tag - 512)
+        for marker in (b'<!doctype', b'<?xml'):
+            found = lowered.rfind(marker, window, tag)
+            if found == -1:
+                continue
+            # A file saved with a leading blank line really does begin at
+            # that line, and dropping it changes the hash -- 1a.html on the
+            # DFRWS 2006 image is one byte of newline before its DOCTYPE.
+            # But the bytes before a carved file are unallocated data that may
+            # also end in whitespace, so backtracking on whitespace alone
+            # overshoots. A file starts on a sector boundary; that is the
+            # only defensible place to stop.
+            start_of_sector = found - (found % SECTOR_SIZE)
+            if (start_of_sector < found
+                    and lowered[start_of_sector:found].isspace()):
+                return start_of_sector
+            return found
+        return tag
 
     #: Which carver handles each selected type. Keys are lowercase because the
     #: menu labels are lowercased before dispatch.

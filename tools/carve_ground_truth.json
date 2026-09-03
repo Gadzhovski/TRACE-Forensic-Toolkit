@@ -224,5 +224,755 @@
         "note": "thumbnail embedded in sherry.jpg -- mid-sector"
       }
     ]
+  },
+  "dfrws-2006-challenge.raw": {
+    "source": "https://github.com/dfrws/dfrws2006-challenge",
+    "title": "DFRWS 2006 Carving Challenge (raw, no filesystem)",
+    "note": "32 files in 22 deliberately awkward scenarios. There is no filesystem, so the whole image is carved. Several scenarios target carving heuristics directly: 3c plants 0xFFD8 in the sector before a JPEG, 3j plants a sector beginning 0xFFD9 inside one.",
+    "files": [
+      {
+        "name": "1a.html",
+        "type": "html",
+        "offset": "0x1200",
+        "size": 18147,
+        "md5": "eec87931b03e5a4a4ef8fd51109a1227",
+        "recoverable": true,
+        "note": "scenario 1a: HTML, non-frag"
+      },
+      {
+        "name": "2c.xls",
+        "type": "ole",
+        "offset": "0x100600",
+        "size": 869888,
+        "md5": "03d1deff4774c932358d3580a3bbae66",
+        "recoverable": true,
+        "note": "scenario 2c: Excel, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3a.jpg",
+        "type": "jpg",
+        "offset": "0x1e3800",
+        "size": 287186,
+        "md5": "daf4205574abd6919b10ca8be92d17a3",
+        "recoverable": true,
+        "note": "scenario 3a: JPEG, non-frag"
+      },
+      {
+        "name": "1d1.html",
+        "type": "html",
+        "offset": "0x22a800",
+        "size": 18426,
+        "md5": "8a1ac28fe7bd144b8230b38b284a3827",
+        "recoverable": true,
+        "note": "scenario 1d: HTML 1, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "1d2.html",
+        "type": "html",
+        "offset": "0x22d000",
+        "size": 43236,
+        "md5": "80e6b9221ef308ff1639fd19df036e34",
+        "recoverable": true,
+        "note": "scenario 1d: HTML 2, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "2d.doc",
+        "type": "ole",
+        "offset": "0x3e3800",
+        "size": 450048,
+        "md5": "8d2a9a284e078805ada47db191f35244",
+        "recoverable": true,
+        "note": "scenario 2d: Word, Frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "2d.jpg",
+        "type": "jpg",
+        "offset": "0x40ba00",
+        "size": 608703,
+        "md5": "4efc6c572683878efd8f3404ddaded7b",
+        "recoverable": true,
+        "note": "scenario 2d: JPEG, non-frag"
+      },
+      {
+        "name": "3d.jpg",
+        "type": "jpg",
+        "offset": "0x5ac600",
+        "size": 190720,
+        "md5": "7b07320709e0caa947663f5df3a0a390",
+        "recoverable": true,
+        "note": "scenario 3d: JPG, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3b.jpg",
+        "type": "jpg",
+        "offset": "0x5f7c00",
+        "size": 7113968,
+        "md5": "b070beae1606f67a342bc5f78c29c743",
+        "recoverable": true,
+        "note": "scenario 3b: BIG JPEG"
+      },
+      {
+        "name": "1b.html",
+        "type": "html",
+        "offset": "0xd6d000",
+        "size": 168527,
+        "md5": "a80ee062aed8279304faae8f20f6d48e",
+        "recoverable": true,
+        "note": "scenario 1b: HTML, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "1b.jpg",
+        "type": "jpg",
+        "offset": "0xd7ae00",
+        "size": 189534,
+        "md5": "fe7e7ac67709f2d9c2483aa98c681b99",
+        "recoverable": true,
+        "note": "scenario 1b: JPEG"
+      },
+      {
+        "name": "1c.html",
+        "type": "html",
+        "offset": "0xdca800",
+        "size": 20019,
+        "md5": "045798407b927321326a547704e67831",
+        "recoverable": true,
+        "note": "scenario 1c: HTML, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "4a.zip",
+        "type": "zip",
+        "offset": "0xde2e00",
+        "size": 147150,
+        "md5": "ebabde39ba44d38888dd82606980498a",
+        "recoverable": true,
+        "note": "scenario 4a: ZIP 1, non-frag"
+      },
+      {
+        "name": "4b.zip",
+        "type": "zip",
+        "offset": "0xe07200",
+        "size": 1163745,
+        "md5": "9a4c2d3a9bd203eb39c9f954a3c997e4",
+        "recoverable": true,
+        "note": "scenario 4b: Zip, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3h1.jpg",
+        "type": "jpg",
+        "offset": "0xf5e600",
+        "size": 98354,
+        "md5": "db89684c177168036e274140ecf766a1",
+        "recoverable": true,
+        "note": "scenario 3h: JPEG 1, Frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3h2.jpg",
+        "type": "jpg",
+        "offset": "0xf65a00",
+        "size": 188693,
+        "md5": "0915313e99af0f6bf13bc06bcd003113",
+        "recoverable": true,
+        "note": "scenario 3h: JPEG 2, Frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "2a.doc",
+        "type": "ole",
+        "offset": "0x1008a00",
+        "size": 287232,
+        "md5": "0e52e75029e99cd2e9dcd0af271cf4a2",
+        "recoverable": true,
+        "note": "scenario 2a: Word, non-frag"
+      },
+      {
+        "name": "2e.doc",
+        "type": "ole",
+        "offset": "0x10be000",
+        "size": 943616,
+        "md5": "d7ff92b8cc1c89c46a78288b9c673152",
+        "recoverable": true,
+        "note": "scenario 2e: Word, Frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3c.jpg",
+        "type": "jpg",
+        "offset": "0x11b8800",
+        "size": 178659,
+        "md5": "2fae8770cc013d22e9ea1c070f2f509b",
+        "recoverable": true,
+        "note": "scenario 3c: JPEG"
+      },
+      {
+        "name": "2b.doc",
+        "type": "ole",
+        "offset": "0x1210c00",
+        "size": 1667584,
+        "md5": "4a22f04b097920d11fff4e192e0667a4",
+        "recoverable": true,
+        "note": "scenario 2b: Word, frag 1 of 3 -- fragmented"
+      },
+      {
+        "name": "3f.jpg",
+        "type": "jpg",
+        "offset": "0x13d7c00",
+        "size": 487473,
+        "md5": "f8c51e0688796b5d616f0e5d4a94d104",
+        "recoverable": true,
+        "note": "scenario 3f: JPG, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3g1.jpg",
+        "type": "jpg",
+        "offset": "0x1451600",
+        "size": 1021085,
+        "md5": "7cce072e518fd72484c97adb1b4be08e",
+        "recoverable": true,
+        "note": "scenario 3g: JPEG 1, Frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3g2.jpg",
+        "type": "jpg",
+        "offset": "0x1535400",
+        "size": 304413,
+        "md5": "c0da37b3f1a07af790e6e9171cedc4d2",
+        "recoverable": true,
+        "note": "scenario 3g: JPEG 2, non-frag"
+      },
+      {
+        "name": "4c.zip",
+        "type": "zip",
+        "offset": "0x15fae00",
+        "size": 270181,
+        "md5": "f940fcc37c82e8ff1431e5c3c061611e",
+        "recoverable": true,
+        "note": "scenario 4c: Zip, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3e.jpg",
+        "type": "jpg",
+        "offset": "0x163fc00",
+        "size": 573499,
+        "md5": "2320fe9c41eaddb864a56c2ddc4dd186",
+        "recoverable": true,
+        "note": "scenario 3e: JPG, frag 1 of 2 -- fragmented"
+      },
+      {
+        "name": "3i.jpg",
+        "type": "jpg",
+        "offset": "0x16e7c00",
+        "size": 24538540,
+        "md5": "db32b271506b2f4974791957627c61cc",
+        "recoverable": true,
+        "note": "scenario 3i: Really Big JPG"
+      },
+      {
+        "name": "3j.jpg",
+        "type": "jpg",
+        "offset": "0x2e4fc00",
+        "size": 924877,
+        "md5": "1a5a843000ef617af93a9cad645e3cdf",
+        "recoverable": true,
+        "note": "scenario 3j: JPEG, frag 1 of 2 -- fragmented"
+      }
+    ],
+    "false_positives_to_avoid": [
+      {
+        "offset": "0x11b8600",
+        "type": "jpg",
+        "note": "scenario 3c: a lone sector starting 0xFFD8, no image"
+      }
+    ]
+  },
+  "dfrws-2007-challenge.img": {
+    "source": "https://github.com/dfrws/dfrws2007-challenge",
+    "title": "DFRWS 2007 Carving Challenge (raw, no filesystem)",
+    "note": "The 2007 challenge deepened 2006: more file types and more complex fragmentation. Only the types TRACE carves are listed here; the image also holds MP3, MPG, EXE, FLV, AVI and mbox data, which are not scored.",
+    "files": [
+      {
+        "name": "1.doc",
+        "type": "ole",
+        "offset": "0xcc27c00",
+        "size": 10038272,
+        "md5": "d7fbd4fb5a1a4aa003a9ff953ae33409",
+        "recoverable": true,
+        "note": "scenario 14, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "1.jpg",
+        "type": "jpg",
+        "offset": "0x13cb4a00",
+        "size": 151255,
+        "md5": "6bb75b6fd6eb8035922eb8ae29dc92cd",
+        "recoverable": true,
+        "note": "scenario 2, 1 fragment(s)"
+      },
+      {
+        "name": "1.mov",
+        "type": "mov",
+        "offset": "0x11fe600",
+        "size": 8530792,
+        "md5": "f33b2e628d209599fb67d0e74e795931",
+        "recoverable": true,
+        "note": "scenario 7, 1 fragment(s)"
+      },
+      {
+        "name": "1.mp4",
+        "type": "mp4",
+        "offset": "0xd9eda00",
+        "size": 2462159,
+        "md5": "460909029d03d9986237bb7ad9687527",
+        "recoverable": true,
+        "note": "scenario 5, 1 fragment(s)"
+      },
+      {
+        "name": "1.pdf",
+        "type": "pdf",
+        "offset": "0x6272400",
+        "size": 314300,
+        "md5": "3440a0169740b80f5fcff4cb8641a210",
+        "recoverable": true,
+        "note": "scenario 11, 1 fragment(s)"
+      },
+      {
+        "name": "1.wmv",
+        "type": "wmv",
+        "offset": "0x5a83200",
+        "size": 6381645,
+        "md5": "6431d913eb678103578919cba9586aae",
+        "recoverable": true,
+        "note": "scenario 37, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "10.jpg",
+        "type": "jpg",
+        "offset": "0xa38aa00",
+        "size": 489957,
+        "md5": "40a47a8cf0c52676cab662e7b30662fd",
+        "recoverable": true,
+        "note": "scenario 38, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "10.pdf",
+        "type": "pdf",
+        "offset": "0x3a7e800",
+        "size": 275308,
+        "md5": "f8d349756a238e7a528c1af98b14d81a",
+        "recoverable": true,
+        "note": "scenario 77, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "11.jpg",
+        "type": "jpg",
+        "offset": "0xfd92800",
+        "size": 2412324,
+        "md5": "1b9f3bb9708e0e631f64abca65d49cbc",
+        "recoverable": true,
+        "note": "scenario 39, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "11.pdf",
+        "type": "pdf",
+        "offset": "0x1228ac00",
+        "size": 36920,
+        "md5": "14c1b23fd4c359deab5d7bd069b26e9b",
+        "recoverable": true,
+        "note": "scenario 85, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "12.jpg",
+        "type": "jpg",
+        "offset": "0x2abe400",
+        "size": 149711,
+        "md5": "01ecf0ecfff5064217995eaeaae2bb4f",
+        "recoverable": true,
+        "note": "scenario 40, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "13.jpg",
+        "type": "jpg",
+        "offset": "0xd92e200",
+        "size": 571695,
+        "md5": "de6e48f234cb5e79c420fbeaee8f2126",
+        "recoverable": true,
+        "note": "scenario 41, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "13.pdf",
+        "type": "pdf",
+        "offset": "0x12293200",
+        "size": 48603,
+        "md5": "28dc16e7653ce01ac91ebffe4e33ee34",
+        "recoverable": true,
+        "note": "scenario 85, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "14.jpg",
+        "type": "jpg",
+        "offset": "0x2232400",
+        "size": 275669,
+        "md5": "082dab412f808a5a0e31bae6be18af8b",
+        "recoverable": true,
+        "note": "scenario 60, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "14.pdf",
+        "type": "pdf",
+        "offset": "0x8b82e00",
+        "size": 19617,
+        "md5": "8cc4aa0e3e918ed13c4558c4101a587e",
+        "recoverable": true,
+        "note": "scenario 89, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "15.jpg",
+        "type": "jpg",
+        "offset": "0x13cfe800",
+        "size": 916862,
+        "md5": "b21175f8e3e76e0fb19e3595f85e38c6",
+        "recoverable": true,
+        "note": "scenario 42, 4 fragment(s) -- fragmented"
+      },
+      {
+        "name": "16.jpg",
+        "type": "jpg",
+        "offset": "0xaae7400",
+        "size": 502872,
+        "md5": "508f542eead845b17ff28b800b8a63d7",
+        "recoverable": true,
+        "note": "scenario 61, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "17.jpg",
+        "type": "jpg",
+        "offset": "0x7c68a00",
+        "size": 347935,
+        "md5": "8b127562cadd99c566d55f9cbc2dfc2a",
+        "recoverable": true,
+        "note": "scenario 62, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "18.jpg",
+        "type": "jpg",
+        "offset": "0xd9b9c00",
+        "size": 325116,
+        "md5": "92ca06100b280e5469f621ecfbfb89c0",
+        "recoverable": true,
+        "note": "scenario 63, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "2.doc",
+        "type": "ole",
+        "offset": "0x28c3c00",
+        "size": 69632,
+        "md5": "9b8abe0f393332b7df41e7d986c6ee8e",
+        "recoverable": true,
+        "note": "scenario 1, 1 fragment(s)"
+      },
+      {
+        "name": "2.jpg",
+        "type": "jpg",
+        "offset": "0x1be7200",
+        "size": 1100759,
+        "md5": "ac14841febb91497b26034f656e6359b",
+        "recoverable": true,
+        "note": "scenario 15, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "2.mov",
+        "type": "mov",
+        "offset": "0x13df1600",
+        "size": 1973066,
+        "md5": "bb299d7f923512a518b15a10e2ba235b",
+        "recoverable": true,
+        "note": "scenario 25, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "2.mp4",
+        "type": "mp4",
+        "offset": "0xdc7f400",
+        "size": 1893289,
+        "md5": "aed20767259bfed7bcee286b3a2ace4b",
+        "recoverable": true,
+        "note": "scenario 22, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "2.pdf",
+        "type": "pdf",
+        "offset": "0x8c4a000",
+        "size": 1323915,
+        "md5": "e2747d8e103fe6d4870851ab339080be",
+        "recoverable": true,
+        "note": "scenario 33, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "3.doc",
+        "type": "ole",
+        "offset": "0x735aa00",
+        "size": 53760,
+        "md5": "3cafabc3c12d4edc973e0c0c5090cada",
+        "recoverable": true,
+        "note": "scenario 44, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "3.jpg",
+        "type": "jpg",
+        "offset": "0x2b78a00",
+        "size": 2029936,
+        "md5": "d7f623e1367a3ba647dfbe2605c47d8a",
+        "recoverable": true,
+        "note": "scenario 16, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "3.mov",
+        "type": "mov",
+        "offset": "0x84e7a00",
+        "size": 320319,
+        "md5": "38809da84fef49352c4786ad2a51245f",
+        "recoverable": true,
+        "note": "scenario 26, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "3.mp4",
+        "type": "mp4",
+        "offset": "0x3f55a00",
+        "size": 4376678,
+        "md5": "d92f6995f8f36e41bc40ded38cf7f9e4",
+        "recoverable": true,
+        "note": "scenario 23, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "3.pdf",
+        "type": "pdf",
+        "offset": "0x11e47e00",
+        "size": 547772,
+        "md5": "ccc56b8b20fcb9fbbf005ecac0ef4651",
+        "recoverable": true,
+        "note": "scenario 34, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "4.doc",
+        "type": "ole",
+        "offset": "0x59ec000",
+        "size": 24576,
+        "md5": "4e683978d0f70540ff28d3c2e6bdc622",
+        "recoverable": true,
+        "note": "scenario 43, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "4.jpg",
+        "type": "jpg",
+        "offset": "0x2c21200",
+        "size": 804735,
+        "md5": "26f5ff9ecf3be74b9495e72140988dfa",
+        "recoverable": true,
+        "note": "scenario 16, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "4.mov",
+        "type": "mov",
+        "offset": "0x84f0200",
+        "size": 245638,
+        "md5": "b2e52edd5354e0a03824489dbc1b7cbf",
+        "recoverable": true,
+        "note": "scenario 26, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "4.mp4",
+        "type": "mp4",
+        "offset": "0x4227a00",
+        "size": 3775008,
+        "md5": "2ff9636424c9cec7b7bde67ddcfcaba9",
+        "recoverable": true,
+        "note": "scenario 23, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "4.pdf",
+        "type": "pdf",
+        "offset": "0x11e4e800",
+        "size": 217130,
+        "md5": "b268a7226f2fd792ffe4794789240e7f",
+        "recoverable": true,
+        "note": "scenario 34, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "5.doc",
+        "type": "ole",
+        "offset": "0x1f82e00",
+        "size": 34304,
+        "md5": "bad33d3535818c0ca8a751a0acad815f",
+        "recoverable": true,
+        "note": "scenario 59, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "5.jpg",
+        "type": "jpg",
+        "offset": "0x2dca800",
+        "size": 3963976,
+        "md5": "825ad24830f88b582cdae632e37f4ca4",
+        "recoverable": true,
+        "note": "scenario 16, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "5.mov",
+        "type": "mov",
+        "offset": "0x8542600",
+        "size": 4610585,
+        "md5": "94af699f13d97923b072141bd462694f",
+        "recoverable": true,
+        "note": "scenario 26, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "5.mp4",
+        "type": "mp4",
+        "offset": "0x3bdcc00",
+        "size": 14314203,
+        "md5": "0ce48c6327f4dc663cc988d5ee9976ff",
+        "recoverable": true,
+        "note": "scenario 73, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "5.pdf",
+        "type": "pdf",
+        "offset": "0x12255000",
+        "size": 126106,
+        "md5": "20d1dd4a484e992dd1e439441217f76f",
+        "recoverable": true,
+        "note": "scenario 51, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "6.doc",
+        "type": "ole",
+        "offset": "0xfd8c400",
+        "size": 27648,
+        "md5": "9b77c651fb75f9e2327edf91700ccfb7",
+        "recoverable": true,
+        "note": "scenario 58, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "6.jpg",
+        "type": "jpg",
+        "offset": "0xa43e800",
+        "size": 3090067,
+        "md5": "15b6233ead8573c546f18e6a905e26a9",
+        "recoverable": true,
+        "note": "scenario 17, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "6.mov",
+        "type": "mov",
+        "offset": "0x11826600",
+        "size": 4874154,
+        "md5": "3c8c016d9255b528679128ed3bf6980d",
+        "recoverable": true,
+        "note": "scenario 55, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "6.mp4",
+        "type": "mp4",
+        "offset": "0xdec1800",
+        "size": 790656,
+        "md5": "615a4a149f76a5c85214167428895364",
+        "recoverable": true,
+        "note": "scenario 87, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "6.pdf",
+        "type": "pdf",
+        "offset": "0x2423000",
+        "size": 482495,
+        "md5": "d89ba04ad63643304754bb6606f56c0b",
+        "recoverable": true,
+        "note": "scenario 52, 3 fragment(s) -- fragmented"
+      },
+      {
+        "name": "7.jpg",
+        "type": "jpg",
+        "offset": "0xa6d6600",
+        "size": 263345,
+        "md5": "79913e14d8845260c3f3b1da938664b3",
+        "recoverable": true,
+        "note": "scenario 17, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "7.mov",
+        "type": "mov",
+        "offset": "0xab67600",
+        "size": 468352,
+        "md5": "62efa42c338dd0e3f0736f2c36c86620",
+        "recoverable": true,
+        "note": "scenario 86, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "7.mp4",
+        "type": "mp4",
+        "offset": "0xb33a800",
+        "size": 4196979,
+        "md5": "ee3b819932d893be9e29e931e75d3ae2",
+        "recoverable": true,
+        "note": "scenario 88, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "7.pdf",
+        "type": "pdf",
+        "offset": "0x2670800",
+        "size": 11984,
+        "md5": "d279ac6f42308738b0b32794c59d47ea",
+        "recoverable": true,
+        "note": "scenario 78, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "8.jpg",
+        "type": "jpg",
+        "offset": "0xa6d8400",
+        "size": 1071081,
+        "md5": "b15623e79a432624b504814d71705c72",
+        "recoverable": true,
+        "note": "scenario 17, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "8.mov",
+        "type": "mov",
+        "offset": "0xb4d4600",
+        "size": 1419917,
+        "md5": "3c957360462b780fe3b8d9baff4d607e",
+        "recoverable": true,
+        "note": "scenario 88, 1 fragment(s) -- fragmented"
+      },
+      {
+        "name": "8.mp4",
+        "type": "mp4",
+        "offset": "0xdf6f400",
+        "size": 3455684,
+        "md5": "4ee04bb9ccdf56dc9a03d30767ba7873",
+        "recoverable": true,
+        "note": "scenario 87, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "8.pdf",
+        "type": "pdf",
+        "offset": "0x11f06800",
+        "size": 4087394,
+        "md5": "1bb755171f6195025a301bb08c182f69",
+        "recoverable": true,
+        "note": "scenario 79, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "9.jpg",
+        "type": "jpg",
+        "offset": "0xa7c0000",
+        "size": 260186,
+        "md5": "489fd3a19602478dabf496c8173bfd6f",
+        "recoverable": true,
+        "note": "scenario 17, 2 fragment(s) -- fragmented"
+      },
+      {
+        "name": "9.pdf",
+        "type": "pdf",
+        "offset": "0xaddb400",
+        "size": 1097512,
+        "md5": "fc4f53512e84ec97e11d6e21fb9211d5",
+        "recoverable": true,
+        "note": "scenario 80, 2 fragment(s) -- fragmented"
+      }
+    ]
   }
 }

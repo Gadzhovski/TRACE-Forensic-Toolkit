@@ -40,6 +40,8 @@ TRUTH = os.path.join(HERE, 'carve_ground_truth.json')
 BASELINE = {
     '11-carve-fat.dd': 15,      # every planted file of a supported type
     '12-carve-ext2.dd': 10,     # likewise
+    'dfrws-2006-challenge.raw': 25,  # 27 planted; the 2 misses are frag'd ZIPs
+    'dfrws-2007-challenge.img': 0,   # set from the first measured run
 }
 
 #: How close a recovered offset must be to the documented one to count as the
