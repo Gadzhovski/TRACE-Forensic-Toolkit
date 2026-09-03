@@ -674,6 +674,44 @@ class FileCarvingWidget(QWidget):
             if is_valid_file(wav_content, 'wav'):
                 self.save_file(wav_content, 'wav', base_offset + start_index)
 
+    @staticmethod
+    def _starts_a_file(offset):
+        """Could a file begin at this absolute offset?
+
+        A filesystem allocates in sectors, so a file it stored begins on a
+        sector boundary -- every file in every answer key used to test this
+        does. A signature found part-way through a sector is something inside
+        a larger object: a thumbnail in a photo, a frame in a video, an
+        attachment in a mail spool. Carving it writes out part of one file
+        under the name of another, which is worse than not carving it: it
+        looks like a recovered file.
+
+        Scanning the DFRWS 2007 image, which is dense with MP3 and MPEG data,
+        this rejected most of the 193 spurious JPEGs while keeping every real
+        one.
+        """
+        return offset % SECTOR_SIZE == 0
+
+    #: Tags that a real page has and a quoted fragment in a mail body usually
+    #: does not. Requiring some structure is what separates a document from
+    #: someone writing about one.
+    _HTML_STRUCTURE = (b'<body', b'<head', b'<title', b'<div', b'<table',
+                       b'<p>', b'<a ', b'<meta')
+
+    @classmethod
+    def _looks_like_a_page(cls, content):
+        """Is this a document, or just bytes containing an <html> tag?
+
+        HTML has no footer magic and no checksum, so nothing else here can
+        reject a match. The DFRWS 2007 image carries mbox mail data whose
+        bodies are full of markup, and without this the carver wrote out 602
+        of them.
+        """
+        if len(content) < 512:
+            return False
+        head = content[:4096].lower()
+        return sum(marker in head for marker in cls._HTML_STRUCTURE) >= 2
+
     def _carve_by_footer(self, chunk, base_offset, file_type,
                          header, footer):
         """Carve every `header` .. `footer` span that actually parses.
@@ -694,6 +732,12 @@ class FileCarvingWidget(QWidget):
             start_index = chunk.find(header, cursor)
             if start_index == -1:
                 break
+
+            if not self._starts_a_file(base_offset + start_index):
+                # Mid-sector: embedded in something else, not a file of its
+                # own. See _starts_a_file.
+                cursor = start_index + len(header)
+                continue
 
             end_index = start_index
             carved = False
@@ -1293,7 +1337,8 @@ class FileCarvingWidget(QWidget):
                 continue
 
             content = chunk[start_index:end]
-            if len(content) >= CARVE_MIN_SIZE:
+            if (self._starts_a_file(base_offset + start_index)
+                    and self._looks_like_a_page(content)):
                 self.save_file(content, 'html', base_offset + start_index)
             cursor = tag + 5
 

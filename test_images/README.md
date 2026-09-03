@@ -102,3 +102,9 @@ Exits non-zero if a score falls below the baseline recorded in that script.
 The score counts files **located**; byte-exactness is reported separately,
 because a fragmented file cannot be reproduced by a contiguous carver and
 counting that as a failure would measure the wrong thing.
+
+**Expect the 2007 image to take a while.** Chunks advance 4 MB but read 36 MB,
+so every byte is scanned about nine times, by each of sixteen carvers -- around
+50 billion byte-scans for a 331 MB image. That overlap is what stops a file
+being lost at a chunk boundary, so it is deliberate, but it makes a large image
+slow to score.
