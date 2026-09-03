@@ -946,6 +946,19 @@ QLabel#aboutMetaQuiet {
     padding-top: 6px;
 }
 
+/* ============ Bookmarks ============ */
+
+QLabel#bookmarksEmpty {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 10px 6px;
+}
+
+QTableWidget#bookmarksTable {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D0D0;
+}
+
 /* ============ Cases ============ */
 
 QDialog#caseLauncher,

@@ -554,6 +554,79 @@ class Case:
             (evidence_id,)).fetchone()
         return bool(row['read_only']) if row else True
 
+    # --- bookmarks --------------------------------------------------------
+
+    def add_bookmark(self, evidence_id, artifact_ref, label,
+                     artifact_name='', artifact_path='', colour=''):
+        """Mark an artifact worth returning to. Returns the bookmark id.
+
+        `artifact_ref` comes from make_artifact_ref / make_span_ref /
+        make_registry_ref -- it is what survives a case being closed and still
+        points at the same thing afterwards. The name and path are stored
+        alongside as human-readable context, so a bookmark still says something
+        useful even if its evidence is missing.
+        """
+        existing = self._db.execute(
+            "SELECT id FROM bookmarks WHERE evidence_id IS ? "
+            "AND artifact_ref = ?", (evidence_id, artifact_ref)).fetchone()
+        if existing:
+            # Bookmarking the same artifact twice is a re-label, not a
+            # duplicate: two identical rows in the list help nobody.
+            self._db.execute(
+                "UPDATE bookmarks SET label = ?, colour = ? WHERE id = ?",
+                (label, colour, existing['id']))
+            self._db.commit()
+            self._record_activity('bookmark updated', f'{label} ({artifact_ref})')
+            return existing['id']
+
+        cursor = self._db.execute(
+            "INSERT INTO bookmarks (evidence_id, artifact_ref, artifact_name,"
+            " artifact_path, label, colour, created_utc) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, artifact_ref, artifact_name, artifact_path, label,
+             colour, _utc_now()))
+        self._db.commit()
+        self._record_activity('bookmark added', f'{label} ({artifact_ref})')
+        return cursor.lastrowid
+
+    def bookmarks(self, evidence_id=None):
+        """Bookmarks, newest first."""
+        if evidence_id is None:
+            rows = self._db.execute(
+                "SELECT * FROM bookmarks ORDER BY id DESC").fetchall()
+        else:
+            rows = self._db.execute(
+                "SELECT * FROM bookmarks WHERE evidence_id = ? "
+                "ORDER BY id DESC", (evidence_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def bookmark_for_artifact(self, evidence_id, artifact_ref):
+        """The bookmark on this artifact, or None."""
+        row = self._db.execute(
+            "SELECT * FROM bookmarks WHERE evidence_id IS ? "
+            "AND artifact_ref = ?", (evidence_id, artifact_ref)).fetchone()
+        return dict(row) if row else None
+
+    def update_bookmark(self, bookmark_id, label=None, colour=None):
+        """Rename or recolour a bookmark."""
+        if label is not None:
+            self._db.execute("UPDATE bookmarks SET label = ? WHERE id = ?",
+                             (label, bookmark_id))
+        if colour is not None:
+            self._db.execute("UPDATE bookmarks SET colour = ? WHERE id = ?",
+                             (colour, bookmark_id))
+        self._db.commit()
+        self._record_activity('bookmark edited', f'id={bookmark_id}')
+
+    def remove_bookmark(self, bookmark_id):
+        """Delete a bookmark. Any notes on it are kept, and become free-standing."""
+        row = self._db.execute("SELECT label FROM bookmarks WHERE id = ?",
+                               (bookmark_id,)).fetchone()
+        self._db.execute("DELETE FROM bookmarks WHERE id = ?", (bookmark_id,))
+        self._db.commit()
+        if row:
+            self._record_activity('bookmark removed', row['label'] or '')
+
     # --- audit ------------------------------------------------------------
 
     def activity(self, limit=200):

@@ -35,6 +35,7 @@ from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.exif import ExifViewer
 from trace_app.ui.viewers.carving import FileCarvingWidget
 from trace_app.ui.viewers.hex import HexViewer
+from trace_app.core.case import make_artifact_ref, parse_artifact_ref
 from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
 from trace_app.infra.paths import config_file, resource_path
@@ -51,6 +52,7 @@ from trace_app.ui.viewers.virustotal import VirusTotal
 from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
 from trace_app.core.workers import ExportWorker
 from trace_app.ui.dialogs import message
+from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
 from trace_app.ui.viewers.case_panel import CasePanel
 
 logger = logging.getLogger('TRACE.MainWindow')
@@ -219,6 +221,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "size": entry.get("size"),
             "is_deleted": entry.get("is_deleted", False),
             "is_recoverable": entry.get("is_recoverable", False),
+            # The MFT record's reuse counter. Carried so a bookmark on
+            # this row can tell two generations of the same inode
+            # apart -- without it a saved reference can come to mean a
+            # different file.
+            "sequence": entry.get("sequence"),
         })
 
     def _populate_table_entry(self, row_position: int, entry: Dict[str, Any], offset: int) -> None:
@@ -316,6 +323,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Utils along the bottom: tall enough to read a viewer, no more.
         self.resizeDocks([self.viewer_dock], [int(height * 0.30)], Qt.Vertical)
+        # Narrower than the tree: a bookmark list is labels, not paths.
+        self.resizeDocks([self.bookmarks_dock], [int(width * 0.18)],
+                         Qt.Horizontal)
 
     def _build_window(self):
         """Window title, icon, geometry and platform taskbar identity."""
@@ -850,6 +860,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         virus_total_key = self.api_keys.get('API_KEYS', 'virustotal', fallback='')
         self.virus_total_api.set_api_key(virus_total_key)
 
+        # Bookmarks live in the right dock, which was unused: they are a
+        # standing list an examiner returns to, not something to page to
+        # through a tab.
+        self.bookmarks_panel = BookmarksPanel()
+        self.bookmarks_panel.set_case(self.case)
+        self.bookmarks_panel.jump_requested.connect(self.go_to_bookmark)
+        self.bookmarks_dock = QDockWidget('Bookmarks', self)
+        self.bookmarks_dock.setObjectName("bookmarksDock")
+        self.bookmarks_dock.setWidget(self.bookmarks_panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.bookmarks_dock)
+
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')
         self.viewer_dock.setWidget(self.viewer_tab)
@@ -1179,6 +1200,110 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.show_image_information()
         finally:
             self.image_handler = original
+
+    # --- bookmarks --------------------------------------------------------
+
+    def artifact_ref_for(self, data):
+        """A durable reference to whatever `data` describes, or None.
+
+        `data` is one of the Qt.UserRole payloads built by the listing, the
+        tree or a search result. They carry the partition offset and inode; the
+        MFT sequence is carried where the source had it, because two files can
+        share an inode over a volume's life and a reference without it can come
+        to mean a different file.
+        """
+        if not data:
+            return None
+        offset = data.get('start_offset')
+        inode = data.get('inode_number')
+        if offset is None or inode is None:
+            return None
+        return make_artifact_ref(offset, inode, data.get('sequence'))
+
+    def evidence_id_for_current_image(self):
+        """The case's id for the image on screen, or None."""
+        if not self.case or not self.current_image_path:
+            return None
+        row = self.case.evidence_for_path(self.current_image_path)
+        if row is None:
+            row_id = self.case.add_evidence(self.current_image_path)
+            return row_id
+        return row['id']
+
+    def add_bookmark_for(self, data, suggested_label=None):
+        """Bookmark the artifact `data` describes."""
+        if not self.case:
+            message.information(
+                self, "No case is open",
+                "Bookmarks are kept in a case. Start one from File ▸ New Case "
+                "to keep findings between sessions.")
+            return
+
+        ref = self.artifact_ref_for(data)
+        if ref is None:
+            message.warning(self, "Cannot bookmark this",
+                            "This item does not have a stable location to "
+                            "record.")
+            return
+
+        default = suggested_label or data.get('name') or 'Bookmark'
+        label, ok = QInputDialog.getText(
+            self, "Add bookmark", "Label:", text=default)
+        if not ok or not label.strip():
+            return
+
+        self.case.add_bookmark(
+            self.evidence_id_for_current_image(), ref, label.strip(),
+            artifact_name=data.get('name') or '',
+            artifact_path=data.get('path') or '')
+        self.bookmarks_panel.refresh()
+        self.set_status(f"Bookmarked {label.strip()}")
+
+    def go_to_bookmark(self, row):
+        """Open whatever a bookmark points at.
+
+        This is the one place that turns an artifact reference back into a
+        selection, shared by bookmarks and by search results. It replaces
+        show_file_in_directory, which hardcoded parent_inode = 5 and so landed
+        every deep file at the volume root with nothing selected.
+        """
+        parsed = parse_artifact_ref(row.get('artifact_ref'))
+
+        if parsed['kind'] != 'file':
+            # Byte ranges and registry keys need their own viewers; say so
+            # rather than silently doing nothing.
+            self.set_status(
+                f"{row.get('label') or 'Bookmark'} points at a "
+                f"{parsed['kind']}, which opens in its own viewer.")
+            return
+
+        if not self.image_handler:
+            message.information(self, "No image loaded",
+                                "Load the evidence this bookmark belongs to "
+                                "first.")
+            return
+
+        offset, inode = parsed['start_offset'], parsed['inode']
+        try:
+            content, metadata = self.image_handler.get_file_content(inode, offset)
+        except Exception as exc:
+            logger.error("Could not open bookmarked artifact: %s", exc)
+            message.warning(self, "Could not open",
+                            f"The bookmarked item could not be read: {exc}")
+            return
+
+        data = {
+            'inode_number': inode,
+            'start_offset': offset,
+            'type': 'file',
+            'name': row.get('artifact_name') or f'inode {inode}',
+            'path': row.get('artifact_path') or '',
+            'size': getattr(metadata, 'size', 0) if metadata else 0,
+        }
+        self.current_selected_data = data
+        self.select_tree_item_by_inode(inode, offset)
+        self.update_viewer_with_file_content(content, data)
+        self.set_status(f"Opened {data['name']}")
 
     # --- case ------------------------------------------------------------
 
@@ -2417,7 +2542,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 "name": entry_name,
                 "size": size,
                 "parent_inode": parent_inode,  # Store parent directory inode for "Go Up" functionality
-                "path": file_path  # Store the full path
+                "path": file_path,  # Store the full path
+                # The MFT record's reuse counter -- see _setup_file_tree_item.
+                "sequence": sequence,
             })
 
             self.listing_table.setItem(row_position, 0, name_item)
@@ -2592,6 +2719,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add separator
                 menu.addSeparator()
 
+            bookmark_action = menu.addAction("Add Bookmark")
+            bookmark_action.setEnabled(self.case is not None)
+            if self.case is None:
+                bookmark_action.setToolTip("Bookmarks are kept in a case.")
+            bookmark_action.triggered.connect(
+                lambda: self.add_bookmark_for(data))
+            menu.addSeparator()
+
             # Add the 'Export' option for any file or folder
             export_action = menu.addAction("Export")
             export_action.triggered.connect(lambda: self.handle_export(data, QFileDialog.getExistingDirectory(self,
@@ -2672,6 +2807,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     "Verify Image" if state is None else "View Verification Result")
                 verify_action.triggered.connect(
                     lambda _=False, p=image_path: self.verify_image(p))
+
+            if data and data.get('inode_number') is not None:
+                bookmark_action = menu.addAction("Add Bookmark")
+                bookmark_action.setEnabled(self.case is not None)
+                bookmark_action.triggered.connect(
+                    lambda: self.add_bookmark_for(data))
+                menu.addSeparator()
 
             # Add the 'Export' option for any file or folder
             export_action = menu.addAction("Export")
