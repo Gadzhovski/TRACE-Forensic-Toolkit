@@ -1,6 +1,11 @@
 """Shared UI and I/O constants."""
 
 SECTOR_SIZE = 512
+
+#: How deep the allocation-map walk will follow directories. A guard against
+#: a corrupt filesystem whose directory entries form a loop; real evidence
+#: does not nest anywhere near this far.
+MAX_DIRECTORY_DEPTH = 64
 CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks for processing
 FILE_BUFFER_SIZE = 4096  # 4KB for file operations
 

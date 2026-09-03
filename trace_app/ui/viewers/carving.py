@@ -23,6 +23,7 @@ from fitz import open as fitz_open, Matrix
 
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
+from trace_app.core.image_handler import ImageHandler
 from trace_app.infra.paths import carved_files_dir, resource_path
 from trace_app.infra.constants import (PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
@@ -324,9 +325,14 @@ class FileCarvingWidget(QWidget):
                     self.allocation_map.extend(partition_map)
                     logger.debug(f"  Single filesystem: {len(partition_map)} allocated regions")
 
-            # Sort the combined allocation map
-            self.allocation_map.sort(key=lambda x: x[0])
-            logger.warning(f"Total allocated regions to skip: {len(self.allocation_map)}")
+            # Merge, not just sort. is_offset_allocated binary searches this
+            # list, which is only valid if the ranges are ordered AND do not
+            # overlap; combining several partitions' maps can produce overlaps
+            # that a plain sort leaves in place.
+            self.allocation_map = ImageHandler._merge_ranges(self.allocation_map)
+            covered = sum(end - begin for begin, end in self.allocation_map)
+            logger.info("Skipping %d allocated regions (%.1f MB) while carving",
+                        len(self.allocation_map), covered / (1024 * 1024))
 
         except Exception as e:
             logger.error(f"Warning: Could not build allocation map: {e}")

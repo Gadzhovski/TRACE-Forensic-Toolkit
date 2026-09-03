@@ -17,7 +17,8 @@ import pyewf
 import pytsk3
 from Registry import Registry
 
-from trace_app.infra.constants import CHUNK_SIZE, SECTOR_SIZE
+from trace_app.infra.constants import (CHUNK_SIZE, MAX_DIRECTORY_DEPTH,
+                                       SECTOR_SIZE)
 from trace_app.infra.utils import FileSystemUtils, safe_datetime
 
 logger = logging.getLogger('TRACE.ImageHandler')
@@ -99,7 +100,19 @@ class ImageHandler:
             raise NotImplementedError("The image format does not support direct reading.")
 
     def build_allocation_map(self, start_offset):
-        """Build a map of allocated disk regions by traversing the filesystem."""
+        """Byte ranges occupied by allocated files, for carving to skip.
+
+        The ranges come from each file's data runs -- the blocks the
+        filesystem actually assigned to it. An earlier version estimated them
+        as `inode number x block size`, which bears no relation to where NTFS
+        places data: measured against the real runs on the test image, those
+        estimates were 1-3 GB out. The map therefore protected the wrong
+        regions, so carving skipped free space and recovered files that had
+        never been deleted.
+
+        Returned sorted and merged, so is_offset_allocated can binary search
+        it.
+        """
         allocation_map = []
 
         try:
@@ -108,94 +121,94 @@ class ImageHandler:
                 logger.warning(f"Unable to get filesystem info for offset {start_offset}")
                 return allocation_map
 
-            # Get block size for this filesystem
             block_size = fs_info.info.block_size
+            partition_offset = start_offset * SECTOR_SIZE
+            visited = set()
 
-            # Recursively walk filesystem to find all allocated files
-            def walk_directory(directory, path="/"):
-                """Recursively walk directory and collect allocated file ranges."""
-                try:
-                    for entry in directory:
-                        # Skip current and parent directory entries
-                        if not hasattr(entry, 'info') or not hasattr(entry.info, 'name'):
+            def record_runs(file_obj):
+                """Add every block run this file occupies."""
+                for attribute in file_obj:
+                    try:
+                        runs = list(attribute)
+                    except Exception:
+                        continue        # resident data has no runs to skip
+                    for run in runs:
+                        if run.len <= 0 or run.addr <= 0:
                             continue
+                        begin = partition_offset + run.addr * block_size
+                        allocation_map.append(
+                            (begin, begin + run.len * block_size))
 
+            def walk_directory(directory, depth=0):
+                if depth > MAX_DIRECTORY_DEPTH:
+                    return
+                for entry in directory:
+                    try:
+                        if entry.info.meta is None or entry.info.name is None:
+                            continue
                         name = entry.info.name.name.decode('utf-8', errors='ignore')
-                        if name in [".", ".."]:
+                        if name in (".", ".."):
                             continue
 
-                        # Check if this is an allocated file
-                        if not hasattr(entry.info, 'meta') or entry.info.meta is None:
-                            continue
+                        inode = entry.info.meta.addr
+                        if inode in visited:
+                            continue        # hard links, and directory cycles
+                        visited.add(inode)
 
-                        # Only process allocated files (skip deleted files)
-                        is_allocated = bool(int(entry.info.meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC)
-                        if not is_allocated:
-                            continue
+                        allocated = bool(int(entry.info.meta.flags)
+                                         & pytsk3.TSK_FS_META_FLAG_ALLOC)
+                        if not allocated:
+                            continue        # deleted: leave it to be carved
 
-                        # Get file size and inode
-                        file_size = entry.info.meta.size
-
-                        # Only process files with actual data
-                        if file_size > 0:
+                        if entry.info.meta.size > 0:
                             try:
-                                # Open the file to access its data runs
-                                file_obj = fs_info.open_meta(inode=entry.info.meta.addr)
-
-                                # Calculate byte offsets for the file's data
-                                # This is approximate - we use the file's logical position
-                                # For a more accurate map, we'd need to walk data runs
-                                # but this is a reasonable approximation for most filesystems
-
-                                # Get partition offset in bytes
-                                partition_offset_bytes = start_offset * 512
-
-                                # For simplicity, we'll mark regions based on inode metadata
-                                # A more sophisticated approach would walk TSK_FS_BLOCK structures
-                                # but pytsk3 doesn't expose block_walk easily
-
-                                # Estimate file location based on inode number and size
-                                # This is a simplified approach - actual blocks may be fragmented
-                                inode_addr = entry.info.meta.addr
-                                estimated_start = partition_offset_bytes + (inode_addr * block_size)
-                                estimated_end = estimated_start + file_size
-
-                                allocation_map.append((estimated_start, estimated_end))
-
+                                record_runs(fs_info.open_meta(inode=inode))
                             except Exception as e:
-                                # Skip files we can't open
-                                logger.debug(f"Could not process file {path}{name}: {e}")
-                                pass
+                                logger.debug("Could not read runs for %s: %s", name, e)
 
-                        # Recursively process directories
                         if entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                             try:
-                                sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
-                                walk_directory(sub_directory, f"{path}{name}/")
+                                walk_directory(fs_info.open_dir(inode=inode),
+                                               depth + 1)
                             except Exception as e:
-                                logger.debug(f"Could not open directory {path}{name}: {e}")
-                                pass
+                                logger.debug("Could not open directory %s: %s", name, e)
+                    except Exception as e:
+                        logger.debug("Skipping a directory entry: %s", e)
 
-                except Exception as e:
-                    logger.debug(f"Error walking directory {path}: {e}")
-                    pass
-
-            # Start walking from root directory
             try:
-                root_dir = fs_info.open_dir(path="/")
-                walk_directory(root_dir)
+                walk_directory(fs_info.open_dir(path="/"))
             except Exception as e:
                 logger.error(f"Error accessing root directory: {e}")
 
-            # Sort allocation map by start offset for efficient searching
-            allocation_map.sort(key=lambda x: x[0])
-
-            logger.info(f"Built allocation map with {len(allocation_map)} allocated file regions")
+            allocation_map = self._merge_ranges(allocation_map)
+            logger.info("Allocation map: %d regions covering %.1f MB",
+                        len(allocation_map),
+                        sum(e - b for b, e in allocation_map) / (1024 * 1024))
 
         except Exception as e:
             logger.error(f"Error building allocation map: {e}")
 
         return allocation_map
+
+    @staticmethod
+    def _merge_ranges(ranges):
+        """Sort ranges and coalesce any that touch or overlap.
+
+        A fragmented file contributes one run per fragment and neighbouring
+        files often sit back to back, so merging keeps the map small enough to
+        search quickly.
+        """
+        if not ranges:
+            return []
+        ranges.sort(key=lambda pair: pair[0])
+        merged = [list(ranges[0])]
+        for begin, end in ranges[1:]:
+            if begin <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([begin, end])
+        return [tuple(pair) for pair in merged]
+
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
