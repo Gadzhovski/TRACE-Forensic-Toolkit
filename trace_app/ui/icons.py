@@ -43,6 +43,11 @@ EVIDENCE_REMOVE = "Icons/tabler/file-minus.svg"
 VERIFY = "Icons/tabler/shield-check.svg"
 VERIFY_OK = "Icons/tabler/shield-check-filled.svg"
 
+# --- Cases -----------------------------------------------------------------
+#: A case is a folder on disk, and the folder glyph is the honest picture of
+#: it. The icon set carries no dedicated case or briefcase mark.
+CASE = "Icons/tabler/folder.svg"
+
 # --- Navigation ------------------------------------------------------------
 BACK = "Icons/tabler/arrow-left.svg"
 FORWARD = "Icons/tabler/arrow-right.svg"

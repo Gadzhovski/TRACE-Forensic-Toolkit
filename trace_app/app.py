@@ -9,6 +9,7 @@ from trace_app import __version__
 from trace_app.infra.paths import log_file
 from trace_app.infra.preflight import check_dependencies, format_report
 from trace_app.ui.dialogs import message
+from trace_app.ui.dialogs.case_launcher import TRIAGE, choose_case
 from trace_app.ui.main_window import MainWindow
 
 
@@ -58,6 +59,15 @@ def main():
             "TRACE started, but some features will not work:\n\n"
             + format_report(missing))
 
-    window = MainWindow()
+    # Ask what kind of session this is before building anything. Someone
+    # handed a USB stick who wants to know what is on it should not have to
+    # name an investigation first, so quick triage leads to exactly the
+    # application TRACE was before cases existed.
+    case = choose_case()
+    if case is None:
+        logging.getLogger('TRACE').info("Launcher dismissed; not starting")
+        return 0
+
+    window = MainWindow(case=None if case is TRIAGE else case)
     window.show()
     return app.exec()

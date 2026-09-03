@@ -45,11 +45,13 @@ from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
 from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, ExifAdapter, HexAdapter,
-                                     MetadataAdapter, TextAdapter, VirusTotalAdapter)
+                                     CaseAdapter, MetadataAdapter, TextAdapter,
+                                     VirusTotalAdapter)
 from trace_app.ui.viewers.virustotal import VirusTotal
 from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
 from trace_app.core.workers import ExportWorker
 from trace_app.ui.dialogs import message
+from trace_app.ui.viewers.case_panel import CasePanel
 
 logger = logging.getLogger('TRACE.MainWindow')
 
@@ -66,8 +68,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     # Class variable for icon caching
     _icon_cache = {}
 
-    def __init__(self):
+    def __init__(self, case=None):
         super().__init__()
+
+        #: The open case, or None for quick triage. Everything case-related
+        #: checks this rather than a separate mode flag: there is one source
+        #: of truth for whether findings have anywhere to be kept.
+        self.case = case
 
         # Create a database manager for icon lookup
         self.db_manager = DatabaseManager()
@@ -110,7 +117,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.current_image_path = None
         self.current_selected_data = None
 
-        self.evidence_files = []
+        #: Images loaded in this session. With a case open this is seeded
+        #: from it and every add/remove writes back, so the list survives a
+        #: restart; in triage it behaves as it always has and is lost on exit.
+        self.evidence_files = list(case.evidence_paths()) if case else []
 
         #: Handlers for evidence other than the one on screen, opened on demand
         #: when a picker asks about an image that is not the current one and
@@ -124,6 +134,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.verification_results = {}
 
         self.initialize_ui()
+
+        if case:
+            # Seeded after the UI is built, not in the attribute block above:
+            # marking an image verified paints its tree row, and the tree does
+            # not exist until initialize_ui() has run.
+            self._seed_verification_from_case()
+            for path in self.evidence_files:
+                if path in self.verification_results:
+                    self.mark_image_verified(path, True)
 
     # ==================== HELPER METHODS ====================
 
@@ -300,7 +319,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _build_window(self):
         """Window title, icon, geometry and platform taskbar identity."""
-        self.setWindowTitle(f'TRACE {__version__}')
+        self.setWindowTitle(self._case_title())
 
         # Set application icon for all platforms
         app_icon = icons.icon(icons.LOGO_LARGE)
@@ -454,6 +473,34 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         }
 
         self.create_menu(menu_bar, 'File', file_actions)
+
+        # Case entries live in their own menu rather than crowding File, and
+        # disable themselves in quick triage: an action that cannot work is
+        # more honest greyed out than failing when clicked.
+        case_menu = QMenu('Case', self)
+        self.case_properties_action = QAction("Case Properties...", self)
+        self.case_properties_action.triggered.connect(self.show_case_properties)
+        case_menu.addAction(self.case_properties_action)
+
+        self.verify_case_action = QAction("Verify All Evidence", self)
+        self.verify_case_action.triggered.connect(self.verify_case_evidence)
+        case_menu.addAction(self.verify_case_action)
+
+        case_menu.addSeparator()
+        open_folder_action = QAction("Open Case Folder", self)
+        open_folder_action.triggered.connect(self.open_case_folder)
+        case_menu.addAction(open_folder_action)
+        self.open_case_folder_action = open_folder_action
+
+        for action in (self.case_properties_action, self.verify_case_action,
+                       self.open_case_folder_action):
+            action.setEnabled(self.case is not None)
+        if self.case is None:
+            case_menu.setToolTipsVisible(True)
+            for action in case_menu.actions():
+                action.setToolTip("Quick triage: no case is open.")
+
+        menu_bar.addMenu(case_menu)
 
         view_menu = QMenu('View', self)
 
@@ -784,6 +831,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Each viewer is wrapped in an adapter exposing a common
         # display()/clear() interface, so nothing below has to dispatch on a
         # tab index. Tab order comes from this list alone.
+        self.case_panel = CasePanel()
+        self.case_panel.set_case(self.case)
+
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
@@ -791,6 +841,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             MetadataAdapter(self.metadata_viewer),
             ExifAdapter(self.exif_viewer),
             VirusTotalAdapter(self.virus_total_api),
+            CaseAdapter(self.case_panel),
         ]
         for adapter in self.viewer_adapters:
             self.viewer_tab.addTab(adapter.widget, adapter.label)
@@ -1000,6 +1051,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if results and image_path:
             self.verification_results[image_path] = results
             self.mark_image_verified(image_path, results.get('verified', False))
+            # A case stores the digests themselves, so reopening it does not
+            # re-hash an image the examiner already waited for.
+            self.store_verification_in_case(image_path, results)
 
         QWidget.closeEvent(widget, event)
 
@@ -1116,6 +1170,119 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.show_image_information()
         finally:
             self.image_handler = original
+
+    # --- case ------------------------------------------------------------
+
+    def _seed_verification_from_case(self):
+        """Rebuild the in-memory verification map from stored hashes.
+
+        A case records the digests themselves, so a reopened case can show an
+        image as verified without reading it again. Only evidence that was
+        actually hashed counts: an entry added but never verified stays
+        unverified rather than inheriting a green tick it never earned.
+        """
+        for row in self.case.evidence():
+            if not (row.get('md5') or row.get('sha1')):
+                continue
+            hashes = {
+                'computed_md5': row.get('md5'),
+                'computed_sha1': row.get('sha1'),
+                'computed_sha256': row.get('sha256'),
+                'stored_md5': row.get('stored_md5'),
+                'stored_sha1': row.get('stored_sha1'),
+                'size': row.get('size'),
+                'path': row['path'],
+            }
+            self.verification_results[row['path']] = {
+                'html': None,       # re-rendered on demand by the dialog
+                'verified': row.get('last_status') == 'verified',
+                'hashes': hashes,
+            }
+
+    def _case_title(self):
+        """Window title, naming the case when there is one."""
+        base = f'TRACE {__version__}'
+        if not self.case:
+            return base
+        number = self.case.number
+        name = self.case.name or 'Untitled case'
+        return f'{base}  —  {name}' + (f' ({number})' if number else '')
+
+    def record_evidence_in_case(self, image_path):
+        """Add an image to the open case, if there is one."""
+        if not self.case:
+            return
+        try:
+            self.case.add_evidence(image_path)
+        except Exception as exc:
+            # A case that cannot record evidence must not stop the examiner
+            # looking at it; the panel will show the discrepancy.
+            logger.error("Could not record evidence in the case: %s", exc)
+
+    def store_verification_in_case(self, image_path, results):
+        """Persist computed hashes against the case's evidence row."""
+        if not self.case or not results:
+            return
+        hashes = results.get('hashes')
+        if not hashes:
+            return
+        row = self.case.evidence_for_path(image_path)
+        if row is None:
+            row_id = self.case.add_evidence(image_path)
+        else:
+            row_id = row['id']
+        try:
+            self.case.record_hashes(row_id, hashes)
+        except Exception as exc:
+            logger.error("Could not store hashes in the case: %s", exc)
+        if getattr(self, 'case_panel', None):
+            self.case_panel.refresh()
+
+    def show_case_properties(self):
+        """Show, and allow editing of, the open case's details."""
+        if not self.case:
+            return
+        from trace_app.ui.dialogs.case_launcher import CasePropertiesDialog
+        dialog = CasePropertiesDialog(self.case, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.setWindowTitle(self._case_title())
+            if getattr(self, 'case_panel', None):
+                self.case_panel.refresh()
+
+    def verify_case_evidence(self):
+        """Re-check every piece of evidence against its recorded hash."""
+        if not self.case:
+            return
+        outcomes = self.case.verify_evidence()
+        if not outcomes:
+            message.information(self, "No evidence",
+                                "This case has no evidence to check yet.")
+            return
+
+        trouble = [(row, status, detail) for row, status, detail in outcomes
+                   if status in ('missing', 'changed')]
+        if getattr(self, 'case_panel', None):
+            self.case_panel.refresh()
+
+        if not trouble:
+            message.information(
+                self, "Evidence verified",
+                f"All {len(outcomes)} piece(s) of evidence match what the "
+                f"case recorded.")
+            return
+
+        lines = [f"{row['display_name'] or row['path']}: {detail}"
+                 for row, _status, detail in trouble]
+        message.warning(
+            self, "Evidence does not match",
+            "Some evidence is not as the case recorded it.",
+            "\n\n".join(lines))
+
+    def open_case_folder(self):
+        """Show the case folder in the system file manager."""
+        if not self.case:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(self.case.folder))
 
     def enable_tabs(self, state):
         self.result_viewer.setEnabled(state)
@@ -1252,6 +1419,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if hasattr(self, '_auxiliary_handlers'):
             self._auxiliary_handlers.clear()
 
+        # A case holds an open SQLite connection; closing it also writes
+        # the closing line of the audit trail.
+        if getattr(self, 'case', None) is not None:
+            try:
+                self.case.close()
+            except Exception as exc:
+                logger.error("Error closing case: %s", exc)
+
+
         # Close database connection
         if hasattr(self, 'db_manager') and self.db_manager:
             try:
@@ -1329,6 +1505,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add the image to evidence files list
                 if image_path not in self.evidence_files:
                     self.evidence_files.append(image_path)
+                # A case remembers its evidence; triage does not.
+                self.record_evidence_in_case(image_path)
+                if getattr(self, 'case_panel', None):
+                    self.case_panel.refresh()
 
                 self.current_image_path = image_path
                 self.set_status_context(
@@ -1344,6 +1524,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                self.registry_extractor_widget,
                                self.metadata_viewer):
                     widget.set_image_handler(self.image_handler)
+                # Carved output belongs inside the case when there is one:
+                # carved files are named after their offset alone, so two
+                # images sharing one directory overwrite each other.
+                self.deleted_files_widget.set_case_folder(
+                    self.case.folder if self.case else None)
                 progress.setValue(80)
 
                 # Load partitions into tree view

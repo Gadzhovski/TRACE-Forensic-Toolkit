@@ -112,9 +112,22 @@ def config_file(name='config.ini'):
     return os.path.join(user_config_dir(), name)
 
 
-def carved_files_dir(create=True):
-    """Directory that file carving writes recovered files into."""
-    path = os.path.join(user_data_dir(create=create), 'carved_files')
+def carved_files_dir(case_folder=None, create=True):
+    """Directory that file carving writes recovered files into.
+
+    With a case open, output belongs inside it: carved files are named after
+    the offset they were found at and nothing else, so two images carved into
+    one shared directory overwrite each other wherever both hold the same file
+    type at the same offset. A case folder gives each investigation its own
+    space, and keeps recovered evidence beside the case that produced it.
+
+    Without a case -- quick triage -- the shared directory under the user data
+    dir stays the default, so triage behaves exactly as it always has.
+    """
+    if case_folder:
+        path = os.path.join(case_folder, 'carved')
+    else:
+        path = os.path.join(user_data_dir(create=create), 'carved_files')
     if create:
         _ensure_dir(path)
         _ensure_dir(os.path.join(path, 'thumbnails'))
@@ -137,3 +150,86 @@ def _ensure_dir(path):
     except OSError:
         pass
     return path
+
+
+def recent_cases_file():
+    """Where the list of recently opened cases is kept.
+
+    Beside config.ini in the user config dir. config_file() already takes a
+    name for exactly this kind of reuse, so no second settings mechanism is
+    introduced.
+    """
+    return config_file('recent_cases.json')
+
+
+def read_recent_cases(limit=10):
+    """Recently opened case folders, most recent first.
+
+    Folders that no longer exist are dropped on read rather than offered and
+    then failing: a launcher listing a case that cannot be opened is worse than
+    a shorter list.
+    """
+    import json
+
+    try:
+        with open(recent_cases_file(), encoding='utf-8') as handle:
+            entries = json.load(handle)
+    except (OSError, ValueError):
+        return []
+
+    if not isinstance(entries, list):
+        return []
+
+    seen = []
+    for entry in entries:
+        folder = entry.get('folder') if isinstance(entry, dict) else entry
+        if not folder or folder in [e['folder'] for e in seen]:
+            continue
+        if not os.path.isdir(folder):
+            continue
+        seen.append({
+            'folder': folder,
+            'name': (entry.get('name') if isinstance(entry, dict) else '')
+                    or os.path.basename(folder),
+            'opened': entry.get('opened', '') if isinstance(entry, dict) else '',
+        })
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def remember_case(folder, name='', limit=10):
+    """Put a case at the top of the recent list."""
+    import json
+
+    entries = [e for e in read_recent_cases(limit=limit)
+               if e['folder'] != folder]
+    entries.insert(0, {
+        'folder': folder,
+        'name': name or os.path.basename(folder),
+        'opened': _now_iso(),
+    })
+
+    try:
+        with open(recent_cases_file(), 'w', encoding='utf-8') as handle:
+            json.dump(entries[:limit], handle, indent=2)
+    except OSError:
+        pass        # a missing recent list must not stop a case opening
+
+
+def forget_case(folder):
+    """Drop a case from the recent list."""
+    import json
+
+    entries = [e for e in read_recent_cases() if e['folder'] != folder]
+    try:
+        with open(recent_cases_file(), 'w', encoding='utf-8') as handle:
+            json.dump(entries, handle, indent=2)
+    except OSError:
+        pass
+
+
+def _now_iso():
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).replace(
+        microsecond=0).isoformat()

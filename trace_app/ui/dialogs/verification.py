@@ -69,6 +69,10 @@ class VerificationWidget(QWidget):
         self.image_handler = image_handler
         self.thread = None
         self._results_html = None
+        #: The digests themselves, as ImageHandler computed them. The rendered
+        #: HTML above is for display; a case has to store real hash values, and
+        #: it cannot store what this layer threw away.
+        self._hash_results = None
         self.setWindowTitle("Trace - Image Verification")
         self.setWindowIcon(icons.icon(icons.LOGO))
         self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
@@ -213,6 +217,7 @@ class VerificationWidget(QWidget):
                 hash_info += f"<br><br><b>Size:</b> {size_bytes} bytes ({size_mb:.2f} MB)<br><b>Path:</b> {hash_results.get('path')}"
                 self.hash_label.setHtml(hash_info)
                 self._results_html = hash_info
+                self._hash_results = dict(hash_results)
             else:
                 self.hash_label.setText("Error calculating hashes. Please ensure the image is accessible.")
         except Exception as e:
@@ -223,6 +228,7 @@ class VerificationWidget(QWidget):
         """Render a previous run without touching the image again."""
         self._results_html = cached.get('html')
         self._verified = cached.get('verified', False)
+        self._hash_results = cached.get('hashes')
         self.hash_label.setHtml(self._results_html or '')
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat("Verified earlier this session")
@@ -235,7 +241,8 @@ class VerificationWidget(QWidget):
         """
         if self._results_html is None:
             return None
-        return {'html': self._results_html, 'verified': self._verified}
+        return {'html': self._results_html, 'verified': self._verified,
+                'hashes': self._hash_results}
 
     @property
     def is_verified(self):

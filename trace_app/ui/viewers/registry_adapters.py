@@ -140,6 +140,22 @@ class VirusTotalAdapter(ViewerAdapter):
         pass
 
 
+class CaseAdapter(ViewerAdapter):
+    label = 'Case'
+
+    def display(self, content, data):
+        self.widget.display_case(data)
+
+    def needs_content(self):
+        # A case is a property of the session, not of whichever file happens
+        # to be selected, so there is no file to read.
+        return False
+
+    def clear(self):
+        # The case outlives any one selection.
+        pass
+
+
 #: Adapter classes in tab order. Adding a viewer means adding one entry here
 #: and constructing the widget in MainWindow -- no index arithmetic anywhere.
 VIEWER_ADAPTERS = (
@@ -149,4 +165,5 @@ VIEWER_ADAPTERS = (
     MetadataAdapter,
     ExifAdapter,
     VirusTotalAdapter,
+    CaseAdapter,
 )

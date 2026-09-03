@@ -139,6 +139,9 @@ class FileCarvingWidget(QWidget):
         self.carved_files = []
         self.carved_file_names = set()  # Track carved file names to avoid duplicates
         self.allocation_map = []  # Map of allocated disk regions to skip during carving
+        #: Case folder to write carved output into, or None for the shared
+        #: triage directory. See set_case_folder.
+        self._case_folder = None
         self.init_ui()
 
     def init_ui(self):
@@ -374,7 +377,7 @@ class FileCarvingWidget(QWidget):
         # Carved output goes to the per-user data dir, not the working
         # directory -- the CWD is not reliably writable (a macOS .app bundle
         # runs with CWD '/') and output does not belong in the source tree.
-        carved_dir = carved_files_dir()
+        carved_dir = carved_files_dir(self._case_folder)
         thumbnail_folder = os.path.join(carved_dir, "thumbnails")
 
         # Build allocation map for all partitions to skip allocated files
@@ -434,6 +437,16 @@ class FileCarvingWidget(QWidget):
         """
         self._stop_requested = True
         self.stop_button.setEnabled(False)
+
+    def set_case_folder(self, case_folder):
+        """Where carved files go: inside the case, or the shared directory.
+
+        Carved files are named after the offset they were found at and nothing
+        else, so two images carved into one directory overwrite each other
+        wherever both hold the same file type at the same offset. A case gives
+        each investigation its own space; triage keeps the shared default.
+        """
+        self._case_folder = case_folder
 
     def set_image_handler(self, image_handler):
         self.image_handler = image_handler
@@ -1533,7 +1546,7 @@ class FileCarvingWidget(QWidget):
         the same file is genuinely found several times -- the absolute offset
         is what lets us recognise it as one file rather than nine.
         """
-        carved_dir = carved_files_dir()
+        carved_dir = carved_files_dir(self._case_folder)
 
         offset_hex = format(offset, 'x')
         file_name = f"{offset_hex}.{file_type}"
@@ -1606,7 +1619,7 @@ class FileCarvingWidget(QWidget):
 
         # Only proceed if the file type is one of the supported formats
         if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp', 'zip', 'wav']:
-            carved_dir = carved_files_dir()
+            carved_dir = carved_files_dir(self._case_folder)
             file_full_path = os.path.join(carved_dir, name)
             thumbnail_folder = os.path.join(carved_dir, "thumbnails")
 

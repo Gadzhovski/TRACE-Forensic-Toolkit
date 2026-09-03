@@ -969,6 +969,59 @@ QLabel#aboutMetaQuiet {
     padding-top: 6px;
 }
 
+/* ============ Cases ============ */
+
+QDialog#caseLauncher,
+QDialog#newCaseDialog,
+QDialog#casePropertiesDialog {
+    background-color: #2B2B2B;
+}
+
+QLabel#launcherTitle {
+    font-size: 24px;
+    font-weight: 600;
+    color: #E8E8E8;
+}
+
+QLabel#launcherSubtitle {
+    font-size: 12px;
+    color: #9aa4b0;
+    padding-bottom: 6px;
+}
+
+QLabel#launcherHeading,
+QLabel#caseSectionHeading {
+    font-size: 12px;
+    font-weight: 600;
+    color: #9aa4b0;
+    padding-top: 4px;
+}
+
+QPushButton#launcherButton {
+    font-size: 14px;
+    text-align: left;
+    padding-left: 14px;
+}
+
+QListWidget#recentCaseList {
+    background-color: #232323;
+    border: 1px solid #3C3C3C;
+    border-radius: 4px;
+}
+
+QLabel#caseFolderHint,
+QLabel#casePropertyValue {
+    font-size: 11px;
+    color: #8b949e;
+}
+
+QLabel#caseHeadline {
+    font-size: 16px;
+    font-weight: 600;
+    color: #E8E8E8;
+    padding: 4px 2px;
+}
+
 /* ============ Multi-select and menu buttons ============ */
 
 /* Shows a text summary, so it is styled like a combo box. */
