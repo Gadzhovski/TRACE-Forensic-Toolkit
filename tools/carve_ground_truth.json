@@ -1,0 +1,228 @@
+{
+  "_comment": "Ground truth transcribed from the published DFTT answer keys. Sizes and MD5s are as documented by the test authors; offsets are the byte offset of the file's header within the image, measured against the image itself. 'recoverable' is false where the file is deliberately corrupted or is not a type TRACE carves.",
+  "11-carve-fat.dd": {
+    "source": "https://dftt.sourceforge.net/test11/index.html",
+    "title": "DFTT #11 - Basic Data Carving Test #1 (FAT32)",
+    "files": [
+      {
+        "name": "paul.jpg",
+        "type": "jpg",
+        "offset": "0x820a00",
+        "recoverable": true,
+        "note": "valid JPEG"
+      },
+      {
+        "name": "shark.jpg",
+        "type": "jpg",
+        "offset": "0x9a0a00",
+        "recoverable": true,
+        "note": "valid JPEG"
+      },
+      {
+        "name": "pumpkin.jpg",
+        "type": "jpg",
+        "offset": "0x9a8200",
+        "recoverable": true,
+        "note": "valid EXIF JPEG; first FFD9 is the thumbnail's"
+      },
+      {
+        "name": "jpeg4",
+        "type": "jpg",
+        "offset": "0xa14a00",
+        "recoverable": true,
+        "note": "valid JFIF JPEG; first FFD9 is the thumbnail's"
+      },
+      {
+        "name": "haxor2.jpg",
+        "type": "jpg",
+        "offset": null,
+        "recoverable": false,
+        "note": "1 byte corrupted at offset 19 -- MUST be rejected"
+      },
+      {
+        "name": "lin_1.2.pdf",
+        "type": "pdf",
+        "offset": "0x82ca00",
+        "recoverable": true,
+        "note": "linearized PDF"
+      },
+      {
+        "name": "nlin_14.pdf",
+        "type": "pdf",
+        "offset": "0x982a00",
+        "recoverable": true,
+        "note": "non-linearized PDF"
+      },
+      {
+        "name": "sm1.gif",
+        "type": "gif",
+        "offset": "0xa2d200",
+        "recoverable": true,
+        "note": "valid GIF"
+      },
+      {
+        "name": "enterprise.wav",
+        "type": "wav",
+        "offset": "0x7d2a00",
+        "recoverable": true,
+        "note": "valid WAV"
+      },
+      {
+        "name": "surf.mov",
+        "type": "mov",
+        "offset": "0xa2ea00",
+        "size": 550653,
+        "recoverable": true,
+        "note": "starts at its moov atom; no ftyp"
+      },
+      {
+        "name": "domopers.wmv",
+        "type": "wmv",
+        "offset": "0x28200",
+        "recoverable": true,
+        "note": "deleted WMV"
+      },
+      {
+        "name": "surf.wmv",
+        "type": "wmv",
+        "offset": "0xab5200",
+        "recoverable": true,
+        "note": "valid WMV"
+      },
+      {
+        "name": "wword60t.zip",
+        "type": "zip",
+        "offset": "0xbb5a00",
+        "recoverable": true,
+        "note": "valid ZIP; entry 'wword60.txt' fnlen=11"
+      },
+      {
+        "name": "2003_document.doc",
+        "type": "ole",
+        "offset": "0x23200",
+        "recoverable": true,
+        "note": "OLE compound"
+      },
+      {
+        "name": "holly.xls",
+        "type": "ole",
+        "offset": "0x826a00",
+        "recoverable": true,
+        "note": "OLE compound"
+      },
+      {
+        "name": "test.ppt",
+        "type": "ole",
+        "offset": "0xbb2a00",
+        "recoverable": true,
+        "note": "deleted PPT, OLE compound"
+      }
+    ],
+    "false_positives_to_avoid": [
+      {
+        "offset": "0xa15b65",
+        "type": "jpg",
+        "note": "EXIF thumbnail embedded in the JPEG at 0xa14a00 -- mid-sector"
+      }
+    ]
+  },
+  "12-carve-ext2.dd": {
+    "source": "https://dftt.sourceforge.net/test12/index.html",
+    "title": "DFTT #12 - Basic Data Carving Test #2 (Ext2)",
+    "files": [
+      {
+        "name": "blogo.gif",
+        "type": "gif",
+        "offset": "0x280400",
+        "size": 18663,
+        "md5": "5e10b2176016885a85bffc074a142524",
+        "recoverable": true,
+        "note": "fragmented"
+      },
+      {
+        "name": "haxor2.bmp",
+        "type": "bmp",
+        "offset": "0x285400",
+        "size": 163878,
+        "md5": "f9633fe6b9ef2a0a5edd6de70d22c0f5",
+        "recoverable": true,
+        "note": "deleted BMP, fragmented"
+      },
+      {
+        "name": "jn.jpg",
+        "type": "jpg",
+        "offset": "0x2b1400",
+        "size": 28949,
+        "md5": "270a0a913fa9603db8121fdf78d63aca",
+        "recoverable": true,
+        "note": "fragmented"
+      },
+      {
+        "name": "lin_test.pdf",
+        "type": "pdf",
+        "offset": "0x2b8c00",
+        "size": 26618,
+        "md5": "1c64456776075d1f0a662e1f6c09e340",
+        "recoverable": true,
+        "note": "fragmented"
+      },
+      {
+        "name": "main_dive.jpg",
+        "type": "jpg",
+        "offset": "0x2bf800",
+        "size": 8463,
+        "md5": "937846adb96773ee25fcb34821230976",
+        "recoverable": true
+      },
+      {
+        "name": "n_lin_ss.pdf",
+        "type": "pdf",
+        "offset": "0x2c1c00",
+        "size": 734652,
+        "md5": "97be95ed3e710b63bc75e5c0775062d9",
+        "recoverable": true,
+        "note": "heavily fragmented across indirect blocks"
+      },
+      {
+        "name": "sherry.jpg",
+        "type": "jpg",
+        "offset": "0x376400",
+        "size": 133249,
+        "md5": "3834e72d2ee266ccfb9733d716b89f2b",
+        "recoverable": true,
+        "note": "fragmented"
+      },
+      {
+        "name": "jimmy.doc",
+        "type": "ole",
+        "offset": "0x2adc00",
+        "size": 12800,
+        "recoverable": true,
+        "note": "deleted DOC (extent is a header-derived upper bound, so no MD5 comparison)"
+      },
+      {
+        "name": "stats.xls",
+        "type": "ole",
+        "offset": "0x397400",
+        "size": 15360,
+        "recoverable": true,
+        "note": "not yet carved (extent is a header-derived upper bound, so no MD5 comparison)"
+      },
+      {
+        "name": "test.ppt",
+        "type": "ole",
+        "offset": "0x39b400",
+        "size": 17408,
+        "recoverable": true,
+        "note": "not yet carved (extent is a header-derived upper bound, so no MD5 comparison)"
+      }
+    ],
+    "false_positives_to_avoid": [
+      {
+        "offset": "0x376c5a",
+        "type": "jpg",
+        "note": "thumbnail embedded in sherry.jpg -- mid-sector"
+      }
+    ]
+  }
+}

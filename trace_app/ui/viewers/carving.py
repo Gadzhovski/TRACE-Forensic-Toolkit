@@ -2,7 +2,9 @@ import logging
 import datetime
 import io
 import os
+import re
 import struct
+import zlib
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +27,9 @@ from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.core.image_handler import ImageHandler
 from trace_app.infra.paths import carved_files_dir, resource_path
-from trace_app.infra.constants import (CARVE_OVERLAP, CHUNK_SIZE,
+from trace_app.infra.constants import (CARVE_MAX_FOOTER_CANDIDATES,
+                                       CARVE_MAX_SIZE, CARVE_MIN_SIZE,
+                                       CARVE_OVERLAP, CHUNK_SIZE,
                                        PANEL_ICON_SIZE, TABLE_ICON_SIZE,
                                        UNKNOWN_DATE)
 from trace_app.ui import icons
@@ -38,7 +42,61 @@ logger = logging.getLogger('TRACE.Carving')
 
 
 #: File signatures the carver can search for. Order is the menu order.
-CARVABLE_TYPES = ["PDF", "JPG", "PNG", "GIF", "BMP", "WAV", "MOV", "WMV", "ZIP"]
+#: "OLE" covers the legacy Office trio (.doc/.xls/.ppt), which share one
+#: compound-document container and cannot be told apart from the header alone.
+CARVABLE_TYPES = ["PDF", "JPG", "PNG", "GIF", "BMP", "TIFF", "WAV", "MOV",
+                  "MP4", "WMV", "ZIP", "GZ", "RAR", "7Z", "OLE", "HTML"]
+
+# Signatures are named rather than inlined so a format's header and footer are
+# stated once, next to each other, and read as a pair.
+#: An ISO-BMFF atom type is four printable ASCII characters. Requiring that is
+#: what stops the walk reading arbitrary bytes as a chain of tiny atoms.
+_ATOM_NAME_RE = re.compile(rb'[A-Za-z0-9 _\-]{4}')
+
+#: Carved types that get a generic icon rather than a rendered preview,
+#: grouped by the icon each one takes.
+VIDEO_TYPES = frozenset({'mov', 'mp4', 'wmv'})
+ARCHIVE_TYPES = frozenset({'zip', 'gz', 'rar', '7z'})
+AUDIO_TYPES = frozenset({'wav'})
+DOCUMENT_TYPES = frozenset({'ole', 'html'})
+#: Everything above: these already arrive square, so cropping only trims them.
+ICON_TYPES = VIDEO_TYPES | ARCHIVE_TYPES | AUDIO_TYPES | DOCUMENT_TYPES
+
+#: Bytes per value for each TIFF field type, used to work out how far an IFD's
+#: out-of-line values push the end of the file.
+_TIFF_TYPE_WIDTH = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1,
+                    8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
+
+#: Ceiling on what one gzip member may expand to while we look for its end.
+#: A carved stream is unverified input; decompressing it without a limit is how
+#: a zip bomb turns a scan into an out-of-memory crash.
+_GZIP_DECOMPRESS_LIMIT = 64 * 1024 * 1024
+
+JPG_HEADER = b'\xFF\xD8\xFF'
+JPG_FOOTER = b'\xFF\xD9'
+PNG_HEADER = b'\x89PNG\r\n\x1a\n'
+#: IEND carries no data, so its CRC is a constant and forms part of the footer.
+PNG_FOOTER = b'IEND\xAE\x42\x60\x82'
+GIF_HEADER = b'GIF8'
+#: Block terminator followed by the GIF trailer.
+GIF_FOOTER = b'\x00\x3B'
+BMP_HEADER = b'BM'
+WAV_HEADER = b'RIFF'
+PDF_HEADER = b'%PDF-'
+PDF_FOOTER = b'%%EOF'
+ZIP_LOCAL_HEADER = b'PK\x03\x04'
+ZIP_EOCD = b'PK\x05\x06'
+OLE_HEADER = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
+GZIP_HEADER = b'\x1F\x8B\x08'
+RAR_HEADER = b'Rar!\x1A\x07'
+SEVENZIP_HEADER = b'7z\xBC\xAF\x27\x1C'
+TIFF_HEADERS = (b'II\x2A\x00', b'MM\x00\x2A')
+#: ASF Header Object GUID: the first 16 bytes of every WMV file.
+ASF_HEADER_GUID = bytes.fromhex('3026B2758E66CF11A6D900AA0062CE6C')
+#: ASF File Properties Object, which carries the declared file size.
+ASF_PROPERTIES_GUID = bytes.fromhex('A1DCAB8C47A9CF118EE400C00C205365')
+
+
 
 
 class NumericTableWidgetItem(QTableWidgetItem):
@@ -556,9 +614,9 @@ class FileCarvingWidget(QWidget):
 
 
     def carve_pdf_files(self, chunk, global_offset):
-        pdf_start_signature = b'%PDF-'
+        pdf_start_signature = PDF_HEADER
         pdf_linearization_signature = b'/Linearized'
-        pdf_end_signature = b'%%EOF'
+        pdf_end_signature = PDF_FOOTER
         offset = 0
         while offset < len(chunk):
             start_index = chunk.find(pdf_start_signature, offset)
@@ -591,7 +649,7 @@ class FileCarvingWidget(QWidget):
                 offset = start_index + 1
 
     def carve_wav_files(self, chunk, base_offset):
-        wav_start_signature = b'RIFF'
+        wav_start_signature = WAV_HEADER
         cursor = 0
         while cursor < len(chunk):
             start_index = chunk.find(wav_start_signature, cursor)
@@ -615,214 +673,294 @@ class FileCarvingWidget(QWidget):
             if is_valid_file(wav_content, 'wav'):
                 self.save_file(wav_content, 'wav', base_offset + start_index)
 
-    def carve_mov_files(self, chunk, base_offset):
-        mov_signatures = [
-            # b'ftyp', b'moov', b'mdat', #b'pnot', b'udta', #b'uuid',
-            # b'moof', b'free', b'skip', b'jP2 ', b'wide', b'load',
-            # b'ctab', b'imap', b'matt', b'kmat', b'clip', b'crgn',
-            # b'sync', b'chap', b'tmcd', b'scpt', b'ssrc', b'PICT'
-            b'moov', b'mdat', b'free', b'wide'
-        ]
+    def _carve_by_footer(self, chunk, base_offset, file_type,
+                         header, footer):
+        """Carve every `header` .. `footer` span that actually parses.
 
-        mov_file_found = False
-        mov_data = b''
-        # Where in the chunk this MOV starts; the cursor below moves, this does
-        # not, so the file keeps the offset it was found at.
-        mov_file_offset = 0
-        offset = 0
-        mov_file_size = 0
+        The first footer after a header is routinely the wrong one. A JPEG's
+        EXIF thumbnail ends with the same FFD9 the image does, so taking the
+        first match truncates a fully recoverable photo into a fragment --
+        which is how two intact JPEGs in the DFTT test image were being lost.
 
-        while offset < len(chunk):
-            if offset + 8 > len(chunk):
-                # Not enough data for an atom header
+        So each candidate footer is tried in turn and the first that validates
+        wins. A header whose footers all fail is abandoned, and the search
+        resumes just past the header rather than past the failed span: a real
+        file can begin inside the region a false candidate covered.
+        """
+        cap = CARVE_MAX_SIZE.get(file_type)
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(header, cursor)
+            if start_index == -1:
                 break
 
-            atom_size = int.from_bytes(chunk[offset:offset + 4], 'big')
-            atom_type = chunk[offset + 4:offset + 8]
-
-            if atom_type not in mov_signatures:
-                if mov_file_found:
-                    # End of MOV file
+            end_index = start_index
+            carved = False
+            for _ in range(CARVE_MAX_FOOTER_CANDIDATES):
+                end_index = chunk.find(footer, end_index + 1)
+                if end_index == -1:
                     break
-                else:
-                    # Not a MOV file or just a stray header, skip ahead
-                    offset += 4
-                    continue
 
-            if not mov_file_found:
-                # First atom of this file: this is where it begins.
-                mov_file_offset = offset
-            mov_file_found = True
-            mov_file_size += atom_size
+                size = end_index + len(footer) - start_index
+                if cap and size > cap:
+                    break               # every later footer is only further
 
-            if offset + atom_size > len(chunk):
-                # Atom extends beyond this chunk, store what we have and wait for more data
-                mov_data += chunk[offset:]
-                break
-            else:
-                # We have the whole atom, store it
-                mov_data += chunk[offset:offset + atom_size]
+                content = chunk[start_index:end_index + len(footer)]
+                if is_valid_file(content, file_type):
+                    self.save_file(content, file_type,
+                                   base_offset + start_index)
+                    cursor = end_index + len(footer)
+                    carved = True
+                    break
 
-            offset += atom_size
-
-        if mov_file_found and mov_data:
-            # file_name = f"carved_{mov_file_offset}.mov"
-            # file_path = os.path.join("carved_files", file_name)
-            # self.save_file(mov_data, 'mov', file_path)
-            self.save_file(mov_data, 'mov', base_offset + mov_file_offset)
+            if not carved:
+                cursor = start_index + len(header)
 
     def carve_jpg_files(self, chunk, base_offset):
-        jpg_start_signature = b'\xFF\xD8\xFF'
-        jpg_end_signature = b'\xFF\xD9'
-        cursor = 0
-        while cursor < len(chunk):
-            start_index = chunk.find(jpg_start_signature, cursor)
-            if start_index == -1:
-                break
-
-            end_index = chunk.find(jpg_end_signature, start_index)
-            if end_index != -1:
-                jpg_content = chunk[start_index:end_index + len(jpg_end_signature)]
-
-                # Check if it's a valid JPG file
-                if is_valid_file(jpg_content, 'jpg'):
-                    self.save_file(jpg_content, 'jpg', base_offset + start_index)
-
-                cursor = end_index + len(jpg_end_signature)
-            else:
-                cursor = start_index + 1  # Continue searching
+        self._carve_by_footer(chunk, base_offset, 'jpg',
+                              JPG_HEADER, JPG_FOOTER)
 
     def carve_gif_files(self, chunk, base_offset):
-        gif_start_signature = b'\x47\x49\x46\x38'
-        gif_end_signature = b'\x00\x3B'
-        cursor = 0
-        while cursor < len(chunk):
-            start_index = chunk.find(gif_start_signature, cursor)
-            if start_index == -1:
-                break
-
-            end_index = chunk.find(gif_end_signature, start_index)
-            if end_index != -1:
-                gif_content = chunk[start_index:end_index + len(gif_end_signature)]
-
-                # Check if it's a valid GIF file
-                if is_valid_file(gif_content, 'gif'):
-                    self.save_file(gif_content, 'gif', base_offset + start_index)
-
-                cursor = end_index + len(gif_end_signature)
-            else:
-                cursor = start_index + 1
+        self._carve_by_footer(chunk, base_offset, 'gif',
+                              GIF_HEADER, GIF_FOOTER)
 
     def carve_png_files(self, chunk, base_offset):
-        png_start_signature = b'\x89\x50\x4E\x47\x0D\x0A\x1A\x0A'
-        png_end_signature = b'\x49\x45\x4E\x44\xAE\x42\x60\x82'
+        self._carve_by_footer(chunk, base_offset, 'png',
+                              PNG_HEADER, PNG_FOOTER)
+
+    def carve_mov_files(self, chunk, base_offset):
+        """Recover QuickTime and MP4 by walking the atom chain.
+
+        A MOV is a flat sequence of size-prefixed atoms, so the file's extent
+        is the walk itself rather than a footer to search for. The previous
+        version scanned four bytes at a time for one of four atom types, then
+        emitted a single file after the loop -- so it found at most one MOV per
+        chunk, entered files at whichever atom happened to match first, and had
+        `ftyp` commented out of its list entirely.
+
+        MP4 is the same container, so one walk finds both and the brand in the
+        `ftyp` atom decides the extension. Running the walk once and labelling
+        the result is what keeps a single file from being written twice.
+        """
+        self._carve_atom_chain(chunk, base_offset)
+
+    def carve_mp4_files(self, chunk, base_offset):
+        """MP4 shares QuickTime's container, and so shares carve_mov_files.
+
+        Deliberately empty: the atom walk already emits MP4s with the right
+        extension. Carving here as well would write the same bytes a second
+        time under a second name.
+        """
+        return
+
+    def _carve_atom_chain(self, chunk, base_offset):
+        cap = max(CARVE_MAX_SIZE.get('mov', 0), CARVE_MAX_SIZE.get('mp4', 0))
+        cursor = 0
+        while cursor + 8 <= len(chunk):
+            anchor = self._next_atom_start(chunk, cursor)
+            if anchor is None:
+                break
+
+            end = self._walk_atoms(chunk, anchor, cap)
+            if end is None:
+                # Not a real chain; resume just past this candidate rather
+                # than past the span it would have covered.
+                cursor = anchor + 4
+                continue
+
+            content = chunk[anchor:end]
+            file_type = self._isobmff_extension(content)
+            if is_valid_file(content, file_type):
+                self.save_file(content, file_type, base_offset + anchor)
+                cursor = end
+            else:
+                cursor = anchor + 4
+
+    @staticmethod
+    def _isobmff_extension(content):
+        """'mp4' or 'mov', from the brand the file declares.
+
+        A `ftyp` atom names the specification the file was written to. Classic
+        QuickTime predates `ftyp` and simply has none, so its absence is itself
+        the answer.
+        """
+        if content[4:8] != b'ftyp':
+            return 'mov'
+        brand = content[8:12]
+        return 'mov' if brand in (b'qt  ', b'moov') else 'mp4'
+
+    @staticmethod
+    def _next_atom_start(chunk, cursor):
+        """Offset of the next plausible container-opening atom."""
+        best = None
+        for name in (b'ftyp', b'moov', b'mdat', b'free', b'skip', b'wide',
+                     b'pnot'):
+            # The type sits 4 bytes into the atom, after its size.
+            found = chunk.find(name, cursor + 4)
+            while found != -1:
+                start = found - 4
+                size = int.from_bytes(chunk[start:start + 4], 'big')
+                if size == 0 or size == 1 or size >= 8:
+                    if best is None or start < best:
+                        best = start
+                    break
+                found = chunk.find(name, found + 1)
+        return best
+
+    @staticmethod
+    def _walk_atoms(chunk, start, cap):
+        """End offset of the atom chain beginning at `start`, or None.
+
+        Returns None when the chain is not one: a single atom proves nothing,
+        because four printable bytes preceded by a plausible length occur in
+        ordinary data.
+        """
+        pos = start
+        atoms = 0
+        while pos + 8 <= len(chunk):
+            size = int.from_bytes(chunk[pos:pos + 4], 'big')
+            kind = chunk[pos + 4:pos + 8]
+            if not _ATOM_NAME_RE.match(kind):
+                break
+            if size == 0:
+                pos = len(chunk)        # runs to the end of the file
+                atoms += 1
+                break
+            if size == 1:
+                if pos + 16 > len(chunk):
+                    break
+                size = int.from_bytes(chunk[pos + 8:pos + 16], 'big')
+            if size < 8 or pos + size > len(chunk):
+                break
+            if cap and (pos + size) - start > cap:
+                break
+            pos += size
+            atoms += 1
+
+        if atoms < 2 or pos <= start:
+            return None
+        return pos
+
+    def carve_wmv_files(self, chunk, base_offset):
+        """Recover ASF/WMV using the size the ASF header object declares."""
+        cap = CARVE_MAX_SIZE.get('wmv')
         cursor = 0
         while cursor < len(chunk):
-            start_index = chunk.find(png_start_signature, cursor)
+            start_index = chunk.find(ASF_HEADER_GUID, cursor)
             if start_index == -1:
                 break
 
-            end_index = chunk.find(png_end_signature, start_index)
-            if end_index != -1:
-                png_content = chunk[start_index:end_index + len(png_end_signature)]
+            # The Header Object's own size sits immediately after its GUID;
+            # the total file size lives in the File Properties Object.
+            size = self._asf_file_size(chunk, start_index)
+            if size is None or size < CARVE_MIN_SIZE:
+                cursor = start_index + 1
+                continue
+            if cap and size > cap:
+                cursor = start_index + 1
+                continue
 
-                # Check if it's a valid PNG file
-                if is_valid_file(png_content, 'png'):
-                    self.save_file(png_content, 'png', base_offset + start_index)
+            end_index = start_index + size
+            if end_index > len(chunk):
+                # Runs past this read; the next chunk's overlap holds it whole.
+                cursor = start_index + 1
+                continue
 
-                cursor = end_index + len(png_end_signature)
+            content = chunk[start_index:end_index]
+            if is_valid_file(content, 'wmv'):
+                self.save_file(content, 'wmv', base_offset + start_index)
+                cursor = end_index
             else:
                 cursor = start_index + 1
 
-    def carve_wmv_files(self, chunk, base_offset):
-        # Define ASF header signature
-        asf_header_signature = b'\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C'
+    @staticmethod
+    def _asf_file_size(chunk, start_index):
+        """Total file size from the ASF File Properties Object, if present."""
+        window = min(start_index + 1024, len(chunk))
+        properties = chunk.find(ASF_PROPERTIES_GUID, start_index, window)
+        if properties == -1:
+            return None
+        # GUID (16) + object size (8) + File ID (16), then the 64-bit
+        # file size.
+        field = properties + 40
+        if field + 8 > len(chunk):
+            return None
+        return int.from_bytes(chunk[field:field + 8], 'little')
 
-        current_offset = 0
+    def carve_zip_files(self, chunk, base_offset):
+        """Recover each ZIP archive as its own file.
 
-        while current_offset < len(chunk):
-            # Search for ASF header
-            start_index = chunk.find(asf_header_signature, current_offset)
+        The previous version joined every local file header in the chunk into
+        one output named after the first, and computed each entry's stride as
+        `30 + compressed_size` -- omitting the filename and extra-field
+        lengths at +26 and +28. Measured against wword60t.zip in the DFTT
+        image, whose single entry has an 11-byte name, every archive came out
+        exactly 11 bytes short and would not open.
+        """
+        cap = CARVE_MAX_SIZE.get('zip')
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(ZIP_LOCAL_HEADER, cursor)
             if start_index == -1:
                 break
 
-            # Find the file properties object header within the first 512 bytes of the file
-            max_search_size = min(start_index + 512, len(chunk))
-            file_properties_header = b'\xA1\xDC\xAB\x8C\x47\xA9\xCF\x11\x8E\xE4\x00\xC0\x0C\x20\x53\x65'
-            file_properties_index = chunk.find(file_properties_header, start_index, max_search_size)
-            if file_properties_index == -1:
-                current_offset = start_index + 1
+            end = self._zip_extent(chunk, start_index, cap)
+            if end is None:
+                cursor = start_index + len(ZIP_LOCAL_HEADER)
                 continue
 
-            # Extract the file size located at offset 40 within the object
-            file_size_offset = file_properties_index + 40
-            file_size_bytes = chunk[file_size_offset:file_size_offset + 8]
-            file_size = int.from_bytes(file_size_bytes, byteorder='little')
+            content = chunk[start_index:end]
+            if is_valid_file(content, 'zip'):
+                self.save_file(content, 'zip', base_offset + start_index)
+                cursor = end
+            else:
+                cursor = start_index + len(ZIP_LOCAL_HEADER)
 
-            # Calculate end index based on file size
-            end_index = start_index + file_size
+    @staticmethod
+    def _zip_extent(chunk, start_index, cap):
+        """End offset of the archive beginning at `start_index`, or None.
 
-            # Extract WMV content
-            wmv_content = chunk[start_index:end_index]
+        Walks the local file headers to find this archive's own End of Central
+        Directory record, so two archives lying next to each other stay two
+        files.
+        """
+        pos = start_index
+        while pos + 30 <= len(chunk) and chunk[pos:pos + 4] == ZIP_LOCAL_HEADER:
+            try:
+                flags = struct.unpack('<H', chunk[pos + 6:pos + 8])[0]
+                compressed = struct.unpack('<I', chunk[pos + 18:pos + 22])[0]
+                name_len = struct.unpack('<H', chunk[pos + 26:pos + 28])[0]
+                extra_len = struct.unpack('<H', chunk[pos + 28:pos + 30])[0]
+            except struct.error:
+                return None
 
-            # Save the WMV content directly into the carved_files directory
-            self.save_file(wmv_content, 'wmv', base_offset + start_index)
-            current_offset = end_index
-
-    def carve_zip_files(self, chunk, global_offset):
-        # Define ZIP header signatures
-        local_file_header_signature = b'\x50\x4b\x03\x04'
-        end_of_central_dir_signature = b'\x50\x4b\x05\x06'
-
-        current_pos = 0
-        zip_file_parts = []  # List to hold all parts of the ZIP file
-        # Where the first local header sits, which is where the archive itself
-        # begins. That position identifies the file, so it is what names it.
-        zip_start = None
-
-        while current_pos < len(chunk):
-            # Search for local file header
-            local_header_index = chunk.find(local_file_header_signature, current_pos)
-            if local_header_index == -1:
+            if flags & 0x08 and compressed == 0:
+                # Sizes were streamed into a trailing data descriptor, so the
+                # local header cannot tell us the stride. The central
+                # directory is the only reliable end.
                 break
 
-            if zip_start is None:
-                zip_start = local_header_index
+            pos += 30 + name_len + extra_len + compressed
+            if cap and pos - start_index > cap:
+                return None
 
-            # Extract compressed size from local file header
-            compressed_size = struct.unpack("<I", chunk[local_header_index + 18:local_header_index + 22])[0]
+        eocd = chunk.find(ZIP_EOCD, start_index)
+        if eocd == -1 or eocd + 22 > len(chunk):
+            return None
+        try:
+            comment_len = struct.unpack('<H', chunk[eocd + 20:eocd + 22])[0]
+        except struct.error:
+            return None
 
-            # Calculate next local file header index
-            next_local_header_index = local_header_index + 30 + compressed_size
-
-            # Extract file content
-            file_content = chunk[local_header_index:next_local_header_index]
-            zip_file_parts.append(file_content)  # Add the file content to the ZIP parts list
-
-            # Move to next local file header
-            current_pos = next_local_header_index
-
-        # Now, find and append the Central Directory and End of Central Directory Record
-        end_central_dir_index = chunk.find(end_of_central_dir_signature, current_pos)
-        if end_central_dir_index != -1:
-            # Extract comment length and calculate the total end of the ZIP file structure
-            comment_length = struct.unpack("<H", chunk[end_central_dir_index + 20:end_central_dir_index + 22])[0]
-            zip_end = end_central_dir_index + 22 + comment_length
-
-            # Extract the Central Directory and End of Central Directory Record
-            zip_file_structure = chunk[current_pos:zip_end]
-            zip_file_parts.append(zip_file_structure)  # Add this to the ZIP parts list
-
-        # Combine all parts into a single ZIP file content
-        if zip_file_parts:
-            complete_zip_file_content = b''.join(zip_file_parts)
-            self.save_file(complete_zip_file_content, 'zip',
-                           global_offset + zip_start)
-
-        return None
+        end = eocd + 22 + comment_len
+        if end > len(chunk):
+            return None
+        if cap and end - start_index > cap:
+            return None
+        return end
 
     def carve_bmp_files(self, chunk, base_offset):
-        bmp_start_signature = b'BM'  # BMP files start with 'BM'
+        bmp_start_signature = BMP_HEADER
         header_size = 14  # The static header size for BMP files
 
         current_offset = 0
@@ -856,13 +994,290 @@ class FileCarvingWidget(QWidget):
             # Extract the BMP file if it's entirely within the chunk
             if start_index + bmp_file_size <= len(chunk):
                 bmp_content = chunk[start_index:start_index + bmp_file_size]
-                self.save_file(bmp_content, 'bmp', base_offset + start_index)
-                current_offset = start_index + bmp_file_size  # Move past this BMP file
+                # Header plausibility is not proof: 'BM' plus a believable size
+                # and dimensions matched 174 times in one 62 MB test image.
+                if is_valid_file(bmp_content, 'bmp'):
+                    self.save_file(bmp_content, 'bmp',
+                                   base_offset + start_index)
+                    current_offset = start_index + bmp_file_size
+                else:
+                    current_offset = start_index + 2
             else:
                 break  # The BMP file exceeds the chunk boundary, stop processing
 
         # Return if more data is needed or if processing is complete
         return None
+
+    def carve_ole_files(self, chunk, base_offset):
+        """Recover legacy Office documents (.doc, .xls, .ppt).
+
+        An OLE2 compound file states its own length: the header names a sector
+        size and the count of sectors in each of its allocation tables, so the
+        extent follows from the header rather than from a footer search. These
+        formats have no footer at all, which is why a signature-and-footer
+        carver could never recover them -- six of them sit unrecovered in the
+        two DFTT test images.
+        """
+        cap = CARVE_MAX_SIZE.get('ole')
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(OLE_HEADER, cursor)
+            if start_index == -1:
+                break
+
+            size = self._ole_size(chunk, start_index, cap)
+            if size is None:
+                cursor = start_index + len(OLE_HEADER)
+                continue
+
+            # The header only bounds the file from above, and the bound
+            # overshoots: on the DFTT ext2 image it ran 49 KB past the end of
+            # stats.xls and swallowed the document that follows. Another OLE
+            # signature is a hard stop -- a file cannot contain the start of
+            # the next one.
+            following = chunk.find(OLE_HEADER, start_index + len(OLE_HEADER))
+            if following != -1:
+                size = min(size, following - start_index)
+
+            content = chunk[start_index:start_index + size]
+            if is_valid_file(content, 'ole'):
+                self.save_file(content, 'ole', base_offset + start_index)
+                cursor = start_index + size
+            else:
+                cursor = start_index + len(OLE_HEADER)
+
+    @staticmethod
+    def _ole_size(chunk, start_index, cap):
+        """Length of the OLE compound file starting at `start_index`.
+
+        Derived from the highest sector the header's FAT accounts for. This is
+        an upper bound on a well-formed file, which is what carving wants: the
+        alternative is guessing, and a short guess truncates a document.
+        """
+        if start_index + 512 > len(chunk):
+            return None
+        header = chunk[start_index:start_index + 512]
+        try:
+            shift = struct.unpack('<H', header[30:32])[0]
+            fat_sectors = struct.unpack('<I', header[44:48])[0]
+            dir_sectors = struct.unpack('<I', header[40:44])[0]
+            mini_sectors = struct.unpack('<I', header[64:68])[0]
+        except struct.error:
+            return None
+
+        if shift not in (9, 12):
+            return None
+        sector = 1 << shift
+        if not 0 < fat_sectors < 65536:
+            return None
+
+        # Each FAT sector maps sector/4 sectors of file.
+        mapped = fat_sectors * (sector // 4)
+        size = (1 + mapped) * sector
+        if dir_sectors or mini_sectors:
+            size += (dir_sectors + mini_sectors) * sector
+
+        if size < CARVE_MIN_SIZE:
+            return None
+        if cap and size > cap:
+            return None
+        if start_index + size > len(chunk):
+            size = len(chunk) - start_index
+        return size
+
+    def carve_tiff_files(self, chunk, base_offset):
+        """Recover TIFF by walking its IFD chain to the last entry."""
+        cap = CARVE_MAX_SIZE.get('tiff')
+        for header in TIFF_HEADERS:
+            cursor = 0
+            big_endian = header.startswith(b'MM')
+            while cursor < len(chunk):
+                start_index = chunk.find(header, cursor)
+                if start_index == -1:
+                    break
+
+                size = self._tiff_size(chunk, start_index, big_endian, cap)
+                if size is None:
+                    cursor = start_index + len(header)
+                    continue
+
+                content = chunk[start_index:start_index + size]
+                if is_valid_file(content, 'tiff'):
+                    self.save_file(content, 'tiff', base_offset + start_index)
+                    cursor = start_index + size
+                else:
+                    cursor = start_index + len(header)
+
+    @staticmethod
+    def _tiff_size(chunk, start_index, big_endian, cap):
+        """Extent of the TIFF at `start_index`, from its IFD chain."""
+        order = '>' if big_endian else '<'
+        try:
+            offset = struct.unpack(
+                order + 'I', chunk[start_index + 4:start_index + 8])[0]
+        except struct.error:
+            return None
+
+        furthest = 8
+        for _ in range(16):             # bounded: a chain can be circular
+            ifd = start_index + offset
+            if offset < 8 or ifd + 2 > len(chunk):
+                return None
+            try:
+                count = struct.unpack(order + 'H', chunk[ifd:ifd + 2])[0]
+            except struct.error:
+                return None
+            if count == 0 or count > 512:
+                return None
+
+            end_of_ifd = ifd + 2 + count * 12 + 4
+            if end_of_ifd > len(chunk):
+                return None
+            furthest = max(furthest, end_of_ifd - start_index)
+
+            # Every entry whose value does not fit inline points outward; the
+            # file has to extend past the furthest of those.
+            for n in range(count):
+                entry = ifd + 2 + n * 12
+                try:
+                    kind, length = struct.unpack(
+                        order + 'HI', chunk[entry + 2:entry + 8])
+                except struct.error:
+                    return None
+                width = _TIFF_TYPE_WIDTH.get(kind, 0)
+                total = width * length
+                if total > 4:
+                    try:
+                        at = struct.unpack(
+                            order + 'I', chunk[entry + 8:entry + 12])[0]
+                    except struct.error:
+                        return None
+                    furthest = max(furthest, at + total)
+
+            try:
+                offset = struct.unpack(
+                    order + 'I', chunk[end_of_ifd - 4:end_of_ifd])[0]
+            except struct.error:
+                return None
+            if offset == 0:
+                break
+
+        if furthest < CARVE_MIN_SIZE:
+            return None
+        if cap and furthest > cap:
+            return None
+        if start_index + furthest > len(chunk):
+            return None
+        return furthest
+
+    def carve_gz_files(self, chunk, base_offset):
+        """Recover gzip streams by decompressing until the stream ends.
+
+        A gzip member carries no length, so the only honest way to find its end
+        is to decompress it and ask how much input was consumed.
+        """
+        cap = CARVE_MAX_SIZE.get('gz')
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(GZIP_HEADER, cursor)
+            if start_index == -1:
+                break
+
+            window = chunk[start_index:start_index + (cap or len(chunk))]
+            decomp = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            try:
+                decomp.decompress(window, _GZIP_DECOMPRESS_LIMIT)
+                consumed = len(window) - len(decomp.unused_data)
+            except zlib.error:
+                cursor = start_index + len(GZIP_HEADER)
+                continue
+
+            if not decomp.eof or consumed < CARVE_MIN_SIZE:
+                cursor = start_index + len(GZIP_HEADER)
+                continue
+
+            content = chunk[start_index:start_index + consumed]
+            if is_valid_file(content, 'gz'):
+                self.save_file(content, 'gz', base_offset + start_index)
+                cursor = start_index + consumed
+            else:
+                cursor = start_index + len(GZIP_HEADER)
+
+    def carve_rar_files(self, chunk, base_offset):
+        self._carve_by_marker(chunk, base_offset, 'rar', RAR_HEADER)
+
+    def carve_7z_files(self, chunk, base_offset):
+        self._carve_by_marker(chunk, base_offset, '7z', SEVENZIP_HEADER)
+
+    def _carve_by_marker(self, chunk, base_offset, file_type, header):
+        """Carve an archive that runs to the next signature or the cap.
+
+        RAR and 7z encode their extents inside structures this carver does not
+        parse, so the recovered span runs to the next header of the same type.
+        That is an upper bound, and the file is written only if it validates.
+        """
+        cap = CARVE_MAX_SIZE.get(file_type)
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(header, cursor)
+            if start_index == -1:
+                break
+
+            following = chunk.find(header, start_index + len(header))
+            end = following if following != -1 else len(chunk)
+            if cap:
+                end = min(end, start_index + cap)
+
+            content = chunk[start_index:end]
+            if is_valid_file(content, file_type):
+                self.save_file(content, file_type, base_offset + start_index)
+            cursor = start_index + len(header)
+
+    def carve_html_files(self, chunk, base_offset):
+        """Recover HTML documents between <html and </html>."""
+        cap = CARVE_MAX_SIZE.get('html')
+        lowered = chunk.lower()
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = lowered.find(b'<html', cursor)
+            if start_index == -1:
+                break
+
+            end_index = lowered.find(b'</html>', start_index)
+            if end_index == -1:
+                cursor = start_index + 5
+                continue
+
+            end = end_index + len(b'</html>')
+            if cap and end - start_index > cap:
+                cursor = start_index + 5
+                continue
+
+            content = chunk[start_index:end]
+            if len(content) >= CARVE_MIN_SIZE:
+                self.save_file(content, 'html', base_offset + start_index)
+            cursor = end
+
+    #: Which carver handles each selected type. Keys are lowercase because the
+    #: menu labels are lowercased before dispatch.
+    CARVERS = {
+        'pdf': carve_pdf_files,
+        'jpg': carve_jpg_files,
+        'png': carve_png_files,
+        'gif': carve_gif_files,
+        'bmp': carve_bmp_files,
+        'tiff': carve_tiff_files,
+        'wav': carve_wav_files,
+        'mov': carve_mov_files,
+        'mp4': carve_mp4_files,
+        'wmv': carve_wmv_files,
+        'zip': carve_zip_files,
+        'gz': carve_gz_files,
+        'rar': carve_rar_files,
+        '7z': carve_7z_files,
+        'ole': carve_ole_files,
+        'html': carve_html_files,
+    }
 
     def carve_files(self, selected_file_types):
         try:
@@ -916,51 +1331,45 @@ class FileCarvingWidget(QWidget):
 
                 if self._stop_requested:
                     self._stop_requested = False
-                    self.start_button.setEnabled(True)
-                    self.stop_button.setEnabled(False)
-                    logger.warning(f"Carving stopped. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
+                    logger.info(
+                        "Carving stopped. Processed %d unallocated chunks, "
+                        "skipped %d allocated chunks",
+                        chunks_processed, chunks_skipped)
+                    # The buttons are restored by the carving_finished slot,
+                    # which runs on the UI thread. Touching a widget from this
+                    # worker is a data race Qt does not police.
                     self.carving_finished.emit()
                     return
 
-                # Call the carve function for each selected file type
+                # One carver per selected type. A mapping rather than a
+                # chain of elifs: adding a format is one entry here, and the
+                # unreachable 'all' branch the old chain carried -- left over
+                # from a check box the UI no longer has -- cannot come back.
                 for file_type in selected_file_types:
-                    if file_type == 'all':
-                        self.carve_wav_files(chunk, offset)
-                        self.carve_mov_files(chunk, offset)
-                        self.carve_pdf_files(chunk, offset)
-                        self.carve_jpg_files(chunk, offset)
-                        self.carve_gif_files(chunk, offset)
-                        self.carve_png_files(chunk, offset)
-                        self.carve_wmv_files(chunk, offset)
-                        self.carve_zip_files(chunk, offset)
-                        self.carve_bmp_files(chunk, offset)
-                    elif file_type == 'wav':
-                        self.carve_wav_files(chunk, offset)
-                    elif file_type == 'mov':
-                        self.carve_mov_files(chunk, offset)
-                    elif file_type == 'pdf':
-                        self.carve_pdf_files(chunk, offset)
-                    elif file_type == 'jpg':
-                        self.carve_jpg_files(chunk, offset)
-                    elif file_type == 'gif':
-                        self.carve_gif_files(chunk, offset)
-                    elif file_type == 'png':
-                        self.carve_png_files(chunk, offset)
-                    elif file_type == 'wmv':
-                        self.carve_wmv_files(chunk, offset)
-                    elif file_type == 'zip':
-                        self.carve_zip_files(chunk, offset)
-                    elif file_type == 'bmp':
-                        self.carve_bmp_files(chunk, offset)
+                    carver = self.CARVERS.get(file_type)
+                    if carver is None:
+                        continue
+                    try:
+                        carver(self, chunk, offset)
+                    except Exception as exc:
+                        # One malformed span must not end the scan. Without
+                        # this a struct.error on a chunk tail killed the whole
+                        # carve, and the future swallowed it so the UI showed
+                        # a clean finish.
+                        logger.warning(
+                            "%s failed at offset %d: %s: %s",
+                            carver.__name__, offset, type(exc).__name__, exc)
 
                 offset += chunk_size
 
-            logger.warning(f"Carving complete. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
+            logger.info(
+                "Carving complete. Recovered %d file(s) from %d unallocated "
+                "chunks; skipped %d allocated chunks",
+                len(self.carved_files), chunks_processed, chunks_skipped)
         finally:
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            # Queued behind the rows this scan emitted, so the columns are
-            # measured against a table that actually has them.
+            # Both the buttons and the column sizing happen in the
+            # carving_finished slot: it is queued behind the rows this scan
+            # emitted, so it runs on the UI thread against a filled table.
             self.carving_finished.emit()
 
     #: Widest a carving column may grow. File Path holds a full path, which
@@ -969,12 +1378,15 @@ class FileCarvingWidget(QWidget):
 
     @Slot()
     def _fit_carved_columns(self):
-        """Size the recovered-files columns to what was actually found.
+        """Finish a scan: restore the buttons and size the columns.
 
         A slot, so it is delivered on the UI thread after every queued
         display_carved_file has run; called directly from the worker it
-        measured an empty table.
+        measured an empty table -- and would touch widgets from the wrong
+        thread.
         """
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
         try:
             fit_columns(self.table_widget, self._CARVED_COLUMN_CAPS)
         except Exception as e:
@@ -1093,7 +1505,7 @@ class FileCarvingWidget(QWidget):
                 # pdf2image, which needed a separate poppler install.
                 pixmap = self.render_pdf_thumbnail(file_full_path, thumbnail_folder, name)
 
-            elif type_.lower() in ('mov', 'wmv'):
+            elif type_.lower() in VIDEO_TYPES:
                 # Video frame extraction previously needed moviepy (ffmpeg) for
                 # .mov and OpenCV for .wmv -- roughly 100 MB of wheels plus an
                 # ffmpeg binary, for a thumbnail. Carved video fragments are
@@ -1101,21 +1513,31 @@ class FileCarvingWidget(QWidget):
                 # generic icon instead.
                 pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_VIDEO), 120)
 
-            elif type_.lower() == 'zip':
-                # Render ZIP icon at target size for crisp display
+            elif type_.lower() in ARCHIVE_TYPES:
+                # Render archive icon at target size for crisp display
                 pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_ARCHIVE), 120)
 
-            elif type_.lower() == 'wav':
+            elif type_.lower() in AUDIO_TYPES:
                 # Render audio icon at target size for crisp display
                 pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_AUDIO), 120)
+
+            elif type_.lower() == 'ole':
+                # A carved OLE file could be Word, Excel or PowerPoint: they
+                # share one container and the header does not say which.
+                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_DOC), 120)
+
+            elif type_.lower() == 'html':
+                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_HTML), 120)
 
             else:
                 # For image files, use the original file path
                 thumbnail_path = file_full_path
                 pixmap = QPixmap(thumbnail_path)
 
-            # Center-crop to perfect square for modern uniform gallery look (skip for SVG icons)
-            if type_.lower() not in ['zip', 'wav', 'mov', 'wmv']:
+            # Center-crop to a square for a uniform gallery. Skipped for the
+            # generic SVG icons, which are already square and would only lose
+            # their margins.
+            if type_.lower() not in ICON_TYPES:
                 pixmap = self.center_crop_to_square(pixmap, 120)
             icon = QIcon(pixmap)
 

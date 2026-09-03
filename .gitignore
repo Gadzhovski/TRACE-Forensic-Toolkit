@@ -1,12 +1,19 @@
-# Forensic test images (never commit evidence files)
-/*.E01
-/*.Ex01
-/*.s01
-/*.dd
-/*.raw
-/*.img
-/*.iso
-/*.ad1
+# Forensic test images (never commit evidence files). Un-anchored on purpose:
+# a leading slash would match only the repository root, so evidence moved into
+# test_images/ -- or any other subdirectory -- would be committable.
+*.E01
+*.Ex01
+*.s01
+*.L01
+*.dd
+*.raw
+*.img
+*.iso
+*.ad1
+*.001
+*.vmdk
+*.dmg
+*.aff
 
 # IDE-specific folders and files
 .idea/

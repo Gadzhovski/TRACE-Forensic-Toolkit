@@ -24,6 +24,44 @@ CHUNK_SIZE = 4 * 1024 * 1024
 #: abandoned, so this has to exceed the largest file a carver will rebuild.
 CARVE_OVERLAP = 32 * 1024 * 1024
 
+#: Largest file each carver will reconstruct, by type. A signature is only a
+#: few bytes, so random data produces header hits constantly; without a ceiling
+#: a stray match runs to whatever byte pattern happens to end it, and writes
+#: megabytes of noise as though it were evidence.
+#:
+#: A cap must REJECT a candidate, never truncate one -- a file cut to the cap
+#: looks like a recovered file and is not. Values sit above what these formats
+#: plausibly reach on the media being examined, and every one is below
+#: CARVE_OVERLAP so a capped file still fits in a single read.
+CARVE_MAX_SIZE = {
+    'jpg': 32 * 1024 * 1024,
+    'png': 32 * 1024 * 1024,
+    'gif': 16 * 1024 * 1024,
+    'bmp': 32 * 1024 * 1024,
+    'tiff': 32 * 1024 * 1024,
+    'pdf': 32 * 1024 * 1024,
+    'zip': 32 * 1024 * 1024,
+    'gz': 32 * 1024 * 1024,
+    'rar': 32 * 1024 * 1024,
+    '7z': 32 * 1024 * 1024,
+    'ole': 32 * 1024 * 1024,
+    'html': 4 * 1024 * 1024,
+    'wav': 32 * 1024 * 1024,
+    'mov': 32 * 1024 * 1024,
+    'mp4': 32 * 1024 * 1024,
+    'wmv': 32 * 1024 * 1024,
+}
+
+#: Smallest carve worth writing. Below this a "file" is a header and little
+#: else -- it cannot be opened, and it buries real recoveries in the listing.
+CARVE_MIN_SIZE = 64
+
+#: How many candidate footers to try before giving up on a header. A JPEG's
+#: EXIF thumbnail ends with the same FFD9 the image does, so the first footer
+#: is routinely the wrong one; taking it truncates a perfectly recoverable
+#: file. Bounded because each retry costs a full decode attempt.
+CARVE_MAX_FOOTER_CANDIDATES = 24
+
 # ==================== CONFIGURATION CONSTANTS ====================
 # Window dimensions
 DEFAULT_WINDOW_WIDTH = 1200

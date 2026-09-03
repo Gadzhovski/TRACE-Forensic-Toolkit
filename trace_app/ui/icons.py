@@ -92,6 +92,11 @@ FILE_UNKNOWN = "Icons/mimetypes/application-x-zerosize.svg"
 FILE_ARCHIVE = "Icons/mimetypes/application-zip.svg"
 FILE_AUDIO = "Icons/mimetypes/audio-x-generic.svg"
 FILE_VIDEO = "Icons/mimetypes/video-x-generic.svg"
+#: Legacy Office compound documents (.doc/.xls/.ppt) share one container, so a
+#: carved OLE file cannot be attributed to a specific application -- the Word
+#: glyph stands for the family.
+FILE_DOC = "Icons/mimetypes/application-vnd.ms-word.svg"
+FILE_HTML = "Icons/mimetypes/text-x-html.svg"
 WEB_BROWSER = "Icons/apps/internet-web-browser.svg"
 
 
