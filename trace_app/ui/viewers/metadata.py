@@ -243,7 +243,12 @@ class MetadataViewer(QWidget):
         for label, attr in (("Created ", 'crtime'), ("File Modified", 'mtime'),
                             ("MFT Modified", 'ctime'), ("Accessed", 'atime')):
             ts = getattr(meta, attr, None)
-            lines.append(f"  {label}\t{self._format_timestamp(ts)}")
+            # NTFS records these to 100-nanosecond precision and TSK hands the
+            # fraction back separately. Truncating to whole seconds throws away
+            # the detail that orders events within the same second, which is
+            # exactly what a timeline is built from.
+            nanoseconds = getattr(meta, f'{attr}_nano', None)
+            lines.append(f"  {label}\t{self._format_timestamp(ts, nanoseconds)}")
 
         # Attribute list -- the resident/non-resident breakdown istat prints.
         try:
@@ -273,13 +278,27 @@ class MetadataViewer(QWidget):
         return "\n".join(lines)
 
     @staticmethod
-    def _format_timestamp(ts):
+    def _format_timestamp(ts, nanoseconds=None):
+        """Format a filesystem timestamp, with its fraction when there is one.
+
+        `nanoseconds` is the sub-second part TSK reports alongside the whole
+        seconds. It is shown only when non-zero, so a filesystem that does not
+        record it (or a file where it happens to be zero) reads the same as
+        before rather than gaining a misleading '.000000000'.
+        """
         if not ts:
             return "N/A"
         try:
-            return datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S') + " UTC"
+            formatted = datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
         except (OSError, OverflowError, ValueError):
             return "N/A"
+
+        try:
+            if nanoseconds:
+                formatted += f".{int(nanoseconds):09d}"
+        except (TypeError, ValueError):
+            pass
+        return formatted + " UTC"
 
     # NTFS attribute type identifiers, as istat labels them.
     _ATTR_TYPES = {

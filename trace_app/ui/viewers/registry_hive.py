@@ -311,12 +311,20 @@ class RegistryExtractor(QWidget):
     def display_metadata(self, registry_object):
         metadata = {
             "Name": registry_object.name(),
-            "Number of Subkeys": len(registry_object.subkeys()),
-            "Number of Values": len(registry_object.values()),
-            "Last Modified": registry_object.timestamp().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        # Start with an HTML structure for styling
+        # The full key path, which is how a registry finding is cited in a
+        # report -- the name alone does not say where in the hive it sits.
+        try:
+            metadata["Path"] = registry_object.path()
+        except Exception as e:
+            logger.debug("No path for this key: %s", e)
+
+        metadata["Number of Subkeys"] = len(registry_object.subkeys())
+        metadata["Number of Values"] = len(registry_object.values())
+        metadata["Last Modified"] = registry_object.timestamp().strftime(
+            "%Y-%m-%d %H:%M:%S UTC")
+
         self.metadataPanel.set_rows(list(metadata.items()))
 
     def setup_table(self, values):

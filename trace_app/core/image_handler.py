@@ -218,6 +218,97 @@ class ImageHandler:
         return [tuple(pair) for pair in merged]
 
 
+    #: EWF header fields worth showing, in the order an examiner reads them,
+    #: paired with the label to display. libewf exposes these as free-text
+    #: header values written by the acquisition tool.
+    _EWF_HEADER_FIELDS = (
+        ('case_number', 'Case Number'),
+        ('evidence_number', 'Evidence Number'),
+        ('description', 'Description'),
+        ('examiner_name', 'Examiner'),
+        ('notes', 'Notes'),
+        ('acquiry_date', 'Acquired'),
+        ('system_date', 'System Date'),
+        ('acquiry_software_version', 'Acquisition Tool'),
+        ('acquiry_operating_system', 'Acquisition OS'),
+    )
+
+    #: libewf media type and compression identifiers, for the numbers the
+    #: handle reports.
+    _EWF_MEDIA_TYPES = {0: 'Removable disk', 1: 'Fixed disk',
+                        3: 'Optical disc', 14: 'Logical evidence', 16: 'Memory'}
+    _EWF_COMPRESSION = {0: 'None', 1: 'Deflate', 2: 'bzip2'}
+
+    def get_acquisition_info(self):
+        """Chain-of-custody metadata recorded when the image was acquired.
+
+        An E01 carries the case and evidence numbers, the examiner's name, the
+        acquisition date and the tool that wrote it. That is the provenance of
+        the evidence -- the first thing an examiner documents -- and it was
+        being read from disk and thrown away. Returns an empty dict for raw
+        images, which carry no such record.
+        """
+        if self.get_image_type() != 'ewf':
+            return {}
+
+        info = {}
+        handle = None
+        try:
+            handle = pyewf.handle()
+            handle.open(pyewf.glob(self.image_path))
+
+            try:
+                available = handle.get_header_values()
+            except Exception as e:
+                logger.debug("No EWF header values: %s", e)
+                available = {}
+
+            for key, label in self._EWF_HEADER_FIELDS:
+                value = available.get(key)
+                if value:
+                    info[label] = str(value).strip()
+
+            def add(label, getter, translate=None):
+                try:
+                    value = getter()
+                except Exception:
+                    return
+                if translate is not None:
+                    value = translate.get(value, f"Unknown ({value})")
+                info[label] = value
+
+            add('Media Type', handle.get_media_type, self._EWF_MEDIA_TYPES)
+            add('Compression', handle.get_compression_method, self._EWF_COMPRESSION)
+            try:
+                info['Chunk Size'] = f"{handle.get_chunk_size():,} bytes"
+            except Exception:
+                pass
+            try:
+                info['Sectors'] = f"{handle.get_number_of_sectors():,}"
+            except Exception:
+                pass
+
+            # The hashes recorded at acquisition, distinct from anything the
+            # verification dialog computes now.
+            for algorithm in ('MD5', 'SHA1'):
+                try:
+                    stored = handle.get_hash_value(algorithm)
+                except Exception:
+                    continue
+                if stored:
+                    info[f'Stored {algorithm}'] = stored
+
+        except Exception as e:
+            logger.warning("Could not read acquisition metadata: %s", e)
+        finally:
+            if handle is not None:
+                try:
+                    handle.close()
+                except Exception:
+                    pass
+
+        return info
+
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
         _, extension = os.path.splitext(self.image_path)
@@ -595,6 +686,15 @@ class ImageHandler:
                         "created": safe_datetime(entry.info.meta.crtime) if hasattr(entry.info.meta,
                                                                                     'crtime') else "N/A",
                         "changed": safe_datetime(entry.info.meta.ctime) if hasattr(entry.info.meta, 'ctime') else "N/A",
+                        # Whether the filesystem still considers this entry
+                        # live. TSK reports it and the listing was discarding
+                        # it, so a deleted file in a directory looked exactly
+                        # like a live one -- the one distinction an examiner
+                        # most needs from a listing.
+                        "is_deleted": self._entry_is_deleted(entry),
+                        # The directory this entry belongs to, which is what
+                        # locates a file when only its inode is known.
+                        "parent_inode": getattr(entry.info.name, 'par_addr', None),
                     })
 
                 # Cache results
@@ -606,6 +706,30 @@ class ImageHandler:
                 logger.error(f"Error in get_directory_contents: {e}")
                 return []
         return []
+
+    @staticmethod
+    def _entry_is_deleted(entry):
+        """True when the filesystem no longer considers this entry live.
+
+        Both records are checked. A file can be unallocated in its metadata
+        while its directory entry still stands, or the reverse -- the name
+        removed from the directory index while the MFT record survives -- and
+        either one means deleted. Reading only one flag misses roughly half
+        the cases on NTFS.
+        """
+        try:
+            name = getattr(entry.info, 'name', None)
+            if name is not None and getattr(name, 'flags', None) is not None:
+                if int(name.flags) & pytsk3.TSK_FS_NAME_FLAG_UNALLOC:
+                    return True
+
+            meta = getattr(entry.info, 'meta', None)
+            if meta is not None and getattr(meta, 'flags', None) is not None:
+                if int(meta.flags) & pytsk3.TSK_FS_META_FLAG_UNALLOC:
+                    return True
+        except Exception as e:
+            logger.debug("Could not read allocation flags: %s", e)
+        return False
 
     def get_registry_hive(self, fs_info, hive_path):
         """Extract a registry hive from the given filesystem."""

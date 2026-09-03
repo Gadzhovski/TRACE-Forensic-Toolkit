@@ -192,6 +192,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         inode_number = entry.get("inode_number", 0)
         is_directory = entry.get("is_directory", False)
         description = "Dir" if is_directory else "File"
+        # A deleted entry still listed in its directory is otherwise
+        # indistinguishable from a live one, which is the single most
+        # misleading thing a forensic listing can do. The filesystem knows;
+        # say so in the Type column, which is already on screen.
+        if entry.get("is_deleted"):
+            description = f"Deleted {description}"
         size_in_bytes = entry.get("size", 0)
         readable_size = self.image_handler.get_readable_size(size_in_bytes)
         created = entry.get("created", "N/A")

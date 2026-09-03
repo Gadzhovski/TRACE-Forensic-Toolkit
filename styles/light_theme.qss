@@ -1170,3 +1170,18 @@ QTreeWidget, QTableWidget, QListWidget, QTextEdit, QPlainTextEdit {
 QTreeWidget#evidenceTree {
     border-right: 1px solid #DDE1E6;
 }
+
+/* Section heading inside the image-information card ("Acquisition"), and the
+   scroll area that card now sits in. */
+QLabel#volumeInfoSectionHeading {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2937;
+    padding-top: 4px;
+    padding-bottom: 2px;
+}
+
+QScrollArea#volumeInfoScroll {
+    background: transparent;
+    border: none;
+}

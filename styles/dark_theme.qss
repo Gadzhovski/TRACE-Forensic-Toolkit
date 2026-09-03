@@ -1160,3 +1160,18 @@ QMainWindow::separator:hover {
 QTreeWidget#evidenceTree {
     border-right: 1px solid #4A4A4A;
 }
+
+/* Section heading inside the image-information card ("Acquisition"), and the
+   scroll area that card now sits in. */
+QLabel#volumeInfoSectionHeading {
+    font-size: 13px;
+    font-weight: 600;
+    color: #F0F0F0;
+    padding-top: 4px;
+    padding-bottom: 2px;
+}
+
+QScrollArea#volumeInfoScroll {
+    background: transparent;
+    border: none;
+}

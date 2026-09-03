@@ -20,8 +20,8 @@ from PySide6.QtCharts import QChart, QChartView, QPieSeries
 from PySide6.QtCore import Qt, QMargins, QSize
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
-                               QSizePolicy, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+                               QScrollArea, QSizePolicy, QTableWidget,
+                               QTableWidgetItem, QVBoxLayout, QWidget)
 
 from trace_app.infra.utils import FileSystemUtils
 
@@ -71,27 +71,42 @@ class VolumeInfoMixin:
         image_info = self._get_image_info()
         key_fields = ["Image Path", "Image Type", "Total Size", "Partition Scheme", "Number of Partitions", "Status"]
 
+        def add_row(field, text):
+            info_row = QWidget()
+            info_row.setObjectName("volumeInfoRow")
+            info_row_layout = QHBoxLayout(info_row)
+            info_row_layout.setContentsMargins(0, 0, 0, 0)
+            info_row_layout.setSpacing(10)
+
+            label = QLabel(f"{field}:")
+            label.setObjectName("volumeInfoFieldLabel")
+            label.setMinimumWidth(140)
+
+            value = QLabel(str(text))
+            value.setObjectName("volumeInfoFieldValue")
+            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            value.setWordWrap(True)
+
+            info_row_layout.addWidget(label)
+            info_row_layout.addWidget(value, 1)
+            summary_layout.addWidget(info_row)
+
         for field in key_fields:
             if field in image_info:
-                info_row = QWidget()
-                info_row.setObjectName("volumeInfoRow")
-                info_row_layout = QHBoxLayout(info_row)
-                info_row_layout.setContentsMargins(0, 0, 0, 0)
-                info_row_layout.setSpacing(10)
+                add_row(field, image_info[field])
 
-                label = QLabel(f"{field}:")
-                label.setObjectName("volumeInfoFieldLabel")
-                label.setMinimumWidth(140)
-
-                value = QLabel(str(image_info[field]))
-                value.setObjectName("volumeInfoFieldValue")
-                value.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                value.setWordWrap(True)
-
-                info_row_layout.addWidget(label)
-                info_row_layout.addWidget(value, 1)
-
-                summary_layout.addWidget(info_row)
+        # Acquisition record. An E01 carries the case and evidence numbers, the
+        # examiner, the date and the tool that wrote it -- the provenance of
+        # the evidence. It was being read off disk by libewf and discarded.
+        # Raw images carry no such record, so the section is omitted for them.
+        acquisition = self.image_handler.get_acquisition_info()
+        if acquisition:
+            heading = QLabel("Acquisition")
+            heading.setObjectName("volumeInfoSectionHeading")
+            summary_layout.addSpacing(10)
+            summary_layout.addWidget(heading)
+            for field, text in acquisition.items():
+                add_row(field, text)
 
         summary_layout.addStretch()
         summary_card.setFixedWidth(450)
@@ -154,7 +169,17 @@ class VolumeInfoMixin:
         chart_content_layout.addWidget(chart_view, 1)
         chart_outer_layout.addLayout(chart_content_layout, 1)
 
-        top_layout.addWidget(summary_card)
+        # The overview plus the acquisition record is more than fits a fixed
+        # card, so it scrolls rather than being clipped.
+        summary_scroll = QScrollArea()
+        summary_scroll.setObjectName("volumeInfoScroll")
+        summary_scroll.setWidget(summary_card)
+        summary_scroll.setWidgetResizable(True)
+        summary_scroll.setFrameShape(QScrollArea.NoFrame)
+        summary_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        summary_scroll.setFixedWidth(470)
+
+        top_layout.addWidget(summary_scroll)
         top_layout.addWidget(chart_widget, 1)
 
         main_layout.addWidget(top_widget)
@@ -186,15 +211,16 @@ class VolumeInfoMixin:
         volume_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         # Set column count and headers
-        volume_table.setColumnCount(10)
+        volume_table.setColumnCount(11)
         volume_table.setHorizontalHeaderLabels([
             'Volume', 'Filesystem', 'Offset (Sectors)', 'Block Size', 'Volume Size',
-            'Total Blocks', 'First Block', 'Last Block', 'Inode Count', 'Root Inode'
+            'Total Blocks', 'First Block', 'Last Block', 'Inode Count', 'Root Inode',
+            'Volume Serial'
         ])
 
         # Configure header - all columns use Interactive mode for horizontal scrolling
         header = volume_table.horizontalHeader()
-        for i in range(10):
+        for i in range(11):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
 
         # Set column widths
@@ -208,6 +234,7 @@ class VolumeInfoMixin:
         volume_table.setColumnWidth(7, 120)   # Last Block
         volume_table.setColumnWidth(8, 120)   # Inode Count
         volume_table.setColumnWidth(9, 100)   # Root Inode
+        volume_table.setColumnWidth(10, 170)  # Volume Serial
 
         # Set header alignment
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -322,6 +349,12 @@ class VolumeInfoMixin:
             root_inode_item = QTableWidgetItem(root_inode)
             table.setItem(idx, 9, root_inode_item)
 
+            # Column 10: Volume Serial -- identifies the volume independently
+            # of the partition layout, which is how an image is tied back to
+            # the device it came from.
+            serial = all_info.get("Volume Serial", "N/A")
+            table.setItem(idx, 10, QTableWidgetItem(serial))
+
         table.setSortingEnabled(True)  # Re-enable sorting after populating
 
     def _extract_comprehensive_volume_info(self, start_offset):
@@ -363,12 +396,46 @@ class VolumeInfoMixin:
                 info["filesystem"]["Inode Count"] = f"{fs_info.info.inum_count:,}"
             if hasattr(fs_info.info, 'root_inum'):
                 info["filesystem"]["Root Inode"] = f"{fs_info.info.root_inum}"
+            if hasattr(fs_info.info, 'last_inum'):
+                info["filesystem"]["Last Inode"] = f"{fs_info.info.last_inum:,}"
+
+            # Volume serial number. TSK hands this back as a fixed-length byte
+            # array with fs_id_used saying how many of those bytes are real;
+            # the rest are padding and must not be printed.
+            serial = self._format_volume_serial(fs_info.info)
+            if serial:
+                info["filesystem"]["Volume Serial"] = serial
+
+            if hasattr(fs_info.info, 'endian'):
+                info["filesystem"]["Byte Order"] = (
+                    "Little endian" if int(fs_info.info.endian) == 1 else "Big endian")
 
         except Exception as e:
             logger.error(f"Error extracting volume info: {e}")
             info["basic"]["Error"] = str(e)
 
         return info
+
+    @staticmethod
+    def _format_volume_serial(fs_info_struct):
+        """The filesystem's serial number, as the acquisition tools print it.
+
+        Identifies the volume independently of any partition layout, so it is
+        how an image is tied back to the device it came from. Only the first
+        `fs_id_used` bytes of `fs_id` are meaningful; the remainder is padding.
+        """
+        try:
+            raw = list(fs_info_struct.fs_id)
+            used = int(getattr(fs_info_struct, 'fs_id_used', 0) or 0)
+        except Exception:
+            return None
+        if used <= 0 or not raw:
+            return None
+        digits = ''.join(f'{byte:02X}' for byte in raw[:used])
+        # NTFS serials are conventionally shown in 8-character halves.
+        if len(digits) == 16:
+            return f"{digits[:8]}-{digits[8:]}"
+        return digits
 
     def _get_image_info(self):
         """Extract comprehensive disk image information."""
