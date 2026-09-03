@@ -1482,6 +1482,32 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             except Exception as e:
                 self.error.emit(f"Error reading unallocated space: {str(e)}")
 
+    #: Index of the Listing tab in the result viewer.
+    LISTING_TAB = 0
+
+    def show_listing_entries(self, entries, start_offset, label=None):
+        """Fill the listing with `entries` and bring it to the front.
+
+        Nothing happens when there is nothing to show. Clicking an empty folder
+        used to clear the listing and leave a blank table -- worse than useless,
+        because whatever was on screen before was at least something. An empty
+        directory is reported in the status bar instead, and the previous view
+        stays put.
+
+        Returns True when the listing was populated.
+        """
+        if not entries:
+            name = label or "This folder"
+            self.set_status(f"{name} is empty", 4000)
+            return False
+
+        self.populate_listing_table(entries, start_offset)
+        # Selecting in the tree is a request to browse, so the Listing is what
+        # the user wants in front -- not whichever of Deleted Files or Registry
+        # they happened to leave open.
+        self.result_viewer.setCurrentIndex(self.LISTING_TAB)
+        return True
+
     def on_item_clicked(self, item, column):
         self.clear_viewers()
 
@@ -1505,6 +1531,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 not data.get("is_unallocated")):
                 # This is the root disk image - display all volumes/partitions
                 self.display_volumes_in_listing()
+                self.result_viewer.setCurrentIndex(self.LISTING_TAB)
                 self.clear_status()
                 return
 
@@ -1539,11 +1566,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         # If it's a regular directory, update the path
                         self.current_path = data.get("path", os.path.join(self.current_path, data.get("name", "")))
 
+                # An empty directory leaves the current view alone rather
+                # than replacing it with a blank table.
+                if not self.show_listing_entries(entries, data["start_offset"],
+                                                 data.get("name")):
+                    return
+
                 # Update directory up button state
                 self.update_directory_up_button()
-
-                # Populate the listing table with directory contents
-                self.populate_listing_table(entries, data["start_offset"])
 
                 # Add to navigation history
                 self._add_to_history(data)
@@ -1574,7 +1604,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 if "inode_number" not in data:
                     data["inode_number"] = 5
 
-                self.populate_listing_table(entries, data["start_offset"])
+                if not self.show_listing_entries(entries, data["start_offset"],
+                                                 data.get("name") or "This volume"):
+                    return
 
                 # Add to navigation history
                 self._add_to_history(data)
@@ -2839,8 +2871,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Update directory up button - should be disabled since we're at volume root
                 self.update_directory_up_button()
 
-                # Populate listing table with volume contents
-                self.populate_listing_table(entries, start_offset)
+                # Populate listing table with volume contents. An empty
+                # volume leaves the view alone -- see show_listing_entries.
+                if not self.show_listing_entries(entries, start_offset,
+                                                 data.get("name") or "This volume"):
+                    return
 
                 # Add to navigation history
                 self._add_to_history(data)
@@ -2871,7 +2906,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Update directory up button state
                 self.update_directory_up_button()
 
-                self.populate_listing_table(entries, data["start_offset"])
+                if not self.show_listing_entries(entries, data["start_offset"],
+                                                 data.get("name")):
+                    return
 
                 # Add to navigation history
                 self._add_to_history(data)
