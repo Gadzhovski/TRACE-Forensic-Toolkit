@@ -946,6 +946,24 @@ QLabel#aboutMetaQuiet {
     padding-top: 6px;
 }
 
+/* ============ Universal search ============ */
+
+QLineEdit#universalSearchBar {
+    font-size: 13px;
+    padding: 3px 8px;
+}
+
+QLabel#searchStatus {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+QTableWidget#searchResults {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D0D0;
+}
+
 /* ============ Archives ============ */
 
 QLabel#archiveTrail {

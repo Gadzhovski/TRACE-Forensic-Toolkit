@@ -58,6 +58,7 @@ from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
 from trace_app.ui.viewers.archive_viewer import ArchiveViewer
 from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
+from trace_app.ui.viewers.search_panel import SearchPanel
 
 logger = logging.getLogger('TRACE.MainWindow')
 
@@ -97,11 +98,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._search_query = ""  # Current search query
         self._last_browsed_state = {}  # Store last directory state for restoration
 
-        # Search debounce timer - wait for user to stop typing before searching
-        self._search_timer = QTimer()
-        self._search_timer.setSingleShot(True)
-        self._search_timer.setInterval(500)  # 500ms delay after last keystroke
-        self._search_timer.timeout.connect(self._execute_search)
 
         # Directory navigation history (for Back/Forward buttons like Windows 11)
         self._directory_history = []  # List of visited directories: [(offset, inode, path), ...]
@@ -731,7 +727,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Add search bar
         self.listing_search_bar = QLineEdit()
         self.listing_search_bar.setObjectName("listingSearchBar")
-        self.listing_search_bar.setPlaceholderText("Search files…")
+        self.listing_search_bar.setPlaceholderText("Filter this listing…")
         self.listing_search_bar.setToolTip(
             "Search the image for files by name.\n"
             "Press Enter to run the search.\n"
@@ -828,6 +824,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # in the tree.
         self.registry_extractor_widget.statusMessage.connect(self.set_status)
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
+
+        # Built here rather than with the viewer-dock panels: the tab below
+        # needs it, and _build_central_widgets runs first.
+        self.search_panel = SearchPanel()
+        self.search_panel.set_case(self.case)
+        self.search_panel.result_activated.connect(self.open_search_result)
+
+        # Search results get their own tab rather than borrowing the listing
+        # table. Sharing it meant every search toggled columns and saved and
+        # restored browse state, and coming back was a mode change.
+        self.result_viewer.addTab(self.search_panel, 'Search')
 
     def _build_viewer_dock(self):
         """Bottom "Utils" dock holding the viewer tabs."""
@@ -1262,6 +1269,30 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.update_viewer_with_file_content(content, data)
         self.set_status(f"{name} — read from inside an archive")
 
+    def open_search_result(self, row):
+        """Open whatever a search result points at.
+
+        Results carry the same artifact reference bookmarks use, so this goes
+        through the one resolver rather than the old show_file_in_directory,
+        which hardcoded parent_inode = 5 and landed every deep file at the
+        volume root.
+        """
+        kind = row.get('kind')
+        if kind == 'archive-member':
+            message.information(
+                self, "Inside an archive",
+                f"{row.get('name')} was found inside "
+                f"{(row.get('path') or '').split('!/')[0]}.\n\n"
+                f"Open that archive and use the Archive tab to read it.")
+            return
+
+        self.go_to_bookmark({
+            'artifact_ref': row.get('artifact_ref'),
+            'artifact_name': row.get('name'),
+            'artifact_path': row.get('path'),
+            'label': row.get('name'),
+        })
+
     def annotate_with_case_identity(self, data):
         """Add the case's view of an artifact to a selection payload.
 
@@ -1473,6 +1504,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setEnabled(state)
         self.deleted_files_widget.setEnabled(state)
         self.registry_extractor_widget.setEnabled(state)
+        self.search_panel.setEnabled(state)
 
     def create_menu(self, menu_bar, menu_name, actions):
         menu = QMenu(menu_name, self)
@@ -1602,6 +1634,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if hasattr(self, '_auxiliary_handlers'):
             self._auxiliary_handlers.clear()
 
+        # The search index holds a connection and may have a worker walking
+        # the image; both have to stop before the handler closes under them.
+        if getattr(self, 'search_panel', None) is not None:
+            try:
+                self.search_panel.shutdown()
+            except Exception as exc:
+                logger.error("Error stopping the search index: %s", exc)
+
         # A case holds an open SQLite connection; closing it also writes
         # the closing line of the audit trail.
         if getattr(self, 'case', None) is not None:
@@ -1712,6 +1752,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # images sharing one directory overwrite each other.
                 self.deleted_files_widget.set_case_folder(
                     self.case.folder if self.case else None)
+                self.search_panel.set_image_handler(self.image_handler)
                 progress.setValue(80)
 
                 # Load partitions into tree view
@@ -3013,18 +3054,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Store the query
         self._search_query = search_query
 
-        # Switch to search mode if not already
+        # switch_to_search_mode runs the search itself, so calling
+        # perform_search here as well walked the whole filesystem twice on the
+        # first search of every session.
         if not self._search_mode:
             self.switch_to_search_mode()
-
-        # Perform the search
-        self.perform_search(search_query)
-
-    def _execute_search(self):
-        """Execute the search after debounce delay."""
-        if self._search_query:
-            # Switch to search mode and perform search
-            self.switch_to_search_mode()
+        else:
+            self.perform_search(search_query)
 
     def switch_to_search_mode(self):
         """Switch from Browse mode to Search mode."""
@@ -3272,62 +3308,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.load_file_content(file_data)
 
     def show_file_in_directory(self, file_data):
-        """Navigate to the file's directory in browse mode and select the file."""
-        try:
-            # Clear search and switch to browse mode
-            self.listing_search_bar.clear()  # This triggers switch_to_browse_mode
+        """Reveal a search result where it lives.
 
-            # Get file's location details
-            start_offset = file_data.get('start_offset')
-            file_path = file_data.get('path', '')
-            file_inode = file_data.get('inode_number')
+        The previous version hardcoded parent_inode = 5 -- the NTFS root MFT
+        record -- with its own TODO, so every file below the root landed the
+        examiner at the volume root with nothing selected. Selecting by inode
+        works at any depth and on any filesystem.
+        """
+        inode = file_data.get('inode_number')
+        offset = file_data.get('start_offset')
+        if inode is None or offset is None:
+            self.set_status("This result has no location to reveal.")
+            return
 
-            if start_offset is None or not file_path:
-                self.set_status("Cannot determine file location")
-                return
-
-            # Parse the path to get parent directory
-            # file_path format: "/path/to/file.txt"
-            path_parts = file_path.split('/')
-            if len(path_parts) < 2:
-                # File is in root
-                parent_inode = self.image_handler.get_root_inode(start_offset)
-                self.current_path = "/"
-            else:
-                # Need to navigate to parent directory
-                # For simplicity, navigate to root for now
-                # TODO: Implement proper path-to-inode resolution for deep directories
-                parent_inode = 5
-                self.current_path = "/"
-
-            # Load the parent directory contents
-            entries = self.image_handler.get_directory_contents(start_offset, parent_inode)
-            self.current_offset = start_offset
-            self.populate_listing_table(entries, start_offset)
-
-            # Find and select the file in the table
-            for row in range(self.listing_table.rowCount()):
-                item = self.listing_table.item(row, 0)
-                if item:
-                    item_data = item.data(Qt.UserRole)
-                    if item_data and item_data.get('inode_number') == file_inode:
-                        # Select this row
-                        self.listing_table.selectRow(row)
-                        # Scroll to make it visible
-                        self.listing_table.scrollToItem(item)
-                        break
-
-            # Update status bar
-            self.set_status(f"Showing {file_data.get('name', 'file')} in directory")
-
-            # TODO: Expand tree view to show this location
-            # This would require traversing the tree to find and expand the correct nodes
-
-        except Exception as e:
-            logger.error(f"Error showing file in directory: {str(e)}")
-            self.set_status(f"Error navigating to file location: {str(e)}")
-
-    # ==================== END SEARCH AND FILTER HANDLERS ====================
+        self.listing_search_bar.clear()     # leaves search mode
+        self.current_selected_data = file_data
+        self.select_tree_item_by_inode(inode, offset)
+        self.set_status(f"Showing {file_data.get('name', 'file')} in place")
 
     def on_listing_table_item_clicked(self, item, navigate=True):
         """Act on a row in the listing table.
