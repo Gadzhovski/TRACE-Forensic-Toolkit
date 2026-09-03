@@ -27,7 +27,7 @@ from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_
                                        CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
                                        DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
                                        PANEL_ICON_SIZE, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
-                                       SECTOR_SIZE, TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
+                                       TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
                                        TREE_ICON_SIZE, TREE_INDENTATION, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
 from trace_app.core.database import DatabaseManager
@@ -1144,12 +1144,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.create_tree_item(root_item_tree, unallocated_item_text,
                                       self.db_manager.get_icon_path('file', 'unknown'),
                                       {"is_unallocated": True, "start_offset": 0,
-                                       "end_offset": size_in_bytes // SECTOR_SIZE})
+                                       "end_offset": size_in_bytes // self.image_handler.sector_size})
             return
 
+        sector_size = self.image_handler.sector_size
         for addr, desc, start, length in partitions:
             end = start + length - 1
-            size_in_bytes = length * SECTOR_SIZE
+            size_in_bytes = length * sector_size
             readable_size = self.image_handler.get_readable_size(size_in_bytes)
             fs_type = self.image_handler.get_fs_type(start)
             desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
@@ -1722,8 +1723,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.listing_table.insertRow(row_position)
 
                 # Calculate volume information
+                sector_size = self.image_handler.sector_size
                 end = start + length - 1
-                size_in_bytes = length * SECTOR_SIZE
+                size_in_bytes = length * sector_size
                 readable_size = self.image_handler.get_readable_size(size_in_bytes)
                 fs_type = self.image_handler.get_fs_type(start)
                 desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
@@ -1777,8 +1779,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 if desc_str and desc_str.strip():
                     info_parts.append(desc_str)
                 # Add detailed partition information
-                info_parts.append(f"Start: {start:,} sectors ({start * SECTOR_SIZE:,} bytes)")
-                info_parts.append(f"End: {end:,} sectors ({end * SECTOR_SIZE:,} bytes)")
+                info_parts.append(f"Start: {start:,} sectors ({start * sector_size:,} bytes)")
+                info_parts.append(f"End: {end:,} sectors ({end * sector_size:,} bytes)")
                 info_parts.append(f"Length: {length:,} sectors ({size_in_bytes:,} bytes)")
                 if block_size != "N/A":
                     info_parts.append(f"Block Size: {block_size}")

@@ -1,13 +1,28 @@
 """Shared UI and I/O constants."""
 
+#: Fallback bytes-per-sector, used only when an image exposes no volume
+#: system to ask. Everything else reads ImageHandler.sector_size, because the
+#: real value is a property of the evidence: a 4Kn drive reports 4096, and
+#: assuming 512 there places every partition eight times too early.
 SECTOR_SIZE = 512
 
-#: How deep the allocation-map walk will follow directories. A guard against
-#: a corrupt filesystem whose directory entries form a loop; real evidence
-#: does not nest anywhere near this far.
-MAX_DIRECTORY_DEPTH = 64
-CHUNK_SIZE = 4 * 1024 * 1024  # 4MB chunks for processing
-FILE_BUFFER_SIZE = 4096  # 4KB for file operations
+#: How deep the allocation-map walk will follow directories. Cycles are
+#: already stopped by the walk's visited-inode set, so this is only a
+#: backstop; it is set high because silently truncating a legitimately deep
+#: tree is the worse failure -- an incomplete map means live files get carved
+#: as though they were deleted. Hitting it is logged.
+MAX_DIRECTORY_DEPTH = 256
+
+#: Bytes per read for hashing, file reads and carving. EWF throughput is flat
+#: from 64 KB to 16 MB (measured 68-69 MB/s), so this is a memory decision
+#: rather than a speed one.
+CHUNK_SIZE = 4 * 1024 * 1024
+
+#: Extra bytes read past the end of each carving chunk, so a file straddling a
+#: chunk boundary is still whole in the following read. Carvers reconstruct a
+#: file from its header, and one that runs off the end of the buffer is
+#: abandoned, so this has to exceed the largest file a carver will rebuild.
+CARVE_OVERLAP = 32 * 1024 * 1024
 
 # ==================== CONFIGURATION CONSTANTS ====================
 # Window dimensions

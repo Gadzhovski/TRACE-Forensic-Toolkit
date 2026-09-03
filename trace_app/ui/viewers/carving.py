@@ -25,7 +25,8 @@ from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.core.image_handler import ImageHandler
 from trace_app.infra.paths import carved_files_dir, resource_path
-from trace_app.infra.constants import (PANEL_ICON_SIZE, TABLE_ICON_SIZE)
+from trace_app.infra.constants import (CARVE_OVERLAP, CHUNK_SIZE,
+                                       PANEL_ICON_SIZE, TABLE_ICON_SIZE)
 from trace_app.ui import icons
 from trace_app.ui.widgets.multi_select import MultiSelectButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
@@ -800,7 +801,24 @@ class FileCarvingWidget(QWidget):
     def carve_files(self, selected_file_types):
         try:
             self._stop_requested = False
-            chunk_size = 1024 * 1024 * 100
+            # Advance by CHUNK_SIZE but read CARVE_OVERLAP beyond it. Two
+            # reasons, both measured on the test image:
+            #
+            # The allocation check is only as precise as this step, and any
+            # span holding a single allocated byte is skipped whole. At the
+            # 100 MB used previously that skipped 1.37 GB where 1.25 GB is
+            # actually allocated -- 120 MB of deleted data never scanned. At
+            # 4 MB the over-skip is about 10 MB.
+            #
+            # Chunks do not overlap by default, and a carver abandons any file
+            # that runs off the end of its buffer, so a smaller step alone
+            # would turn 163 boundaries into 4096 places a file can be lost.
+            # The overlap makes a file crossing a boundary whole in the next
+            # read; duplicates cost nothing because save_file names each file
+            # after its absolute offset, so the second find rewrites the same
+            # path.
+            chunk_size = CHUNK_SIZE
+            read_size = CHUNK_SIZE + CARVE_OVERLAP
             offset = 0
             chunks_processed = 0
             chunks_skipped = 0
@@ -815,7 +833,7 @@ class FileCarvingWidget(QWidget):
 
                 chunks_processed += 1
 
-                chunk = self.image_handler.read(offset, chunk_size)
+                chunk = self.image_handler.read(offset, read_size)
                 if not chunk:
                     break
 

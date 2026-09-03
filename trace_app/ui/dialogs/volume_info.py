@@ -341,7 +341,9 @@ class VolumeInfoMixin:
             fs_type = self.image_handler.get_fs_type(start_offset)
 
             # === BASIC INFO ===
-            info["basic"]["Partition Offset"] = f"{start_offset:,} sectors ({start_offset * 512:,} bytes)"
+            sector_size = self.image_handler.sector_size
+            info["basic"]["Partition Offset"] = (
+                f"{start_offset:,} sectors ({start_offset * sector_size:,} bytes)")
             info["basic"]["Filesystem Type"] = fs_type or "Unknown"
 
             if hasattr(fs_info.info, 'block_size'):
@@ -382,10 +384,14 @@ class VolumeInfoMixin:
             info["Total Size"] = FileSystemUtils.get_readable_size(total_size)
             info["Total Size (Bytes)"] = f"{total_size:,}"
 
-            # Sector information
-            sector_count = total_size // 512
+            # Sector information, read from the image rather than assumed.
+            # This is reported to the examiner as a fact about the evidence,
+            # so it must not be a literal: it was hardcoded to "512", which
+            # would have been a false statement on a 4Kn drive.
+            sector_size = self.image_handler.sector_size
+            sector_count = total_size // sector_size
             info["Total Sectors"] = f"{sector_count:,}"
-            info["Bytes per Sector"] = "512"
+            info["Bytes per Sector"] = f"{sector_size:,}"
 
             # Volume information
             if self.image_handler.volume_info:
@@ -458,9 +464,10 @@ class VolumeInfoMixin:
             partition_details = []
 
             if partitions:
+                sector_size = self.image_handler.sector_size
                 for part in partitions:
                     addr, desc, start, length = part
-                    size = length * 512
+                    size = length * sector_size
                     allocated_space += size
 
                     # Get filesystem type

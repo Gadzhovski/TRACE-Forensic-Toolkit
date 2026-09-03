@@ -53,6 +53,7 @@ class ImageHandler:
         self.is_wiped_image = False
         self._directory_cache = {}  # Cache for directory contents
         self._partition_cache = None  # Cache for partitions
+        self._sector_size = None  # Read from the image on first use
 
         #: False when the image could not be opened; callers should check
         #: this rather than waiting for a later AttributeError.
@@ -122,7 +123,7 @@ class ImageHandler:
                 return allocation_map
 
             block_size = fs_info.info.block_size
-            partition_offset = start_offset * SECTOR_SIZE
+            partition_offset = start_offset * self.sector_size
             visited = set()
 
             def record_runs(file_obj):
@@ -141,6 +142,13 @@ class ImageHandler:
 
             def walk_directory(directory, depth=0):
                 if depth > MAX_DIRECTORY_DEPTH:
+                    # Audible, because the consequence is silent otherwise: an
+                    # incomplete map means allocated files below this point are
+                    # carved as though they had been deleted.
+                    logger.warning(
+                        "Allocation map stopped at depth %d; files nested "
+                        "deeper are not protected from carving",
+                        MAX_DIRECTORY_DEPTH)
                     return
                 for entry in directory:
                     try:
@@ -444,6 +452,35 @@ class ImageHandler:
         return self.is_wiped_image
 
     @property
+    def sector_size(self):
+        """Bytes per sector, as the image itself reports it.
+
+        Partition offsets come out of pytsk3 in sectors and have to be
+        multiplied to reach a byte offset. That multiplier is a property of
+        the evidence, not a constant: a 4Kn drive uses 4096, and assuming 512
+        there would place every partition eight times too early -- silently,
+        because the only symptom is a filesystem that will not open.
+
+        SECTOR_SIZE is the fallback for an image with no volume system, where
+        there is nothing to ask.
+        """
+        if self._sector_size is None:
+            size = SECTOR_SIZE
+            volume_info = getattr(self, 'volume_info', None)
+            if volume_info is not None:
+                try:
+                    reported = int(volume_info.info.block_size)
+                    if reported > 0:
+                        size = reported
+                except Exception as e:
+                    logger.debug("Could not read the volume's sector size: %s", e)
+            if size != SECTOR_SIZE:
+                logger.info("Image reports %d-byte sectors (not %d)",
+                            size, SECTOR_SIZE)
+            self._sector_size = size
+        return self._sector_size
+
+    @property
     def partitions(self):
         """Get partitions with caching."""
         if self._partition_cache is None:
@@ -469,7 +506,8 @@ class ImageHandler:
         """Retrieve the FS_Info for a partition, initializing it if necessary."""
         if start_offset not in self.fs_info_cache:
             try:
-                fs_info = pytsk3.FS_Info(self.img_info, offset=start_offset * 512)
+                fs_info = pytsk3.FS_Info(self.img_info,
+                                         offset=start_offset * self.sector_size)
                 self.fs_info_cache[start_offset] = fs_info
             except Exception as e:
                 return None
@@ -626,13 +664,15 @@ class ImageHandler:
 
     def read_unallocated_space(self, start_offset, end_offset):
         try:
-            start_byte_offset = start_offset * SECTOR_SIZE
-            end_byte_offset = max(end_offset * SECTOR_SIZE, start_byte_offset + SECTOR_SIZE - 1)
+            sector = self.sector_size
+            start_byte_offset = start_offset * sector
+            end_byte_offset = max(end_offset * sector,
+                                  start_byte_offset + sector - 1)
             size_in_bytes = end_byte_offset - start_byte_offset + 1  # Ensuring at least some data is read
 
             if size_in_bytes <= 0:
                 logger.warning("Invalid size for unallocated space, adjusting to read at least one sector.")
-                size_in_bytes = SECTOR_SIZE  # Adjust to read at least one sector
+                size_in_bytes = sector  # Adjust to read at least one sector
 
             # For large blocks, read in chunks instead of all at once
             if size_in_bytes > CHUNK_SIZE:
@@ -687,7 +727,8 @@ class ImageHandler:
     def process_partition(self, img_info, offset_sectors, files_list, extensions):
         """Process partition listing - offset_sectors is in sectors, not bytes."""
         try:
-            fs_info = pytsk3.FS_Info(img_info, offset=offset_sectors * SECTOR_SIZE)
+            fs_info = pytsk3.FS_Info(img_info,
+                                     offset=offset_sectors * self.sector_size)
             self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions, None, offset_sectors)
         except IOError as e:
             logger.error(f"Unable to open filesystem at offset {offset_sectors}: {e}")
@@ -875,8 +916,10 @@ class ImageHandler:
     def process_partition_search(self, img_info, offset_sectors, files_list, search_query):
         """Process partition search - offset_sectors is in sectors, not bytes."""
         try:
-            logger.info(f"Opening filesystem at offset {offset_sectors} sectors ({offset_sectors * SECTOR_SIZE} bytes)")
-            fs_info = pytsk3.FS_Info(img_info, offset=offset_sectors * SECTOR_SIZE)
+            byte_offset = offset_sectors * self.sector_size
+            logger.info("Opening filesystem at offset %d sectors (%d bytes)",
+                        offset_sectors, byte_offset)
+            fs_info = pytsk3.FS_Info(img_info, offset=byte_offset)
             logger.info(f"Starting recursive search with query: '{search_query}'")
             initial_count = len(files_list)
             self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset_sectors)
