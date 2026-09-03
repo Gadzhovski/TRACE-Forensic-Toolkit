@@ -684,7 +684,7 @@ QLabel#panelTitle {
 
 QTableWidget#hexTable {
     gridline-color: transparent;
-    border: 1px solid #d3d3d3;
+    border: none;   /* see QTextEdit#textContentView */
 }
 
 QTableWidget#hexTable::item {
@@ -1010,8 +1010,10 @@ QToolBarSeparator {
 QTextEdit#textContentView {
     background-color: #FFFFFF;
     color: #212529;
-    border: 1px solid #CED4DA;
-    border-radius: 4px;
+    /* No frame. This pane fills its tab, so a border round it is not read as
+       the widget's edge -- it is a stray line inset from the dock, and the
+       Application and Metadata tabs, which have no frame, sit flush. */
+    border: none;
 }
 
 #placeholderLabel {
