@@ -25,6 +25,12 @@
 # Application output
 /carved_files/
 
+# Case working data. A case is created wherever the examiner points TRACE,
+# which during testing is often inside the repository; its database and search
+# index are derived data, never source.
+case.db
+search.db
+
 # Virtual environment
 /venv/
 /.venv/
