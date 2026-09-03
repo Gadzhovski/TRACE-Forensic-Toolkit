@@ -48,6 +48,46 @@ which target carving heuristics directly:
 contiguous**. It also contains MP3, MPG, EXE, FLV, AVI and mbox data that TRACE
 does not carve and the harness does not score.
 
+## The rest of the DFTT suite
+
+These test everything except carving: partition tables, keyword search,
+undelete, timestamps, volume labels, filesystem detection and ISO9660. Each
+page at <https://dftt.sourceforge.net/> documents what its image contains and
+what a tool is expected to do with it.
+
+| File | Size | Tests | DFTT |
+|---|---|---|---|
+| `ext-part-test-2.dd` | 153 MB | Extended/nested partitions -- 6 FAT16 volumes, some inside extended tables | [#1](https://dftt.sourceforge.net/test1/index.html) |
+| `fat-img-kw.dd` | 15 MB | Keyword search on FAT16 | [#2](https://dftt.sourceforge.net/test2/index.html) |
+| `ntfs-img-kw-1.dd` | 7.8 MB | Keyword search on NTFS | [#3](https://dftt.sourceforge.net/test3/index.html) |
+| `ext3-img-kw-1.dd` | 5 MB | Keyword search on ext3 | [#4](https://dftt.sourceforge.net/test4/index.html) |
+| `daylight.dd` | 1.4 MB | FAT timestamps across a daylight-saving boundary | [#5](https://dftt.sourceforge.net/test5/index.html) |
+| `6-fat-undel.dd` | 5.9 MB | Recovering deleted files from FAT | [#6](https://dftt.sourceforge.net/test6/index.html) |
+| `7-ntfs-undel.dd` | 5.9 MB | Recovering deleted files from NTFS, and a leap day | [#7](https://dftt.sourceforge.net/test7/index.html) |
+| `8-jpeg-search.dd` | 9.8 MB | Identifying JPEGs by content, not extension | [#8](https://dftt.sourceforge.net/test8/index.html) |
+| `10-ntfs-disk.dd` | 94 MB | Two file systems layered in one partition | [#10](https://dftt.sourceforge.net/test10/index.html) |
+| `10-ntfs-part1.dd` | 47 MB | Partition 1 of the above: NTFS under Ext2 | [#10](https://dftt.sourceforge.net/test10/index.html) |
+| `10-ntfs-part2.dd` | 47 MB | Partition 2 of the above: NTFS under UFS2 | [#10](https://dftt.sourceforge.net/test10/index.html) |
+| `iso-dirtree1.iso` | 366 KB | ISO9660 directory structure | [#14](https://dftt.sourceforge.net/test14/index.html) |
+| `iso-dirtree2.iso` | 366 KB | ISO9660 directory structure, variant | [#14](https://dftt.sourceforge.net/test14/index.html) |
+| `iso-endian.iso` | 366 KB | ISO9660 byte-order handling | [#14](https://dftt.sourceforge.net/test14/index.html) |
+
+Three of these earn particular attention:
+
+- **#5 (`daylight.dd`)** holds one file written in January and one in June, both
+  at a round hour. FAT stores wall-clock time with no timezone, so a tool that
+  converts them as though they were UTC shifts one by an hour and not the
+  other. `winter.txt` must read 2:00 PM and `summer.txt` 3:00 PM.
+- **#7 (`7-ntfs-undel.dd`)** deletes six files. Their directory entries survive
+  but no longer link to their metadata, so a tool that reads the inode only
+  from that link lists six names it cannot open. The MFT record number is still
+  in the entry.
+- **#10** formats each partition as NTFS and then overwrites it with Ext2 or
+  UFS, leaving both signature sets intact. In the authors' words: "The test is
+  whether your tool will warn you that there are two valid file systems or if
+  it will show you only one and hide the other." Showing an empty partition is
+  worse than either.
+
 ## Other images
 
 | File | Size | Notes |
@@ -74,6 +114,20 @@ ffeb78b6cf8eed64c241212fb5cd1f3d226dcd58e16b67192f465e4a3ec46342  12-carve-ext2.
 ca312b0582c78e1b379eca318aa7a9d7fc4a809bfcfd25be093f5298e72a81ab  9-fat-label.dd
 9d24547c9d8a17602ee5a8ecf960ff8cc2ee48575ffc127cd084b3b0a484d1dd  dfrws-2006-challenge.raw
 ace31ac34503bf3f56acd7cfe729a1f701f17e6fc2c202de7ccbb7ea58bc3a2c  dfrws-2007-challenge.img
+b075ed83211765dd14f24390389b77b20ef688d70aaf69385e026b5513bdd8d2  ext-part-test-2.dd
+b173fd82a052e2637cfeb89cf21a603817f072799a63decffbfc948fc19a06e6  fat-img-kw.dd
+cad097e8fcf4538a928c980a01bc64dcf36ca062432b0f6d5c3962e3bc0c4060  ntfs-img-kw-1.dd
+2065c9b3fa3f1f59fd5ee2ec0ad83a987d988e9ae898497a0b48e4986010f686  ext3-img-kw-1.dd
+a81dc8aeefb28b75e0625c1c8b54db9f46ec1c6c28e16595539d1cb00bbd45b5  daylight.dd
+e6f1f3bc53d426ae6f81b2d7b75598bc95f7447853e38b8f9ca1d1b65f7b3512  6-fat-undel.dd
+4138cc42148e3381e3c66eb50090f4a30416ae8c20247c2b9bad27cf8c764d88  7-ntfs-undel.dd
+9c43d6a2dd5132cf6afc29e5c644cde0cb747c64998a68e73f2efb787887b126  8-jpeg-search.dd
+4d2edfe4a8ee0079720a4b9e258ecf59ffa17783465a5a013101614b4ac64049  10-ntfs-disk.dd
+d6739c45d652c0eb67e59536e7b9c02b25ca99aaabf500fe9c374bb7f2ae8bc3  10-ntfs-part1.dd
+529c607152f8ca25a6f2645e6894a80b303b4f2b352b89bdfef0fde549e3c6e2  10-ntfs-part2.dd
+0418d266405e1baf1334a014b9fba984962e81ec65003f34b67a7f5c7b28e6ad  iso-dirtree1.iso
+5f4fe2707eb4227b2d8e35482f492c888a44937abca05b67a0b63f2a2e34e074  iso-dirtree2.iso
+70231746c40640efc6ea5a926ef9184910c44b43b0716d72026db41b40966b9c  iso-endian.iso
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01
 a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA-1.E01
@@ -90,6 +144,14 @@ unzip dfrws-2006-challenge.zip && unzip dfrws-2007-challenge.zip
 ```
 
 The DFTT images come from <https://dftt.sourceforge.net/>, one page per test.
+Every test's archive is under the same SourceForge path:
+
+```bash
+base="https://sourceforge.net/projects/dftt/files/Test%20Images"
+curl -L -o 1-extend-part.zip "$base/1_%20Extended%20Partition/1-extend-part.zip/download"
+curl -L -o 7-undel-ntfs.zip  "$base/7_%20NTFS%20File%20Recovery%20%28and%20Leap%20Year%29%20%231/7-undel-ntfs.zip/download"
+# ...and so on; the directory names are visible at the base URL.
+```
 
 ## Scoring the carvers
 
