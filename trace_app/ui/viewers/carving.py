@@ -57,6 +57,12 @@ class NumericTableWidgetItem(QTableWidgetItem):
 
 class FileCarvingWidget(QWidget):
     file_carved = Signal(str, str, str, str, str)  # Unified signal for file carving
+    #: Emitted when a scan ends. Carrying this as a signal rather than calling
+    #: straight from the worker matters: file_carved is a queued cross-thread
+    #: signal, so its rows are still waiting in the event queue when the worker
+    #: finishes. Anything the worker does directly -- such as sizing columns --
+    #: therefore runs against a table that is not filled in yet.
+    carving_finished = Signal()
     #: Emitted when the user opens a carved file, so the host can show it in a
     #: viewer. Replaces reaching up into MainWindow directly.
     carved_file_opened = Signal(bytes, dict)
@@ -128,6 +134,7 @@ class FileCarvingWidget(QWidget):
         self.layout.addWidget(self.tab_widget)
 
         self.file_carved.connect(self.display_carved_file)
+        self.carving_finished.connect(self._fit_carved_columns)
         # Every control in this toolbar gets the shared height, once it is built.
         align_controls(self.toolbar)
 
@@ -885,6 +892,7 @@ class FileCarvingWidget(QWidget):
                     self.start_button.setEnabled(True)
                     self.stop_button.setEnabled(False)
                     logger.warning(f"Carving stopped. Processed {chunks_processed} unallocated chunks, skipped {chunks_skipped} allocated chunks")
+                    self.carving_finished.emit()
                     return
 
                 # Call the carve function for each selected file type
@@ -924,17 +932,22 @@ class FileCarvingWidget(QWidget):
         finally:
             self.start_button.setEnabled(True)
             self.stop_button.setEnabled(False)
-            # Fitted once the scan is over rather than per recovered file: the
-            # table grows a row at a time and re-measuring on each would cost
-            # far more than doing it once at the end.
-            self._fit_carved_columns()
+            # Queued behind the rows this scan emitted, so the columns are
+            # measured against a table that actually has them.
+            self.carving_finished.emit()
 
     #: Widest a carving column may grow. File Path holds a full path, which
     #: would otherwise set the table's width on its own.
     _CARVED_COLUMN_CAPS = {5: 420}
 
+    @Slot()
     def _fit_carved_columns(self):
-        """Size the recovered-files columns to what was actually found."""
+        """Size the recovered-files columns to what was actually found.
+
+        A slot, so it is delivered on the UI thread after every queued
+        display_carved_file has run; called directly from the worker it
+        measured an empty table.
+        """
         try:
             fit_columns(self.table_widget, self._CARVED_COLUMN_CAPS)
         except Exception as e:
