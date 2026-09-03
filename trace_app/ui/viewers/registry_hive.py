@@ -216,9 +216,9 @@ class RegistryExtractor(QWidget):
         hive = self.hiveSelector.currentText()
         self.statusMessage.emit(f"Reading the {hive} hive...")
         self.loadHiveButton.setEnabled(False)
+        # No placeholder row here: progress goes to the window's status bar,
+        # and a tree entry saying "Reading..." reads like a registry key.
         self.treeWidget.clear()
-        placeholder = QTreeWidgetItem(self.treeWidget, [f"Reading {hive}..."])
-        placeholder.setDisabled(True)
 
         self._loader = _HiveLoader(self.image_handler, hive, self)
         self._loader.loaded.connect(self._on_hive_loaded)
@@ -242,8 +242,6 @@ class RegistryExtractor(QWidget):
 
     def _on_hive_failed(self, message):
         self.treeWidget.clear()
-        item = QTreeWidgetItem(self.treeWidget, [message])
-        item.setDisabled(True)
         self.statusMessage.emit(message)
         self._on_load_finished()
 

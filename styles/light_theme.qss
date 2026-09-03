@@ -1202,7 +1202,17 @@ QStatusBar::item {
     border: none;   /* Qt draws a sunken frame round each item otherwise */
 }
 
+/* The context label, and the bar's own children. The global QWidget rule
+   paints every widget white, and a QLabel inside the status bar is matched by
+   it directly -- so the label drew a white block over the bar rather than
+   inheriting it. Stated here instead. */
+QStatusBar QLabel, QStatusBar QSizeGrip, QStatusBar QWidget {
+    background-color: transparent;
+    border: none;
+}
+
 QLabel#statusContext {
+    background-color: transparent;
     color: #6b7480;
     padding-right: 4px;
 }
