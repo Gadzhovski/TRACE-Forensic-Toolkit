@@ -291,6 +291,80 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             QApplication.instance().setWindowIcon(app_icon)
 
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+        self._build_status_bar()
+
+    def _build_status_bar(self):
+        """The status bar, built now rather than on first use.
+
+        QMainWindow.statusBar() creates one the first time it is called, which
+        used to be partway through a session -- so the window lost 22px and
+        everything shifted the moment the first file was clicked. Building it
+        here keeps the layout still.
+
+        Two areas: transient messages on the left, via showMessage, and a
+        permanent label on the right holding what is currently selected. The
+        right-hand label is why the bar is not blank between operations.
+        """
+        status = self.statusBar()
+        status.setSizeGripEnabled(False)
+
+        self.status_context = QLabel("", self)
+        self.status_context.setObjectName("statusContext")
+        status.addPermanentWidget(self.status_context)
+
+        self.set_status_context("No evidence loaded")
+
+    def set_status(self, message, timeout=0):
+        """Show a transient message: what the application is doing now."""
+        self.statusBar().showMessage(message, timeout)
+
+    def clear_status(self):
+        """Drop the transient message, leaving the context label in place."""
+        self.statusBar().clearMessage()
+
+    def set_status_context(self, text):
+        """Set the standing right-hand text: what is currently selected."""
+        if hasattr(self, 'status_context'):
+            self.status_context.setText(text)
+
+    def describe_selection(self, data):
+        """One line describing the selected item, for the status bar.
+
+        Says what an examiner would otherwise have to read off three columns:
+        what it is, how big, and which MFT record it came from.
+        """
+        if not data:
+            return ""
+
+        name = data.get('name') or ''
+        kind = data.get('type') or ''
+        parts = [name] if name else []
+
+        if kind == 'directory':
+            parts.append("Folder")
+        elif kind == 'volume':
+            parts.append("Volume")
+
+        size = data.get('size')
+        if size not in (None, ''):
+            if isinstance(size, (int, float)):
+                size = self.image_handler.get_readable_size(size)
+            parts.append(str(size))
+
+        inode = data.get('inode_number')
+        if inode is not None:
+            parts.append(f"inode {inode}")
+
+        if data.get('is_deleted'):
+            parts.append("deleted")
+
+        return "   ·   ".join(p for p in parts if p)
+
+    def update_status_for_selection(self, data):
+        """Refresh the standing context text for a newly selected item."""
+        described = self.describe_selection(data)
+        if described:
+            self.set_status_context(described)
 
     def _build_menus(self):
         """Menu bar: File, View, Tools, Options and Help."""
@@ -611,6 +685,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
 
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
+        # Hive reading runs on a worker thread, so its progress belongs in the
+        # status bar with everything else rather than only as a placeholder row
+        # in the tree.
+        self.registry_extractor_widget.statusMessage.connect(self.set_status)
         self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
 
     def _build_viewer_dock(self):
@@ -1002,6 +1080,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.clearContents()
         self.listing_table.setRowCount(0)
         self.clear_evidence_views()
+        self.set_status_context("No evidence loaded")
         self.current_image_path = None
         self.current_offset = None
         self.evidence_files.clear()
@@ -1175,6 +1254,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.evidence_files.append(image_path)
 
                 self.current_image_path = image_path
+                self.set_status_context(
+                    f"{os.path.basename(image_path)}   ·   "
+                    f"{len(self.image_handler.get_partitions())} partitions")
                 progress.setValue(70)
 
                 # Pass the image handler to widgets that need it
@@ -1409,10 +1491,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Store the current selection data
         self.current_selected_data = data
+        self.update_status_for_selection(data)
 
         # Show a status message in the UI to indicate loading
-        statusbar = self.statusBar()
-        statusbar.showMessage("Loading content...")
+        self.set_status("Loading content...")
 
         # Use a background worker thread if processing large files or unallocated space
         try:
@@ -1423,7 +1505,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 not data.get("is_unallocated")):
                 # This is the root disk image - display all volumes/partitions
                 self.display_volumes_in_listing()
-                statusbar.clearMessage()
+                self.clear_status()
                 return
 
             if data.get("is_unallocated"):
@@ -1433,7 +1515,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.unallocated_worker.completed.connect(
                     lambda content: self.update_viewer_with_file_content(content, data))
                 self.unallocated_worker.error.connect(
-                    lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                    lambda msg: (self.log_error(msg), self.clear_status()))
                 self.unallocated_worker.start()
 
             elif data.get("type") == "directory":
@@ -1444,6 +1526,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         data["parent_inode"] = parent_inode
                         # Update the stored data with parent information
                         self.current_selected_data = data
+                        self.update_status_for_selection(data)
 
                 # Handle directories - populate the listing synchronously
                 entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
@@ -1465,7 +1548,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add to navigation history
                 self._add_to_history(data)
 
-                statusbar.clearMessage()
+                self.clear_status()
 
             elif data.get("inode_number") is not None:
                 # Handle files in background
@@ -1474,7 +1557,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.file_worker.completed.connect(
                     lambda content, _: self.update_viewer_with_file_content(content, data))
                 self.file_worker.error.connect(
-                    lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                    lambda msg: (self.log_error(msg), self.clear_status()))
                 self.file_worker.start()
 
             elif data.get("start_offset") is not None:
@@ -1496,15 +1579,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add to navigation history
                 self._add_to_history(data)
 
-                statusbar.clearMessage()
+                self.clear_status()
 
             else:
                 self.log_error("Clicked item is not a file, directory, or unallocated space.")
-                statusbar.clearMessage()
+                self.clear_status()
 
         except Exception as e:
             self.log_error(f"Error processing item: {str(e)}")
-            statusbar.clearMessage()
+            self.clear_status()
 
     def update_directory_up_button(self):
         """Update the state of the directory up button based on current selection"""
@@ -1577,8 +1660,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not parent_inode:
             return
 
-        statusbar = self.statusBar()
-        statusbar.showMessage("Loading parent directory...")
+        self.set_status("Loading parent directory...")
 
         try:
             # Create data for parent directory
@@ -1615,11 +1697,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # Find and select the corresponding item in the tree view if possible
             self.select_tree_item_by_inode(parent_data["inode_number"], parent_data["start_offset"])
 
-            statusbar.clearMessage()
+            self.clear_status()
 
         except Exception as e:
             self.log_error(f"Error navigating to parent directory: {str(e)}")
-            statusbar.clearMessage()
+            self.clear_status()
 
     def _add_to_history(self, directory_data):
         """Add a directory to the navigation history."""
@@ -1706,8 +1788,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _navigate_to_history_entry(self, history_entry):
         """Navigate to a specific directory from history."""
-        statusbar = self.statusBar()
-        statusbar.showMessage("Navigating...")
+        self.set_status("Navigating...")
 
         try:
             # Restore the path
@@ -1737,11 +1818,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if inode_number:
                 self.select_tree_item_by_inode(inode_number, start_offset)
 
-            statusbar.clearMessage()
+            self.clear_status()
 
         except Exception as e:
             self.log_error(f"Error navigating from history: {str(e)}")
-            statusbar.clearMessage()
+            self.clear_status()
 
     def select_tree_item_by_inode(self, inode_number, start_offset):
         """Attempt to find and select the item in the tree view that matches the given inode"""
@@ -2042,8 +2123,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         or from a background thread.
         """
         # Clear the status message if it exists
-        statusbar = self.statusBar()
-        statusbar.clearMessage()
+        self.clear_status()
 
         adapter = self.active_viewer_adapter()
         if adapter is None:
@@ -2063,8 +2143,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def update_viewer_with_media_stream(self, file_obj, file_size, metadata, data):
         """Update the application viewer with a media stream for playback."""
         # Clear the status message if it exists
-        statusbar = self.statusBar()
-        statusbar.clearMessage()
+        self.clear_status()
 
         try:
             adapter = self.active_viewer_adapter()
@@ -2115,8 +2194,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.current_selected_data:
             return
 
-        statusbar = self.statusBar()
-        statusbar.showMessage("Updating view...")
+        self.set_status("Updating view...")
 
         try:
             # Cancel any in-flight workers before starting new ones, so a
@@ -2138,7 +2216,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         lambda file_obj, file_size, metadata: self.update_viewer_with_media_stream(
                             file_obj, file_size, metadata, self.current_selected_data))
                     self.media_worker.error.connect(
-                        lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                        lambda msg: (self.log_error(msg), self.clear_status()))
                     self.media_worker.start()
                 else:
                     # For non-media files or other tabs, use FileContentWorker (loads content)
@@ -2146,13 +2224,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.file_worker.completed.connect(
                         lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))
                     self.file_worker.error.connect(
-                        lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                        lambda msg: (self.log_error(msg), self.clear_status()))
                     self.file_worker.start()
             else:
-                statusbar.clearMessage()
+                self.clear_status()
         except Exception as e:
             self.log_error(f"Error updating active tab: {str(e)}")
-            statusbar.clearMessage()
+            self.clear_status()
 
     def open_listing_context_menu(self, position):
         # Get the selected item
@@ -2438,8 +2516,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setColumnHidden(8, False)  # Path column
 
         # Update status bar
-        statusbar = self.statusBar()
-        statusbar.showMessage(f"Searching for '{self._search_query}'...")
+        self.set_status(f"Searching for '{self._search_query}'...")
 
         # Perform the search
         self.perform_search(self._search_query)
@@ -2476,10 +2553,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     # This will also update the listing table via on_item_clicked
                     self._restore_tree_selection(path, directory_data)
                 except Exception as e:
-                    self.statusBar().showMessage(f"Error restoring directory view: {str(e)}")
+                    self.set_status(f"Error restoring directory view: {str(e)}")
 
         # Clear status bar
-        self.statusBar().clearMessage()
+        self.clear_status()
 
     def _restore_tree_selection(self, path, directory_data):
         """Restore tree view selection to a previous location."""
@@ -2568,8 +2645,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.image_handler:
             return
 
-        statusbar = self.statusBar()
-        statusbar.showMessage(f"Searching for '{search_query}'...")
+        self.set_status(f"Searching for '{search_query}'...")
 
         try:
             # Check if search query contains wildcards
@@ -2605,10 +2681,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.listing_table.setSortingEnabled(True)
 
             # Update status bar with result count
-            statusbar.showMessage(f"{len(files)} result(s) for '{search_query}'")
+            self.set_status(f"{len(files)} result(s) for '{search_query}'")
 
         except Exception as e:
-            statusbar.showMessage(f"Search error: {str(e)}")
+            self.set_status(f"Search error: {str(e)}")
 
     def insert_search_result_row(self, file_data):
         """Insert a search result into the listing table."""
@@ -2675,7 +2751,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             file_inode = file_data.get('inode_number')
 
             if start_offset is None or not file_path:
-                self.statusBar().showMessage("Cannot determine file location")
+                self.set_status("Cannot determine file location")
                 return
 
             # Parse the path to get parent directory
@@ -2710,14 +2786,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         break
 
             # Update status bar
-            self.statusBar().showMessage(f"Showing {file_data.get('name', 'file')} in directory")
+            self.set_status(f"Showing {file_data.get('name', 'file')} in directory")
 
             # TODO: Expand tree view to show this location
             # This would require traversing the tree to find and expand the correct nodes
 
         except Exception as e:
             logger.error(f"Error showing file in directory: {str(e)}")
-            self.statusBar().showMessage(f"Error navigating to file location: {str(e)}")
+            self.set_status(f"Error navigating to file location: {str(e)}")
 
     # ==================== END SEARCH AND FILTER HANDLERS ====================
 
@@ -2738,6 +2814,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         self.current_selected_data = data
+        self.update_status_for_selection(data)
 
         if not navigate and data.get("type") in ("volume", "directory"):
             # Single click on a folder: select it, so the metadata and other
@@ -2746,8 +2823,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                            data.get("start_offset"))
             return
 
-        statusbar = self.statusBar()
-        statusbar.showMessage("Loading content...")
+        self.set_status("Loading content...")
 
         try:
             if data.get("type") == "volume":
@@ -2769,7 +2845,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add to navigation history
                 self._add_to_history(data)
 
-                statusbar.clearMessage()
+                self.clear_status()
 
             elif data.get("type") == "directory":
                 inode_number = data.get("inode_number", 0)
@@ -2800,7 +2876,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add to navigation history
                 self._add_to_history(data)
 
-                statusbar.clearMessage()
+                self.clear_status()
             else:
                 # Reveal the file's location in the tree view. In search mode the
                 # result may live in a directory the tree has not expanded yet, so
@@ -2816,12 +2892,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.file_worker.completed.connect(
                     lambda content, _: self.update_viewer_with_file_content(content, data))
                 self.file_worker.error.connect(
-                    lambda msg: (self.log_error(msg), statusbar.clearMessage()))
+                    lambda msg: (self.log_error(msg), self.clear_status()))
                 self.file_worker.start()
 
         except Exception as e:
             self.log_error(f"Error processing listing table click: {str(e)}")
-            statusbar.clearMessage()
+            self.clear_status()
 
 
 

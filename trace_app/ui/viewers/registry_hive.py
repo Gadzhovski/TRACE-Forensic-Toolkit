@@ -85,6 +85,10 @@ class _HiveLoader(QThread):
 
 
 class RegistryExtractor(QWidget):
+    #: Progress text for the window's status bar. Emitted rather than written
+    #: directly, so this widget stays independent of the window it sits in.
+    statusMessage = Signal(str)
+
     #: Item data slot recording whether a node's children have been built.
     POPULATED_ROLE = Qt.UserRole + 1
 
@@ -210,6 +214,7 @@ class RegistryExtractor(QWidget):
             self._loader.wait(2000)
 
         hive = self.hiveSelector.currentText()
+        self.statusMessage.emit(f"Reading the {hive} hive...")
         self.loadHiveButton.setEnabled(False)
         self.treeWidget.clear()
         placeholder = QTreeWidgetItem(self.treeWidget, [f"Reading {hive}..."])
@@ -227,12 +232,19 @@ class RegistryExtractor(QWidget):
 
     def _on_hive_loaded(self, hive_name, root_key):
         self.display_registry_hive(hive_name, root_key)
+        try:
+            count = len(root_key.subkeys())
+            self.statusMessage.emit(
+                f"{hive_name} loaded  ·  {count} top-level keys")
+        except Exception:
+            self.statusMessage.emit(f"{hive_name} loaded")
         self._on_load_finished()
 
     def _on_hive_failed(self, message):
         self.treeWidget.clear()
         item = QTreeWidgetItem(self.treeWidget, [message])
         item.setDisabled(True)
+        self.statusMessage.emit(message)
         self._on_load_finished()
 
     def display_registry_hive(self, hive_name, root_key):

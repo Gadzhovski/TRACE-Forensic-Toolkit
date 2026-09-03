@@ -1187,3 +1187,22 @@ QScrollArea#volumeInfoScroll {
     background: transparent;
     border: none;
 }
+
+/* Status bar. Transient progress on the left, the standing selection context
+   on the right. It is built at startup rather than on first use, so the window
+   does not lose 22px the moment something is clicked. */
+QStatusBar {
+    background-color: #F2F3F5;
+    border-top: 1px solid #DDE1E6;
+    color: #495057;
+    padding: 0px 8px;
+}
+
+QStatusBar::item {
+    border: none;   /* Qt draws a sunken frame round each item otherwise */
+}
+
+QLabel#statusContext {
+    color: #6b7480;
+    padding-right: 4px;
+}
