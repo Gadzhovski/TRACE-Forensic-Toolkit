@@ -449,8 +449,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
         self.listing_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-        # Connect click event to handle navigation in search mode
-        self.listing_table.itemClicked.connect(self.on_listing_table_item_clicked)
+        # Single click selects: a file's content is shown, a folder is only
+        # highlighted. Double-click is what opens a folder, below.
+        self.listing_table.itemClicked.connect(
+            lambda item: self.on_listing_table_item_clicked(item, navigate=False))
 
         # Create a QVBoxLayout for the listing tab
         self.listing_layout = QVBoxLayout()
@@ -2587,8 +2589,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # ==================== END SEARCH AND FILTER HANDLERS ====================
 
-    def on_listing_table_item_clicked(self, item):
-        """Handle click events on the listing table."""
+    def on_listing_table_item_clicked(self, item, navigate=True):
+        """Act on a row in the listing table.
+
+        `navigate` is False for a single click, which selects a file and shows
+        its content but leaves folders alone. Opening a directory on a single
+        click made the listing hard to browse: selecting a folder to read its
+        metadata moved you into it instead. Double-click navigates, as it does
+        in any file manager.
+        """
         row = item.row()
 
         # Get data from the name column (column 0)
@@ -2597,6 +2606,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         self.current_selected_data = data
+
+        if not navigate and data.get("type") in ("volume", "directory"):
+            # Single click on a folder: select it, so the metadata and other
+            # tabs describe it, but stay where we are.
+            self.select_tree_item_by_inode(data.get("inode_number"),
+                                           data.get("start_offset"))
+            return
 
         statusbar = self.statusBar()
         statusbar.showMessage("Loading content...")
