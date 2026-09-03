@@ -394,6 +394,35 @@ class FileCarvingWidget(QWidget):
 
         return False
 
+    @staticmethod
+    def next_allocated_start(offset, allocation_map):
+        """Where the next allocated region begins at or after `offset`.
+
+        Carving reads past the end of its chunk so a file straddling the
+        boundary stays whole, but that extra window is not covered by the
+        chunk's own allocation check -- so without this it read straight into
+        live file data and carved it. Trimming the buffer here keeps the
+        overlap while leaving allocated space untouched.
+
+        Returns None when nothing is allocated ahead.
+        """
+        if not allocation_map:
+            return None
+
+        low, high = 0, len(allocation_map)
+        while low < high:
+            mid = (low + high) // 2
+            if allocation_map[mid][1] <= offset:
+                low = mid + 1        # region ends before us; look right
+            else:
+                high = mid
+
+        if low >= len(allocation_map):
+            return None
+        start, end = allocation_map[low]
+        # A region already covering `offset` leaves no room to read at all.
+        return offset if start <= offset < end else start
+
     def open_context_menu(self, position):
         menu = QMenu()
 
@@ -833,7 +862,18 @@ class FileCarvingWidget(QWidget):
 
                 chunks_processed += 1
 
-                chunk = self.image_handler.read(offset, read_size)
+                # Stop the read at the next allocated region. The chunk itself
+                # is known unallocated, but the overlap window beyond it is not
+                # checked by the test above -- reading it blindly pulled live
+                # file data into the carvers, which is precisely what the
+                # allocation map exists to prevent.
+                limit = self.next_allocated_start(offset, self.allocation_map)
+                span = read_size if limit is None else min(read_size, limit - offset)
+                if span <= 0:
+                    offset += chunk_size
+                    continue
+
+                chunk = self.image_handler.read(offset, span)
                 if not chunk:
                     break
 
