@@ -428,7 +428,24 @@ class VolumeInfoMixin:
             # Get filesystem info
             fs_info = self.image_handler.get_fs_info(start_offset)
             if not fs_info:
-                info["basic"]["Status"] = "Unable to access filesystem"
+                # TSK could not open it, which is not the same as there being
+                # nothing there. A partition formatted twice keeps both sets of
+                # structures and TSK refuses to guess between them; reporting
+                # only "unable to access" hides a volume whose earlier contents
+                # are still recoverable.
+                present = self.image_handler.detect_filesystems(start_offset)
+                if len(present) > 1:
+                    info["basic"]["Status"] = (
+                        f"{' + '.join(present)} -- two file systems present. "
+                        "The volume was reformatted without being wiped, so "
+                        "the earlier one's data may still be recoverable by "
+                        "carving.")
+                elif present:
+                    info["basic"]["Status"] = (
+                        f"{present[0]} present, but its structures are damaged "
+                        "and cannot be read. Carving may still recover files.")
+                else:
+                    info["basic"]["Status"] = "Unable to access filesystem"
                 return info
 
             fs_type = self.image_handler.get_fs_type(start_offset)
@@ -530,9 +547,27 @@ class VolumeInfoMixin:
         for start in starts:
             fs_type = handler.get_fs_type(start)
             if not fs_type or fs_type == 'N/A':
+                # TSK could not open one, but the partition may still hold a
+                # filesystem it refuses to guess between -- a volume formatted
+                # twice keeps both sets of structures, and the older data is
+                # still recoverable. Saying nothing here is what makes such a
+                # partition look empty.
+                for name in handler.detect_filesystems(start):
+                    entry = f"{name} (not mountable)"
+                    if entry not in filesystems:
+                        filesystems.append(entry)
                 continue
             if fs_type not in filesystems:
                 filesystems.append(fs_type)
+
+            # A second signature under a mountable filesystem means the volume
+            # was reformatted without being wiped.
+            buried = [n for n in handler.detect_filesystems(start)
+                      if not n.startswith(fs_type[:3])]
+            for name in buried:
+                entry = f"{name} (overwritten, data may survive)"
+                if entry not in filesystems:
+                    filesystems.append(entry)
 
             fs_info = handler.get_fs_info(start)
             if fs_info is None:

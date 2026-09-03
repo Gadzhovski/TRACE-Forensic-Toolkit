@@ -24,6 +24,14 @@ from trace_app.infra.utils import FileSystemUtils, safe_datetime
 
 logger = logging.getLogger('TRACE.ImageHandler')
 
+#: UFS superblock magic, 0x00011954. Written in the byte order of the host
+#: that created the filesystem, so a carved or foreign image may show either.
+_UFS_MAGIC_LE = (0x00011954).to_bytes(4, 'little')
+_UFS_MAGIC_BE = (0x00011954).to_bytes(4, 'big')
+#: UFS2 stores the same value rotated; FreeBSD writes 0x19540119 there.
+_UFS2_MAGIC_LE = (0x19540119).to_bytes(4, 'little')
+_UFS2_MAGIC_BE = (0x19540119).to_bytes(4, 'big')
+
 
 class EWFImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
@@ -42,6 +50,33 @@ class EWFImgInfo(pytsk3.Img_Info):
 
 
 # ImageHandler class with optimizations
+#: Filesystems that store a local wall-clock time with no timezone recorded.
+#: Reporting one of these as UTC claims knowledge the evidence does not carry.
+_TIMEZONE_NAIVE = frozenset({'FAT12', 'FAT16', 'FAT32', 'ExFAT'})
+
+class _OrphanMeta:
+    """A copy of the fields a listing needs from a TSK_FS_META.
+
+    pytsk3's metadata object is owned by the File it came from; once that File
+    is collected the fields read back as None. A deleted entry is opened by
+    inode specifically because its own metadata link is gone, so this is
+    exactly the path where that bites.
+    """
+
+    __slots__ = ('addr', 'size', 'type', 'flags',
+                 'atime', 'mtime', 'crtime', 'ctime')
+
+    def __init__(self, meta):
+        self.addr = meta.addr
+        self.size = meta.size
+        self.type = meta.type
+        self.flags = meta.flags
+        self.atime = getattr(meta, 'atime', 0)
+        self.mtime = getattr(meta, 'mtime', 0)
+        self.crtime = getattr(meta, 'crtime', 0)
+        self.ctime = getattr(meta, 'ctime', 0)
+
+
 class ImageHandler:
     def __init__(self, image_path):
         # Normalise here so every consumer gets a well-formed path: libewf's
@@ -556,6 +591,87 @@ class ImageHandler:
         fs_info = self.get_fs_info(start_offset)
         return fs_info is not None
 
+    #: Filesystem signatures, as (byte offset from the partition start, the
+    #: bytes to expect there, the name). Read directly rather than through
+    #: TSK, so a filesystem that will not mount is still reported as present.
+    _FS_SIGNATURES = (
+        (3, b'NTFS    ', 'NTFS'),
+        (3, b'MSDOS', 'FAT'),
+        (3, b'MSWIN', 'FAT'),
+        (0x36, b'FAT12', 'FAT12'),
+        (0x36, b'FAT16', 'FAT16'),
+        (0x52, b'FAT32', 'FAT32'),
+        (3, b'EXFAT   ', 'ExFAT'),
+        (0x8001, b'CD001', 'ISO9660'),
+        (1024 + 56, b'\x53\xef', 'Ext2/3/4'),
+        (0x400, b'H+', 'HFS+'),
+        (0x400, b'HX', 'HFSX'),
+        (0x20, b'NXSB', 'APFS'),
+        # UFS puts its superblock well past the partition start and writes the
+        # magic in the host's byte order, so both spellings have to be
+        # accepted. UFS1 and UFS2 differ only in where the block sits.
+        (8192 + 1372, _UFS_MAGIC_LE, 'UFS1'),
+        (8192 + 1372, _UFS_MAGIC_BE, 'UFS1'),
+        (65536 + 1372, _UFS_MAGIC_LE, 'UFS2'),
+        (65536 + 1372, _UFS_MAGIC_BE, 'UFS2'),
+        (65536 + 1372, _UFS2_MAGIC_LE, 'UFS2'),
+        (65536 + 1372, _UFS2_MAGIC_BE, 'UFS2'),
+    )
+
+    def detect_filesystems(self, start_offset):
+        """Every filesystem signature present at this partition offset.
+
+        Returns a list of names, longest-standing first. More than one means
+        the partition was formatted repeatedly without being wiped, and the
+        earlier filesystem's structures survive underneath -- which is a
+        finding in its own right, not an error: the older data is still there
+        to be recovered.
+
+        This deliberately does not ask TSK. TSK reports what it can mount;
+        this reports what is on the media.
+        """
+        found = []
+        try:
+            base = start_offset * self.sector_size
+            # One read covering every signature offset above.
+            header = self.read(base, 0x11000)
+        except Exception as exc:
+            logger.debug("Could not read partition header at %d: %s",
+                         start_offset, exc)
+            return found
+
+        if not header:
+            return found
+
+        for offset, magic, name in self._FS_SIGNATURES:
+            if header[offset:offset + len(magic)] == magic and name not in found:
+                found.append(name)
+        return found
+
+    def describe_filesystem(self, start_offset):
+        """What to tell the examiner about this partition.
+
+        Prefers what TSK actually opened. Falls back to the signatures when it
+        opened nothing, so a partition holding an unmountable filesystem is
+        never described as empty.
+        """
+        fs_type = self.get_fs_type(start_offset)
+        signatures = self.detect_filesystems(start_offset)
+
+        if fs_type not in ("N/A", "Unknown"):
+            others = [s for s in signatures if not s.startswith(fs_type[:3])]
+            if others:
+                return (f"{fs_type} (also found: {', '.join(others)} -- "
+                        f"reformatted, earlier data may survive)")
+            return fs_type
+
+        if len(signatures) > 1:
+            return (f"{' + '.join(signatures)} -- two file systems present, "
+                    f"neither can be opened")
+        if signatures:
+            return f"{signatures[0]} (present but not readable)"
+        return fs_type
+
     def is_wiped(self):
         # Image is considered wiped if no volume info, no filesystem detected
         return self.is_wiped_image
@@ -691,6 +807,28 @@ class ImageHandler:
                            partition_start_offset, e)
             return False
 
+    @staticmethod
+    def _meta_for_orphan(fs, inode):
+        """Metadata for an entry whose directory record no longer links it.
+
+        Returns None when the record cannot be opened, which is the ordinary
+        case for a name whose MFT entry has since been reused by another file.
+        """
+        try:
+            # The File must be bound to a name. Reading .info.meta straight
+            # off the temporary lets pytsk3 collect the File first, and the
+            # metadata comes back None -- silently, so the entry then reports
+            # size 0 instead of raising.
+            file_obj = fs.open_meta(inode=inode)
+            meta = file_obj.info.meta
+            if meta is None:
+                return None
+            # Copy out what the listing needs, so nothing depends on the
+            # File's lifetime once this returns.
+            return _OrphanMeta(meta)
+        except Exception:
+            return None
+
     def get_directory_contents(self, start_offset, inode_number=None):
         """Get directory contents with caching for performance."""
         cache_key = f"{start_offset}_{inode_number}"
@@ -704,28 +842,43 @@ class ImageHandler:
             try:
                 directory = fs.open_dir(inode=inode_number) if inode_number else fs.open_dir(path="/")
                 entries = []
+                # FAT and exFAT store wall-clock time with no timezone; every
+                # other filesystem here stores UTC. See safe_datetime.
+                zoned = self.get_fs_type(start_offset) not in _TIMEZONE_NAIVE
 
                 for entry in directory:
                     if entry.info.name.name in [b".", b".."]:
                         continue
 
+                    # A deleted NTFS entry keeps its name but loses the link
+                    # to its metadata, so entry.info.meta is None. The MFT
+                    # record number survives in the name structure, and
+                    # opening it returns the file intact -- reading the inode
+                    # only from info.meta is what left deleted files listed at
+                    # size 0 with no way to open them.
+                    meta = entry.info.meta
+                    inode = meta.addr if meta else None
+                    if inode is None:
+                        inode = getattr(entry.info.name, 'meta_addr', None) or None
+                        if inode is not None:
+                            recovered = self._meta_for_orphan(fs, inode)
+                            if recovered is not None:
+                                meta = recovered
+
                     is_directory = False
-                    if entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+                    if meta and meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                         is_directory = True
 
                     entries.append({
                         "name": entry.info.name.name.decode('utf-8', errors='replace') if hasattr(entry.info.name,
                                                                                                   'name') else None,
                         "is_directory": is_directory,
-                        "inode_number": entry.info.meta.addr if entry.info.meta else None,
-                        "size": entry.info.meta.size if entry.info.meta and entry.info.meta.size is not None else 0,
-                        "accessed": safe_datetime(entry.info.meta.atime) if hasattr(entry.info.meta,
-                                                                                    'atime') else "N/A",
-                        "modified": safe_datetime(entry.info.meta.mtime) if hasattr(entry.info.meta,
-                                                                                    'mtime') else "N/A",
-                        "created": safe_datetime(entry.info.meta.crtime) if hasattr(entry.info.meta,
-                                                                                    'crtime') else "N/A",
-                        "changed": safe_datetime(entry.info.meta.ctime) if hasattr(entry.info.meta, 'ctime') else "N/A",
+                        "inode_number": inode,
+                        "size": meta.size if meta and meta.size is not None else 0,
+                        "accessed": safe_datetime(meta.atime, zoned) if hasattr(meta, 'atime') else "N/A",
+                        "modified": safe_datetime(meta.mtime, zoned) if hasattr(meta, 'mtime') else "N/A",
+                        "created": safe_datetime(meta.crtime, zoned) if hasattr(meta, 'crtime') else "N/A",
+                        "changed": safe_datetime(meta.ctime, zoned) if hasattr(meta, 'ctime') else "N/A",
                         # Whether the filesystem still considers this entry
                         # live. TSK reports it and the listing was discarding
                         # it, so a deleted file in a directory looked exactly

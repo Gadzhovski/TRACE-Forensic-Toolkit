@@ -7,13 +7,23 @@ from contextlib import contextmanager
 
 
 # Define a utility function for safe datetime conversion
-def safe_datetime(timestamp):
+def safe_datetime(timestamp, timezone_known=True):
+    """Format a filesystem timestamp for display.
+
+    `timezone_known` says whether the filesystem records what zone the time was
+    in. NTFS, ext and HFS store UTC and it does. FAT and exFAT store the local
+    wall-clock time of whatever machine wrote the file, with no zone alongside
+    it -- so labelling those UTC asserts something about the evidence that is
+    not known, and invites a reader to "correct" a time that was already right.
+    """
     if timestamp is None or timestamp == 0:
         return "N/A"
     try:
-        return datetime.datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S') + " UTC"
+        moment = datetime.datetime.utcfromtimestamp(timestamp)
     except Exception:
         return "N/A"
+    stamp = moment.strftime('%Y-%m-%d %H:%M:%S')
+    return f"{stamp} UTC" if timezone_known else f"{stamp} (local, no zone)"
 
 
 # Utility class for common operations
