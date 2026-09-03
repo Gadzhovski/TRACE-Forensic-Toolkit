@@ -800,14 +800,24 @@ class ImageHandler:
             logger.debug("Could not read allocation flags: %s", e)
         return False
 
-    def get_registry_hive(self, fs_info, hive_path):
-        """Extract a registry hive from the given filesystem."""
+    def get_registry_hive(self, fs_info, hive_path, required=True):
+        """Extract a registry hive from the given filesystem.
+
+        `required` is False when the caller is only probing -- asking a volume
+        whether it happens to hold a Windows installation. A data volume has no
+        hives, which is normal and not worth an ERROR in the log; the registry
+        browser, which is asked for a specific hive by name, still reports a
+        failure as one.
+        """
         try:
             registry_file = fs_info.open(hive_path)
             hive_data = registry_file.read_random(0, registry_file.info.meta.size)
             return hive_data
         except Exception as e:
-            logger.error(f"Error reading registry hive: {e}")
+            if required:
+                logger.error(f"Error reading registry hive: {e}")
+            else:
+                logger.debug("No %s on this volume: %s", hive_path, e)
             return None
 
     def get_windows_version(self, start_offset):
@@ -885,7 +895,8 @@ class ImageHandler:
 
     def _read_software_hive(self, fs_info):
         """Windows version details from SOFTWARE."""
-        data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
+        data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE",
+                                      required=False)
         if not data:
             return {}
 
@@ -918,7 +929,8 @@ class ImageHandler:
 
     def _read_system_hive(self, fs_info):
         """Timezone and computer name from SYSTEM."""
-        data = self.get_registry_hive(fs_info, "/Windows/System32/config/SYSTEM")
+        data = self.get_registry_hive(fs_info, "/Windows/System32/config/SYSTEM",
+                                      required=False)
         if not data:
             return {}
 
