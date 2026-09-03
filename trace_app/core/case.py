@@ -43,7 +43,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -579,6 +579,9 @@ class Case:
             self._record_activity('bookmark updated', f'{label} ({artifact_ref})')
             return existing['id']
 
+        if evidence_id is not None and not self._evidence_exists(evidence_id):
+            evidence_id = None
+
         cursor = self._db.execute(
             "INSERT INTO bookmarks (evidence_id, artifact_ref, artifact_name,"
             " artifact_path, label, colour, created_utc) "
@@ -626,6 +629,93 @@ class Case:
         self._db.commit()
         if row:
             self._record_activity('bookmark removed', row['label'] or '')
+
+    # --- notes ------------------------------------------------------------
+
+    def add_note(self, body, evidence_id=None, artifact_ref=None,
+                 artifact_name='', artifact_path='', bookmark_id=None):
+        """Write a note. Returns its id.
+
+        Everything except the body is optional, which is the point: a note may
+        be about one file, about a bookmark, or about the case as a whole, and
+        an examiner should not have to select something before recording a
+        thought.
+        """
+        now = _utc_now()
+        # An evidence id that no longer exists must not cost the examiner the
+        # note. The reference is dropped and the note kept: analysis is the
+        # part that cannot be recovered by re-running anything.
+        if evidence_id is not None and not self._evidence_exists(evidence_id):
+            logger.warning("Note references unknown evidence %s; keeping the "
+                           "note without it", evidence_id)
+            evidence_id = None
+        if bookmark_id is not None and not self._bookmark_exists(bookmark_id):
+            bookmark_id = None
+
+        cursor = self._db.execute(
+            "INSERT INTO notes (evidence_id, artifact_ref, artifact_name,"
+            " artifact_path, body, created_utc, updated_utc, bookmark_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, artifact_ref, artifact_name, artifact_path, body,
+             now, now, bookmark_id))
+        self._db.commit()
+        self._record_activity(
+            'note added',
+            f"{artifact_name or 'case note'}: {body[:60]}")
+        return cursor.lastrowid
+
+    def notes(self, evidence_id=None, artifact_ref=None, bookmark_id=None):
+        """Notes, newest first, filtered by whatever is given.
+
+        With no arguments this returns every note in the case, which is what
+        the report needs.
+        """
+        clauses, params = [], []
+        if evidence_id is not None:
+            clauses.append("evidence_id = ?")
+            params.append(evidence_id)
+        if artifact_ref is not None:
+            clauses.append("artifact_ref = ?")
+            params.append(artifact_ref)
+        if bookmark_id is not None:
+            clauses.append("bookmark_id = ?")
+            params.append(bookmark_id)
+
+        sql = "SELECT * FROM notes"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY id DESC"
+        return [dict(row) for row in self._db.execute(sql, params).fetchall()]
+
+    def case_notes(self):
+        """Notes not attached to any artifact -- the case's own record."""
+        rows = self._db.execute(
+            "SELECT * FROM notes WHERE artifact_ref IS NULL "
+            "ORDER BY id DESC").fetchall()
+        return [dict(row) for row in rows]
+
+    def update_note(self, note_id, body):
+        """Rewrite a note's body, stamping when it changed."""
+        self._db.execute(
+            "UPDATE notes SET body = ?, updated_utc = ? WHERE id = ?",
+            (body, _utc_now(), note_id))
+        self._db.commit()
+        self._record_activity('note edited', f'id={note_id}')
+
+    def remove_note(self, note_id):
+        self._db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        self._db.commit()
+        self._record_activity('note removed', f'id={note_id}')
+
+    def _evidence_exists(self, evidence_id):
+        return self._db.execute(
+            "SELECT 1 FROM evidence WHERE id = ?",
+            (evidence_id,)).fetchone() is not None
+
+    def _bookmark_exists(self, bookmark_id):
+        return self._db.execute(
+            "SELECT 1 FROM bookmarks WHERE id = ?",
+            (bookmark_id,)).fetchone() is not None
 
     # --- audit ------------------------------------------------------------
 
@@ -691,7 +781,8 @@ class Case:
                 artifact_path TEXT,
                 body          TEXT NOT NULL,
                 created_utc   TEXT,
-                updated_utc   TEXT
+                updated_utc   TEXT,
+                bookmark_id   INTEGER REFERENCES bookmarks(id) ON DELETE SET NULL
             );
 
             CREATE TABLE IF NOT EXISTS bookmarks (
@@ -767,6 +858,18 @@ class Case:
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
 
+        if version < 3:
+            # Notes can hang off a bookmark. SET NULL rather than CASCADE:
+            # deleting a marker should not delete the analysis written against
+            # it -- the note is the more valuable of the two.
+            try:
+                self._db.execute(
+                    "ALTER TABLE notes ADD COLUMN bookmark_id INTEGER "
+                    "REFERENCES bookmarks(id) ON DELETE SET NULL")
+            except sqlite3.OperationalError:
+                pass        # already present
+            self._db.commit()
+
         if version < 2:
             # read_only arrived with the integrity work. Existing evidence
             # defaults to read-only, which is the safe reading: a case written
@@ -780,6 +883,8 @@ class Case:
                 pass        # already present
             self._db.commit()
             version = 2
+
+        version = SCHEMA_VERSION
 
         if version != SCHEMA_VERSION:
             self._set('schema_version', SCHEMA_VERSION)

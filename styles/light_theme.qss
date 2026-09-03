@@ -946,6 +946,19 @@ QLabel#aboutMetaQuiet {
     padding-top: 6px;
 }
 
+/* ============ Notes ============ */
+
+QLabel#notesScope {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+QTextEdit#notesEditor, QTableWidget#notesTable {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D0D0;
+}
+
 /* ============ Bookmarks ============ */
 
 QLabel#bookmarksEmpty {

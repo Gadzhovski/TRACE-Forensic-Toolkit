@@ -156,6 +156,18 @@ class CaseAdapter(ViewerAdapter):
         pass
 
 
+class NotesAdapter(ViewerAdapter):
+    label = 'Notes'
+
+    def display(self, content, data):
+        self.widget.display_for(data)
+
+    def needs_content(self):
+        # A note is about a file, not made from it: the data dict names the
+        # artifact, and nothing has to be read off disk to write one.
+        return False
+
+
 #: Adapter classes in tab order. Adding a viewer means adding one entry here
 #: and constructing the widget in MainWindow -- no index arithmetic anywhere.
 VIEWER_ADAPTERS = (
@@ -166,4 +178,5 @@ VIEWER_ADAPTERS = (
     ExifAdapter,
     VirusTotalAdapter,
     CaseAdapter,
+    NotesAdapter,
 )

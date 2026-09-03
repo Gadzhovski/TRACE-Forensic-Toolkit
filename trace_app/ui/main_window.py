@@ -46,7 +46,8 @@ from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
 from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, ExifAdapter, HexAdapter,
-                                     CaseAdapter, MetadataAdapter, TextAdapter,
+                                     CaseAdapter, MetadataAdapter, NotesAdapter,
+                                     TextAdapter,
                                      VirusTotalAdapter)
 from trace_app.ui.viewers.virustotal import VirusTotal
 from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
@@ -54,6 +55,7 @@ from trace_app.core.workers import ExportWorker
 from trace_app.ui.dialogs import message
 from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
 from trace_app.ui.viewers.case_panel import CasePanel
+from trace_app.ui.viewers.notes_panel import NotesPanel
 
 logger = logging.getLogger('TRACE.MainWindow')
 
@@ -844,6 +846,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.case_panel = CasePanel()
         self.case_panel.set_case(self.case)
 
+        self.notes_panel = NotesPanel()
+        self.notes_panel.set_case(self.case)
+
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
@@ -852,6 +857,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             ExifAdapter(self.exif_viewer),
             VirusTotalAdapter(self.virus_total_api),
             CaseAdapter(self.case_panel),
+            NotesAdapter(self.notes_panel),
         ]
         for adapter in self.viewer_adapters:
             self.viewer_tab.addTab(adapter.widget, adapter.label)
@@ -1229,6 +1235,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             row_id = self.case.add_evidence(self.current_image_path)
             return row_id
         return row['id']
+
+    def annotate_with_case_identity(self, data):
+        """Add the case's view of an artifact to a selection payload.
+
+        The viewers receive whatever the listing or tree built; notes and
+        bookmarks additionally need to know which evidence row it belongs to
+        and what its durable reference is. Computing it here keeps that
+        knowledge out of every individual viewer.
+        """
+        if not data or not self.case:
+            return data
+        ref = self.artifact_ref_for(data)
+        if ref:
+            data = dict(data)
+            data['artifact_ref'] = ref
+            data['evidence_id'] = self.evidence_id_for_current_image()
+        return data
 
     def add_bookmark_for(self, data, suggested_label=None):
         """Bookmark the artifact `data` describes."""
@@ -2601,7 +2624,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         try:
-            adapter.display(file_content, data)
+            # Notes and bookmarks need to know which evidence row and which
+            # durable reference this selection is; the listing and tree do not
+            # carry that, so it is added once here rather than in each viewer.
+            adapter.display(file_content, self.annotate_with_case_identity(data))
         except Exception as e:
             self.log_error(f"Error displaying content in viewer: {str(e)}")
 
