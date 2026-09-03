@@ -6,6 +6,7 @@ from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (QLabel, QPlainTextEdit, QScrollArea, QSizePolicy,
                                QVBoxLayout, QWidget)
 
+from trace_app.infra.constants import UNKNOWN_DATE
 from trace_app.ui.widgets.property_table import PropertyTable
 import hashlib
 from magic import Magic
@@ -125,11 +126,13 @@ class MetadataViewer(QWidget):
                 return
 
         if is_carved:
-            carved_timestamp = data.get('carved_timestamp', 'N/A')
-            created_time = 'N/A (carved file)'
-            modified_time = carved_timestamp if carved_timestamp != 'N/A' else 'N/A (carved file)'
-            accessed_time = 'N/A (carved file)'
-            changed_time = 'N/A (carved file)'
+            # A carved file was recovered from unallocated space with no
+            # directory entry, so it has no filesystem timestamps at all. The
+            # only date available is one the format stored inside itself, and
+            # it is not a substitute for any of the four.
+            carved_timestamp = data.get('carved_timestamp') or UNKNOWN_DATE
+            carved_source = data.get('carved_timestamp_source') or ''
+            created_time = modified_time = accessed_time = changed_time = None
         else:
             created_time = self._format_timestamp(getattr(metadata, 'crtime', None))
             modified_time = self._format_timestamp(getattr(metadata, 'mtime', None))
@@ -170,12 +173,23 @@ class MetadataViewer(QWidget):
             offset_value = data.get('offset', 0)
             rows.append(("Disk Offset", f"{hex(offset_value)} ({offset_value} bytes)"))
 
+        if is_carved:
+            rows.append((None, "Timestamps"))
+            rows.append(("Embedded Date", carved_timestamp))
+            if carved_source:
+                rows.append(("Date Source", carved_source))
+            rows.append(("Filesystem Times",
+                         "None -- carved from unallocated space"))
+        else:
+            rows += [
+                (None, "Timestamps"),
+                ("Modified", modified_time),
+                ("Accessed", accessed_time),
+                ("Created", created_time),
+                ("Changed", changed_time),
+            ]
+
         rows += [
-            (None, "Timestamps"),
-            ("Modified", modified_time),
-            ("Accessed", accessed_time),
-            ("Created", created_time),
-            ("Changed", changed_time),
             (None, "Hashes"),
             ("MD5", md5_hash),
             ("SHA-256", sha256_hash),

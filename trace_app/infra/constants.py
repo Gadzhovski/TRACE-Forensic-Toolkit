@@ -156,6 +156,11 @@ TABLE_BATCH_SIZE = 200  # Number of rows to process before updating UI
 INPUT_FIELD_MIN_WIDTH = 400
 API_DIALOG_WIDTH = 600
 
+# Shown where a carved file carries no date of its own. Carving recovers bytes
+# from unallocated space, not directory entries, so most formats yield nothing
+# -- and saying so is more useful than substituting the time of recovery.
+UNKNOWN_DATE = "Unknown"
+
 # Qt maximum size constant
 QT_MAX_SIZE = 16777215
 # ================================================================

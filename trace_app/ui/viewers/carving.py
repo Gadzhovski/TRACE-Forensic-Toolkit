@@ -26,7 +26,8 @@ from trace_app.core.carving_signatures import (extract_original_timestamp,
 from trace_app.core.image_handler import ImageHandler
 from trace_app.infra.paths import carved_files_dir, resource_path
 from trace_app.infra.constants import (CARVE_OVERLAP, CHUNK_SIZE,
-                                       PANEL_ICON_SIZE, TABLE_ICON_SIZE)
+                                       PANEL_ICON_SIZE, TABLE_ICON_SIZE,
+                                       UNKNOWN_DATE)
 from trace_app.ui import icons
 from trace_app.ui.widgets.multi_select import MultiSelectButton
 from trace_app.ui.widgets.table_columns import fit_columns
@@ -56,7 +57,7 @@ class NumericTableWidgetItem(QTableWidgetItem):
 
 
 class FileCarvingWidget(QWidget):
-    file_carved = Signal(str, str, str, str, str)  # Unified signal for file carving
+    file_carved = Signal(str, str, str, str, str, str)  # Unified signal for file carving
     #: Emitted when a scan ends. Carrying this as a signal rather than calling
     #: straight from the worker matters: file_carved is a queued cross-thread
     #: signal, so its rows are still waiting in the event queue when the worker
@@ -140,7 +141,8 @@ class FileCarvingWidget(QWidget):
 
     def create_table_widget(self):
         table_widget = QTableWidget()
-        table_widget.setColumnCount(6)  # Id, Name, Size, Type, Modification Date, File Path
+        # Id, Name, Size, Type, Embedded Date, Date Source, File Path
+        table_widget.setColumnCount(7)
         table_widget.setSelectionBehavior(QTableWidget.SelectRows)
         table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
         table_widget.setSortingEnabled(True)
@@ -164,7 +166,8 @@ class FileCarvingWidget(QWidget):
         header.setSectionResizeMode(1, QHeaderView.Interactive)  # Name - fixed, manually resizable
         header.setSectionResizeMode(2, QHeaderView.Interactive)  # Size - fixed, manually resizable
         header.setSectionResizeMode(3, QHeaderView.Interactive)  # Type - fixed, manually resizable
-        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Modification Date - fixed, manually resizable
+        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Embedded Date
+        header.setSectionResizeMode(5, QHeaderView.Interactive)  # Date Source
         header.setSectionResizeMode(5, QHeaderView.Interactive)  # File Path - fixed, manually resizable
 
         # Set column widths (matching Listing tab style)
@@ -172,14 +175,17 @@ class FileCarvingWidget(QWidget):
         table_widget.setColumnWidth(1, 400)  # Name - widest (matching Listing tab)
         table_widget.setColumnWidth(2, 100)   # Size - compact (matching Listing tab)
         table_widget.setColumnWidth(3, 100)   # Type - compact (matching Listing tab)
-        table_widget.setColumnWidth(4, 160)   # Modification Date - matching timestamp columns in Listing
+        table_widget.setColumnWidth(4, 160)   # Embedded Date - matching Listing
+        table_widget.setColumnWidth(5, 170)   # Date Source
         table_widget.setColumnWidth(5, 1100)  # File Path - wide (matching Listing tab)
 
         # Set header alignment (matching Listing tab)
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         # Set the header labels
-        table_widget.setHorizontalHeaderLabels(['Id', 'Name', 'Size', 'Type', 'Modification Date', 'File Path'])
+        table_widget.setHorizontalHeaderLabels(
+            ['Id', 'Name', 'Size', 'Type', 'Embedded Date', 'Date Source',
+             'File Path'])
 
         # Context menu and click handlers
         table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -471,11 +477,18 @@ class FileCarvingWidget(QWidget):
                     break
 
     def get_carved_timestamp(self, file_name):
-        """Get the preserved timestamp for a carved file."""
+        """The date this carved file carries in its own bytes, if any."""
         for file_info in self.carved_files:
             if file_info[0] == file_name:
-                return file_info[4]  # Modification date at index 4
+                return file_info[4]
         return None
+
+    def get_carved_timestamp_source(self, file_name):
+        """Which field the carved file's date was read from."""
+        for file_info in self.carved_files:
+            if file_info[0] == file_name:
+                return file_info[5]
+        return ''
 
     def on_carved_file_clicked(self, *args):
         """Handle click on carved file to display in internal viewer.
@@ -528,7 +541,8 @@ class FileCarvingWidget(QWidget):
                         'is_carved': True,  # Flag indicating this is a carved file
                         'source': 'carved_file',
                         'file_content': file_content,  # Include content so metadata viewer doesn't re-read
-                        'carved_timestamp': self.get_carved_timestamp(file_name)  # Get original timestamp if available
+                        'carved_timestamp': self.get_carved_timestamp(file_name),
+                        'carved_timestamp_source': self.get_carved_timestamp_source(file_name)
                     }
 
                     self.carved_file_opened.emit(file_content, data)
@@ -561,7 +575,7 @@ class FileCarvingWidget(QWidget):
                         file_size = int(chunk[file_size_start:file_size_end].split()[0])
                         pdf_content = chunk[start_index:start_index + file_size]
                         if is_valid_file(pdf_content, 'pdf'):
-                            self.save_file(pdf_content, 'pdf', global_offset + start_index, file_size)
+                            self.save_file(pdf_content, 'pdf', global_offset + start_index)
                             offset = start_index + file_size
                             continue
                     except ValueError:
@@ -571,21 +585,21 @@ class FileCarvingWidget(QWidget):
                 end_index += len(pdf_end_signature)
                 pdf_content = chunk[start_index:end_index]
                 if is_valid_file(pdf_content, 'pdf'):
-                    self.save_file(pdf_content, 'pdf', global_offset + start_index, end_index - start_index)
+                    self.save_file(pdf_content, 'pdf', global_offset + start_index)
                 offset = end_index
             else:
                 offset = start_index + 1
 
-    def carve_wav_files(self, chunk, offset):
+    def carve_wav_files(self, chunk, base_offset):
         wav_start_signature = b'RIFF'
-        offset = 0
-        while offset < len(chunk):
-            start_index = chunk.find(wav_start_signature, offset)
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(wav_start_signature, cursor)
             if start_index == -1:
                 break
 
             if chunk[start_index + 8:start_index + 12] != b'WAVE':
-                offset = start_index + 4
+                cursor = start_index + 4
                 continue
 
             file_size_bytes = chunk[start_index + 4:start_index + 8]
@@ -593,15 +607,15 @@ class FileCarvingWidget(QWidget):
 
             if start_index + file_size > len(chunk):
                 wav_content = chunk[start_index:]
-                offset = len(chunk)
+                cursor = len(chunk)
             else:
                 wav_content = chunk[start_index:start_index + file_size]
-                offset = start_index + file_size
+                cursor = start_index + file_size
 
             if is_valid_file(wav_content, 'wav'):
-                self.save_file(wav_content, 'wav', 'carved_files', start_index)
+                self.save_file(wav_content, 'wav', base_offset + start_index)
 
-    def carve_mov_files(self, chunk, offset):
+    def carve_mov_files(self, chunk, base_offset):
         mov_signatures = [
             # b'ftyp', b'moov', b'mdat', #b'pnot', b'udta', #b'uuid',
             # b'moof', b'free', b'skip', b'jP2 ', b'wide', b'load',
@@ -612,7 +626,10 @@ class FileCarvingWidget(QWidget):
 
         mov_file_found = False
         mov_data = b''
-        mov_file_offset = offset
+        # Where in the chunk this MOV starts; the cursor below moves, this does
+        # not, so the file keeps the offset it was found at.
+        mov_file_offset = 0
+        offset = 0
         mov_file_size = 0
 
         while offset < len(chunk):
@@ -632,6 +649,9 @@ class FileCarvingWidget(QWidget):
                     offset += 4
                     continue
 
+            if not mov_file_found:
+                # First atom of this file: this is where it begins.
+                mov_file_offset = offset
             mov_file_found = True
             mov_file_size += atom_size
 
@@ -649,14 +669,14 @@ class FileCarvingWidget(QWidget):
             # file_name = f"carved_{mov_file_offset}.mov"
             # file_path = os.path.join("carved_files", file_name)
             # self.save_file(mov_data, 'mov', file_path)
-            self.save_file(mov_data, 'mov', 'carved_files', mov_file_offset)
+            self.save_file(mov_data, 'mov', base_offset + mov_file_offset)
 
-    def carve_jpg_files(self, chunk, offset):
+    def carve_jpg_files(self, chunk, base_offset):
         jpg_start_signature = b'\xFF\xD8\xFF'
         jpg_end_signature = b'\xFF\xD9'
-        offset = 0
-        while offset < len(chunk):
-            start_index = chunk.find(jpg_start_signature, offset)
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(jpg_start_signature, cursor)
             if start_index == -1:
                 break
 
@@ -666,18 +686,18 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid JPG file
                 if is_valid_file(jpg_content, 'jpg'):
-                    self.save_file(jpg_content, 'jpg', 'carved_files', start_index)
+                    self.save_file(jpg_content, 'jpg', base_offset + start_index)
 
-                offset = end_index + len(jpg_end_signature)
+                cursor = end_index + len(jpg_end_signature)
             else:
-                offset = start_index + 1  # Continue searching
+                cursor = start_index + 1  # Continue searching
 
-    def carve_gif_files(self, chunk, offset):
+    def carve_gif_files(self, chunk, base_offset):
         gif_start_signature = b'\x47\x49\x46\x38'
         gif_end_signature = b'\x00\x3B'
-        offset = 0
-        while offset < len(chunk):
-            start_index = chunk.find(gif_start_signature, offset)
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(gif_start_signature, cursor)
             if start_index == -1:
                 break
 
@@ -687,18 +707,18 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid GIF file
                 if is_valid_file(gif_content, 'gif'):
-                    self.save_file(gif_content, 'gif', 'carved_files', start_index)
+                    self.save_file(gif_content, 'gif', base_offset + start_index)
 
-                offset = end_index + len(gif_end_signature)
+                cursor = end_index + len(gif_end_signature)
             else:
-                offset = start_index + 1
+                cursor = start_index + 1
 
-    def carve_png_files(self, chunk, offset):
+    def carve_png_files(self, chunk, base_offset):
         png_start_signature = b'\x89\x50\x4E\x47\x0D\x0A\x1A\x0A'
         png_end_signature = b'\x49\x45\x4E\x44\xAE\x42\x60\x82'
-        offset = 0
-        while offset < len(chunk):
-            start_index = chunk.find(png_start_signature, offset)
+        cursor = 0
+        while cursor < len(chunk):
+            start_index = chunk.find(png_start_signature, cursor)
             if start_index == -1:
                 break
 
@@ -708,13 +728,13 @@ class FileCarvingWidget(QWidget):
 
                 # Check if it's a valid PNG file
                 if is_valid_file(png_content, 'png'):
-                    self.save_file(png_content, 'png', 'carved_files', start_index)
+                    self.save_file(png_content, 'png', base_offset + start_index)
 
-                offset = end_index + len(png_end_signature)
+                cursor = end_index + len(png_end_signature)
             else:
-                offset = start_index + 1
+                cursor = start_index + 1
 
-    def carve_wmv_files(self, chunk, offset):
+    def carve_wmv_files(self, chunk, base_offset):
         # Define ASF header signature
         asf_header_signature = b'\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C'
 
@@ -746,7 +766,7 @@ class FileCarvingWidget(QWidget):
             wmv_content = chunk[start_index:end_index]
 
             # Save the WMV content directly into the carved_files directory
-            self.save_file(wmv_content, 'wmv', 'carved_files', start_index + offset)
+            self.save_file(wmv_content, 'wmv', base_offset + start_index)
             current_offset = end_index
 
     def carve_zip_files(self, chunk, global_offset):
@@ -756,12 +776,18 @@ class FileCarvingWidget(QWidget):
 
         current_pos = 0
         zip_file_parts = []  # List to hold all parts of the ZIP file
+        # Where the first local header sits, which is where the archive itself
+        # begins. That position identifies the file, so it is what names it.
+        zip_start = None
 
         while current_pos < len(chunk):
             # Search for local file header
             local_header_index = chunk.find(local_file_header_signature, current_pos)
             if local_header_index == -1:
                 break
+
+            if zip_start is None:
+                zip_start = local_header_index
 
             # Extract compressed size from local file header
             compressed_size = struct.unpack("<I", chunk[local_header_index + 18:local_header_index + 22])[0]
@@ -790,11 +816,12 @@ class FileCarvingWidget(QWidget):
         # Combine all parts into a single ZIP file content
         if zip_file_parts:
             complete_zip_file_content = b''.join(zip_file_parts)
-            self.save_file(complete_zip_file_content, 'zip', 'carved_files', global_offset)
+            self.save_file(complete_zip_file_content, 'zip',
+                           global_offset + zip_start)
 
         return None
 
-    def carve_bmp_files(self, chunk, offset):
+    def carve_bmp_files(self, chunk, base_offset):
         bmp_start_signature = b'BM'  # BMP files start with 'BM'
         header_size = 14  # The static header size for BMP files
 
@@ -829,7 +856,7 @@ class FileCarvingWidget(QWidget):
             # Extract the BMP file if it's entirely within the chunk
             if start_index + bmp_file_size <= len(chunk):
                 bmp_content = chunk[start_index:start_index + bmp_file_size]
-                self.save_file(bmp_content, 'bmp', 'carved_files', start_index + offset)
+                self.save_file(bmp_content, 'bmp', base_offset + start_index)
                 current_offset = start_index + bmp_file_size  # Move past this BMP file
             else:
                 break  # The BMP file exceeds the chunk boundary, stop processing
@@ -938,7 +965,7 @@ class FileCarvingWidget(QWidget):
 
     #: Widest a carving column may grow. File Path holds a full path, which
     #: would otherwise set the table's width on its own.
-    _CARVED_COLUMN_CAPS = {5: 420}
+    _CARVED_COLUMN_CAPS = {6: 420}
 
     @Slot()
     def _fit_carved_columns(self):
@@ -974,37 +1001,56 @@ class FileCarvingWidget(QWidget):
             return QPixmap()
 
 
-    def save_file(self, file_content, file_type, file_path, offset):
+    def save_file(self, file_content, file_type, offset):
+        """Write one recovered file, named after where on disk it was found.
+
+        `offset` must be absolute within the image, not relative to the chunk:
+        it is the file's identity. Chunks overlap by CARVE_OVERLAP so that a
+        file straddling a boundary is whole in the following read, which means
+        the same file is genuinely found several times -- the absolute offset
+        is what lets us recognise it as one file rather than nine.
+        """
         carved_dir = carved_files_dir()
 
         offset_hex = format(offset, 'x')
         file_name = f"{offset_hex}.{file_type}"
+
+        # Already recovered from an earlier, overlapping chunk.
+        if file_name in self.carved_file_names:
+            return
+
         file_path = os.path.join(carved_dir, file_name)
 
         # Write file content to disk
         with open(file_path, "wb") as f:
             f.write(file_content)
 
-        # Try to extract original timestamp from file metadata
-        original_timestamp = extract_original_timestamp(file_content, file_type)
+        # Only a date the file carries in its own bytes means anything here.
+        # A carved file has no directory entry, so its filesystem created,
+        # modified and deleted times are gone; stamping it with the time of
+        # recovery would present our own clock as evidence.
+        original_timestamp, source = extract_original_timestamp(file_content,
+                                                                file_type)
 
         if original_timestamp:
-            # Convert datetime to timestamp (seconds since epoch)
+            # Give the extracted file the date it claims, so it still reads
+            # correctly outside TRACE.
             timestamp = time.mktime(original_timestamp.timetuple())
-            # Set both access time and modification time to preserve original timestamp
             os.utime(file_path, (timestamp, timestamp))
-            modification_date = original_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            embedded_date = original_timestamp.strftime("%Y-%m-%d %H:%M:%S")
         else:
-            # Fall back to carving time if no original timestamp found
-            modification_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            embedded_date = UNKNOWN_DATE
 
         file_size = str(len(file_content))
-        self.carved_files.append((file_name, file_size, file_type, file_path, modification_date))
-        self.file_carved.emit(file_name, file_size, file_type, modification_date, file_path)
         self.carved_file_names.add(file_name)
+        self.carved_files.append((file_name, file_size, file_type, file_path,
+                                  embedded_date, source))
+        self.file_carved.emit(file_name, file_size, file_type, embedded_date,
+                              file_path, source)
 
-    @Slot(str, str, str, str, str)
-    def display_carved_file(self, name, size, type_, modification_date, file_path):
+    @Slot(str, str, str, str, str, str)
+    def display_carved_file(self, name, size, type_, embedded_date, file_path,
+                            source=""):
         row = self.table_widget.rowCount()
         readable_size = self.image_handler.get_readable_size(int(size))
         self.table_widget.insertRow(row)
@@ -1024,8 +1070,16 @@ class FileCarvingWidget(QWidget):
         # Set other columns
         self.table_widget.setItem(row, 2, NumericTableWidgetItem(readable_size))
         self.table_widget.setItem(row, 3, QTableWidgetItem(type_))
-        self.table_widget.setItem(row, 4, QTableWidgetItem(modification_date))
-        self.table_widget.setItem(row, 5, QTableWidgetItem(file_path))
+        date_item = QTableWidgetItem(embedded_date)
+        if embedded_date == UNKNOWN_DATE:
+            # Say why there is no date, rather than leaving the examiner to
+            # wonder whether the scan failed.
+            date_item.setToolTip(
+                f"{type_.upper()} carries no timestamp in its own data, and a "
+                "carved file has no filesystem record to read one from.")
+        self.table_widget.setItem(row, 4, date_item)
+        self.table_widget.setItem(row, 5, QTableWidgetItem(source))
+        self.table_widget.setItem(row, 6, QTableWidgetItem(file_path))
 
         # Only proceed if the file type is one of the supported formats
         if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp', 'zip', 'wav']:
