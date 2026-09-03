@@ -88,6 +88,42 @@ Three of these earn particular attention:
   it will show you only one and hide the other." Showing an empty partition is
   worse than either.
 
+## Filesystems beyond FAT and NTFS
+
+TRACE had only ever been exercised on FAT, NTFS, ext2/3 and ISO9660. These add
+HFS+, exFAT and ext4, plus NTFS features -- compression, EFS encryption,
+journaling -- that none of the DFTT images cover.
+
+| File | Size | Filesystem | Tests | Source |
+|---|---|---|---|---|
+| `ntfs1-gen2.E01` | 34 MB | NTFS | The same files stored raw, NTFS-compressed and EFS-encrypted, plus interleaved logfile writes that fragment them | [NPS](https://digitalcorpora.org/corpora/drives/) |
+| `image.gen1.dmg` | 10 MB | HFS+ | A journaled HFS+ volume where an earlier version of a file survives only in the journal | [NPS](https://digitalcorpora.org/corpora/drives/) |
+| `ubnist1.casper-rw.gen3.E01` | 160 MB | ext3 | The persistence file from a bootable Ubuntu 8.10 USB | [NPS](https://digitalcorpora.org/corpora/drives/) |
+| `dfr-01-xfat.dd` | 63 MB | exFAT | Deleted-file recovery | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+| `dfr-01-osx.dd` | 1.0 GB | HFS+ | Deleted-file recovery across four HFS+ volumes | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+| `dfr-01-ext.dd` | 1.0 GB | ext2, ext3, ext4 | Deleted-file recovery, one volume per generation | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+| `dfr-01-ntfs.dd` | 1.0 GB | NTFS | Deleted-file recovery, non-fragmented | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+| `dfr-05-braid-ntfs.dd` | 1.0 GB | NTFS | Several deleted files interleaved fragment by fragment | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+| `dfr-05-nest-ntfs.dd` | 1.0 GB | NTFS | Several deleted files nested inside one another's gaps | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+| `dfr-01-recycle-ntfs.dd` | 1.0 GB | NTFS | Files deleted through the Recycle Bin rather than unlinked | [NIST DFR](https://cfreds-archive.nist.gov/dfr-test-images.html) |
+
+What these established, all measured rather than assumed:
+
+- **HFS+, exFAT and ext4 list and read correctly.** exFAT recovers both its
+  deleted files; ext3 recovers its one.
+- **NTFS compression is transparent.** Files in the `Compressed` directory read
+  back at full length with correct magic bytes, identical to `RAW`.
+- **EFS-encrypted files return ciphertext**, at the right size but with no valid
+  header -- which is the honest result. TRACE reports what is on the disk
+  rather than implying it decrypted anything.
+- **HFS+ shows no deleted entries at all**, because HFS+ removes the catalog
+  record on delete rather than flagging it. That is the filesystem's behaviour,
+  not a gap in the tool; those files are reachable only by carving.
+- **ext2 zeroes the inode pointer on delete**, so a deleted name there has no
+  metadata to follow. ext3 and ext4 keep the record but clear its size and
+  block pointers. The listing now says which deleted files can actually be
+  opened and which are a name and nothing more.
+
 ## Other images
 
 | File | Size | Notes |
@@ -128,6 +164,16 @@ d6739c45d652c0eb67e59536e7b9c02b25ca99aaabf500fe9c374bb7f2ae8bc3  10-ntfs-part1.
 0418d266405e1baf1334a014b9fba984962e81ec65003f34b67a7f5c7b28e6ad  iso-dirtree1.iso
 5f4fe2707eb4227b2d8e35482f492c888a44937abca05b67a0b63f2a2e34e074  iso-dirtree2.iso
 70231746c40640efc6ea5a926ef9184910c44b43b0716d72026db41b40966b9c  iso-endian.iso
+2badead91bef56c80155d7731671ad1d93c08f32cd4ce17566fdf02d5769feea  ntfs1-gen2.E01
+beb7795dd6d1a5319f9c20101855ffff9665fcc11c6b23de822d50c0d1e388ee  image.gen1.dmg
+f2ad970ab2c8ed41e2d26d0c7e821aaee0bb6fe71063ae17bea894306a8e55ff  ubnist1.casper-rw.gen3.E01
+bb3755982959e189d7cfc7a4819553406e5c64e67a11d6b875ea1d4f23fa745b  dfr-01-xfat.dd
+06e997b4a341854495ced8e201fa3b63fdfe0ba042c62fb8fa4e98283d430b6d  dfr-01-osx.dd
+855e7dfdc3a807beae3dadd519243f1c047d9a7bd2c08a4e70e7a8eda8f75901  dfr-01-ext.dd
+c863ccad01804b840a6dfa623a94996ca876e15ded41c6c0d8ae148620eb6493  dfr-01-ntfs.dd
+43f239c3b141a02c20ee2e6adc94e553215a3b35371fa291f7e3d4aa9b562cb7  dfr-05-braid-ntfs.dd
+7da808c9d3da75eb437fd175567dc781f6291547fab37bb704773cb31562669c  dfr-05-nest-ntfs.dd
+6a44af0530812edf1a289c539a3c6c7d6b42e1c93e8f60e53287bddb5fdf7efa  dfr-01-recycle-ntfs.dd
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01
 a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA-1.E01
@@ -141,6 +187,23 @@ curl -L -o dfrws-2006-challenge.zip \
 curl -L -o dfrws-2007-challenge.zip \
   "https://www.dropbox.com/s/5ze0r2o1vjxf811/dfrws-2007-challenge.zip?dl=1"
 unzip dfrws-2006-challenge.zip && unzip dfrws-2007-challenge.zip
+```
+
+The NPS images come from Digital Corpora:
+
+```bash
+base="https://downloads.digitalcorpora.org/corpora/drives"
+curl -L -O "$base/nps-2009-ntfs1/ntfs1-gen2.E01"
+curl -L -O "$base/nps-2009-hfsjtest1/image.gen1.dmg"
+curl -L -O "$base/nps-2009-casper-rw/ubnist1.casper-rw.gen3.E01"
+```
+
+The NIST deleted-file-recovery images are bzip2-compressed; `xfat` means exFAT
+and `osx` means HFS+:
+
+```bash
+curl -L -O "https://cfreds-archive.nist.gov/dfr-images/dfr-01-xfat.dd.bz2"
+bunzip2 dfr-01-xfat.dd.bz2
 ```
 
 The DFTT images come from <https://dftt.sourceforge.net/>, one page per test.

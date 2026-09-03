@@ -808,6 +808,24 @@ class ImageHandler:
             return False
 
     @staticmethod
+    def recovery_note(entry):
+        """Why a deleted entry cannot be opened, or None when it can.
+
+        `entry` is a dict from get_directory_contents.
+        """
+        if not entry.get('is_deleted'):
+            return None
+        if entry.get('is_recoverable'):
+            return None
+        if not entry.get('inode_number'):
+            return ('The directory entry no longer points at any metadata, so '
+                    'only the file name survives. Carving unallocated space is '
+                    'the remaining option.')
+        return ('The metadata record survives but records no content: the file '
+                'system cleared its size and block pointers on delete. Carving '
+                'unallocated space is the remaining option.')
+
+    @staticmethod
     def _meta_for_orphan(fs, inode):
         """Metadata for an entry whose directory record no longer links it.
 
@@ -885,6 +903,14 @@ class ImageHandler:
                         # like a live one -- the one distinction an examiner
                         # most needs from a listing.
                         "is_deleted": self._entry_is_deleted(entry),
+                        # Whether the content can still be reached. A deleted
+                        # name whose inode pointer was zeroed (ext2 does this;
+                        # so does NTFS once the MFT record is reused) has no
+                        # metadata left to follow, so the name is all that
+                        # survives. Saying so here spares the examiner
+                        # discovering it one click at a time.
+                        "is_recoverable": bool(inode) and bool(
+                            meta and meta.size),
                         # The directory this entry belongs to, which is what
                         # locates a file when only its inode is known.
                         "parent_inode": getattr(entry.info.name, 'par_addr', None),

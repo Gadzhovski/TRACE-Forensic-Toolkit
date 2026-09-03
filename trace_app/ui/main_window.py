@@ -170,6 +170,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "name": entry["name"],
             "size": entry.get("size"),
             "is_deleted": entry.get("is_deleted", False),
+            "is_recoverable": entry.get("is_recoverable", False),
             # Already counted above; saves the status bar counting again.
             "child_count": len(sub_entries),
         })
@@ -198,6 +199,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # tree as fully as one picked from the listing.
             "size": entry.get("size"),
             "is_deleted": entry.get("is_deleted", False),
+            "is_recoverable": entry.get("is_recoverable", False),
         })
 
     def _populate_table_entry(self, row_position: int, entry: Dict[str, Any], offset: int) -> None:
@@ -410,7 +412,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             parts.append(f"inode {inode}")
 
         if data.get('is_deleted'):
-            parts.append("deleted")
+            # Two very different situations both read as "deleted": one where
+            # the metadata survives and the file can be opened, and one where
+            # the entry points at nothing and only the name is left. Saying
+            # which spares the examiner finding out by clicking.
+            if data.get('is_recoverable'):
+                parts.append("deleted, recoverable")
+            elif 'is_recoverable' in data:
+                parts.append("deleted, name only")
+            else:
+                parts.append("deleted")
 
         return "   ·   ".join(p for p in parts if p)
 
