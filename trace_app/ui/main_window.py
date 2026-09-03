@@ -166,7 +166,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "inode_number": entry["inode_number"],
             "type": 'directory',
             "start_offset": start_offset,
-            "name": entry["name"]
+            "name": entry["name"],
+            "size": entry.get("size"),
+            "is_deleted": entry.get("is_deleted", False),
+            # Already counted above; saves the status bar counting again.
+            "child_count": len(sub_entries),
         })
 
         # Set child indicator
@@ -188,7 +192,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "inode_number": entry["inode_number"],
             "type": 'file',
             "start_offset": start_offset,
-            "name": entry["name"]
+            "name": entry["name"],
+            # Carried so the status bar can describe a file picked from the
+            # tree as fully as one picked from the listing.
+            "size": entry.get("size"),
+            "is_deleted": entry.get("is_deleted", False),
         })
 
     def _populate_table_entry(self, row_position: int, entry: Dict[str, Any], offset: int) -> None:
@@ -327,21 +335,52 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if hasattr(self, 'status_context'):
             self.status_context.setText(text)
 
-    def describe_selection(self, data):
+    def describe_selection(self, data, item=None):
         """One line describing the selected item, for the status bar.
 
         Says what an examiner would otherwise have to read off three columns:
         what it is, how big, and which MFT record it came from.
+
+        Volumes, unallocated space and the image root are described from their
+        offsets, because those carry no name or type in their item data -- only
+        a start and end sector. Without that they produced an empty string and
+        the bar kept whatever a previous click had left there.
         """
         if not data:
             return ""
 
         name = data.get('name') or ''
         kind = data.get('type') or ''
+
+        # Unallocated space: the sector range is the only thing identifying it.
+        if data.get('is_unallocated'):
+            return self._describe_span("Unallocated space", data)
+
+        # A volume or the image root, neither of which carries a name.
+        if not name and data.get('start_offset') is not None:
+            label = (item.text(0).split('(')[0].strip()
+                     if item is not None and item.text(0) else '')
+            if data.get('end_offset') is not None:
+                described = self._describe_span(label or "Volume", data)
+                # The filesystem is the most useful thing about a volume and is
+                # already known; the row text only carries the partition type.
+                fs_type = (self.image_handler.get_fs_type(data['start_offset'])
+                           if self.image_handler else None)
+                if fs_type and fs_type != 'N/A':
+                    described += f"   ·   {fs_type}"
+                return described
+            # No end offset and no name: this is the image itself.
+            if self.current_image_path:
+                partitions = len(self.image_handler.get_partitions()) if self.image_handler else 0
+                return (f"{os.path.basename(self.current_image_path)}"
+                        f"   ·   {partitions} partitions")
+            return ""
+
         parts = [name] if name else []
 
         if kind == 'directory':
-            parts.append("Folder")
+            count = data.get('child_count')
+            parts.append(f"Folder, {count} items" if count is not None else "Folder")
         elif kind == 'volume':
             parts.append("Volume")
 
@@ -360,9 +399,21 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         return "   ·   ".join(p for p in parts if p)
 
-    def update_status_for_selection(self, data):
+    def _describe_span(self, label, data):
+        """Describe a run of sectors: where it starts and how much it covers."""
+        start = data.get('start_offset') or 0
+        end = data.get('end_offset')
+        parts = [label]
+        if end is not None and end >= start and self.image_handler:
+            sectors = end - start + 1
+            size = sectors * self.image_handler.sector_size
+            parts.append(self.image_handler.get_readable_size(size))
+        parts.append(f"sector {start:,}")
+        return "   ·   ".join(parts)
+
+    def update_status_for_selection(self, data, item=None):
         """Refresh the standing context text for a newly selected item."""
-        described = self.describe_selection(data)
+        described = self.describe_selection(data, item)
         if described:
             self.set_status_context(described)
 
@@ -1515,9 +1566,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not data:
             return
 
-        # Store the current selection data
+        # Store the current selection data. The item goes along so a volume,
+        # which carries no name in its data, can be labelled from its row.
         self.current_selected_data = data
-        self.update_status_for_selection(data)
+        self.update_status_for_selection(data, item)
 
         # Show a status message in the UI to indicate loading
         self.set_status("Loading content...")
