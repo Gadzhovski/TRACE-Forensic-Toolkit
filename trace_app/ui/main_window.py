@@ -35,6 +35,8 @@ from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.exif import ExifViewer
 from trace_app.ui.viewers.carving import FileCarvingWidget
 from trace_app.ui.viewers.hex import HexViewer
+from trace_app.core import archives
+from trace_app.infra.utils import FileSystemUtils
 from trace_app.core.case import make_artifact_ref, parse_artifact_ref
 from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
@@ -46,7 +48,7 @@ from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
 from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, ExifAdapter, HexAdapter,
-                                     ArchiveAdapter, CaseAdapter, MetadataAdapter,
+                                     CaseAdapter, MetadataAdapter,
                                      NotesAdapter,
                                      TextAdapter,
                                      VirusTotalAdapter)
@@ -55,7 +57,6 @@ from trace_app.ui.dialogs.volume_info import VolumeInfoMixin
 from trace_app.core.workers import ExportWorker
 from trace_app.ui.dialogs import message
 from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
-from trace_app.ui.viewers.archive_viewer import ArchiveViewer
 from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
 from trace_app.ui.viewers.search_panel import SearchPanel
@@ -123,6 +124,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: from it and every add/remove writes back, so the list survives a
         #: restart; in triage it behaves as it always has and is lost on exit.
         self.evidence_files = list(case.evidence_paths()) if case else []
+
+        #: While browsing inside an archive: a list of levels, each
+        #: (display name, archive bytes, artifact data of the file it came
+        #: from). Empty when browsing the filesystem. An archive inside an
+        #: archive pushes another level, so the trail is also the answer to
+        #: "where was this file found".
+        self._archive_stack = []
 
         #: Handlers for evidence other than the one on screen, opened on demand
         #: when a picker asks about an image that is not the current one and
@@ -240,8 +248,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # say so in the Type column, which is already on screen.
         if entry.get("is_deleted"):
             description = f"Deleted {description}"
+        # A row read out of an archive says so: an examiner reporting where a
+        # file was found needs to know it came from inside a container rather
+        # than off the volume.
+        if entry.get("type") == "archive-member":
+            description = ("Encrypted in archive"
+                           if entry.get("archive_encrypted")
+                           else f"In archive")
         size_in_bytes = entry.get("size", 0)
-        readable_size = self.image_handler.get_readable_size(size_in_bytes)
+        # The static utility rather than the handler's wrapper around it: an
+        # archive member is listed from bytes already in memory and may have no
+        # image handler behind it.
+        readable_size = FileSystemUtils.get_readable_size(size_in_bytes)
         created = entry.get("created", "N/A")
         accessed = entry.get("accessed", "N/A")
         modified = entry.get("modified", "N/A")
@@ -260,6 +278,22 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                           modified, changed, parent_inode,
                                           entry.get("sequence"),
                                           entry.get("attributes", ""))
+
+        # An archive member has no inode, so the row payload the click handler
+        # reads has to carry what identifies it instead: its name inside the
+        # archive, and the fact that it is one.
+        if entry.get("type") == "archive-member":
+            cell = self.listing_table.item(row_position, 0)
+            if cell is not None:
+                payload = dict(cell.data(Qt.UserRole) or {})
+                payload.update({
+                    'type': 'archive-member',
+                    'archive_member': entry.get('archive_member', entry_name),
+                    'archive_encrypted': entry.get('archive_encrypted', False),
+                    'is_directory': is_directory,
+                    'size': size_in_bytes,
+                })
+                cell.setData(Qt.UserRole, payload)
 
     # ==================== END HELPER METHODS ====================
 
@@ -433,7 +467,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         size = data.get('size')
         if size not in (None, ''):
             if isinstance(size, (int, float)):
-                size = self.image_handler.get_readable_size(size)
+                size = FileSystemUtils.get_readable_size(size)
             parts.append(str(size))
 
         inode = data.get('inode_number')
@@ -858,9 +892,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.notes_panel = NotesPanel()
         self.notes_panel.set_case(self.case)
 
-        self.archive_viewer = ArchiveViewer()
-        self.archive_viewer.member_opened.connect(self.open_archive_member)
-
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
@@ -870,7 +901,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             VirusTotalAdapter(self.virus_total_api),
             CaseAdapter(self.case_panel),
             NotesAdapter(self.notes_panel),
-            ArchiveAdapter(self.archive_viewer),
         ]
         for adapter in self.viewer_adapters:
             self.viewer_tab.addTab(adapter.widget, adapter.label)
@@ -1292,6 +1322,204 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'artifact_path': row.get('path'),
             'label': row.get('name'),
         })
+
+    # --- archives as folders ---------------------------------------------
+
+    def open_archive_if_archive(self, data):
+        """If `data` names an archive, list it like a directory.
+
+        Returns True when it did, so the caller can stop. Reading the bytes is
+        the expensive part and happens once here; navigating inside the
+        archive afterwards is all in memory.
+        """
+        inode = data.get('inode_number')
+        offset = data.get('start_offset')
+        if inode is None or offset is None:
+            return False
+
+        name = data.get('name') or ''
+        size = data.get('size') or 0
+        if isinstance(size, str):
+            size = 0
+
+        # Reading a large file to find out it is not an archive is wasted
+        # work; the extension and a header read settle it far more cheaply.
+        if size and size > archives.MAX_MEMBER_BYTES:
+            return False
+
+        try:
+            header = self.image_handler.read_file_bytes(inode, offset, 512) \
+                if hasattr(self.image_handler, 'read_file_bytes') else None
+        except Exception:
+            header = None
+
+        if header is not None and not archives.detect_archive(header):
+            return False
+
+        self.set_status(f"Opening {name}…")
+        try:
+            content, _meta = self.image_handler.get_file_content(inode, offset)
+        except Exception as exc:
+            logger.debug("Could not read %s: %s", name, exc)
+            self.clear_status()
+            return False
+
+        if not content or not archives.detect_archive(content):
+            self.clear_status()
+            return False
+
+        self._archive_stack = [(name, content, dict(data))]
+        return self.show_archive_level()
+
+    def show_archive_level(self):
+        """List the archive on top of the stack in the listing table."""
+        if not self._archive_stack:
+            return False
+
+        name, content, source = self._archive_stack[-1]
+        try:
+            members = archives.list_members(content)
+        except archives.EncryptedArchive as exc:
+            message.information(
+                self, "Encrypted archive",
+                f"{name} is encrypted.\n\n{exc}\n\n"
+                "Its presence and size are still evidence; its contents "
+                "cannot be listed without the password.")
+            self._archive_stack.pop()
+            self.clear_status()
+            return False
+        except archives.ArchiveError as exc:
+            message.warning(self, "Could not read the archive",
+                            f"{name} could not be read.\n\n{exc}")
+            self._archive_stack.pop()
+            self.clear_status()
+            return False
+
+        entries = self._archive_entries(members, source)
+        self.current_path = self.archive_trail()
+        self.update_directory_up_button()
+
+        if not self.show_listing_entries(entries, source.get('start_offset', 0),
+                                         name):
+            self._archive_stack.pop()
+            return False
+
+        self.set_status(f"{self.archive_trail()} — {len(entries)} item(s)")
+        return True
+
+    def _archive_entries(self, members, source):
+        """Turn archive members into listing rows.
+
+        Members are given the same shape get_directory_contents produces, so
+        the listing draws them with the same icons and columns as any other
+        file. Nothing in the table builder needs to know an archive exists.
+        """
+        entries = []
+        for member in members:
+            entries.append({
+                'name': member['name'],
+                'is_directory': member['is_dir'],
+                # A member has no inode of its own: it exists only inside the
+                # archive. The name is what identifies it, and the type below
+                # is what routes a click.
+                'inode_number': None,
+                'size': member['size'],
+                'accessed': 'N/A',
+                'modified': member['modified'] or 'N/A',
+                'created': 'N/A',
+                'changed': 'N/A',
+                'is_deleted': False,
+                'is_recoverable': not member['encrypted'],
+                'parent_inode': None,
+                'sequence': None,
+                'attributes': 'encrypted' if member['encrypted'] else '',
+                # Routes the click, and marks the row as living in an archive.
+                'type': 'archive-member',
+                'archive_member': member['name'],
+                'archive_encrypted': member['encrypted'],
+                'start_offset': source.get('start_offset', 0),
+            })
+        return entries
+
+    def open_archive_member_row(self, data, navigate=True):
+        """Open a member: descend if it is an archive, otherwise view it."""
+        if not self._archive_stack:
+            return
+
+        _name, content, source = self._archive_stack[-1]
+        member_name = data.get('archive_member') or data.get('name')
+
+        if data.get('is_directory'):
+            # Archive directories are prefixes rather than real entries; the
+            # flat listing already shows their contents by full name.
+            return
+
+        if data.get('archive_encrypted'):
+            message.information(
+                self, "Encrypted member",
+                f"{member_name} is encrypted. Its name and size are readable; "
+                f"its contents are not.")
+            return
+
+        try:
+            member_bytes = archives.read_member(content, member_name)
+        except archives.ArchiveError as exc:
+            message.warning(self, "Could not read member", str(exc))
+            return
+
+        # An archive inside an archive is another folder to step into.
+        if navigate and archives.detect_archive(member_bytes):
+            if len(self._archive_stack) >= archives.MAX_NESTING:
+                message.warning(
+                    self, "Too deeply nested",
+                    f"Archives are followed {archives.MAX_NESTING} levels "
+                    f"deep.")
+                return
+            self._archive_stack.append((member_name, member_bytes, source))
+            self.show_archive_level()
+            return
+
+        # Otherwise it is a file, and every viewer can show it.
+        view_data = dict(data)
+        view_data['size'] = len(member_bytes)
+        view_data['path'] = f"{self.archive_trail()}/{member_name}"
+        self.current_selected_data = view_data
+        self.update_viewer_with_file_content(member_bytes, view_data)
+        self.update_status_for_selection(view_data)
+
+    def archive_trail(self):
+        """Where we are, as a path an examiner can quote."""
+        if not self._archive_stack:
+            return self.current_path
+        base = self._archive_stack[0][2].get('path') or self._archive_stack[0][0]
+        parts = [base] + [name for name, _c, _s in self._archive_stack[1:]]
+        return '!/'.join(parts)
+
+    def leave_archive(self):
+        """Step out one archive level, or back to the filesystem.
+
+        Returns True when it handled the request, so Up can defer to it.
+        """
+        if not self._archive_stack:
+            return False
+
+        self._archive_stack.pop()
+        if self._archive_stack:
+            self.show_archive_level()
+            return True
+
+        # Back to the filesystem, in the directory the archive was in.
+        self.current_path = os.path.dirname(self.current_path.split('!/')[0]) or '/'
+        parent = self.current_selected_data or {}
+        offset = parent.get('start_offset', self.current_offset or 0)
+        try:
+            inode = self.image_handler.get_root_inode(offset)
+            entries = self.image_handler.get_directory_contents(offset, inode)
+            self.show_listing_entries(entries, offset, 'This volume')
+        except Exception as exc:
+            logger.debug("Could not return to the filesystem: %s", exc)
+        self.update_directory_up_button()
+        return True
 
     def annotate_with_case_identity(self, data):
         """Add the case's view of an artifact to a selection payload.
@@ -2123,6 +2351,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def update_directory_up_button(self):
         """Update the state of the directory up button based on current selection"""
+        # Inside an archive there is always somewhere to go up to, whether
+        # that is an outer archive or back to the filesystem.
+        if self._archive_stack:
+            self.go_up_action.setEnabled(True)
+            return
+
         if not self.current_selected_data:
             self.go_up_action.setEnabled(False)
             return
@@ -2173,6 +2407,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def navigate_up_directory(self):
         """Navigate to the parent directory"""
+        # Inside an archive, Up means "out of this archive level" -- the
+        # filesystem's parent directory is not where the user is.
+        if self._archive_stack and self.leave_archive():
+            return
+
         if not self.current_selected_data:
             return
 
@@ -2700,18 +2939,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         except Exception as e:
             self.log_error(f"Error displaying content in viewer: {str(e)}")
 
-        # The Archive tab is fed even when it is not the active one. Reading a
-        # multi-megabyte archive takes a moment, and a viewer that only
-        # populates while it happens to be on screen looks broken: the user
-        # selects a ZIP with Hex showing, switches tab, and finds a stale
-        # message about the format not being recognised.
-        if (getattr(self, 'archive_viewer', None) is not None
-                and adapter.widget is not self.archive_viewer
-                and file_content):
-            try:
-                self.archive_viewer.display_archive(file_content, annotated)
-            except Exception as exc:
-                logger.debug("Could not pre-fill the archive viewer: %s", exc)
+
 
     def update_viewer_with_media_stream(self, file_obj, file_size, metadata, data):
         """Update the application viewer with a media stream for playback."""
@@ -2793,12 +3021,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.media_worker.start()
                 else:
                     # For non-media files or other tabs, use FileContentWorker (loads content)
-                    # Tell the archive viewer a read is in flight, so it
-                    # does not sit on a message about the previous file.
-                    if getattr(self, 'archive_viewer', None) is not None:
-                        self.archive_viewer.waiting_for(
-                            self.current_selected_data.get('name') or 'file')
-
                     self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, offset))
                     self.file_worker.completed.connect(
                         lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))
@@ -3434,7 +3656,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self._add_to_history(data)
 
                 self.clear_status()
+            elif data.get("type") == "archive-member":
+                # A member already read out of the archive on screen.
+                self.open_archive_member_row(data, navigate)
+                return
+
             else:
+                # A double-click on an archive opens it like a folder, because
+                # that is what it is. Single click still just selects, so the
+                # viewers describe the archive file itself.
+                if navigate and self.open_archive_if_archive(data):
+                    return
+
                 # Reveal the file's location in the tree view. In search mode the
                 # result may live in a directory the tree has not expanded yet, so
                 # navigate by path; otherwise select by inode.
