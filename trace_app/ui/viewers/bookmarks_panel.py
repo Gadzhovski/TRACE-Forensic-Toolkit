@@ -39,6 +39,9 @@ class BookmarksPanel(QWidget):
     #: Emitted with a bookmark row when the user wants to go there.
     jump_requested = Signal(dict)
 
+    #: Emitted after the panel changes the list, so the tree can redraw.
+    bookmarks_changed = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case = None
@@ -150,6 +153,7 @@ class BookmarksPanel(QWidget):
         elif action == remove:
             self.case.remove_bookmark(row['id'])
             self.refresh()
+            self.bookmarks_changed.emit()
 
     def _rename(self, row):
         from PySide6.QtWidgets import QInputDialog
@@ -160,3 +164,4 @@ class BookmarksPanel(QWidget):
         if ok and label.strip():
             self.case.update_bookmark(row['id'], label=label.strip())
             self.refresh()
+            self.bookmarks_changed.emit()

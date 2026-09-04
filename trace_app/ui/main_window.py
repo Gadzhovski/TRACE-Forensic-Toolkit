@@ -150,6 +150,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # marking an image verified paints its tree row, and the tree does
             # not exist until initialize_ui() has run.
             self._seed_verification_from_case()
+            self.refresh_bookmarks_tree()
             for path in self.evidence_files:
                 if path in self.verification_results:
                     self.mark_image_verified(path, True)
@@ -547,6 +548,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         menu_bar.addMenu(case_menu)
 
         view_menu = QMenu('View', self)
+        # Kept so the docks can add their own toggles once they
+        # exist -- menus are built before the docks are.
+        self._view_menu = view_menu
 
         # Create the "Full Screen" action and connect it to the showFullScreen slot
         full_screen_action = QAction("Full Screen", self)
@@ -915,10 +919,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.bookmarks_panel = BookmarksPanel()
         self.bookmarks_panel.set_case(self.case)
         self.bookmarks_panel.jump_requested.connect(self.go_to_bookmark)
+        self.bookmarks_panel.bookmarks_changed.connect(
+            self.refresh_bookmarks_tree)
         self.bookmarks_dock = QDockWidget('Bookmarks', self)
         self.bookmarks_dock.setObjectName("bookmarksDock")
         self.bookmarks_dock.setWidget(self.bookmarks_panel)
         self.addDockWidget(Qt.RightDockWidgetArea, self.bookmarks_dock)
+        # Hidden by default. The listing is where the investigation happens and
+        # it should have the width; bookmarks live in the tree, and this dock
+        # is for anyone who wants the fuller view with labels and dates.
+        self.bookmarks_dock.hide()
+
+        # Qt gives every dock a checkable show/hide action; using it means the
+        # menu and the dock's own close button can never disagree.
+        bookmarks_action = self.bookmarks_dock.toggleViewAction()
+        bookmarks_action.setText("Bookmarks Panel")
+        self._view_menu.addAction(bookmarks_action)
+        self._view_menu.addSeparator()
 
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')
@@ -1564,8 +1581,66 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.evidence_id_for_current_image(), ref, label.strip(),
             artifact_name=data.get('name') or '',
             artifact_path=data.get('path') or '')
-        self.bookmarks_panel.refresh()
+        self.refresh_bookmarks()
         self.set_status(f"Bookmarked {label.strip()}")
+
+    def refresh_bookmarks(self):
+        """Redraw both views of the bookmark list.
+
+        The tree node and the dock panel show the same rows; refreshing one
+        and forgetting the other is how they drift apart.
+        """
+        if getattr(self, 'bookmarks_panel', None) is not None:
+            self.bookmarks_panel.refresh()
+        self.refresh_bookmarks_tree()
+
+    def refresh_bookmarks_tree(self):
+        """Rebuild the Bookmarks node at the top of the tree.
+
+        Bookmarks sit beside the evidence rather than in a panel of their own,
+        because the tree is already where an examiner looks to find where
+        something is. The node is only present when there is a case and at
+        least one bookmark -- an empty node is a permanent reminder of a
+        feature rather than a way into anything.
+        """
+        # Drop the previous node, wherever it ended up.
+        for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
+            item = self.tree_viewer.topLevelItem(index)
+            data = item.data(0, Qt.UserRole) or {}
+            if data.get('is_bookmarks_root'):
+                self.tree_viewer.takeTopLevelItem(index)
+
+        if not self.case:
+            return
+
+        rows = self.case.bookmarks()
+        if not rows:
+            return
+
+        root = QTreeWidgetItem(self.tree_viewer)
+        root.setText(0, f"Bookmarks ({len(rows)})")
+        root.setIcon(0, icons.icon(icons.CASE))
+        root.setData(0, Qt.UserRole, {'is_bookmarks_root': True})
+        # First, so it is the first thing seen rather than buried under a
+        # long evidence tree.
+        self.tree_viewer.insertTopLevelItem(0, self.tree_viewer.takeTopLevelItem(
+            self.tree_viewer.indexOfTopLevelItem(root)))
+        root = self.tree_viewer.topLevelItem(0)
+
+        for row in rows:
+            child = QTreeWidgetItem(root)
+            child.setText(0, row.get('label') or '(unlabelled)')
+            child.setToolTip(0, row.get('artifact_path')
+                             or row.get('artifact_name') or '')
+            name = row.get('artifact_name') or ''
+            extension = name.rsplit('.', 1)[-1].lower() if '.' in name else 'unknown'
+            child.setIcon(0, self._get_file_icon(extension))
+            # Marked as a bookmark so a click resolves it rather than trying
+            # to read an inode the tree does not have.
+            child.setData(0, Qt.UserRole, {'is_bookmark': True,
+                                           'bookmark': row})
+
+        root.setExpanded(True)
 
     def go_to_bookmark(self, row):
         """Open whatever a bookmark points at.
@@ -1986,6 +2061,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Load partitions into tree view
                 QApplication.processEvents()
                 self.load_partitions_into_tree(image_path)
+                # The evidence tree just grew a root; keep bookmarks above it.
+                self.refresh_bookmarks_tree()
                 progress.setValue(100)
 
                 # Enable all tabs since we have a valid image
@@ -2223,6 +2300,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return True
 
     def on_item_clicked(self, item, column):
+        # A bookmark node resolves to its artifact; it has no inode of its own
+        # for the ordinary tree handling below to read.
+        data = item.data(0, Qt.UserRole) or {}
+        if data.get('is_bookmark'):
+            self.go_to_bookmark(data['bookmark'])
+            return
+        if data.get('is_bookmarks_root'):
+            item.setExpanded(not item.isExpanded())
+            return
+
         self.clear_viewers()
 
         data = item.data(0, Qt.UserRole)
@@ -3126,6 +3213,32 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             selected_item = self.tree_viewer.itemFromIndex(indexes[0])
             menu = QMenu()
             data = selected_item.data(0, Qt.UserRole)
+
+            # A bookmark in the tree gets the actions the panel offers, so the
+            # dock is genuinely optional rather than the only way to manage
+            # them.
+            if data and data.get('is_bookmark'):
+                row = data['bookmark']
+                go_action = menu.addAction("Go to Artifact")
+                rename_action = menu.addAction("Rename Bookmark...")
+                menu.addSeparator()
+                remove_action = menu.addAction("Remove Bookmark")
+                chosen = menu.exec_(
+                    self.tree_viewer.viewport().mapToGlobal(position))
+                if chosen == go_action:
+                    self.go_to_bookmark(row)
+                elif chosen == rename_action:
+                    label, ok = QInputDialog.getText(
+                        self, "Rename bookmark", "Label:",
+                        text=row.get('label') or '')
+                    if ok and label.strip():
+                        self.case.update_bookmark(row['id'],
+                                                  label=label.strip())
+                        self.refresh_bookmarks()
+                elif chosen == remove_action:
+                    self.case.remove_bookmark(row['id'])
+                    self.refresh_bookmarks()
+                return
 
             # Check if the selected item is a root item (disk image)
             if selected_item and selected_item.parent() is None:
