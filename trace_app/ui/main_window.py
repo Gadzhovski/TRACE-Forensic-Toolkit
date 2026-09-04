@@ -957,13 +957,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # is for anyone who wants the fuller view with labels and dates.
         self.bookmarks_dock.hide()
 
-        # Qt gives every dock a checkable show/hide action; using it means the
-        # menu and the dock's own close button can never disagree.
-        bookmarks_action = self.bookmarks_dock.toggleViewAction()
-        bookmarks_action.setText("Bookmarks Panel")
-        self._view_menu.addAction(bookmarks_action)
-        self._view_menu.addSeparator()
-
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')
         self.viewer_dock.setWidget(self.viewer_tab)
@@ -979,6 +972,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # file listing.
         self.viewer_tab.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.viewer_tab.currentChanged.connect(self.display_content_for_active_tab)
+
+        # Every panel that can be shown or hidden, gathered in one place in
+        # the View menu now that the docks exist.
+        self._add_panel_toggles()
 
         # disable all tabs before loading an image file
         self.enable_tabs(False)
@@ -1972,6 +1969,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.case:
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.case.folder))
+
+    def _add_panel_toggles(self):
+        """Put a show/hide entry in View for each dockable panel.
+
+        Called after the docks are built, because the menu bar is constructed
+        first and these actions cannot exist before the docks they belong to.
+
+        Qt's own toggleViewAction is used rather than a hand-written action, so
+        the menu tick and the panel's own close button cannot disagree about
+        whether it is open.
+        """
+        self._view_menu.addSeparator()
+
+        for dock, label in ((self.tree_dock, "Tree View"),
+                            (self.viewer_dock, "Utils Panel"),
+                            (self.bookmarks_dock, "Bookmarks Panel")):
+            action = dock.toggleViewAction()
+            action.setText(label)
+            self._view_menu.addAction(action)
 
     def enable_tabs(self, state):
         self.result_viewer.setEnabled(state)
