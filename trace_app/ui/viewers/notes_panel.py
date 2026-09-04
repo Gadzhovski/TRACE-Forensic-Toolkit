@@ -36,38 +36,49 @@ class NotesPanel(QWidget):
         self._artifact = None       # (evidence_id, ref, name, path) or None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        # Tight, for the same reason as the Case panel: this dock is short and
+        # padding costs rows of notes.
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
-        self.scope_label = QLabel()
-        self.scope_label.setObjectName("notesScope")
-        self.scope_label.setWordWrap(True)
-        layout.addWidget(self.scope_label)
+        # The scope, the editor and the controls share one row. Stacked, they
+        # took three lines of a panel that has about six.
+        entry = QHBoxLayout()
+        entry.setSpacing(6)
 
         self.editor = QTextEdit()
         self.editor.setObjectName("notesEditor")
-        self.editor.setPlaceholderText(
-            "Write a note about the selected file, or about the case. "
-            "Ctrl+Enter saves.")
-        self.editor.setFixedHeight(70)
-        layout.addWidget(self.editor)
+        self.editor.setPlaceholderText("Write a note…  (Ctrl+Enter saves)")
+        # Two lines tall, and it does not grow: the list of notes already
+        # written is the more useful half of this panel.
+        self.editor.setFixedHeight(CONTROL_HEIGHT * 2 + 6)
+        self.editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        entry.addWidget(self.editor, 1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(6)
-        self.save_button = QPushButton("Save Note")
+        controls = QVBoxLayout()
+        controls.setSpacing(3)
+        self.save_button = QPushButton("Save")
         self.save_button.setFixedSize(BUTTON_WIDTH, CONTROL_HEIGHT)
+        self.save_button.setToolTip("Save this note  (Ctrl+Enter)")
         self.save_button.clicked.connect(self._save)
-        buttons.addWidget(self.save_button)
+        controls.addWidget(self.save_button)
 
         self.scope_button = QPushButton("On the case")
-        self.scope_button.setFixedHeight(CONTROL_HEIGHT)
+        self.scope_button.setFixedSize(BUTTON_WIDTH, CONTROL_HEIGHT)
         self.scope_button.setCheckable(True)
         self.scope_button.setToolTip(
             "Attach the note to the whole case instead of the selected file.")
         self.scope_button.toggled.connect(self._update_scope_label)
-        buttons.addWidget(self.scope_button)
-        buttons.addStretch()
-        layout.addLayout(buttons)
+        controls.addWidget(self.scope_button)
+        entry.addLayout(controls)
+        layout.addLayout(entry)
+
+        # What the note will be attached to, in the space a label costs rather
+        # than a line of its own.
+        self.scope_label = QLabel()
+        self.scope_label.setObjectName("notesScope")
+        self.scope_label.setWordWrap(False)
+        layout.addWidget(self.scope_label)
 
         self.table = QTableWidget()
         self.table.setObjectName("notesTable")
@@ -79,10 +90,13 @@ class NotesPanel(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.Interactive)
+        self.table.setMinimumHeight(TABLE_ROW_HEIGHT * 2)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         self.table.itemDoubleClicked.connect(self._edit_selected)
-        layout.addWidget(self.table)
+        # All remaining height: the notes already written are what this panel
+        # is for.
+        layout.addWidget(self.table, 1)
 
         self.set_case(None)
 

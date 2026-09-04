@@ -1,9 +1,14 @@
 """The Case tab: what this investigation is, and what evidence it holds.
 
-Read-only for now. It exists as much for what comes next as for what it shows
-today: notes, bookmarks and findings all belong on this panel, and giving them
-a home before they are written keeps each one a view rather than a new
-persistence layer.
+Laid out for the dock it actually lives in. The Utils panel is around 220px
+tall, because the listing is where the investigation happens and should keep
+the window; a panel that asks for more than that gets three widgets none of
+which can be read.
+
+So: one line of identity at the top, and everything else behind tabs, with
+exactly one table on screen taking all the remaining height. The case's details
+are a tab of their own rather than a permanent block, since they are read once
+and the evidence is read constantly.
 
 Shows nothing useful in quick triage, and says so plainly rather than
 presenting an empty table.
@@ -47,29 +52,35 @@ class CasePanel(QWidget):
         self.case = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        # Tight margins: this panel lives in a dock about 220px tall, and
+        # every pixel spent on padding is a row of evidence not shown.
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
 
+        # One line, not a block. The case's name and number are what an
+        # examiner needs to see at a glance; everything else about the case is
+        # on the Details tab, where it costs no height until asked for.
         self.headline = QLabel()
         self.headline.setObjectName("caseHeadline")
-        self.headline.setWordWrap(True)
+        self.headline.setWordWrap(False)
+        self.headline.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.headline)
+
+        # Everything else is a tab, so exactly one table is on screen and it
+        # gets all the height there is.
+        self.tabs = QTabWidget()
+        self.tabs.setObjectName("caseTabs")
+        self.tabs.setDocumentMode(True)
+        layout.addWidget(self.tabs, 1)
 
         self.details = PropertyTable()
         self.details.setObjectName("caseDetailsTable")
-        layout.addWidget(self.details)
+        self.details.setMinimumHeight(TABLE_ROW_HEIGHT * 2)
 
-        self.evidence_heading = QLabel("Evidence")
-        self.evidence_heading.setObjectName("caseSectionHeading")
-        layout.addWidget(self.evidence_heading)
-
-        # Evidence, its verification history, and the audit trail are three
-        # views of the same question -- "can this evidence be relied on" --
-        # so they live as tabs rather than three stacked tables nobody can
-        # read at this dock height.
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("caseTabs")
-        layout.addWidget(self.tabs)
+        # Kept so refresh() can still address it; the heading itself is now
+        # the tab label.
+        self.evidence_heading = QLabel()
+        self.evidence_heading.setVisible(False)
 
         self.evidence_table = QTableWidget()
         self.evidence_table.setObjectName("caseEvidenceTable")
@@ -84,6 +95,7 @@ class CasePanel(QWidget):
         self.evidence_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.evidence_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.Interactive)
+        self.evidence_table.setMinimumHeight(TABLE_ROW_HEIGHT * 2)
         self.tabs.addTab(self.evidence_table, "Evidence")
 
         self.history_table = self._make_table(
@@ -94,6 +106,9 @@ class CasePanel(QWidget):
         self.activity_table = self._make_table(
             "caseActivityTable", ['When (UTC)', 'Action', 'Detail'])
         self.tabs.addTab(self.activity_table, "Activity log")
+
+        # Last, because it is the tab an examiner opens least often.
+        self.tabs.addTab(self.details, "Details")
 
         self.set_case(None)
 
@@ -112,19 +127,25 @@ class CasePanel(QWidget):
                 "Nothing is saved between sessions. Start a case from "
                 "File ▸ New Case to keep evidence, hashes and findings "
                 "together.")
-            self.details.setVisible(False)
-            self.evidence_heading.setVisible(False)
             self.tabs.setVisible(False)
             return
 
-        self.details.setVisible(True)
-        self.evidence_heading.setVisible(True)
         self.tabs.setVisible(True)
 
         metadata = self.case.metadata
         name = metadata.get('name', '(unnamed)')
         number = metadata.get('number', '')
-        self.headline.setText(f"{name} · {number}" if number else name)
+        examiner = metadata.get('examiner', '')
+
+        # Everything identifying on one line, since that is all the height
+        # there is for it.
+        parts = [f"<b>{name}</b>"]
+        if number:
+            parts.append(number)
+        if examiner:
+            parts.append(examiner)
+        self.headline.setText("  ·  ".join(parts))
+        self.headline.setToolTip(metadata.get('description') or '')
 
         rows = [
             ("Case name", name),
@@ -143,8 +164,9 @@ class CasePanel(QWidget):
     def _fill_evidence(self):
         evidence = self.case.evidence()
         self.evidence_table.setRowCount(len(evidence))
-        self.evidence_heading.setText(
-            f"Evidence ({len(evidence)})" if evidence else "Evidence (none)")
+        # The count belongs on the tab, where it is visible whichever tab is
+        # open, rather than on a heading that costs a line of height.
+        self.tabs.setTabText(0, f"Evidence ({len(evidence)})")
 
         for row, item in enumerate(evidence):
             status = item.get('last_status') or STATUS_PENDING
@@ -177,6 +199,10 @@ class CasePanel(QWidget):
     def _make_table(object_name, headers):
         """A read-only table shaped like the evidence one."""
         table = QTableWidget()
+        # Small enough to fit a short dock and scroll, rather than demanding a
+        # height the Utils panel does not have and pushing everything else off
+        # screen.
+        table.setMinimumHeight(TABLE_ROW_HEIGHT * 2)
         table.setObjectName(object_name)
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
