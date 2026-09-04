@@ -37,6 +37,7 @@ from trace_app.ui.viewers.exif import ExifViewer
 from trace_app.ui.viewers.carving import FileCarvingWidget
 from trace_app.ui.viewers.hex import HexViewer
 from trace_app.core import archives
+from trace_app.infra.theme import read_theme, save_theme
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.core.case import (make_artifact_ref, make_span_ref,
                                  parse_artifact_ref)
@@ -597,9 +598,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         theme_group.setExclusive(True)  # Only one theme can be selected at a time
 
         # Light Theme Action
+        saved_theme = read_theme()
+
         light_theme_action = QAction("Light Mode", self)
         light_theme_action.setCheckable(True)
-        light_theme_action.setChecked(True)  # Set Light Theme as default
+        light_theme_action.setChecked(saved_theme == 'light')
         light_theme_action.triggered.connect(lambda: self.apply_stylesheet('light'))
         theme_group.addAction(light_theme_action)
         view_menu.addAction(light_theme_action)
@@ -607,12 +610,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Dark Theme Action
         dark_theme_action = QAction("Dark Mode", self)
         dark_theme_action.setCheckable(True)
+        dark_theme_action.setChecked(saved_theme == 'dark')
         dark_theme_action.triggered.connect(lambda: self.apply_stylesheet('dark'))
         theme_group.addAction(dark_theme_action)
         view_menu.addAction(dark_theme_action)
 
-        # **Apply the default stylesheet**
-        self.apply_stylesheet('light')
+        # Whatever was chosen last time, not a hardcoded light. app.py has
+        # already applied it to the application; this brings the window's own
+        # icons and palette into line.
+        self.apply_stylesheet(saved_theme)
 
         tools_menu = QMenu('Tools', self)
 
@@ -1018,6 +1024,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             QApplication.instance().setStyleSheet(self._resolve_qss_urls(stylesheet))
         except Exception as e:
             logger.error(f"Error loading stylesheet {qss_file}: {e}")
+
+        # Remembered, so the next launch -- including its launcher -- opens in
+        # the theme the examiner actually chose.
+        save_theme(theme)
 
     #: Selection colours per theme: (highlight, highlighted text). These match
     #: the ::item:selected rules in the corresponding stylesheet.

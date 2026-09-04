@@ -7,7 +7,9 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from trace_app import __version__
 from trace_app.infra.paths import log_file
+from trace_app.infra.theme import apply_theme
 from trace_app.infra.preflight import check_dependencies, format_report
+from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.dialogs.case_launcher import TRIAGE, choose_case
 from trace_app.ui.main_window import MainWindow
@@ -58,6 +60,13 @@ def main():
             None, "Missing dependencies",
             "TRACE started, but some features will not work:\n\n"
             + format_report(missing))
+
+    # Theme first, before any window exists. Applying it from inside
+    # MainWindow meant the launcher -- the first thing an examiner sees -- was
+    # drawn by the platform instead, dark on a dark desktop whatever they had
+    # chosen last time.
+    theme = apply_theme(app)
+    icons.set_theme(theme)
 
     # Ask what kind of session this is before building anything. Someone
     # handed a USB stick who wants to know what is on it should not have to
