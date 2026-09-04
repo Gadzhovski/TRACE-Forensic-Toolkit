@@ -92,18 +92,27 @@ class ArchiveViewer(QWidget):
         self._stack = []
 
         if not content:
-            self._show_message("Nothing to read.")
+            # No bytes yet is not the same as no archive. Saying "not
+            # recognised" here reads as a verdict on the evidence, when the
+            # file has simply not finished loading.
+            self._show_message(f"Reading {name}…")
             return
 
         kind = detect_archive(content)
         if kind is None:
             self._show_message(
-                "This file is not an archive TRACE recognises.\n\n"
-                "Supported: ZIP, TAR, GZIP, BZIP2, XZ and 7z.")
+                f"{name} is not an archive TRACE recognises.\n\n"
+                "Supported: ZIP, TAR, GZIP, BZIP2, XZ and 7z. Office files "
+                "(.docx, .xlsx, .pptx) are ZIPs and open here too.")
             return
 
         self._stack.append((name, content))
         self._render()
+
+    def waiting_for(self, name):
+        """Say that a file is on its way, before its bytes arrive."""
+        self._stack = []
+        self._show_message(f"Reading {name}…")
 
     def clear_content(self):
         self._stack = []

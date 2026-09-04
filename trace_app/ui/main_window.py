@@ -2690,13 +2690,28 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.log_error("No content available to display")
             return
 
+        # Notes and bookmarks need to know which evidence row and which
+        # durable reference this selection is; the listing and tree do not
+        # carry that, so it is added once here rather than in each viewer.
+        annotated = self.annotate_with_case_identity(data)
+
         try:
-            # Notes and bookmarks need to know which evidence row and which
-            # durable reference this selection is; the listing and tree do not
-            # carry that, so it is added once here rather than in each viewer.
-            adapter.display(file_content, self.annotate_with_case_identity(data))
+            adapter.display(file_content, annotated)
         except Exception as e:
             self.log_error(f"Error displaying content in viewer: {str(e)}")
+
+        # The Archive tab is fed even when it is not the active one. Reading a
+        # multi-megabyte archive takes a moment, and a viewer that only
+        # populates while it happens to be on screen looks broken: the user
+        # selects a ZIP with Hex showing, switches tab, and finds a stale
+        # message about the format not being recognised.
+        if (getattr(self, 'archive_viewer', None) is not None
+                and adapter.widget is not self.archive_viewer
+                and file_content):
+            try:
+                self.archive_viewer.display_archive(file_content, annotated)
+            except Exception as exc:
+                logger.debug("Could not pre-fill the archive viewer: %s", exc)
 
     def update_viewer_with_media_stream(self, file_obj, file_size, metadata, data):
         """Update the application viewer with a media stream for playback."""
@@ -2778,6 +2793,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.media_worker.start()
                 else:
                     # For non-media files or other tabs, use FileContentWorker (loads content)
+                    # Tell the archive viewer a read is in flight, so it
+                    # does not sit on a message about the previous file.
+                    if getattr(self, 'archive_viewer', None) is not None:
+                        self.archive_viewer.waiting_for(
+                            self.current_selected_data.get('name') or 'file')
+
                     self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, offset))
                     self.file_worker.completed.connect(
                         lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))

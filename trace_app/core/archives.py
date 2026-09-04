@@ -104,7 +104,14 @@ def list_members(data, kind=None, password=None):
     if kind == 'tar':
         return _list_tar(data)
     if kind in ('gzip', 'bzip2', 'xz'):
-        return _list_single_stream(data, kind)
+        # .tar.gz and friends are a tar inside a single-stream compressor, and
+        # are far more common than a bare compressed file. tarfile reads all
+        # three transparently, so try it first and fall back to treating the
+        # stream as one file.
+        try:
+            return _list_tar(data)
+        except ArchiveError:
+            return _list_single_stream(data, kind)
     if kind == '7z':
         return _list_7z(data, password)
     if kind == 'rar':
@@ -130,6 +137,12 @@ def read_member(data, member_name=None, kind=None, password=None,
     if kind == 'tar':
         return _read_tar_member(data, member_name, limit)
     if kind in ('gzip', 'bzip2', 'xz'):
+        # See list_members: a compressed tarball is read as a tar.
+        if member_name:
+            try:
+                return _read_tar_member(data, member_name, limit)
+            except ArchiveError:
+                pass
         return _read_single_stream(data, kind, limit)
     if kind == '7z':
         return _read_7z_member(data, member_name, password, limit)
