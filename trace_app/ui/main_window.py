@@ -151,6 +151,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # not exist until initialize_ui() has run.
             self._seed_verification_from_case()
             self.refresh_bookmarks_tree()
+            # Deferred: this runs during __init__, before the window is shown,
+            # and loading an image can take seconds and wants to draw progress.
+            QTimer.singleShot(0, self.load_case_evidence)
             for path in self.evidence_files:
                 if path in self.verification_results:
                     self.mark_image_verified(path, True)
@@ -1690,6 +1693,48 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # --- case ------------------------------------------------------------
 
+    def load_case_evidence(self):
+        """Open the images this case already holds.
+
+        Reopening a case should put the examiner back where they were. Each
+        image is verified as present first: evidence that has moved or changed
+        is reported once, together, rather than as a string of failures that
+        looks like the application is broken.
+        """
+        if not self.case:
+            return
+
+        rows = self.case.evidence()
+        if not rows:
+            return
+
+        missing = []
+        opened = 0
+        for row in rows:
+            path = row['path']
+            if not os.path.exists(path):
+                missing.append((row, 'is not where the case recorded it'))
+                continue
+            if self.open_evidence_image(path, record_in_case=False):
+                opened += 1
+            else:
+                missing.append((row, 'could not be opened'))
+
+        if opened:
+            self.set_status(
+                f"Reopened {opened} of {len(rows)} piece(s) of evidence")
+
+        if missing:
+            lines = [f"{row.get('display_name') or row['path']} {why}"
+                     for row, why in missing]
+            message.warning(
+                self, "Some evidence could not be opened",
+                f"{len(missing)} of {len(rows)} piece(s) of evidence in this "
+                f"case could not be loaded.",
+                "\n".join(lines)
+                + "\n\nUse Case ▸ Verify All Evidence to check the rest, or "
+                  "add the image again from its new location.")
+
     def _seed_verification_from_case(self):
         """Rebuild the in-memory verification map from stored hashes.
 
@@ -1999,80 +2044,95 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", file_filter)
 
         if image_path:
-            try:
-                image_path = os.path.normpath(image_path)
+            self.open_evidence_image(image_path)
 
-                # Create a progress dialog to show loading status
-                progress = QProgressDialog("Loading image...", "Cancel", 0, 100, self)
-                progress.setWindowTitle("Loading Evidence")
-                progress.setWindowModality(Qt.WindowModal)
-                progress.setMinimumDuration(PROGRESS_MIN_DURATION)  # Show dialog only if operation takes more than threshold
-                progress.setValue(10)
+    def open_evidence_image(self, image_path, record_in_case=True):
+        """Load an image and show it. Returns True when it opened.
 
-                # Clean up any existing ImageHandler resources
-                if self.image_handler:
-                    self.image_handler.close_resources()
+        Separated from the file dialog so reopening a case can load the
+        evidence it already knows about through exactly this code -- a second
+        implementation of image loading would drift from this one, and this is
+        what decides whether an image opens at all.
+        """
+        try:
+            image_path = os.path.normpath(image_path)
 
-                # Create or update the ImageHandler instance with progress updates
-                progress.setValue(20)
+            # Create a progress dialog to show loading status
+            progress = QProgressDialog("Loading image...", "Cancel", 0, 100, self)
+            progress.setWindowTitle("Loading Evidence")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(PROGRESS_MIN_DURATION)  # Show dialog only if operation takes more than threshold
+            progress.setValue(10)
 
-                # Process events to update UI
-                QApplication.processEvents()
+            # Clean up any existing ImageHandler resources
+            if self.image_handler:
+                self.image_handler.close_resources()
 
-                # Create a new ImageHandler with the selected image
-                self.image_handler = ImageHandler(image_path)
-                if not self.image_handler.loaded:
-                    raise ValueError(
-                        "The file could not be opened as a disk image. It may be "
-                        "corrupt, incomplete (a missing .E02 segment, say), or an "
-                        "unsupported format.")
-                progress.setValue(50)
+            # Create or update the ImageHandler instance with progress updates
+            progress.setValue(20)
 
-                # Add the image to evidence files list
-                if image_path not in self.evidence_files:
-                    self.evidence_files.append(image_path)
-                # A case remembers its evidence; triage does not.
+            # Process events to update UI
+            QApplication.processEvents()
+
+            # Create a new ImageHandler with the selected image
+            self.image_handler = ImageHandler(image_path)
+            if not self.image_handler.loaded:
+                raise ValueError(
+                    "The file could not be opened as a disk image. It may be "
+                    "corrupt, incomplete (a missing .E02 segment, say), or an "
+                    "unsupported format.")
+            progress.setValue(50)
+
+            # Add the image to evidence files list
+            if image_path not in self.evidence_files:
+                self.evidence_files.append(image_path)
+            # A case remembers its evidence; triage does not. Skipped
+            # when the case is what asked for this load, since the row is
+            # already there.
+            if record_in_case:
                 self.record_evidence_in_case(image_path)
-                if getattr(self, 'case_panel', None):
-                    self.case_panel.refresh()
+            if getattr(self, 'case_panel', None):
+                self.case_panel.refresh()
 
-                self.current_image_path = image_path
-                self.set_status_context(
-                    f"{os.path.basename(image_path)}   ·   "
-                    f"{len(self.image_handler.get_partitions())} partitions")
-                progress.setValue(70)
+            self.current_image_path = image_path
+            self.set_status_context(
+                f"{os.path.basename(image_path)}   ·   "
+                f"{len(self.image_handler.get_partitions())} partitions")
+            progress.setValue(70)
 
-                # Pass the image handler to widgets that need it
-                # One mechanism for every consumer. These widgets are built
-                # before an image is loaded, so they are constructed with
-                # image_handler=None and pointed at the real handler here.
-                for widget in (self.deleted_files_widget,
-                               self.registry_extractor_widget,
-                               self.metadata_viewer):
-                    widget.set_image_handler(self.image_handler)
-                # Carved output belongs inside the case when there is one:
-                # carved files are named after their offset alone, so two
-                # images sharing one directory overwrite each other.
-                self.deleted_files_widget.set_case_folder(
-                    self.case.folder if self.case else None)
-                self.search_panel.set_image_handler(self.image_handler)
-                progress.setValue(80)
+            # Pass the image handler to widgets that need it
+            # One mechanism for every consumer. These widgets are built
+            # before an image is loaded, so they are constructed with
+            # image_handler=None and pointed at the real handler here.
+            for widget in (self.deleted_files_widget,
+                           self.registry_extractor_widget,
+                           self.metadata_viewer):
+                widget.set_image_handler(self.image_handler)
+            # Carved output belongs inside the case when there is one:
+            # carved files are named after their offset alone, so two
+            # images sharing one directory overwrite each other.
+            self.deleted_files_widget.set_case_folder(
+                self.case.folder if self.case else None)
+            self.search_panel.set_image_handler(self.image_handler)
+            progress.setValue(80)
 
-                # Load partitions into tree view
-                QApplication.processEvents()
-                self.load_partitions_into_tree(image_path)
-                # The evidence tree just grew a root; keep bookmarks above it.
-                self.refresh_bookmarks_tree()
-                progress.setValue(100)
+            # Load partitions into tree view
+            QApplication.processEvents()
+            self.load_partitions_into_tree(image_path)
+            # The evidence tree just grew a root; keep bookmarks above it.
+            self.refresh_bookmarks_tree()
+            progress.setValue(100)
 
-                # Enable all tabs since we have a valid image
-                self.enable_tabs(True)
+            # Enable all tabs since we have a valid image
+            self.enable_tabs(True)
+            return True
 
-            except Exception as e:
-                message.critical(self, "Error Loading Image", f"Failed to load image: {str(e)}")
-                # Remove the image from evidence files if it was added but failed to load
-                if image_path in self.evidence_files:
-                    self.evidence_files.remove(image_path)
+        except Exception as e:
+            message.critical(self, "Error Loading Image", f"Failed to load image: {str(e)}")
+            # Remove the image from evidence files if it was added but failed to load
+            if image_path in self.evidence_files:
+                self.evidence_files.remove(image_path)
+            return False
 
     def remove_image_evidence(self):
         if not self.evidence_files:
