@@ -43,7 +43,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -74,6 +74,14 @@ _SPAN_REF = re.compile(r'^p(\d+):x([0-9a-fA-F]+)-([0-9a-fA-F]+)$')
 
 #: A registry key or value, identified by hive and key path.
 _REGISTRY_REF = re.compile(r'^reg:([^:]+):(.*)$')
+
+
+#: The mismatch grades worth putting in front of an examiner. Suspicious is an
+#: executable in a document's clothing; notable covers a file whose content
+#: cannot be identified and looks like random data, which is what an encrypted
+#: document looks like from outside. Benign disagreements are recorded but not
+#: reported: a list opening with every .jpe teaches people to close the list.
+REPORTED_MISMATCHES = ('suspicious', 'notable')
 
 
 def make_artifact_ref(start_offset, inode, sequence=None):
@@ -743,6 +751,214 @@ class Case:
 
     # --- schema -----------------------------------------------------------
 
+    # --- analysis modules -------------------------------------------
+
+    def add_analysis_batch(self, evidence_id, rows):
+        """Record what the modules found, for a batch of files.
+
+        A batch rather than a row at a time: a commit per file turns a
+        20,000-file image into 20,000 transactions and the walk ends up
+        spending its time in SQLite rather than reading evidence.
+
+        Each row is `(artifact_ref, name, path, is_deleted, facts)`, where
+        `facts` holds whatever the selected modules produced -- a module that
+        was not selected leaves its columns NULL rather than zero, so "not
+        measured" stays distinguishable from "measured as nothing".
+        """
+        now = _utc_now()
+        payload = []
+        for ref, name, path, deleted, facts in rows:
+            payload.append((
+                evidence_id, ref, name, path, facts.get('size'),
+                1 if deleted else 0,
+                facts.get('mime'), facts.get('extension'),
+                facts.get('mismatch'), facts.get('entropy'),
+                facts.get('entropy_peak'), facts.get('entropy_peak_offset'),
+                facts.get('md5'), facts.get('sha256'), facts.get('note'),
+                now))
+
+        self._db.executemany(
+            "INSERT OR REPLACE INTO file_analysis "
+            "(evidence_id, artifact_ref, name, path, size, is_deleted, "
+            " mime, extension, mismatch, entropy, entropy_peak, "
+            " entropy_peak_offset, md5, sha256, note, analysed_utc) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", payload)
+        self._db.commit()
+
+    def clear_analysis(self, evidence_id):
+        """Drop a previous run's findings for one piece of evidence."""
+        self._db.execute("DELETE FROM file_analysis WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.commit()
+
+    def commit(self):
+        """Flush pending writes. Named for what the walk needs to call."""
+        self._db.commit()
+
+    def set_analysis_state(self, evidence_id, status, modules=None,
+                           files_done=None, files_total=None, last_error=None):
+        """Record how far a run got, so a cancelled one can be resumed."""
+        existing = self.analysis_state(evidence_id) or {}
+        self._db.execute(
+            "INSERT OR REPLACE INTO analysis_state "
+            "(evidence_id, status, modules, files_done, files_total, "
+            " last_error, updated_utc) VALUES (?,?,?,?,?,?,?)",
+            (evidence_id, status,
+             modules if modules is not None else existing.get('modules'),
+             files_done if files_done is not None
+             else existing.get('files_done', 0),
+             files_total if files_total is not None
+             else existing.get('files_total', 0),
+             last_error, _utc_now()))
+        self._db.commit()
+
+        if status in ('done', 'cancelled', 'failed'):
+            self._record_activity(
+                f"analysis {status}",
+                f"evidence id={evidence_id} files={files_done or 0}"
+                + (f" error={last_error}" if last_error else ''))
+
+    def analysis_state(self, evidence_id):
+        """How the last run on this evidence ended, or None."""
+        row = self._db.execute(
+            "SELECT * FROM analysis_state WHERE evidence_id = ?",
+            (evidence_id,)).fetchone()
+        return dict(row) if row else None
+
+    def analysis_for_artifact(self, evidence_id, artifact_ref):
+        """What is known about one file, for the listing to show."""
+        row = self._db.execute(
+            "SELECT * FROM file_analysis "
+            "WHERE evidence_id = ? AND artifact_ref = ?",
+            (evidence_id, artifact_ref)).fetchone()
+        return dict(row) if row else None
+
+    def analysis_map(self, evidence_id, refs=None):
+        """artifact_ref -> analysis, for a whole directory at once.
+
+        The listing draws a page of rows in one go, and asking per row turns
+        drawing a directory into one query per file. `refs` narrows it to what
+        is actually on screen.
+        """
+        if refs is not None:
+            refs = list(refs)
+            if not refs:
+                return {}
+            # Chunked: SQLite's parameter limit is finite and a directory can
+            # hold more entries than it allows in one statement.
+            found = {}
+            for start in range(0, len(refs), 500):
+                chunk = refs[start:start + 500]
+                marks = ','.join('?' * len(chunk))
+                rows = self._db.execute(
+                    f"SELECT * FROM file_analysis WHERE evidence_id = ? "
+                    f"AND artifact_ref IN ({marks})",
+                    [evidence_id] + chunk).fetchall()
+                found.update({r['artifact_ref']: dict(r) for r in rows})
+            return found
+
+        rows = self._db.execute(
+            "SELECT * FROM file_analysis WHERE evidence_id = ?",
+            (evidence_id,)).fetchall()
+        return {r['artifact_ref']: dict(r) for r in rows}
+
+    def type_mismatches(self, evidence_id=None, grade='suspicious',
+                        limit=1000):
+        """Files whose content disagrees with their extension.
+
+        Defaults to the suspicious grade only. The others are recorded so a
+        filter can ask for them, but a list that opens with every `.jpe` and
+        every plain-text `.log` is a list nobody reads twice.
+        """
+        query = ("SELECT * FROM file_analysis WHERE mismatch IS NOT NULL "
+                 "AND mismatch != ''")
+        params = []
+        if isinstance(grade, (list, tuple, set)):
+            grades = list(grade)
+            query += f" AND mismatch IN ({','.join('?' * len(grades))})"
+            params.extend(grades)
+        elif grade:
+            query += " AND mismatch = ?"
+            params.append(grade)
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        query += " ORDER BY name LIMIT ?"
+        params.append(limit)
+        return [dict(r) for r in self._db.execute(query, params)]
+
+    def high_entropy_files(self, evidence_id=None, threshold=7.5, limit=1000):
+        """Files that look like random data, most extreme first."""
+        query = "SELECT * FROM file_analysis WHERE entropy >= ?"
+        params = [threshold]
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        query += " ORDER BY entropy DESC LIMIT ?"
+        params.append(limit)
+        return [dict(r) for r in self._db.execute(query, params)]
+
+    def duplicate_groups(self, evidence_id=None, limit=500):
+        """Files sharing a SHA-256, grouped, biggest waste first.
+
+        Ordered by how much space the copies take rather than by how many
+        there are: fifty copies of a 1KB icon matter less than three copies of
+        a 2GB archive, and an examiner scanning the list wants the second.
+        """
+        query = ("SELECT sha256, COUNT(*) AS copies, MAX(size) AS size "
+                 "FROM file_analysis WHERE sha256 IS NOT NULL AND sha256 != ''")
+        params = []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        query += (" GROUP BY sha256 HAVING copies > 1 "
+                  "ORDER BY (copies - 1) * size DESC LIMIT ?")
+        params.append(limit)
+
+        groups = []
+        for row in self._db.execute(query, params):
+            members = self._db.execute(
+                "SELECT * FROM file_analysis WHERE sha256 = ? ORDER BY path",
+                (row['sha256'],)).fetchall()
+            groups.append({'sha256': row['sha256'], 'copies': row['copies'],
+                           'size': row['size'],
+                           'members': [dict(m) for m in members]})
+        return groups
+
+    def find_by_hash(self, digest):
+        """Every file matching a hash, whichever algorithm it is.
+
+        Takes MD5 or SHA-256 without being told which: an examiner pasting a
+        hash from a report should not have to say what kind it is.
+        """
+        digest = (digest or '').strip().lower()
+        if not digest:
+            return []
+        column = 'md5' if len(digest) == 32 else 'sha256'
+        return [dict(r) for r in self._db.execute(
+            f"SELECT * FROM file_analysis WHERE {column} = ? ORDER BY path",
+            (digest,))]
+
+    def analysis_summary(self, evidence_id=None):
+        """Counts for the tree node and the Triage tab."""
+        where = " WHERE evidence_id = ?" if evidence_id is not None else ""
+        params = [evidence_id] if evidence_id is not None else []
+
+        analysed = self._db.execute(
+            f"SELECT COUNT(*) FROM file_analysis{where}", params).fetchone()[0]
+        mismatches = len(self.type_mismatches(
+            evidence_id, grade=REPORTED_MISMATCHES))
+        entropy = len(self.high_entropy_files(evidence_id))
+        duplicates = self._db.execute(
+            "SELECT COUNT(*) FROM (SELECT sha256 FROM file_analysis"
+            + (" WHERE evidence_id = ?" if evidence_id is not None else "")
+            + (" AND" if evidence_id is not None else " WHERE")
+            + " sha256 IS NOT NULL AND sha256 != '' GROUP BY sha256"
+              " HAVING COUNT(*) > 1)", params).fetchone()[0]
+
+        return {'analysed': analysed, 'mismatches': mismatches,
+                'high_entropy': entropy, 'duplicate_groups': duplicates}
+
     def _create_schema(self):
         """Create every table, including the ones no feature uses yet.
 
@@ -827,6 +1043,47 @@ class Case:
                 detail        TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS file_analysis (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT NOT NULL,
+                name          TEXT NOT NULL,
+                path          TEXT,
+                size          INTEGER,
+                is_deleted    INTEGER NOT NULL DEFAULT 0,
+                mime          TEXT,
+                extension     TEXT,
+                mismatch      TEXT,
+                entropy       REAL,
+                entropy_peak  REAL,
+                entropy_peak_offset INTEGER,
+                md5           TEXT,
+                sha256        TEXT,
+                note          TEXT,
+                analysed_utc  TEXT NOT NULL,
+                UNIQUE(evidence_id, artifact_ref)
+            );
+
+            CREATE TABLE IF NOT EXISTS analysis_state (
+                evidence_id   INTEGER PRIMARY KEY
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                status        TEXT NOT NULL,
+                modules       TEXT,
+                files_done    INTEGER NOT NULL DEFAULT 0,
+                files_total   INTEGER NOT NULL DEFAULT 0,
+                last_error    TEXT,
+                updated_utc   TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_analysis_mismatch
+                ON file_analysis(evidence_id, mismatch);
+            CREATE INDEX IF NOT EXISTS idx_analysis_entropy
+                ON file_analysis(evidence_id, entropy);
+            -- Duplicate detection is a GROUP BY over this column, so it is
+            -- the one index the feature genuinely cannot do without.
+            CREATE INDEX IF NOT EXISTS idx_analysis_sha256
+                ON file_analysis(sha256);
             CREATE INDEX IF NOT EXISTS idx_verifications_evidence
                 ON verifications(evidence_id, id DESC);
             CREATE INDEX IF NOT EXISTS idx_notes_artifact
@@ -857,6 +1114,13 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 4:
+            # file_analysis and analysis_state are created unconditionally
+            # above; there is nothing to alter, because no earlier version had
+            # a column to preserve. A case that predates them simply has no
+            # analysis until one is run.
+            self._db.commit()
 
         if version < 3:
             # Notes can hang off a bookmark. SET NULL rather than CASCADE:

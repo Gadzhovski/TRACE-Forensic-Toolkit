@@ -63,6 +63,10 @@ from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
 from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
 from trace_app.ui.viewers.search_panel import SearchPanel
+from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
+from trace_app.ui.widgets.job_bar import Job, JobBar
+from trace_app.ui.dialogs.analysis_modules import choose_modules
+from trace_app.core.analysis import MODULES, is_high_entropy
 
 logger = logging.getLogger('TRACE.MainWindow')
 
@@ -407,6 +411,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             QApplication.instance().setWindowIcon(app_icon)
 
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+        #: What was chosen last time, so a second run does not start from
+        #: nothing. Everything, until something is chosen.
+        self._last_modules = list(MODULES)
         self._build_status_bar()
 
     def _build_status_bar(self):
@@ -423,6 +430,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         status = self.statusBar()
         status.setSizeGripEnabled(False)
+
+        # Background work reports here, between the transient message and
+        # the selection context: one place to look for everything the
+        # application is doing, rather than a progress bar per feature in a
+        # different corner depending on what was started.
+        self.job_bar = JobBar(self)
+        self.job_bar.all_finished.connect(self._on_jobs_finished)
+        status.addPermanentWidget(self.job_bar)
 
         self.status_context = QLabel("", self)
         self.status_context.setObjectName("statusContext")
@@ -573,6 +588,35 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 action.setToolTip("Quick triage: no case is open.")
 
         menu_bar.addMenu(case_menu)
+
+        # Analysis is its own menu rather than an entry under Case: these are
+        # things done to the evidence, and there will be more of them.
+        analysis_menu = QMenu('Analysis', self)
+        self.run_analysis_action = QAction("Run Analysis Modules...", self)
+        self.run_analysis_action.triggered.connect(self.run_analysis_modules)
+        analysis_menu.addAction(self.run_analysis_action)
+
+        self.cancel_analysis_action = QAction("Cancel Running Analysis", self)
+        self.cancel_analysis_action.triggered.connect(
+            lambda: self.job_bar.cancel_all())
+        analysis_menu.addAction(self.cancel_analysis_action)
+
+        analysis_menu.addSeparator()
+        self.find_by_hash_action = QAction("Find by Hash...", self)
+        self.find_by_hash_action.triggered.connect(self.find_by_hash)
+        analysis_menu.addAction(self.find_by_hash_action)
+
+        for action in (self.run_analysis_action, self.cancel_analysis_action,
+                       self.find_by_hash_action):
+            action.setEnabled(self.case is not None)
+        if self.case is None:
+            analysis_menu.setToolTipsVisible(True)
+            for action in analysis_menu.actions():
+                action.setToolTip(
+                    "Analysis findings are kept in a case; quick triage has "
+                    "nowhere to record them.")
+
+        menu_bar.addMenu(analysis_menu)
 
         view_menu = QMenu('View', self)
         # Kept so the docks can add their own toggles once they
@@ -737,7 +781,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # 12 columns. Sequence and Attributes are appended rather than slotted
         # in beside Inode, because the volume, search and file views each set
         # column visibility by hardcoded index.
-        self.listing_table.setColumnCount(12)
+        self.listing_table.setColumnCount(15)
 
         # Enable horizontal scrolling for smaller windows
         self.listing_table.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
@@ -864,7 +908,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Set the header labels
         self.listing_table.setHorizontalHeaderLabels(
             ['Name', 'Inode', 'Type', 'Size', 'Created Date', 'Accessed Date',
-             'Modified Date', 'Changed Date', 'Path', 'Info', 'Seq', 'Attributes']
+             'Modified Date', 'Changed Date', 'Path', 'Info', 'Seq',
+             'Attributes', 'Detected Type', 'Entropy', 'Flag']
         )
 
         self.listing_table.itemDoubleClicked.connect(self.on_listing_table_item_clicked)
@@ -911,6 +956,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # table. Sharing it meant every search toggled columns and saved and
         # restored browse state, and coming back was a mode change.
         self.result_viewer.addTab(self.search_panel, 'Search')
+
+        self.triage_panel = TriagePanel()
+        self.triage_panel.set_case(self.case)
+        self.triage_panel.icon_resolver = self._get_file_icon
+        self.triage_panel.finding_activated.connect(self.open_finding)
+        self.triage_panel.finding_menu_requested.connect(
+            self.open_finding_menu)
+        self.triage_panel.run_requested.connect(self.run_analysis_modules)
+        self.result_viewer.addTab(self.triage_panel, 'Triage')
 
     def _build_viewer_dock(self):
         """Bottom "Utils" dock holding the viewer tabs."""
@@ -1779,6 +1833,354 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if child.isExpanded():
                 self.mark_bookmarked_tree_items(child)
 
+    # --- analysis modules -------------------------------------------
+
+    def offer_analysis_modules(self):
+        """Ask what to analyse, when a case has just been opened.
+
+        Separate from run_analysis_modules because the two have different
+        manners. This one is an offer made without being asked, so it stays
+        quiet when there is nothing to offer -- no case, no evidence, or a
+        run whose findings are already recorded. The menu entry always asks,
+        because there the examiner went looking for it.
+        """
+        if not self.case:
+            return
+
+        rows = self.case.evidence()
+        if not rows:
+            # A new case with no evidence yet: the offer belongs at the point
+            # an image is added, not here.
+            return
+
+        # Already analysed: re-offering on every reopen would train an
+        # examiner to dismiss the dialog without reading it.
+        if any((self.case.analysis_state(row['id']) or {}).get('status')
+               == 'done' for row in rows):
+            self.refresh_analysis_views()
+            return
+
+        modules = choose_modules(self, preselected=self._last_modules)
+        if not modules:
+            return
+
+        self._last_modules = modules
+        self.queue_analysis(rows, modules)
+
+    def run_analysis_modules(self):
+        """Ask which modules to run, then queue a run per piece of evidence."""
+        if not self.case:
+            message.warning(
+                self, "No case open",
+                "Analysis findings are kept in a case.",
+                "File \u25b8 New Case starts one.")
+            return
+
+        rows = self.case.evidence()
+        if not rows:
+            message.warning(
+                self, "No evidence",
+                "There is nothing to analyse yet.",
+                "Add an image to the case first.")
+            return
+
+        # Everything, the first time: an examiner opening this dialog has
+        # asked to analyse the image, and unticking what they do not want is
+        # less work than finding what they do.
+        modules = choose_modules(self, preselected=self._last_modules or MODULES)
+        if not modules:
+            return          # "Just browse" is an answer, not a failure
+
+        self._last_modules = modules
+        self.queue_analysis(rows, modules)
+
+    def queue_analysis(self, rows, modules):
+        """Put one analysis job per piece of evidence on the shared queue."""
+        queued = 0
+        for row in rows:
+            path = row['path']
+            if not os.path.exists(path):
+                logger.warning("Skipping analysis of missing %s", path)
+                continue
+            if self._queue_analysis_job(row, modules):
+                queued += 1
+
+        if queued:
+            self.set_status(
+                f"Analysing {queued} piece(s) of evidence in the background")
+        return queued
+
+    def _queue_analysis_job(self, row, modules):
+        """One evidence row, one job."""
+        evidence_id = row['id']
+        name = row.get('display_name') or os.path.basename(row['path'])
+
+        def start(job):
+            worker = AnalysisWorker(row['path'], self.case.folder,
+                                    evidence_id, modules, self)
+            worker.progressed.connect(
+                lambda done, total, path: self.job_bar.report(
+                    done, total, os.path.basename(path)))
+            worker.finished_analysis.connect(
+                lambda count, error: self._analysis_finished(count, error))
+            # Retained the same way every other worker is: assigning over a
+            # running thread drops the last reference to it and the C++ object
+            # can be collected mid-read.
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"analysis:{evidence_id}",
+            title=f"Analysing {name}",
+            start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _analysis_finished(self, count, error):
+        """One analysis job has ended, however it ended."""
+        if error:
+            self.set_status(f"Analysis failed: {error}")
+            logger.error("Analysis failed: %s", error)
+        else:
+            self.set_status(f"Analysed {count:,} file(s)")
+
+        self.job_bar.job_finished()
+        self.refresh_analysis_views()
+
+    def _on_jobs_finished(self):
+        """The queue has emptied; show everything the runs produced."""
+        self.refresh_analysis_views()
+
+    def refresh_analysis_views(self):
+        """Redraw everywhere findings are shown."""
+        if getattr(self, 'triage_panel', None) is not None:
+            self.triage_panel.set_case(self.case,
+                                       self.evidence_id_for_current_image())
+        self.refresh_analysis_tree()
+        self.mark_analysis_rows()
+
+    # --- findings in the tree ---------------------------------------
+
+    def refresh_analysis_tree(self):
+        """Rebuild the Findings node at the top of the tree.
+
+        Beside Bookmarks and for the same reason: the tree is where an
+        examiner looks to find where something is, and a finding that lives
+        only in a tab is one they have to remember to go and read. Absent
+        until there is something in it -- an empty node is a permanent
+        advertisement for a feature rather than a way into anything.
+        """
+        for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
+            item = self.tree_viewer.topLevelItem(index)
+            data = item.data(0, Qt.UserRole) or {}
+            if data.get('is_analysis_root'):
+                self.tree_viewer.takeTopLevelItem(index)
+
+        if not self.case:
+            return
+
+        evidence_id = self.evidence_id_for_current_image()
+        summary = self.case.analysis_summary(evidence_id)
+        if not summary['analysed']:
+            return
+
+        groups = [
+            ('Type mismatches', summary['mismatches'],
+             lambda: self.case.type_mismatches(evidence_id)),
+            ('High entropy', summary['high_entropy'],
+             lambda: self.case.high_entropy_files(evidence_id)),
+            ('Duplicates', summary['duplicate_groups'],
+             lambda: [m for g in self.case.duplicate_groups(evidence_id)
+                      for m in g['members']]),
+        ]
+        if not any(count for _, count, _ in groups):
+            return          # analysed, and nothing stood out: say nothing
+
+        root = QTreeWidgetItem(self.tree_viewer)
+        total = sum(count for _, count, _ in groups)
+        root.setText(0, f"Findings ({total})")
+        root.setIcon(0, icons.icon(icons.SEARCH_BROWSER))
+        root.setData(0, Qt.UserRole, {'is_analysis_root': True})
+
+        # Below Bookmarks but above the evidence: findings are why an examiner
+        # opened the case, and a bookmark is something they made themselves.
+        position = 1 if self._has_bookmarks_root() else 0
+        self.tree_viewer.insertTopLevelItem(
+            position, self.tree_viewer.takeTopLevelItem(
+                self.tree_viewer.indexOfTopLevelItem(root)))
+        root = self.tree_viewer.topLevelItem(position)
+
+        for label, count, fetch in groups:
+            if not count:
+                continue
+            group = QTreeWidgetItem(root)
+            group.setText(0, f"{label} ({count})")
+            group.setData(0, Qt.UserRole, {'is_analysis_group': True})
+            for finding in fetch()[:200]:
+                child = QTreeWidgetItem(group)
+                child.setText(0, finding.get('name') or '(unnamed)')
+                child.setToolTip(0, finding.get('path') or '')
+                child.setIcon(0, self._get_file_icon(
+                    (finding.get('extension') or 'unknown')))
+                child.setData(0, Qt.UserRole, {'is_finding': True,
+                                               'finding': finding})
+
+        root.setExpanded(True)
+
+    def _has_bookmarks_root(self):
+        for index in range(self.tree_viewer.topLevelItemCount()):
+            data = self.tree_viewer.topLevelItem(index).data(0, Qt.UserRole)
+            if (data or {}).get('is_bookmarks_root'):
+                return True
+        return False
+
+    # --- opening a finding ------------------------------------------
+
+    def open_finding(self, finding):
+        """Jump to the file a finding describes.
+
+        Through the same resolver a bookmark and a search result use. A
+        finding is already a row carrying an artifact_ref, which is what
+        go_to_bookmark resolves -- there is one way to turn a reference into a
+        selection, and this is not a second one.
+        """
+        if not finding.get('artifact_ref'):
+            return
+        self.go_to_bookmark({
+            'artifact_ref': finding['artifact_ref'],
+            'label': finding.get('name') or 'Finding',
+            'artifact_name': finding.get('name') or '',
+            'artifact_path': finding.get('path') or '',
+        })
+
+    def open_finding_menu(self, finding, position):
+        """The same right-click menu findings deserve everywhere else."""
+        menu = QMenu(self)
+        open_action = menu.addAction("Open")
+        open_action.triggered.connect(lambda: self.open_finding(finding))
+        menu.addSeparator()
+
+        # add_bookmark_action wants what the listing puts in a row, so the
+        # reference is taken apart into the same shape rather than teaching it
+        # a second one.
+        parsed = parse_artifact_ref(finding.get('artifact_ref'))
+        if parsed['kind'] == 'file':
+            self.add_bookmark_action(menu, {
+                'inode_number': parsed['inode'],
+                'start_offset': parsed['start_offset'],
+                'sequence': parsed['sequence'],
+                'name': finding.get('name') or '',
+                'path': finding.get('path') or '',
+            })
+        menu.exec(position)
+
+    def find_by_hash(self):
+        """Look up a hash across everything the case has analysed."""
+        if not self.case:
+            return
+        digest, accepted = QInputDialog.getText(
+            self, "Find by Hash",
+            "MD5 or SHA-256 (the kind is worked out from the length):")
+        if not accepted or not digest.strip():
+            return
+
+        rows = self.case.find_by_hash(digest)
+        if not rows:
+            message.information(
+                self, "No match",
+                f"Nothing in this case has that hash.",
+                "Only files covered by a hash analysis run can be found this "
+                "way \u2014 run Analysis \u25b8 Run Analysis Modules with "
+                "hashing selected.")
+            return
+
+        if len(rows) == 1:
+            self.open_finding(rows[0])
+            self.set_status(f"Found {rows[0].get('path') or ''}")
+            return
+
+        # More than one: the Triage tab's duplicate view already shows copies
+        # of a hash, so send them there rather than inventing a second list.
+        self.result_viewer.setCurrentWidget(self.triage_panel)
+        self.triage_panel.tabs.setCurrentIndex(2)
+        self.set_status(f"{len(rows)} files share that hash")
+
+    def mark_analysis_rows(self):
+        """Fill the analysis columns for the rows currently listed.
+
+        One query for the whole directory rather than one per row: drawing a
+        folder of 2,000 files should not be 2,000 round trips to SQLite.
+        """
+        if not self.case or not hasattr(self, 'listing_table'):
+            return
+
+        columns = self.listing_table.columnCount()
+        if columns < 15:
+            return          # an older listing layout; nothing to fill
+
+        evidence_id = self.evidence_id_for_current_image()
+        if evidence_id is None:
+            return
+
+        refs = {}
+        for row in range(self.listing_table.rowCount()):
+            item = self.listing_table.item(row, 0)
+            if item is None:
+                continue
+            data = item.data(Qt.UserRole) or {}
+            inode = data.get('inode_number')
+            if inode is None:
+                continue
+            refs[make_artifact_ref(data.get('start_offset', 0), inode,
+                                   data.get('sequence'))] = row
+
+        if not refs:
+            return
+
+        found = self.case.analysis_map(evidence_id, refs.keys())
+        for ref, row in refs.items():
+            facts = found.get(ref)
+            if not facts:
+                continue
+
+            mime = facts.get('mime') or ''
+            entropy = facts.get('entropy')
+            mismatch = facts.get('mismatch') or ''
+
+            # Mismatch first: a file whose content disagrees with its name is
+            # a stronger statement than a high score, and an encrypted
+            # document is both. Reporting only the entropy would describe the
+            # symptom and drop the finding.
+            flag = ''
+            if mismatch == 'suspicious':
+                flag = 'Type mismatch'
+            elif mismatch == 'notable':
+                flag = 'Likely encrypted'
+            elif entropy is not None and is_high_entropy(
+                    entropy, facts.get('entropy_peak') or 0, mime):
+                flag = 'High entropy'
+
+            for column, value in ((12, mime),
+                                  (13, f"{entropy:.2f}" if entropy else ''),
+                                  (14, flag)):
+                cell = QTableWidgetItem(str(value))
+                if column == 14 and flag:
+                    # The flag is the one thing here worth colouring: it is a
+                    # claim that something is wrong, and it should not read
+                    # like another metadata column.
+                    cell.setForeground(QBrush(QColor('#C62828')))
+                    if mismatch == 'suspicious':
+                        tip = (f"Claims .{facts.get('extension') or ''}, "
+                               f"content is {mime}")
+                    elif mismatch == 'notable':
+                        tip = (f"Claims .{facts.get('extension') or ''}, but "
+                               f"the content cannot be identified and scores "
+                               f"{entropy:.2f} of a possible 8.00")
+                    else:
+                        tip = f"Entropy {entropy:.2f} of a possible 8.00"
+                    cell.setToolTip(tip)
+                self.listing_table.setItem(row, column, cell)
+
     def mark_bookmarked_rows(self):
         """Put the bookmark mark on rows that have one, in place.
 
@@ -1957,14 +2359,45 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         parent = None
+        fs_info = None
         try:
             fs_info = self.image_handler.get_fs_info(offset)
-            if fs_info is not None:
+        except Exception as exc:
+            logger.debug("Could not open the filesystem at %s: %s",
+                         offset, exc)
+
+        # By path first. open_meta(inode=...) returns a file with no name
+        # entry -- info.name is None -- so it cannot say what the parent is,
+        # and every file outside the root used to fall through to the root
+        # and select nothing. Opening the same file by path does carry the
+        # name entry, and with it the real par_addr.
+        artifact_path = (data.get('path') or '').replace('\\', '/')
+        if fs_info is not None and artifact_path:
+            try:
+                located = fs_info.open(artifact_path)
+                parent = getattr(located.info.name, 'par_addr', None)
+            except Exception as exc:
+                logger.debug("Could not open %s by path: %s",
+                             artifact_path, exc)
+
+        # No path, or the path no longer resolves: ask by inode anyway. It
+        # answers for some filesystems, and costs nothing when it does not.
+        if parent is None and fs_info is not None:
+            try:
                 meta = fs_info.open_meta(inode=inode)
                 parent = getattr(meta.info.name, 'par_addr', None)
-        except Exception as exc:
-            logger.debug("Could not find the parent of inode %s: %s",
-                         inode, exc)
+            except Exception as exc:
+                logger.debug("Could not find the parent of inode %s: %s",
+                             inode, exc)
+
+        # Last resort: the directory the path names, resolved directly. This
+        # is what recovers a file whose own entry has gone.
+        if parent is None and fs_info is not None and '/' in artifact_path:
+            directory = artifact_path.rsplit('/', 1)[0] or '/'
+            try:
+                parent = fs_info.open_dir(path=directory).info.fs_file.meta.addr
+            except Exception as exc:
+                logger.debug("Could not open directory %s: %s", directory, exc)
 
         if parent is None:
             parent = self.image_handler.get_root_inode(offset)
@@ -2256,6 +2689,26 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def cleanup_resources(self):
         """Clean up all resources when closing the application."""
+        # Background jobs first, and cooperatively. The sweep below looks for
+        # QThreads held on attributes and calls quit() on them; the analysis
+        # worker is held in _active_workers instead, and quit() would not stop
+        # it anyway -- it ends an event loop, and this thread is inside a walk
+        # over the evidence. Left running, it would keep reading an image
+        # whose handler is closed a few lines further down.
+        try:
+            if getattr(self, 'job_bar', None) is not None:
+                self.job_bar.cancel_all()
+            for worker in list(getattr(self, '_active_workers', ())):
+                if hasattr(worker, 'stop'):
+                    worker.stop()
+            for worker in list(getattr(self, '_active_workers', ())):
+                if worker.isRunning():
+                    # Generous, because the wait is for the current file to
+                    # finish rather than for the whole run.
+                    worker.wait(5000)
+        except Exception as exc:
+            logger.error("Error stopping background jobs: %s", exc)
+
         # Clean up application viewer first to ensure media players are properly shut down
         try:
             if hasattr(self, 'application_viewer'):
@@ -3298,8 +3751,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     #: Widest a listing column may grow when fitted. Path and Attributes hold
     #: strings long enough to push the timestamps off screen, so they elide
-    #: with a tooltip rather than setting the table's width.
-    _LISTING_COLUMN_CAPS = {8: 420, 11: 320}
+    #: with a tooltip rather than setting the table's width. Detected Type is
+    #: capped for the same reason: a full MIME string is longer than the
+    #: filename it describes.
+    _LISTING_COLUMN_CAPS = {8: 420, 11: 320, 12: 200}
 
     def _fit_listing_columns(self):
         """Size the listing's columns to what the current directory holds.

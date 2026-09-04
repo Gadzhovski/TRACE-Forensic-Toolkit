@@ -1390,3 +1390,67 @@ QLabel#statusContext {
     color: #6b7480;
     padding-right: 4px;
 }
+
+/* --- Background jobs, in the status bar ------------------------------- */
+
+QLabel#jobBarLabel {
+    color: #495057;
+    padding-right: 4px;
+}
+
+QProgressBar#jobBarProgress {
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    text-align: center;
+    background-color: #f5f5f5;
+    color: #212529;
+    font-size: 11px;
+}
+
+QProgressBar#jobBarProgress::chunk {
+    /* Blue, not the verification green: this bar reports work in progress,
+       and green here would read as an outcome that has not happened yet. */
+    background-color: #2F6FD0;
+    border-radius: 3px;
+}
+
+QPushButton#jobBarCancel {
+    padding: 1px 10px;
+    font-size: 11px;
+}
+
+/* --- Analysis modules dialog ------------------------------------------ */
+
+QLabel#analysisModulesIntro {
+    color: #212529;
+    padding-bottom: 4px;
+}
+
+QCheckBox#analysisModuleCheck {
+    font-weight: bold;
+    padding-top: 4px;
+}
+
+QLabel#analysisModuleNote {
+    color: #6c757d;
+    padding-bottom: 6px;
+}
+
+QLabel#analysisModulesFooter {
+    color: #868e96;
+    font-size: 11px;
+    padding-top: 6px;
+}
+
+/* --- Triage panel ----------------------------------------------------- */
+
+QLabel#triageStatus {
+    color: #495057;
+}
+
+QTableWidget#triageTable {
+    /* No background declared: the panel sits in the same dock as the other
+       tables and should be the same colour as them, which it already is by
+       inheritance. Declaring one here is how the last mismatch happened. */
+    gridline-color: #dee2e6;
+}

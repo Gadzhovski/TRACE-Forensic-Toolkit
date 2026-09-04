@@ -3,6 +3,7 @@
 import logging
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from trace_app import __version__
@@ -79,4 +80,11 @@ def main():
 
     window = MainWindow(case=None if case is TRIAGE else case)
     window.show()
+
+    # Once the window is up and the case's evidence has been reopened, ask
+    # what to examine. Deferred by a beat so the offer lands on a drawn
+    # window rather than over a half-built one.
+    if case is not TRIAGE:
+        QTimer.singleShot(0, window.offer_analysis_modules)
+
     return app.exec()
