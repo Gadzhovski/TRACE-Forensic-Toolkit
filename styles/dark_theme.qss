@@ -983,7 +983,6 @@ QLabel#searchStatus {
 }
 
 QTableWidget#searchResults {
-    background-color: #232323;
     border: 1px solid #3C3C3C;
 }
 
@@ -1002,7 +1001,6 @@ QLabel#archiveSummary {
 }
 
 QTableWidget#archiveTable {
-    background-color: #232323;
     border: 1px solid #3C3C3C;
 }
 
@@ -1015,7 +1013,6 @@ QLabel#notesScope {
 }
 
 QTextEdit#notesEditor, QTableWidget#notesTable {
-    background-color: #232323;
     border: 1px solid #3C3C3C;
 }
 
@@ -1028,12 +1025,14 @@ QLabel#bookmarksEmpty {
 }
 
 QTableWidget#bookmarksTable {
-    background-color: #232323;
     border: 1px solid #3C3C3C;
 }
 
 /* ============ Cases ============ */
 
+/* No background of their own: they take the dialog colour the rest of
+   the application uses, so a new dialog cannot introduce a second opinion
+   about what a dialog looks like. */
 QDialog#caseLauncher,
 QDialog#newCaseDialog,
 QDialog#casePropertiesDialog {
@@ -1067,7 +1066,6 @@ QPushButton#launcherButton {
 }
 
 QListWidget#recentCaseList {
-    background-color: #232323;
     border: 1px solid #3C3C3C;
     border-radius: 4px;
 }

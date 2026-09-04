@@ -960,7 +960,6 @@ QLabel#searchStatus {
 }
 
 QTableWidget#searchResults {
-    background-color: #FFFFFF;
     border: 1px solid #D0D0D0;
 }
 
@@ -979,7 +978,6 @@ QLabel#archiveSummary {
 }
 
 QTableWidget#archiveTable {
-    background-color: #FFFFFF;
     border: 1px solid #D0D0D0;
 }
 
@@ -992,7 +990,6 @@ QLabel#notesScope {
 }
 
 QTextEdit#notesEditor, QTableWidget#notesTable {
-    background-color: #FFFFFF;
     border: 1px solid #D0D0D0;
 }
 
@@ -1005,16 +1002,17 @@ QLabel#bookmarksEmpty {
 }
 
 QTableWidget#bookmarksTable {
-    background-color: #FFFFFF;
     border: 1px solid #D0D0D0;
 }
 
 /* ============ Cases ============ */
 
+/* The same white every other dialog uses. #F5F5F5 here made each new
+   dialog read as a grey card sitting on the window. */
 QDialog#caseLauncher,
 QDialog#newCaseDialog,
 QDialog#casePropertiesDialog {
-    background-color: #F5F5F5;
+    background-color: #ffffff;
 }
 
 QLabel#launcherTitle {
@@ -1044,7 +1042,6 @@ QPushButton#launcherButton {
 }
 
 QListWidget#recentCaseList {
-    background-color: #FFFFFF;
     border: 1px solid #D0D0D0;
     border-radius: 4px;
 }

@@ -10,8 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import pytsk3
 from Registry import Registry
-from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer
-from PySide6.QtGui import QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap, QColor, QCursor
+from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QUrl
+from PySide6.QtGui import (QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap,
+                           QColor, QCursor, QDesktopServices)
 from PySide6.QtCharts import QChart
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
