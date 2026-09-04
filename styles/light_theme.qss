@@ -67,6 +67,12 @@ QComboBox QAbstractItemView::item {
     border: none;
 }
 
+/* Selected AND hovered, together. The popup marks its current entry
+   selected, and QListWidget::item:selected elsewhere in this file does not
+   match it -- the popup is a QListView -- so the item fell through to the
+   platform's own colour and rendered near-white on near-white: the current
+   choice was the one entry in the list nobody could read. */
+QComboBox QAbstractItemView::item:selected,
 QComboBox QAbstractItemView::item:hover {
     background-color: #1a73e8;
     color: #FFFFFF;
