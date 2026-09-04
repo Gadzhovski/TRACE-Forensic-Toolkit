@@ -893,6 +893,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.search_panel = SearchPanel()
         self.search_panel.set_case(self.case)
         self.search_panel.result_activated.connect(self.open_search_result)
+        # The listing's own icon lookup, so a result looks like the file it is.
+        self.search_panel.icon_resolver = self._get_file_icon
 
         # Search results get their own tab rather than borrowing the listing
         # table. Sharing it meant every search toggled columns and saved and

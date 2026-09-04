@@ -19,6 +19,7 @@ from trace_app.core.search_index import (INDEX_CANCELLED, INDEX_DONE,
                                          INDEX_FAILED, INDEX_RUNNING,
                                          MAX_FILE_BYTES, MAX_TEXT_PER_FILE)
 from trace_app.core.text_extract import extract_text
+from trace_app.infra.utils import safe_datetime
 
 logger = logging.getLogger('TRACE.Indexer')
 
@@ -191,7 +192,7 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
 
             _index_file(image_handler, index, evidence_id, offset, inode,
                         getattr(meta, 'seq', None), name, child_path,
-                        meta.size)
+                        meta.size, _entry_times(meta))
 
             # Committing periodically means a cancel or a crash keeps most of
             # the work rather than none of it.
@@ -204,29 +205,48 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
     return done
 
 
+def _entry_times(meta):
+    """The four timestamps a listing shows, formatted as it formats them."""
+    return {
+        'created': safe_datetime(getattr(meta, 'crtime', None)),
+        'accessed': safe_datetime(getattr(meta, 'atime', None)),
+        'modified': safe_datetime(getattr(meta, 'mtime', None)),
+        'changed': safe_datetime(getattr(meta, 'ctime', None)),
+        'is_deleted': not bool(int(meta.flags)
+                               & pytsk3.TSK_FS_META_FLAG_ALLOC),
+    }
+
+
 def _index_file(image_handler, index, evidence_id, offset, inode, sequence,
-                name, path, size):
+                name, path, size, times=None):
     """Index one file, and the members of it if it is an archive."""
     ref = make_artifact_ref(offset, inode, sequence)
+    times = times or {}
+    facts = dict(inode=inode, start_offset=offset,
+                 created_utc=times.get('created', ''),
+                 accessed_utc=times.get('accessed', ''),
+                 mtime_utc=times.get('modified', ''),
+                 changed_utc=times.get('changed', ''),
+                 is_deleted=times.get('is_deleted', False))
 
     if size > MAX_FILE_BYTES:
         # Too large to read; still worth finding by name.
-        index.add_item(evidence_id, ref, 'file', name, path, '', size)
+        index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)
         return
 
     try:
         content, _meta = image_handler.get_file_content(inode, offset)
     except Exception as exc:
         logger.debug("Could not read %s: %s", path, exc)
-        index.add_item(evidence_id, ref, 'file', name, path, '', size)
+        index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)
         return
 
     if not content:
-        index.add_item(evidence_id, ref, 'file', name, path, '', size)
+        index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)
         return
 
     text = extract_text(content, name, limit=MAX_TEXT_PER_FILE)
-    index.add_item(evidence_id, ref, 'file', name, path, text, size)
+    index.add_item(evidence_id, ref, 'file', name, path, text, size, **facts)
 
     # An archive's members are what an examiner is looking for; the archive
     # itself is just the container they arrived in.

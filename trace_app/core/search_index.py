@@ -29,7 +29,7 @@ logger = logging.getLogger('TRACE.Search')
 #: Bumped when the index schema changes. The index is a cache -- it can always
 #: be rebuilt from the evidence -- so a version bump discards it rather than
 #: migrating.
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 
 #: Largest amount of text taken from one file. A 20 MB log is worth indexing;
 #: taking all of a 2 GB one costs more than it returns.
@@ -116,7 +116,15 @@ class SearchIndex:
                 name          TEXT,
                 path          TEXT,
                 size          INTEGER,
+                -- The same facts the listing shows, so a result can be read
+                -- without going back to the file to find out about it.
+                inode         INTEGER,
+                start_offset  INTEGER,
+                created_utc   TEXT,
+                accessed_utc  TEXT,
                 mtime_utc     TEXT,
+                changed_utc   TEXT,
+                is_deleted    INTEGER DEFAULT 0,
                 mime          TEXT,
                 indexed_utc   TEXT,
                 body          TEXT
@@ -162,11 +170,15 @@ class SearchIndex:
     # --- writing ----------------------------------------------------------
 
     def add_item(self, evidence_id, artifact_ref, kind, name, path,
-                 body='', size=0, mtime_utc='', mime=''):
+                 body='', size=0, mtime_utc='', mime='', inode=None,
+                 start_offset=None, created_utc='', accessed_utc='',
+                 changed_utc='', is_deleted=False):
         """Index one artifact. Returns its item id.
 
         `body` is the extracted text; an empty body still produces a row, so
-        the artifact is findable by name and path.
+        the artifact is findable by name and path. The remaining fields are
+        what a listing row shows, recorded so a result can be read where it
+        stands.
         """
         import datetime
         now = datetime.datetime.now(datetime.timezone.utc).replace(
@@ -174,10 +186,12 @@ class SearchIndex:
 
         cursor = self._db.execute(
             "INSERT INTO indexed_items (evidence_id, artifact_ref, kind, name,"
-            " path, size, mtime_utc, mime, indexed_utc, body) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (evidence_id, artifact_ref, kind, name, path, size, mtime_utc,
-             mime, now, body or ''))
+            " path, size, inode, start_offset, created_utc, accessed_utc,"
+            " mtime_utc, changed_utc, is_deleted, mime, indexed_utc, body) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, artifact_ref, kind, name, path, size, inode,
+             start_offset, created_utc, accessed_utc, mtime_utc, changed_utc,
+             1 if is_deleted else 0, mime, now, body or ''))
         item_id = cursor.lastrowid
 
         # An external-content FTS table indexes the row it mirrors, so the
