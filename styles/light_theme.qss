@@ -46,6 +46,39 @@ QComboBox {
     background-color: #ffffff;
     selection-background-color: #56CCF2;
 }
+/* The popup list a combo box opens. Qt does not inherit the closed
+   control's styling into it, so without this the list is drawn by the
+   platform: no frame, and on a dark theme, near-invisible. This covers every
+   combo in the application, not just the search examples. */
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    color: #202124;
+    border: 1px solid #C0C0C0;
+    border-radius: 4px;
+    padding: 2px;
+    outline: none;
+    selection-background-color: #1a73e8;
+    selection-color: #FFFFFF;
+}
+
+QComboBox QAbstractItemView::item {
+    padding: 4px 8px;
+    min-height: 20px;
+    border: none;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background-color: #1a73e8;
+    color: #FFFFFF;
+}
+
+/* Group headings in the search examples: shown, but not choosable. */
+QComboBox QAbstractItemView::item:disabled {
+    color: #9aa0a6;
+    font-weight: 600;
+    background-color: transparent;
+}
+
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;

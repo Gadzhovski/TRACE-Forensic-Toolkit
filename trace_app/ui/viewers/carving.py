@@ -123,6 +123,11 @@ class FileCarvingWidget(QWidget):
     #: finishes. Anything the worker does directly -- such as sizing columns --
     #: therefore runs against a table that is not filled in yet.
     carving_finished = Signal()
+    #: Emitted with (file info, global position) when a carved file is
+    #: right-clicked, so the host can offer bookmark actions. This widget does
+    #: not know about cases; the window does.
+    carved_menu_requested = Signal(dict, object)
+
     #: Emitted when the user opens a carved file, so the host can show it in a
     #: viewer. Replaces reaching up into MainWindow directly.
     carved_file_opened = Signal(bytes, dict)
@@ -511,8 +516,36 @@ class FileCarvingWidget(QWidget):
         # A region already covering `offset` leaves no room to read at all.
         return offset if start <= offset < end else start
 
+    def selected_carved_file(self):
+        """The carved file the user right-clicked, as a dict, or None."""
+        item = self.table_widget.currentItem()
+        if item is None:
+            return None
+        name = self.table_widget.item(item.row(), 1)
+        if name is None:
+            return None
+        for info in self.carved_files:
+            if info[0] == name.text():
+                return {
+                    'name': info[0],
+                    'size': info[1],
+                    'type': info[2],
+                    'path': info[3],
+                    'embedded_date': info[4],
+                    'date_source': info[5],
+                }
+        return None
+
     def open_context_menu(self, position):
         menu = QMenu()
+
+        # A carved file is an artifact like any other, so it gets the same
+        # bookmark actions. The host fills them in: it owns the case.
+        info = self.selected_carved_file()
+        if info is not None:
+            self.carved_menu_requested.emit(
+                info, self.table_widget.viewport().mapToGlobal(position))
+            return
 
         open_location_action = QAction("Open File Location")
         open_location_action.triggered.connect(self.open_file_location)

@@ -157,6 +157,11 @@ class SearchPanel(QWidget):
     #: Emitted with a result row when the user opens one.
     result_activated = Signal(dict)
 
+    #: Emitted with (row, global position) when a result is right-clicked, so
+    #: the host can offer the same bookmark actions the listing has. The panel
+    #: does not know about cases; the window does.
+    result_menu_requested = Signal(dict, object)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case = None
@@ -254,6 +259,8 @@ class SearchPanel(QWidget):
         self.results.horizontalHeader().setSectionResizeMode(
             QHeaderView.Interactive)
         self.results.itemDoubleClicked.connect(self._activate)
+        self.results.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.results.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.results)
 
         self.set_case(None)
@@ -452,6 +459,15 @@ class SearchPanel(QWidget):
         self.status_label.setText(
             f"{len(rows):,} result(s) for {query!r}"
             + ("  (showing the first 500)" if len(rows) >= 500 else ''))
+
+    def _context_menu(self, position):
+        items = self.results.selectedItems()
+        if not items:
+            return
+        row = self.results.item(items[0].row(), 0).data(Qt.UserRole)
+        if row:
+            self.result_menu_requested.emit(
+                row, self.results.viewport().mapToGlobal(position))
 
     def _activate(self, _item=None):
         items = self.results.selectedItems()

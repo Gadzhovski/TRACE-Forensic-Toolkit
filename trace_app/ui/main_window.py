@@ -38,7 +38,8 @@ from trace_app.ui.viewers.carving import FileCarvingWidget
 from trace_app.ui.viewers.hex import HexViewer
 from trace_app.core import archives
 from trace_app.infra.utils import FileSystemUtils
-from trace_app.core.case import make_artifact_ref, parse_artifact_ref
+from trace_app.core.case import (make_artifact_ref, make_span_ref,
+                                 parse_artifact_ref)
 from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
 from trace_app.infra.paths import config_file, resource_path
@@ -879,6 +880,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # through a MainWindow reference into db_manager.
         self.deleted_files_widget.icon_resolver = self.db_manager.get_icon_path
         self.deleted_files_widget.carved_file_opened.connect(self.update_viewer_with_file_content)
+        self.deleted_files_widget.carved_menu_requested.connect(
+            self.open_carved_menu)
         self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
 
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
@@ -895,6 +898,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.search_panel.result_activated.connect(self.open_search_result)
         # The listing's own icon lookup, so a result looks like the file it is.
         self.search_panel.icon_resolver = self._get_file_icon
+        self.search_panel.result_menu_requested.connect(
+            self.open_search_result_menu)
 
         # Search results get their own tab rather than borrowing the listing
         # table. Sharing it meant every search toggled columns and saved and
@@ -1340,6 +1345,82 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.update_viewer_with_file_content(content, data)
         self.set_status(f"{name} — read from inside an archive")
 
+    def open_carved_menu(self, info, position):
+        """The context menu for a carved file.
+
+        A carved file has no inode -- it was recovered from unallocated space,
+        which is the whole point -- so it is referenced by the offset it was
+        found at, which is also what names it on disk.
+        """
+        menu = QMenu(self)
+        open_action = menu.addAction("Open Externally")
+        location_action = menu.addAction("Open File Location")
+
+        offset_hex = os.path.splitext(info['name'])[0]
+        try:
+            offset = int(offset_hex, 16)
+        except ValueError:
+            offset = None
+
+        if offset is not None and self.case:
+            menu.addSeparator()
+            size = info.get('size') or 0
+            size = int(size) if str(size).isdigit() else 0
+            ref = make_span_ref(self.current_offset or 0, offset, offset + size)
+            existing = self.case.bookmark_for_artifact(
+                self.evidence_id_for_current_image(), ref)
+            if existing:
+                remove = menu.addAction("Remove Bookmark")
+                remove.triggered.connect(
+                    lambda: self._remove_bookmark_and_refresh(existing))
+            else:
+                add = menu.addAction("Add Bookmark")
+                add.triggered.connect(
+                    lambda: self._bookmark_carved(info, ref))
+
+        chosen = menu.exec_(position)
+        if chosen == open_action:
+            self.deleted_files_widget.open_image()
+        elif chosen == location_action:
+            self.deleted_files_widget.open_file_location()
+
+    def _bookmark_carved(self, info, ref):
+        label, ok = QInputDialog.getText(
+            self, "Add bookmark", "Label:", text=info['name'])
+        if not ok or not label.strip():
+            return
+        self.case.add_bookmark(
+            self.evidence_id_for_current_image(), ref, label.strip(),
+            artifact_name=info['name'], artifact_path=info.get('path') or '')
+        self.refresh_bookmarks()
+        self.set_status(f"Bookmarked {label.strip()}")
+
+    def open_search_result_menu(self, row, position):
+        """The context menu for a search result.
+
+        A result names the same artifact a listing row does, so it gets the
+        same actions -- there is no reason bookmarking should depend on which
+        table the examiner found the file in.
+        """
+        parsed = parse_artifact_ref(row.get('artifact_ref'))
+        data = {
+            'name': row.get('name') or '',
+            'path': row.get('path') or '',
+            'type': 'file',
+            'inode_number': parsed.get('inode'),
+            'start_offset': parsed.get('start_offset'),
+            'sequence': parsed.get('sequence'),
+        }
+
+        menu = QMenu(self)
+        open_action = menu.addAction("Open")
+        menu.addSeparator()
+        self.add_bookmark_action(menu, data)
+
+        chosen = menu.exec_(position)
+        if chosen == open_action:
+            self.open_search_result(row)
+
     def open_search_result(self, row):
         """Open whatever a search result points at.
 
@@ -1579,6 +1660,51 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             data['evidence_id'] = self.evidence_id_for_current_image()
         return data
 
+    def add_bookmark_action(self, menu, data, refresh=None):
+        """Put Add or Remove Bookmark into `menu` for whatever `data` names.
+
+        One method rather than an entry hand-written per menu: bookmarking was
+        only reachable from the listing and the tree because each menu had its
+        own copy, and a table added later simply had neither.
+
+        `refresh` is called after the change, for a view that has to redraw
+        itself rather than being redrawn by refresh_bookmarks.
+        """
+        if not self.case:
+            action = menu.addAction("Add Bookmark")
+            action.setEnabled(False)
+            action.setToolTip("Bookmarks are kept in a case.")
+            return
+
+        ref = self.artifact_ref_for(data)
+        if ref is None:
+            return
+
+        existing = self.case.bookmark_for_artifact(
+            self.evidence_id_for_current_image(), ref)
+
+        if existing:
+            action = menu.addAction("Remove Bookmark")
+            action.triggered.connect(
+                lambda: self._remove_bookmark_and_refresh(existing, refresh))
+        else:
+            action = menu.addAction("Add Bookmark")
+            action.triggered.connect(
+                lambda: self._add_bookmark_and_refresh(data, refresh))
+        return action
+
+    def _add_bookmark_and_refresh(self, data, refresh=None):
+        self.add_bookmark_for(data)
+        if refresh:
+            refresh()
+
+    def _remove_bookmark_and_refresh(self, row, refresh=None):
+        self.case.remove_bookmark(row['id'])
+        self.refresh_bookmarks()
+        self.set_status(f"Removed bookmark {row.get('label') or ''}".strip())
+        if refresh:
+            refresh()
+
     def add_bookmark_for(self, data, suggested_label=None):
         """Bookmark the artifact `data` describes."""
         if not self.case:
@@ -1607,6 +1733,41 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             artifact_path=data.get('path') or '')
         self.refresh_bookmarks()
         self.set_status(f"Bookmarked {label.strip()}")
+
+    def mark_bookmarked_tree_items(self, parent=None):
+        """Show which files in the tree carry a bookmark.
+
+        Walks only what has been expanded: an unexpanded node has no visible
+        children to mark, and populating the whole tree to draw an icon would
+        read every directory in the image.
+        """
+        if not hasattr(self, 'tree_viewer'):
+            return
+
+        if parent is None:
+            for index in range(self.tree_viewer.topLevelItemCount()):
+                item = self.tree_viewer.topLevelItem(index)
+                data = item.data(0, Qt.UserRole) or {}
+                if data.get('is_bookmarks_root'):
+                    continue        # the Bookmarks node is not itself a file
+                self.mark_bookmarked_tree_items(item)
+            return
+
+        for index in range(parent.childCount()):
+            child = parent.child(index)
+            data = child.data(0, Qt.UserRole) or {}
+            inode = data.get('inode_number')
+            if inode is not None:
+                ref = make_artifact_ref(data.get('start_offset', 0), inode,
+                                        data.get('sequence'))
+                bookmarked = ref in self._bookmarked_refs
+                font = child.font(0)
+                font.setBold(bookmarked)
+                child.setFont(0, font)
+                child.setToolTip(
+                    0, "Bookmarked in this case." if bookmarked else "")
+            if child.isExpanded():
+                self.mark_bookmarked_tree_items(child)
 
     def mark_bookmarked_rows(self):
         """Put the bookmark mark on rows that have one, in place.
@@ -1659,8 +1820,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if getattr(self, 'bookmarks_panel', None) is not None:
             self.bookmarks_panel.refresh()
         self.refresh_bookmarks_tree()
-        # Redraw the listing so a newly bookmarked row picks up its mark.
+        # Both places a file is shown pick the change up now, rather than the
+        # next time the directory happens to be rebuilt -- a bookmark removed
+        # used to stay marked until the examiner navigated away and back.
         self.mark_bookmarked_rows()
+        self.mark_bookmarked_tree_items()
 
     def refresh_bookmarks_tree(self):
         """Rebuild the Bookmarks node at the top of the tree.
@@ -3345,12 +3509,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Add separator
                 menu.addSeparator()
 
-            bookmark_action = menu.addAction("Add Bookmark")
-            bookmark_action.setEnabled(self.case is not None)
-            if self.case is None:
-                bookmark_action.setToolTip("Bookmarks are kept in a case.")
-            bookmark_action.triggered.connect(
-                lambda: self.add_bookmark_for(data))
+            self.add_bookmark_action(menu, data)
             menu.addSeparator()
 
             # Add the 'Export' option for any file or folder
@@ -3461,10 +3620,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     lambda _=False, p=image_path: self.verify_image(p))
 
             if data and data.get('inode_number') is not None:
-                bookmark_action = menu.addAction("Add Bookmark")
-                bookmark_action.setEnabled(self.case is not None)
-                bookmark_action.triggered.connect(
-                    lambda: self.add_bookmark_for(data))
+                self.add_bookmark_action(menu, data)
                 menu.addSeparator()
 
             # Add the 'Export' option for any file or folder
