@@ -89,6 +89,19 @@ EXAMPLES = [
 ]
 
 
+#: How each entity kind reads in the summary. Plural, because the summary is
+#: always reporting a count.
+ENTITY_LABELS = {
+    'email': 'email addresses',
+    'url': 'URLs',
+    'domain': 'domains',
+    'ip': 'IPv4 addresses',
+    'ipv6': 'IPv6 addresses',
+    'hash': 'hashes',
+    'btc': 'Bitcoin addresses',
+}
+
+
 class IndexWorker(QThread):
     """Runs the indexer off the UI thread."""
 
@@ -201,11 +214,23 @@ class SearchPanel(QWidget):
         self.status_label.setWordWrap(True)
         index_row.addWidget(self.status_label, 1)
 
+        # What the index holds, kept on screen. It says what is in the
+        # evidence before the examiner knows what to ask for, so a search
+        # should not be what makes it disappear. Each count is a link: reading
+        # "8 email" and then having to type "email:" is a step that need not
+        # exist.
+        self.summary_label = QLabel()
+        self.summary_label.setObjectName("searchSummary")
+        self.summary_label.setWordWrap(True)
+        self.summary_label.setTextFormat(Qt.RichText)
+        self.summary_label.linkActivated.connect(self._run_linked_query)
+
         self.index_button = QPushButton("Build Index")
         self.index_button.setFixedHeight(CONTROL_HEIGHT)
         self.index_button.clicked.connect(self.toggle_indexing)
         index_row.addWidget(self.index_button)
         layout.addLayout(index_row)
+        layout.addWidget(self.summary_label)
 
         self.progress = QProgressBar()
         self.progress.setObjectName("searchProgress")
@@ -261,21 +286,42 @@ class SearchPanel(QWidget):
             self.status_label.setText(
                 "Quick triage — universal search needs a case, because the "
                 "index is kept with it. File ▸ New Case starts one.")
+            self.summary_label.clear()
+            return
+
+        self.status_label.clear()
+        self._update_summary()
+
+    def _update_summary(self):
+        """Write what the index holds. Survives every search."""
+        if self.index is None:
+            self.summary_label.clear()
             return
 
         stats = self.index.statistics()
         if not stats['items']:
-            self.status_label.setText(
+            self.summary_label.setText(
                 "Nothing indexed yet. Build the index to search inside file "
                 "contents, registry values and archives.")
             return
 
-        entities = ', '.join(
-            f"{count} {kind}" for kind, count in
-            sorted(stats['entities'].items()) if count)
-        self.status_label.setText(
-            f"{stats['items']:,} item(s) indexed"
-            + (f" — {entities}" if entities else ''))
+        parts = [f"<b>{stats['items']:,}</b> item(s) indexed"]
+        links = []
+        for kind, count in sorted(stats['entities'].items()):
+            if not count:
+                continue
+            # Each count runs its own query when clicked.
+            links.append(
+                f'<a href="{kind}:">{count:,} {ENTITY_LABELS.get(kind, kind)}</a>')
+        if links:
+            parts.append(' · '.join(links))
+
+        self.summary_label.setText(' — '.join(parts))
+
+    def _run_linked_query(self, query):
+        """A count in the summary was clicked; run it."""
+        self.query_input.setText(query)
+        self.run_search()
 
     # --- indexing ---------------------------------------------------------
 
@@ -313,6 +359,7 @@ class SearchPanel(QWidget):
         self.progress.setVisible(False)
         self.index_button.setText("Rebuild Index")
         self.index_button.setEnabled(True)
+        self.status_label.clear()
         if error:
             message.warning(self, "Indexing failed", error)
 
@@ -343,7 +390,8 @@ class SearchPanel(QWidget):
         query = self.query_input.text().strip()
         if not query:
             self.results.setRowCount(0)
-            self._update_status()
+            self.status_label.clear()
+            self._update_summary()
             return
 
         try:
@@ -400,6 +448,7 @@ class SearchPanel(QWidget):
                 self.results.setItem(position, column, cell)
 
         fit_columns(self.results, {1: 300, 7: 260})
+        # Only the result line; the summary of what the index holds stays put.
         self.status_label.setText(
             f"{len(rows):,} result(s) for {query!r}"
             + ("  (showing the first 500)" if len(rows) >= 500 else ''))

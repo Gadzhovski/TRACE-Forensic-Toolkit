@@ -959,6 +959,18 @@ QLabel#searchStatus {
     padding: 2px 4px;
 }
 
+QLabel#searchSummary {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+/* The entity counts are links that run their own query. */
+QLabel#searchSummary a {
+    color: #1a73e8;
+    text-decoration: none;
+}
+
 QTableWidget#searchResults {
     border: 1px solid #D0D0D0;
 }
