@@ -214,28 +214,34 @@ class SearchPanel(QWidget):
         index_row = QHBoxLayout()
         index_row.setSpacing(6)
 
-        self.status_label = QLabel()
-        self.status_label.setObjectName("searchStatus")
-        self.status_label.setWordWrap(True)
-        index_row.addWidget(self.status_label, 1)
-
-        # What the index holds, kept on screen. It says what is in the
-        # evidence before the examiner knows what to ask for, so a search
-        # should not be what makes it disappear. Each count is a link: reading
-        # "8 email" and then having to type "email:" is a step that need not
-        # exist.
+        # What the index holds, beside the button that builds it. It says what
+        # is in the evidence before the examiner knows what to ask for, so a
+        # search should not be what makes it disappear -- and it belongs in
+        # the width next to Build Index rather than on a row of its own, which
+        # left that space empty and cost a line of the panel.
+        #
+        # Each count is a link: reading "8 email addresses" and then having to
+        # type "email:" is a step that need not exist.
         self.summary_label = QLabel()
         self.summary_label.setObjectName("searchSummary")
         self.summary_label.setWordWrap(True)
         self.summary_label.setTextFormat(Qt.RichText)
         self.summary_label.linkActivated.connect(self._run_linked_query)
+        index_row.addWidget(self.summary_label, 1)
 
         self.index_button = QPushButton("Build Index")
         self.index_button.setFixedHeight(CONTROL_HEIGHT)
         self.index_button.clicked.connect(self.toggle_indexing)
         index_row.addWidget(self.index_button)
         layout.addLayout(index_row)
-        layout.addWidget(self.summary_label)
+
+        # The result count and indexing progress. Below the summary rather
+        # than beside it, because it changes with every search while the
+        # summary stays.
+        self.status_label = QLabel()
+        self.status_label.setObjectName("searchStatus")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
 
         self.progress = QProgressBar()
         self.progress.setObjectName("searchProgress")
@@ -290,14 +296,23 @@ class SearchPanel(QWidget):
         self.index_button.setEnabled(has_case and self.image_handler is not None)
 
         if not has_case:
-            self.status_label.setText(
+            self._set_status(
                 "Quick triage — universal search needs a case, because the "
                 "index is kept with it. File ▸ New Case starts one.")
             self.summary_label.clear()
             return
 
-        self.status_label.clear()
+        self._set_status()
         self._update_summary()
+
+    def _set_status(self, text=''):
+        """Say something below the summary, or take the row back.
+
+        An empty label still occupies a line. In a panel this size that is a
+        row of results, so the label is hidden when it has nothing to say.
+        """
+        self.status_label.setText(text)
+        self.status_label.setVisible(bool(text))
 
     def _update_summary(self):
         """Write what the index holds. Survives every search."""
@@ -360,13 +375,13 @@ class SearchPanel(QWidget):
         if total:
             self.progress.setMaximum(total)
             self.progress.setValue(done)
-        self.status_label.setText(f"Indexing {done:,} of {total:,} — {path}")
+        self._set_status(f"Indexing {done:,} of {total:,} — {path}")
 
     def _on_indexed(self, count, error):
         self.progress.setVisible(False)
         self.index_button.setText("Rebuild Index")
         self.index_button.setEnabled(True)
-        self.status_label.clear()
+        self._set_status()
         if error:
             message.warning(self, "Indexing failed", error)
 
@@ -397,7 +412,7 @@ class SearchPanel(QWidget):
         query = self.query_input.text().strip()
         if not query:
             self.results.setRowCount(0)
-            self.status_label.clear()
+            self._set_status()
             self._update_summary()
             return
 
@@ -411,7 +426,7 @@ class SearchPanel(QWidget):
                 for row in rows:
                     row['evidence_name'] = names.get(row.get('evidence_id'), '')
         except SearchError as exc:
-            self.status_label.setText(str(exc))
+            self._set_status(str(exc))
             self.results.setRowCount(0)
             return
 
@@ -456,7 +471,7 @@ class SearchPanel(QWidget):
 
         fit_columns(self.results, {1: 300, 7: 260})
         # Only the result line; the summary of what the index holds stays put.
-        self.status_label.setText(
+        self._set_status(
             f"{len(rows):,} result(s) for {query!r}"
             + ("  (showing the first 500)" if len(rows) >= 500 else ''))
 
