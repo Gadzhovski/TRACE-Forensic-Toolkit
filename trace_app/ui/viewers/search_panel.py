@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from trace_app.core.image_handler import ImageHandler
 from trace_app.core.indexer import index_evidence
 from trace_app.core.search_index import (INDEX_DONE, SearchError, SearchIndex)
 from trace_app.infra.constants import CONTROL_HEIGHT, TABLE_ROW_HEIGHT
@@ -53,10 +54,15 @@ class IndexWorker(QThread):
     progressed = Signal(int, int, str)
     finished_indexing = Signal(int, str)
 
-    def __init__(self, image_handler, index, evidence_id, parent=None):
+    def __init__(self, image_path, case_folder, evidence_id, parent=None):
         super().__init__(parent)
-        self.image_handler = image_handler
-        self.index = index
+        # Paths, not open objects. A SQLite connection belongs to the thread
+        # that created it, and pytsk3's image handle is no better: an
+        # ImageHandler opened by the UI thread reports N/A for every volume
+        # when read from here, so indexing walked nothing and reported
+        # success. The worker opens its own of each.
+        self.image_path = image_path
+        self.case_folder = case_folder
         self.evidence_id = evidence_id
         self._stop = False
 
@@ -64,9 +70,16 @@ class IndexWorker(QThread):
         self._stop = True
 
     def run(self):
+        index = None
+        handler = None
         try:
+            index = SearchIndex(self.case_folder)
+            handler = ImageHandler(self.image_path)
+            if not handler.load_image():
+                raise RuntimeError(
+                    f"Could not open {self.image_path} for indexing.")
             count = index_evidence(
-                self.image_handler, self.index, self.evidence_id,
+                handler, index, self.evidence_id,
                 progress=lambda done, total, path:
                     self.progressed.emit(done, total, path),
                 should_stop=lambda: self._stop)
@@ -74,6 +87,14 @@ class IndexWorker(QThread):
         except Exception as exc:
             logger.error("Indexing failed: %s", exc)
             self.finished_indexing.emit(0, str(exc))
+        finally:
+            if index is not None:
+                index.close()
+            if handler is not None:
+                try:
+                    handler.close_resources()
+                except Exception:
+                    pass
 
 
 class SearchPanel(QWidget):
@@ -219,8 +240,7 @@ class SearchPanel(QWidget):
         row = self.case.evidence_for_path(path) if path else None
         evidence_id = row['id'] if row else self.case.add_evidence(path)
 
-        self._worker = IndexWorker(self.image_handler, self.index, evidence_id,
-                                   self)
+        self._worker = IndexWorker(path, self.case.folder, evidence_id, self)
         self._worker.progressed.connect(self._on_progress)
         self._worker.finished_indexing.connect(self._on_indexed)
         self.progress.setVisible(True)
@@ -240,6 +260,17 @@ class SearchPanel(QWidget):
         self.index_button.setEnabled(True)
         if error:
             message.warning(self, "Indexing failed", error)
+
+        # Reopen this thread's connection: the worker wrote through its own,
+        # and a connection opened before those writes does not see them.
+        if self.case is not None:
+            try:
+                if self.index is not None:
+                    self.index.close()
+                self.index = SearchIndex(self.case.folder)
+            except Exception as exc:
+                logger.error("Could not reopen the search index: %s", exc)
+
         self._update_status()
 
     # --- searching --------------------------------------------------------

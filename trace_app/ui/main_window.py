@@ -133,6 +133,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: "where was this file found".
         self._archive_stack = []
 
+        #: Artifact references that carry a bookmark, so the listing can mark
+        #: them without asking the database once per row.
+        self._bookmarked_refs = set()
+
         #: Handlers for evidence other than the one on screen, opened on demand
         #: when a picker asks about an image that is not the current one and
         #: kept so the second click is instant.
@@ -283,6 +287,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                           modified, changed, parent_inode,
                                           entry.get("sequence"),
                                           entry.get("attributes", ""))
+
+        # A bookmarked file is marked where the examiner is looking. The
+        # bookmark glyph goes in the Type column rather than replacing the
+        # file's own icon, which still has to say what kind of file it is.
+        if self._bookmarked_refs:
+            ref = make_artifact_ref(offset, inode_number,
+                                    entry.get('sequence'))                 if inode_number is not None else None
+            if ref and ref in self._bookmarked_refs:
+                type_cell = self.listing_table.item(row_position, 2)
+                if type_cell is not None:
+                    type_cell.setIcon(icons.icon(icons.BOOKMARK))
+                    type_cell.setToolTip("Bookmarked in this case.")
+                name_cell = self.listing_table.item(row_position, 0)
+                if name_cell is not None:
+                    font = name_cell.font()
+                    font.setBold(True)
+                    name_cell.setFont(font)
 
         # An archive member has no inode, so the row payload the click handler
         # reads has to carry what identifies it instead: its name inside the
@@ -1588,15 +1609,59 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.refresh_bookmarks()
         self.set_status(f"Bookmarked {label.strip()}")
 
+    def mark_bookmarked_rows(self):
+        """Put the bookmark mark on rows that have one, in place.
+
+        Called after a bookmark is added or removed so the listing updates
+        without being rebuilt -- rebuilding would lose the scroll position and
+        the selection the examiner is working from.
+        """
+        if not hasattr(self, 'listing_table'):
+            return
+        for row in range(self.listing_table.rowCount()):
+            name_cell = self.listing_table.item(row, 0)
+            type_cell = self.listing_table.item(row, 2)
+            if name_cell is None or type_cell is None:
+                continue
+            payload = name_cell.data(Qt.UserRole) or {}
+            inode = payload.get('inode_number')
+            ref = (make_artifact_ref(payload.get('start_offset', 0), inode,
+                                     payload.get('sequence'))
+                   if inode is not None else None)
+            bookmarked = bool(ref and ref in self._bookmarked_refs)
+
+            font = name_cell.font()
+            font.setBold(bookmarked)
+            name_cell.setFont(font)
+            if bookmarked:
+                type_cell.setIcon(icons.icon(icons.BOOKMARK))
+                type_cell.setToolTip("Bookmarked in this case.")
+            else:
+                type_cell.setIcon(QIcon())
+                type_cell.setToolTip("")
+
+    def _reload_bookmarked_refs(self):
+        """Cache which artifacts are bookmarked, for the listing to mark."""
+        self._bookmarked_refs = set()
+        if not self.case:
+            return
+        for row in self.case.bookmarks():
+            ref = row.get('artifact_ref')
+            if ref:
+                self._bookmarked_refs.add(ref)
+
     def refresh_bookmarks(self):
         """Redraw both views of the bookmark list.
 
         The tree node and the dock panel show the same rows; refreshing one
         and forgetting the other is how they drift apart.
         """
+        self._reload_bookmarked_refs()
         if getattr(self, 'bookmarks_panel', None) is not None:
             self.bookmarks_panel.refresh()
         self.refresh_bookmarks_tree()
+        # Redraw the listing so a newly bookmarked row picks up its mark.
+        self.mark_bookmarked_rows()
 
     def refresh_bookmarks_tree(self):
         """Rebuild the Bookmarks node at the top of the tree.
@@ -1618,12 +1683,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         rows = self.case.bookmarks()
+        self._bookmarked_refs = {r['artifact_ref'] for r in rows
+                                 if r.get('artifact_ref')}
         if not rows:
             return
 
         root = QTreeWidgetItem(self.tree_viewer)
         root.setText(0, f"Bookmarks ({len(rows)})")
-        root.setIcon(0, icons.icon(icons.CASE))
+        root.setIcon(0, icons.icon(icons.BOOKMARK))
         root.setData(0, Qt.UserRole, {'is_bookmarks_root': True})
         # First, so it is the first thing seen rather than buried under a
         # long evidence tree.
@@ -1637,8 +1704,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             child.setToolTip(0, row.get('artifact_path')
                              or row.get('artifact_name') or '')
             name = row.get('artifact_name') or ''
-            extension = name.rsplit('.', 1)[-1].lower() if '.' in name else 'unknown'
-            child.setIcon(0, self._get_file_icon(extension))
+            if '.' in name:
+                child.setIcon(0, self._get_file_icon(
+                    name.rsplit('.', 1)[-1].lower()))
+            else:
+                # No extension to go on: the bookmark glyph says what the row
+                # is, rather than a generic unknown-file mark that says
+                # nothing.
+                child.setIcon(0, icons.icon(icons.BOOKMARK))
             # Marked as a bookmark so a click resolves it rather than trying
             # to read an inode the tree does not have.
             child.setData(0, Qt.UserRole, {'is_bookmark': True,
@@ -1688,9 +1761,60 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'size': getattr(metadata, 'size', 0) if metadata else 0,
         }
         self.current_selected_data = data
+
+        # Show the file where an examiner is actually looking: the listing,
+        # positioned in the directory that holds it, with the file selected.
+        # Selecting it in the tree alone left the listing showing whatever was
+        # there before, so a bookmark appeared to do nothing.
+        self.show_listing_for_artifact(data)
         self.select_tree_item_by_inode(inode, offset)
         self.update_viewer_with_file_content(content, data)
         self.set_status(f"Opened {data['name']}")
+
+    def show_listing_for_artifact(self, data):
+        """List the directory holding `data`, and select the file in it.
+
+        Uses the parent recorded in the filesystem rather than a path string,
+        so it works at any depth and on any filesystem -- the reason the old
+        show_file_in_directory could only ever land at the volume root.
+        """
+        offset = data.get('start_offset')
+        inode = data.get('inode_number')
+        if offset is None or inode is None:
+            return
+
+        parent = None
+        try:
+            fs_info = self.image_handler.get_fs_info(offset)
+            if fs_info is not None:
+                meta = fs_info.open_meta(inode=inode)
+                parent = getattr(meta.info.name, 'par_addr', None)
+        except Exception as exc:
+            logger.debug("Could not find the parent of inode %s: %s",
+                         inode, exc)
+
+        if parent is None:
+            parent = self.image_handler.get_root_inode(offset)
+
+        try:
+            entries = self.image_handler.get_directory_contents(offset, parent)
+        except Exception as exc:
+            logger.debug("Could not list the parent directory: %s", exc)
+            return
+
+        if not self.show_listing_entries(entries, offset,
+                                         data.get('name') or 'This folder'):
+            return
+
+        # Put the cursor on the file itself, so the row is visible and the
+        # other tabs describe it.
+        for row in range(self.listing_table.rowCount()):
+            cell = self.listing_table.item(row, 0)
+            payload = cell.data(Qt.UserRole) if cell else None
+            if payload and payload.get('inode_number') == inode:
+                self.listing_table.selectRow(row)
+                self.listing_table.scrollToItem(cell)
+                break
 
     # --- case ------------------------------------------------------------
 

@@ -54,21 +54,35 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
     done = 0
 
     try:
-        # Counting first means the progress bar is honest rather than a
-        # spinner pretending to know how far along it is.
+        # Count first so the progress bar is honest rather than a spinner
+        # pretending to know how far along it is. Volumes that cannot be
+        # opened simply count zero -- get_fs_info returns None and the walk
+        # handles it, so there is no need to ask a second question first.
+        #
+        # There used to be a get_fs_type() guard here. It depends on a cached
+        # FS_Info, gave a different answer on the worker thread than on the
+        # one that loaded the image, and skipped every volume: indexing then
+        # reported success having read nothing at all.
         for offset in offsets:
-            if image_handler.get_fs_type(offset) in ('N/A', 'Unknown'):
-                continue
             total += _count_files(image_handler, offset, should_stop)
 
+        logger.info("Indexing evidence %s: %d file(s) across %d volume(s)",
+                    evidence_id, total, len(offsets))
+        if not total:
+            logger.warning(
+                "Nothing to index in evidence %s. Volumes examined: %s",
+                evidence_id,
+                ", ".join(f"{o} ({image_handler.get_fs_type(o)})"
+                          for o in offsets))
         index.set_state(evidence_id, INDEX_RUNNING, files_total=total)
 
         for offset in offsets:
-            if image_handler.get_fs_type(offset) in ('N/A', 'Unknown'):
-                continue
+            before = done
             done = _index_partition(
                 image_handler, index, evidence_id, offset,
                 done, total, progress, should_stop)
+            if done == before:
+                logger.debug("Volume at %s contributed nothing", offset)
 
         index.commit()
         index.set_state(evidence_id, INDEX_DONE, files_done=done,
@@ -96,6 +110,7 @@ def _count_files(image_handler, offset, should_stop):
     count = 0
     fs_info = image_handler.get_fs_info(offset)
     if fs_info is None:
+        logger.debug("No filesystem to count at offset %s", offset)
         return 0
 
     def walk(directory, depth):
@@ -123,7 +138,8 @@ def _count_files(image_handler, offset, should_stop):
     except IndexerCancelled:
         raise
     except Exception as exc:
-        logger.debug("Could not count files at %s: %s", offset, exc)
+        logger.warning("Could not count files at %s: %s: %s",
+                       offset, type(exc).__name__, exc)
     return count
 
 
@@ -131,6 +147,7 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
                      progress, should_stop):
     fs_info = image_handler.get_fs_info(offset)
     if fs_info is None:
+        logger.debug("No filesystem to index at offset %s", offset)
         return done
 
     visited = set()

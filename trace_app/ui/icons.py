@@ -48,6 +48,11 @@ VERIFY_OK = "Icons/tabler/shield-check-filled.svg"
 #: it. The icon set carries no dedicated case or briefcase mark.
 CASE = "Icons/tabler/folder.svg"
 
+#: A Tabler line glyph, so it is tinted to the theme's foreground and stays
+#: visible in dark mode. The folder PNG used before was a fixed-colour bitmap:
+#: invisible against a dark tree, and pixelated once scaled to a row.
+BOOKMARK = "Icons/tabler/bookmark.svg"
+
 # --- Navigation ------------------------------------------------------------
 BACK = "Icons/tabler/arrow-left.svg"
 FORWARD = "Icons/tabler/arrow-right.svg"
