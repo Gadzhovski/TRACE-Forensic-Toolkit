@@ -3,14 +3,19 @@
     Installs TRACE and its dependencies on Windows.
 
 .DESCRIPTION
-    Checks for a supported Python, warns clearly if the Microsoft C++ Build
-    Tools are missing (pytsk3 and libewf-python are source distributions and
-    cannot build without them), creates a virtual environment, and installs
-    the requirements.
+    Checks for Python 3.10 or newer, creates a virtual environment, and
+    installs the requirements. Every package -- including the forensic
+    engines pytsk3 and libewf-python -- installs from a pre-built wheel, so
+    no compiler or Visual Studio Build Tools are needed.
+
+.PARAMETER Yes
+    Non-interactive: accept defaults (reuse an existing venv). Used by CI.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File install_windows.ps1
 #>
+
+param([switch]$Yes)
 
 $ErrorActionPreference = 'Stop'
 
@@ -38,12 +43,12 @@ foreach ($candidate in @('python', 'python3', 'py')) {
     } catch { continue }
     if (-not $ver) { continue }
     $parts = $ver.Split('.')
-    if ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge 9) {
+    if ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge 10) {
         $python = $candidate
         Write-Ok "Found $candidate (Python $ver)"
         break
     } else {
-        Write-Warn "$candidate is Python $ver - TRACE needs 3.9 or newer"
+        Write-Warn "$candidate is Python $ver - TRACE needs 3.10 or newer"
     }
 }
 
@@ -54,37 +59,11 @@ if (-not $python) {
     exit 1
 }
 
-# --- Check for a C++ toolchain --------------------------------------------
-# pytsk3 and libewf-python ship as source only. Without the Build Tools, pip
-# fails partway through with a long and fairly cryptic compiler error, so warn
-# up front instead.
-Write-Step "Checking for Microsoft C++ Build Tools..."
-
-$hasBuildTools = $false
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-if (Test-Path $vswhere) {
-    $installed = & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-    if ($installed) { $hasBuildTools = $true }
-}
-
-if ($hasBuildTools) {
-    Write-Ok "C++ build tools detected."
-} else {
-    Write-Warn "Microsoft C++ Build Tools were not detected."
-    Write-Host "  pytsk3 and libewf-python are compiled from source and need them."
-    Write-Host "  If a prebuilt wheel exists for your Python version the install"
-    Write-Host "  may still succeed; otherwise download them from:"
-    Write-Host "    https://visualstudio.microsoft.com/visual-cpp-build-tools/" -ForegroundColor White
-    Write-Host "  and select 'Desktop development with C++'."
-    $reply = Read-Host "  Continue anyway? (y/n)"
-    if ($reply -notmatch '^[Yy]') { exit 1 }
-}
-
 # --- Virtual environment ---------------------------------------------------
 Write-Step "Creating virtual environment..."
 if (Test-Path 'venv') {
     Write-Warn "A venv directory already exists."
-    $reply = Read-Host "  Recreate it? Existing packages will be lost. (y/n)"
+    $reply = if ($Yes) { 'n' } else { Read-Host "  Recreate it? Existing packages will be lost. (y/n)" }
     if ($reply -match '^[Yy]') {
         Remove-Item -Recurse -Force venv
         & $python -m venv venv
@@ -100,12 +79,16 @@ if (Test-Path 'venv') {
 # --- Dependencies ----------------------------------------------------------
 Write-Step "Installing Python packages (this can take a few minutes)..."
 $venvPy = Join-Path (Resolve-Path 'venv') 'Scripts\python.exe'
-& $venvPy -m pip install --upgrade pip setuptools wheel
-& $venvPy -m pip install -r requirements.txt
+& $venvPy -m pip install --upgrade pip
+# --only-binary for the two forensic engines: if no wheel exists for this
+# Python, say so plainly rather than attempt a C build that will fail.
+& $venvPy -m pip install --only-binary=pytsk3,libewf-python -r requirements.txt
 
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "Dependency installation failed."
-    Write-Host "  The most common cause is the missing C++ Build Tools described above."
+    Write-Host "  pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
+    Write-Host "  on x64, x86 and ARM64 Windows. Check that '$python' is one of"
+    Write-Host "  those versions."
     exit 1
 }
 

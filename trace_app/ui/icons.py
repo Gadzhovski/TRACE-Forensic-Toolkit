@@ -236,7 +236,8 @@ def _recoloured_svg(name, colour):
     the markup keeps the aspect ratio intact.
     """
     try:
-        markup = open(resource_path(name), encoding='utf-8').read()
+        with open(resource_path(name), encoding='utf-8') as handle:
+            markup = handle.read()
     except OSError:
         logger.warning("Icon not found: %s", name)
         return b''

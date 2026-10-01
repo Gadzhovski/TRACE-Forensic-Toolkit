@@ -68,7 +68,7 @@ def _xdg_dir(env_var, default_subpath):
 
 
 def user_config_dir(create=True):
-    """Per-user configuration directory (API keys and similar settings).
+    r"""Per-user configuration directory (API keys and similar settings).
 
     Windows: ``%APPDATA%\TRACE``
     macOS:   ``~/Library/Application Support/TRACE``
@@ -88,7 +88,7 @@ def user_config_dir(create=True):
 
 
 def user_data_dir(create=True):
-    """Per-user data directory (carved output, logs).
+    r"""Per-user data directory (carved output, logs).
 
     Windows: ``%LOCALAPPDATA%\TRACE``
     macOS:   ``~/Library/Application Support/TRACE``

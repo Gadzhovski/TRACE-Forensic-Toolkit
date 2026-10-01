@@ -12,7 +12,7 @@ import re
 import struct
 import zipfile
 
-from fitz import open as fitz_open
+from pymupdf import open as fitz_open
 from PIL import Image, UnidentifiedImageError
 
 from trace_app.infra.constants import CARVE_MAX_SIZE, CARVE_MIN_SIZE
@@ -380,7 +380,7 @@ def _gzip_timestamp(file_content):
     if not seconds:
         return None
     try:
-        stamp = datetime.datetime.utcfromtimestamp(seconds)
+        stamp = datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).replace(tzinfo=None)
     except (OverflowError, OSError, ValueError):
         return None
     return (stamp, 'GZIP header mtime') if _plausible(stamp) else None

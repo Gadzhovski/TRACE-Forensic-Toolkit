@@ -369,7 +369,7 @@ class MetadataViewer(QWidget):
         if not ts:
             return "N/A"
         try:
-            formatted = datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+            formatted = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         except (OSError, OverflowError, ValueError):
             return "N/A"
 

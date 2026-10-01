@@ -19,7 +19,7 @@ def safe_datetime(timestamp, timezone_known=True):
     if timestamp is None or timestamp == 0:
         return "N/A"
     try:
-        moment = datetime.datetime.utcfromtimestamp(timestamp)
+        moment = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc).replace(tzinfo=None)
     except Exception:
         return "N/A"
     stamp = moment.strftime('%Y-%m-%d %H:%M:%S')

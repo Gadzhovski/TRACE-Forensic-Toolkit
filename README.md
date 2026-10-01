@@ -11,10 +11,11 @@ triage what stands out, search inside the evidence, and recover deleted files �
 
 <p>
   <img src="https://img.shields.io/badge/version-2.0.0-4c8eda?style=flat-square" alt="Version"/>
-  <img src="https://img.shields.io/badge/python-3.9%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/Qt-PySide6-41cd52?style=flat-square&logo=qt&logoColor=white" alt="PySide6"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
+  <a href="https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/actions/workflows/tests.yml"><img src="https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/actions/workflows/tests.yml/badge.svg?branch=refactor%2Fcleanup-crossplatform" alt="Tests"/></a>
 </p>
 
 <a href="#installation"><b>Install</b></a> ·
@@ -126,9 +127,8 @@ they describe. Bookmarks sit beside the findings in Triage and in the tree.
 
 ### 🗜 Archives without extracting
 
-ZIP, TAR, GZIP, BZIP2 and XZ — and 7z when the optional `py7zr` package is
-installed — are browsed like folders straight from the image, nested archives
-too, and their members open in the viewers. Nothing is
+ZIP, TAR, GZIP, BZIP2, XZ and 7z are browsed like folders straight from the
+image — nested archives too — and their members open in the viewers. Nothing is
 written to disk; encrypted members are reported as encrypted, and decompression
 bombs are refused.
 
@@ -274,12 +274,13 @@ and ISO 9660 have been tested here.
 
 ## Installation
 
-Requires **Python 3.9 or newer**. The install scripts handle the system
-libraries, the virtual environment and the Python packages.
-
-`pytsk3` and `libewf-python` are distributed as source and compile during
-installation, so a C/C++ toolchain is needed unless a prebuilt wheel exists for
-your platform. The scripts check for this and tell you what is missing.
+Requires **Python 3.10 or newer** (3.10 – 3.14). **No compiler is needed on
+any platform**: every package — including the forensic engines, The Sleuth Kit
+(`pytsk3`) and libewf (`libewf-python`) — installs as a pre-built wheel on
+Windows (x64, ARM64), macOS (Apple Silicon and Intel) and Linux (x86_64,
+aarch64). The install scripts create the virtual environment and install
+everything; on macOS and Linux they also add the few system libraries Qt and
+file-type detection need.
 
 <details open>
 <summary><b>Windows</b></summary>
@@ -290,10 +291,6 @@ git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
 cd TRACE-Forensic-Toolkit
 powershell -ExecutionPolicy Bypass -File install_windows.ps1
 ```
-
-If the installer reports that the Microsoft C++ Build Tools are missing, install
-them from [visualstudio.microsoft.com](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-— select **Desktop development with C++** — then run the script again.
 
 ```powershell
 venv\Scripts\activate
@@ -313,9 +310,10 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The script detects the platform and installs what it needs — Xcode Command Line
-Tools and Homebrew packages on macOS, or `build-essential`, `libewf-dev`,
-`libtsk-dev`, `libmagic1` and the Qt runtime libraries on Debian-based Linux.
+The script detects the platform and installs what it needs: `libmagic`
+from Homebrew on macOS; on Debian/Ubuntu, `libmagic1` and the Qt runtime
+libraries (display, audio, networking). `./install.sh --yes` runs it without
+prompts.
 
 ```bash
 source venv/bin/activate
@@ -334,9 +332,11 @@ With a virtual environment already active:
 pip install -r requirements.txt
 ```
 
-A single `requirements.txt` covers every platform; Windows-only packages carry
-environment markers. **Upgrading an existing install?** Run it again — AVIF
-support needs Pillow 11.3 or newer, and legacy Office checks use `olefile`.
+A single `requirements.txt` lists every library TRACE uses, on every platform;
+Windows-only packages carry environment markers. Everything installs from
+pre-built wheels — no compiler needed. **Upgrading an existing install?** Run
+it again: the forensic engines moved to their first wheel-built releases
+(The Sleuth Kit 4.15), AVIF needs Pillow 11.3+, and 7z archives need `py7zr`.
 
 </details>
 
@@ -373,6 +373,34 @@ reporting a bug.
 
 ## Testing
 
+Every push is installed from scratch and tested on **Windows, macOS (Apple
+Silicon and Intel) and Linux, on Python 3.10, 3.12 and 3.14**, by GitHub
+Actions ([`tests.yml`](.github/workflows/tests.yml)). The same suite runs
+locally:
+
+```bash
+python tools/fetch_test_images.py   # public test images, checksum-verified
+python -m pytest                    # image handling, core logic, the UI
+```
+
+- **Image handling** — every partition, file, deleted flag, timestamp and
+  content hash TRACE reads from the public DFTT, NPS and NIST images is
+  compared with a reviewed manifest (`tests/manifests/`), and every file is
+  read back byte for byte. A change in what an examiner would be told fails
+  the build.
+- **Times are machine-independent** — FAT and exFAT store local time with no
+  zone; TRACE shows the stored digits whatever zone the examining machine is
+  in, and a test runs that check under a foreign time zone.
+- **The UI** — the real window, run headlessly on a two-device case: browsing,
+  Triage, previews from the right image, the Application tab's formats
+  (including offline HTML that is proven to make no network request), and
+  VirusTotal against a faked network.
+
+Only public images are used, downloaded from their publishers and verified
+against recorded SHA-256s; no evidence is stored in the repository.
+
+### Carving
+
 Carving is scored rather than eyeballed: `tools/carve_score.py` runs the real
 carvers over the DFTT and DFRWS test images and compares the result with the
 answer keys their authors published.
@@ -406,6 +434,7 @@ contiguous carver can reproduce. Test images are not included — see
 [Pillow](https://python-pillow.org/) ·
 [python-magic](https://github.com/ahupp/python-magic) ·
 [olefile](https://github.com/decalage2/olefile) ·
+[py7zr](https://github.com/miurahr/py7zr) ·
 [Tabler Icons](https://tabler.io/icons)
 
 <br/>

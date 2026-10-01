@@ -181,6 +181,16 @@ a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA
 
 ## Re-downloading
 
+The public images the tests use are fetched and checksum-verified by
+
+```bash
+python tools/fetch_test_images.py          # all of them
+python tools/fetch_test_images.py --list   # sources
+```
+
+It never overwrites an image already here; one whose checksum differs is
+reported, not replaced. The manual commands below remain for the rest.
+
 ```bash
 curl -L -o dfrws-2006-challenge.zip \
   "https://www.dropbox.com/s/genp058scvl8hbp/dfrws-2006-challenge.zip?dl=1"

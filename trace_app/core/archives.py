@@ -297,21 +297,36 @@ def _gzip_inner_name(data):
 
 # --- 7z -------------------------------------------------------------------
 
-def _list_7z(data, password):
+def _open_7z(data, password):
+    """A py7zr archive, or EncryptedArchive if even its names need a password.
+
+    py7zr raises its own PasswordRequired when the header -- the list of
+    names -- is encrypted. That is a finding, not a read failure, and is
+    reported as one.
+    """
     py7zr = _import_7z()
     try:
-        with py7zr.SevenZipFile(io.BytesIO(data), password=password) as archive:
-            if archive.needs_password() and not password:
-                raise EncryptedArchive(
-                    "This 7z archive is encrypted and needs a password.")
+        return py7zr.SevenZipFile(io.BytesIO(data), password=password)
+    except py7zr.exceptions.PasswordRequired as exc:
+        raise EncryptedArchive(
+            "This 7z archive encrypts its file names; it needs a password "
+            "even to list.") from exc
+
+
+def _list_7z(data, password):
+    try:
+        with _open_7z(data, password) as archive:
+            # Names are readable but contents are not: list the members and
+            # say they are encrypted, as a ZIP is -- the names are evidence
+            # even when the bytes are locked.
+            locked = archive.needs_password() and not password
             return [{
                 'name': info.filename,
                 'size': info.uncompressed or 0,
                 'compressed_size': info.compressed or 0,
                 'is_dir': info.is_directory,
                 'modified': str(info.creationtime or ''),
-                'encrypted': bool(getattr(info, 'crc32', None) is None
-                                  and archive.needs_password()),
+                'encrypted': locked and not info.is_directory,
                 'crc': f"{info.crc32:08x}" if getattr(info, 'crc32', None) else '',
             } for info in archive.list()]
     except EncryptedArchive:
@@ -322,17 +337,36 @@ def _list_7z(data, password):
 
 def _read_7z_member(data, name, password, limit):
     py7zr = _import_7z()
+    from py7zr.io import BytesIOFactory
     try:
-        with py7zr.SevenZipFile(io.BytesIO(data), password=password) as archive:
+        with _open_7z(data, password) as archive:
             if archive.needs_password() and not password:
                 raise EncryptedArchive(
                     f"{name} is encrypted and needs a password.")
-            extracted = archive.read([name])
-            if not extracted or name not in extracted:
+            info = next((i for i in archive.list() if i.filename == name),
+                        None)
+            if info is None or info.is_directory:
                 raise ArchiveError(f"No member named {name}.")
-            return extracted[name].read(limit)
+            size = info.uncompressed or 0
+            # Checked before extracting, not after: py7zr's in-memory writer
+            # silently stops at its limit, so an oversized member would come
+            # back truncated and look complete.
+            if size > limit:
+                raise ArchiveError(
+                    f"{name} is {size:,} bytes, more than the "
+                    f"{limit:,} TRACE reads from an archive at once.")
+            _guard_bomb(info.compressed or 0, size, name)
+            factory = BytesIOFactory(size + 1)
+            archive.extract(targets=[name], factory=factory)
+            product = factory.products.get(name)
+            if product is None:
+                raise ArchiveError(f"No member named {name}.")
+            product.seek(0)
+            return product.read()
     except (EncryptedArchive, ArchiveError):
         raise
+    except py7zr.exceptions.PasswordRequired as exc:
+        raise EncryptedArchive(f"{name} is encrypted and needs a password.")             from exc
     except Exception as exc:
         raise ArchiveError(f"Could not read {name}: {exc}") from exc
 
@@ -366,7 +400,7 @@ def _guard_bomb(compressed, uncompressed, name):
 def _epoch_to_text(seconds):
     import datetime
     try:
-        return datetime.datetime.utcfromtimestamp(seconds).strftime(
+        return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc).strftime(
             '%Y-%m-%d %H:%M:%S')
     except (OSError, OverflowError, ValueError):
         return ''

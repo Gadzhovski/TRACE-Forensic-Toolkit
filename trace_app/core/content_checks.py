@@ -390,7 +390,7 @@ def _ole_encryption(data):
 def _pdf_encryption(data):
     if b'/Encrypt' not in data:
         return []
-    from fitz import open as fitz_open
+    from pymupdf import open as fitz_open
     with fitz_open(stream=data, filetype='pdf') as document:
         if document.needs_pass:
             return [Finding(MODULE_HIDDEN, 'encrypted', GRADE_NOTABLE,
@@ -654,7 +654,7 @@ def _iso_date(value):
 
 
 def _pdf_authors(data):
-    from fitz import open as fitz_open
+    from pymupdf import open as fitz_open
     with fitz_open(stream=data, filetype='pdf') as document:
         meta = document.metadata or {}
     return {

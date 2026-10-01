@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
                                QScrollArea, QSizePolicy, QToolBar, QToolButton,
                                QVBoxLayout, QWidget)
 
-from fitz import open as fitz_open, Matrix
+from pymupdf import open as fitz_open, Matrix
 
 from trace_app.ui.dialogs import message
 from trace_app.infra.paths import resource_path

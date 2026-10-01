@@ -110,7 +110,7 @@ def build_executable():
         "PIL.Image",
         "requests",
         "Registry",
-        "fitz",
+        "pymupdf",
         "magic",
         "chardet",
     ]

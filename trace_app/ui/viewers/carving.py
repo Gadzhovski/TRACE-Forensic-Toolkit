@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QToolBar, QSizePolic
 from PySide6.QtWidgets import QMenu
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
                                QPushButton, QLabel, QTabWidget, QMessageBox)
-from fitz import open as fitz_open, Matrix
+from pymupdf import open as fitz_open, Matrix
 
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)

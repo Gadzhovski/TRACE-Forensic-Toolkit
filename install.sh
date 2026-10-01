@@ -10,7 +10,20 @@ MAGENTA="\033[1;35m"
 YELLOW="\033[1;33m"
 R="\033[0m"
 
-clear
+# --yes: answer every prompt with the default and skip the animation, so the
+# script can run unattended (CI runs this exact script on every platform).
+ASSUME_YES=0
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes) ASSUME_YES=1 ;;
+        -h|--help)
+            echo "Usage: ./install.sh [--yes]"
+            echo "  --yes   non-interactive: accept the detected platform and defaults"
+            exit 0 ;;
+    esac
+done
+
+[[ "$ASSUME_YES" -eq 1 ]] || clear
 
 # === Animated intro ===
 animate_intro() {
@@ -45,8 +58,10 @@ print_banner() {
 }
 
 # === Run intro and banner ===
-animate_intro
-print_banner
+if [[ "$ASSUME_YES" -eq 0 ]]; then
+    animate_intro
+    print_banner
+fi
 
 # === Detect OS type ===
 OS_TYPE=$(uname)
@@ -67,7 +82,11 @@ fi
 
 echo -e "${CYAN}Detected operating system:${R} ${YELLOW}$DETECTED_OS${R}\n"
 
-read -p "Proceed with $DETECTED_OS installation? (y/n or type 'macos'/'linux'/'wsl' to override): " USER_INPUT
+if [[ "$ASSUME_YES" -eq 1 ]]; then
+    USER_INPUT="y"
+else
+    read -p "Proceed with $DETECTED_OS installation? (y/n or type 'macos'/'linux'/'wsl' to override): " USER_INPUT
+fi
 USER_INPUT=$(echo "$USER_INPUT" | tr '[:upper:]' '[:lower:]')
 
 case "$USER_INPUT" in
@@ -82,22 +101,29 @@ echo -e "\n${MAGENTA}Installing for:${R} ${YELLOW}$USER_OS${R}"
 echo "------------------------------------------------------------"
 
 # --- Pick a Python interpreter -------------------------------------------
-# pytsk3 and libewf-python are source distributions, so the version matters:
-# they must be able to build (or find a wheel) for whichever Python is used.
+# Python 3.10 or newer: pytsk3 and libewf-python publish pre-built wheels for
+# 3.10+ on every platform, so nothing is compiled. (3.9 is end-of-life and
+# would need a C toolchain for both.)
 find_python() {
-    for candidate in python3.12 python3.11 python3.10 python3; do
+    # TRACE_PYTHON names the interpreter explicitly -- CI sets it so each
+    # job installs with the Python it is meant to test, not whichever newer
+    # one the runner also has.
+    for candidate in ${TRACE_PYTHON:-} python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
         if command -v "$candidate" &> /dev/null; then
             PY="$candidate"
             PY_VER=$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
             MAJOR=${PY_VER%%.*}
             MINOR=${PY_VER##*.}
-            if [[ "$MAJOR" -eq 3 && "$MINOR" -ge 9 ]]; then
+            if [[ "$MAJOR" -eq 3 && "$MINOR" -ge 10 ]]; then
                 echo -e "${GREEN}Using $PY (Python $PY_VER)${R}"
                 return 0
             fi
         fi
     done
-    echo -e "${RED}No suitable Python found. TRACE needs Python 3.9 or newer.${R}"
+    echo -e "${RED}No suitable Python found. TRACE needs Python 3.10 or newer.${R}"
+    echo "  macOS:          brew install python@3.12"
+    echo "  Debian/Ubuntu:  sudo apt install python3.12 python3.12-venv"
+    echo "                  (older releases: python.org or pyenv)"
     exit 1
 }
 
@@ -105,15 +131,15 @@ find_python() {
 install_macos_deps() {
     echo -e "${CYAN}Installing macOS system dependencies...${R}"
 
-    if ! xcode-select -p &> /dev/null; then
-        echo -e "${YELLOW}Xcode Command Line Tools are required to build pytsk3.${R}"
-        echo "Launching the installer - rerun this script once it finishes."
-        xcode-select --install || true
-        exit 1
-    fi
-
+    # No compiler is needed: pytsk3 and libewf-python come as pre-built
+    # wheels with The Sleuth Kit and libewf inside. Homebrew is only for
+    # libmagic, which python-magic loads at runtime.
     if ! command -v brew &> /dev/null; then
-        echo -e "${YELLOW}Homebrew not found.${R}"
+        echo -e "${YELLOW}Homebrew not found (needed for libmagic).${R}"
+        if [[ "$ASSUME_YES" -eq 1 ]]; then
+            echo -e "${RED}Install Homebrew from https://brew.sh, then rerun.${R}"
+            exit 1
+        fi
         read -p "Install Homebrew now? (y/n): " install_brew
         if [[ "$install_brew" =~ ^[Yy]$ ]]; then
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -123,9 +149,8 @@ install_macos_deps() {
         fi
     fi
 
-    # libmagic: file-type detection in the Metadata tab.
-    # libewf/sleuthkit: headers for the libewf-python and pytsk3 builds.
-    brew install libmagic libewf sleuthkit
+    # libmagic: file-type detection (analysis, viewers, Metadata tab).
+    brew install libmagic
 }
 
 install_linux_deps() {
@@ -133,23 +158,35 @@ install_linux_deps() {
     if ! command -v apt &> /dev/null; then
         echo -e "${YELLOW}This script automates apt-based distributions only.${R}"
         echo "Install the equivalents of these manually, then rerun:"
-        echo "  python3-venv python3-dev build-essential"
-        echo "  libmagic1 libewf-dev libtsk-dev"
-        echo "  libxcb-cursor0 libegl1 libxkbcommon-x11-0"
-        read -p "Continue anyway? (y/n): " cont
-        [[ "$cont" =~ ^[Yy]$ ]] || exit 1
+        echo "  python3 (3.10+) with venv and pip"
+        echo "  libmagic (file-type detection)"
+        echo "  libxcb-cursor0 libegl1 libxkbcommon-x11-0 libgl1 (Qt runtime)"
+        echo "  libpulse (Qt Multimedia) and gssapi/krb5 (Qt Network)"
+        if [[ "$ASSUME_YES" -eq 0 ]]; then
+            read -p "Continue anyway? (y/n): " cont
+            [[ "$cont" =~ ^[Yy]$ ]] || exit 1
+        fi
         return
     fi
 
-    sudo apt update
-    # build-essential/python3-dev + libewf-dev/libtsk-dev: required to compile
-    #   pytsk3 and libewf-python. Without these pip fails on a clean system.
-    # libmagic1: the Metadata tab raises ImportError without it.
-    # libxcb-cursor0 and friends: Qt6 xcb platform plugin.
-    sudo apt install -y \
-        python3 python3-venv python3-pip python3-dev build-essential \
-        libmagic1 libewf-dev libtsk-dev \
-        libxcb-cursor0 libxcb-xinerama0 libegl1 libxkbcommon-x11-0 libgl1
+    # No compiler or -dev packages: pytsk3 and libewf-python come as
+    # pre-built wheels with The Sleuth Kit and libewf inside.
+    # libmagic1: file-type detection (python-magic loads it at runtime).
+    # libxcb-cursor0 and friends: the Qt 6 platform plugins.
+    SUDO=""
+    [[ "$(id -u)" -ne 0 ]] && SUDO="sudo"
+    $SUDO apt-get update
+    # libpulse0: Qt Multimedia (the audio/video player) fails to import
+    #   without it, which stops the whole window opening.
+    # libgssapi-krb5-2: Qt Network.
+    # --no-install-recommends: python3-pip otherwise pulls in a C/C++
+    #   compiler that nothing here needs.
+    $SUDO apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-pip \
+        libmagic1 \
+        libxcb-cursor0 libxcb-xinerama0 libegl1 libxkbcommon-x11-0 libgl1 \
+        libglib2.0-0 libfontconfig1 libdbus-1-3 \
+        libpulse0 libgssapi-krb5-2
 }
 
 install_wsl_deps() {
@@ -173,8 +210,18 @@ echo -e "\n${CYAN}Creating virtual environment...${R}"
 echo -e "\n${CYAN}Installing Python packages...${R}"
 # shellcheck disable=SC1091
 source venv/bin/activate
-pip install --upgrade pip setuptools wheel
-pip install -r requirements.txt
+pip install --upgrade pip
+# --only-binary for the two forensic engines: if no wheel exists for this
+# platform, say so plainly rather than attempt a C build that will fail.
+if ! pip install --only-binary=pytsk3,libewf-python -r requirements.txt; then
+    deactivate
+    echo -e "\n${RED}Dependency installation failed.${R}"
+    echo "pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
+    echo "on Windows, macOS (Apple Silicon and Intel) and Linux (x86_64 and"
+    echo "aarch64). Check that $PY is one of those versions and this machine"
+    echo "one of those platforms."
+    exit 1
+fi
 deactivate
 
 echo -e "\n${GREEN}Installation complete.${R}"

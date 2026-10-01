@@ -98,7 +98,7 @@ def extract_strings(content, min_length=MIN_STRING_LENGTH):
 # --- format-specific ------------------------------------------------------
 
 def _from_pdf(content):
-    from fitz import open as fitz_open
+    from pymupdf import open as fitz_open
 
     with fitz_open(stream=content, filetype='pdf') as document:
         return '\n'.join(page.get_text() for page in document)

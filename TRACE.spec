@@ -15,7 +15,7 @@ a = Analysis(
     hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets', 'PySide6.QtCharts',
                    'PySide6.QtSvg', 'PySide6.QtSvgWidgets', 'PySide6.QtMultimedia',
                    'PySide6.QtMultimediaWidgets', 'PySide6.QtPrintSupport', 'pytsk3', 'pyewf',
-                   'PIL', 'PIL.Image', 'requests', 'Registry', 'fitz', 'magic',
+                   'PIL', 'PIL.Image', 'requests', 'Registry', 'pymupdf', 'magic',
                    'chardet'] + _trace_modules,
     hookspath=[],
     hooksconfig={},
