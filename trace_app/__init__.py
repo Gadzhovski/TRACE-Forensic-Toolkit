@@ -74,5 +74,52 @@ def _bundled_libmagic():
     os.environ['MAGIC'] = str(pylibmagic.data.joinpath('magic.mgc'))
 
 
+#: Database bytes handed to libmagic, kept for the life of the process:
+#: magic_load_buffers does not copy them.
+_MAGIC_DATABASES = {}
+
+
+def _unicode_safe_libmagic():
+    """On Windows, let libmagic load its database from any path.
+
+    python-magic-bin's libmagic (5.32) opens magic.mgc with the C runtime's
+    narrow fopen, which reads the path in the ANSI code page. Installed under
+    a folder whose name has a character outside it -- a Cyrillic, Greek or
+    accented user name, say -- every Magic() fails with "could not find any
+    valid magic files", and file-type identification silently disappears
+    (the packaged build's self-test found this). Python reads the database
+    instead, which it can from any path, and libmagic takes it from memory.
+    """
+    if sys.platform != 'win32':
+        return
+    try:
+        import ctypes
+        from magic import magic as binding
+        load_buffers = binding.libmagic.magic_load_buffers
+    except Exception:
+        return
+    load_buffers.restype = ctypes.c_int
+    load_buffers.argtypes = [binding.magic_t, ctypes.POINTER(ctypes.c_void_p),
+                             ctypes.POINTER(ctypes.c_size_t), ctypes.c_size_t]
+
+    def magic_load(cookie, filename):
+        path = filename or binding.default_magic_file
+        if isinstance(path, bytes):
+            path = os.fsdecode(path)
+        if path not in _MAGIC_DATABASES:
+            with open(path, 'rb') as handle:
+                data = handle.read()
+            _MAGIC_DATABASES[path] = ctypes.create_string_buffer(data, len(data))
+        database = _MAGIC_DATABASES[path]
+        buffers = (ctypes.c_void_p * 1)(ctypes.addressof(database))
+        sizes = (ctypes.c_size_t * 1)(len(database))
+        if load_buffers(cookie, buffers, sizes, 1) != 0:
+            raise binding.MagicException(binding.magic_error(cookie))
+        return 0
+
+    binding.magic_load = magic_load
+
+
 _pin_utc()
 _bundled_libmagic()
+_unicode_safe_libmagic()

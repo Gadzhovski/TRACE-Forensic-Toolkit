@@ -152,6 +152,24 @@ def test_libmagic_names_content_not_extension():
     assert reader.from_buffer(zip_bytes({'a.txt': b'x'})) == 'application/zip'
 
 
+@pytest.mark.skipif(sys.platform != 'win32',
+                    reason="Windows' libmagic opens its database by ANSI path")
+def test_libmagic_loads_from_a_path_outside_the_ansi_code_page(tmp_path):
+    """Installed under a Cyrillic or accented folder name, libmagic must
+    still identify files (trace_app loads its database from memory)."""
+    import shutil
+    import trace_app  # noqa: F401  (installs the fix)
+    import magic
+    from magic import magic as binding
+
+    folder = tmp_path / 'Пример José'
+    folder.mkdir()
+    database = folder / 'magic.mgc'
+    shutil.copy(binding.default_magic_file, database)
+    reader = magic.Magic(mime=True, magic_file=str(database))
+    assert reader.from_buffer(jpeg()) == 'image/jpeg'
+
+
 @pytest.mark.skipif(sys.platform != 'darwin',
                     reason="macOS takes libmagic from the pylibmagic wheel")
 def test_macos_uses_the_bundled_libmagic_not_homebrew():
