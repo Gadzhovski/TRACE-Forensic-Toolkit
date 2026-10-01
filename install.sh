@@ -121,7 +121,8 @@ find_python() {
         fi
     done
     echo -e "${RED}No suitable Python found. TRACE needs Python 3.10 or newer.${R}"
-    echo "  macOS:          brew install python@3.12"
+    echo "  macOS:          the installer from https://www.python.org/downloads/macos/"
+    echo "                  (or: brew install python@3.12)"
     echo "  Debian/Ubuntu:  sudo apt install python3.12 python3.12-venv"
     echo "                  (older releases: python.org or pyenv)"
     exit 1
@@ -129,28 +130,11 @@ find_python() {
 
 # --- System dependencies --------------------------------------------------
 install_macos_deps() {
-    echo -e "${CYAN}Installing macOS system dependencies...${R}"
-
-    # No compiler is needed: pytsk3 and libewf-python come as pre-built
-    # wheels with The Sleuth Kit and libewf inside. Homebrew is only for
-    # libmagic, which python-magic loads at runtime.
-    if ! command -v brew &> /dev/null; then
-        echo -e "${YELLOW}Homebrew not found (needed for libmagic).${R}"
-        if [[ "$ASSUME_YES" -eq 1 ]]; then
-            echo -e "${RED}Install Homebrew from https://brew.sh, then rerun.${R}"
-            exit 1
-        fi
-        read -p "Install Homebrew now? (y/n): " install_brew
-        if [[ "$install_brew" =~ ^[Yy]$ ]]; then
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        else
-            echo -e "${RED}Homebrew is required. Exiting.${R}"
-            exit 1
-        fi
-    fi
-
-    # libmagic: file-type detection (analysis, viewers, Metadata tab).
-    brew install libmagic
+    # Nothing to install outside Python: every library comes as a wheel --
+    # The Sleuth Kit (pytsk3), libewf, and libmagic (pylibmagic). No
+    # Homebrew, no Xcode. Only Python 3.10+ is needed (macOS's own python3
+    # is 3.9).
+    echo -e "${CYAN}macOS: no system packages needed.${R}"
 }
 
 install_linux_deps() {

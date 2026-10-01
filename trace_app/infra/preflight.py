@@ -17,12 +17,32 @@ def _install_hint(package):
     hints = {
         'libmagic': {
             'win32': "pip install python-magic-bin",
-            'darwin': "brew install libmagic",
+            # Bundled by the pylibmagic wheel; Homebrew is not needed.
+            'darwin': "pip install -r requirements.txt",
             'linux': "sudo apt install libmagic1",
         },
     }
     platform_key = 'win32' if sys.platform == 'win32' else 'darwin' if sys.platform == 'darwin' else 'linux'
     return hints.get(package, {}).get(platform_key, f"install {package}")
+
+
+def libmagic_identity():
+    """(version, path) of the libmagic actually loaded, or None.
+
+    Signature databases change between releases, and two versions can name
+    the same file differently, so which one identified a file is worth
+    recording. python-magic keeps the loaded library as `magic.libmagic`;
+    python-magic-bin (Windows) as `magic.magic.libmagic`.
+    """
+    try:
+        import magic
+        lib = getattr(magic, 'libmagic', None)
+        if lib is None:
+            lib = magic.magic.libmagic
+        number = int(lib.magic_version())
+    except Exception:
+        return None
+    return f"{number // 100}.{number % 100:02d}", getattr(lib, '_name', '?')
 
 
 def check_dependencies():

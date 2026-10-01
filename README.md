@@ -310,9 +310,12 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The script detects the platform and installs what it needs: `libmagic`
-from Homebrew on macOS; on Debian/Ubuntu, `libmagic1` and the Qt runtime
-libraries (display, audio, networking). `./install.sh --yes` runs it without
+**macOS** needs nothing but Python 3.10 or newer — the
+[python.org installer](https://www.python.org/downloads/macos/) is the simplest
+way (the `python3` macOS ships is 3.9). No Homebrew, no Xcode: everything,
+including libmagic for file-type detection, installs as a wheel.
+On **Debian/Ubuntu** the script adds `libmagic1` and the Qt runtime libraries
+(display, audio, networking) with apt. `./install.sh --yes` runs it without
 prompts.
 
 ```bash
@@ -433,6 +436,7 @@ contiguous carver can reproduce. Test images are not included — see
 [PyMuPDF](https://pymupdf.readthedocs.io/) ·
 [Pillow](https://python-pillow.org/) ·
 [python-magic](https://github.com/ahupp/python-magic) ·
+[pylibmagic](https://github.com/kratsg/pylibmagic) ·
 [olefile](https://github.com/decalage2/olefile) ·
 [py7zr](https://github.com/miurahr/py7zr) ·
 [Tabler Icons](https://tabler.io/icons)

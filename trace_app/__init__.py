@@ -47,4 +47,32 @@ def _pin_utc():
             pass
 
 
+def _bundled_libmagic():
+    """On macOS, use the libmagic shipped in the pylibmagic wheel.
+
+    python-magic is only a binding; libmagic itself is a C library that
+    macOS does not provide. pylibmagic carries it (and its signature
+    database) as a wheel, so a Mac needs no Homebrew. Importing it puts its
+    directory first on DYLD_LIBRARY_PATH, which ctypes' find_library -- the
+    first place python-magic looks -- consults, so the bundled copy is used
+    even when Homebrew has another. Every Mac then names a file the same way.
+
+    MAGIC is set to the bundled database alone, not prepended to whatever
+    the environment held: which signatures identified a file should not
+    depend on the examiner's shell.
+
+    Must run before anything imports `magic`, which loads the library at
+    import time. Windows' python-magic-bin carries its own DLL; Linux takes
+    libmagic1 from apt, which it needs anyway for Qt.
+    """
+    if sys.platform != 'darwin':
+        return
+    try:
+        import pylibmagic
+    except ImportError:
+        return                          # source checkout: Homebrew's, if any
+    os.environ['MAGIC'] = str(pylibmagic.data.joinpath('magic.mgc'))
+
+
 _pin_utc()
+_bundled_libmagic()

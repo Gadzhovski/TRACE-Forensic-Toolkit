@@ -4,6 +4,7 @@ import io
 import json
 import os
 import sqlite3
+import sys
 import zipfile
 
 import pytest
@@ -131,6 +132,40 @@ def test_document_authors_keep_their_zone():
     assert facts['author'] == 'J. Smith'
     assert facts['last_saved_by'] == 'K. Jones'
     assert facts['created'] == '2023-02-19 10:29:00 UTC'
+
+
+# --- libmagic -----------------------------------------------------------------------
+
+def test_libmagic_names_content_not_extension():
+    """libmagic is loaded and identifies files by their bytes."""
+    from PIL import Image
+    from trace_app.infra.preflight import libmagic_identity
+    import magic
+
+    assert libmagic_identity(), "libmagic did not load"
+    png = io.BytesIO()
+    Image.new('RGB', (8, 8)).save(png, 'PNG')
+    reader = magic.Magic(mime=True)
+    assert reader.from_buffer(png.getvalue()) == 'image/png'
+    assert reader.from_buffer(jpeg()) == 'image/jpeg'
+    assert reader.from_buffer(b'%PDF-1.4\n1 0 obj\n<<>>\nendobj\n') == 'application/pdf'
+    assert reader.from_buffer(zip_bytes({'a.txt': b'x'})) == 'application/zip'
+
+
+@pytest.mark.skipif(sys.platform != 'darwin',
+                    reason="macOS takes libmagic from the pylibmagic wheel")
+def test_macos_uses_the_bundled_libmagic_not_homebrew():
+    """The library loaded is pylibmagic's, so a Mac needs no Homebrew and
+    every Mac identifies files with the same signatures."""
+    import trace_app  # noqa: F401  (must precede `import magic`)
+    import pylibmagic
+    from trace_app.infra.preflight import libmagic_identity
+
+    bundled = os.path.realpath(str(pylibmagic.data))
+    version, path = libmagic_identity()
+    assert os.path.realpath(path).startswith(bundled + os.sep), path
+    assert os.environ['MAGIC'] == str(pylibmagic.data.joinpath('magic.mgc'))
+    assert version == '5.41'
 
 
 # --- type detection and document reading ------------------------------------------

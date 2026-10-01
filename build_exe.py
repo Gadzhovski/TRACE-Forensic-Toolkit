@@ -122,6 +122,10 @@ def build_executable():
     # and fully collected.
     cmd.extend(["--paths", ".", "--collect-submodules", "trace_app"])
 
+    # macOS: libmagic and its database come from the pylibmagic wheel.
+    if sys.platform == "darwin":
+        cmd.extend(["--collect-all", "pylibmagic"])
+
     cmd.extend(["--noconfirm", "--log-level", "INFO", MAIN_SCRIPT])
 
     print("\nRunning PyInstaller with command:")

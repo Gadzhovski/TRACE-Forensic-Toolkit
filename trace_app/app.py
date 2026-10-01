@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from trace_app import __version__
 from trace_app.infra.paths import log_file
 from trace_app.infra.theme import apply_theme
-from trace_app.infra.preflight import check_dependencies, format_report
+from trace_app.infra.preflight import (
+    check_dependencies, format_report, libmagic_identity)
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.dialogs.case_launcher import TRIAGE, choose_case
@@ -44,6 +45,9 @@ def configure_logging():
 def main():
     configure_logging()
     logging.getLogger('TRACE').info("Starting TRACE %s on %s", __version__, sys.platform)
+    magic_id = libmagic_identity()
+    if magic_id:
+        logging.getLogger('TRACE').info("libmagic %s from %s", *magic_id)
 
     app = QApplication(sys.argv)
     app.setApplicationName("TRACE")

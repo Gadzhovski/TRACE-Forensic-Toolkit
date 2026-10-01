@@ -67,6 +67,18 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # A Mac needs no Homebrew: libmagic comes from the pylibmagic wheel.
+      # The runner image may carry Homebrew's copy, so remove it first and
+      # check nothing is left where python-magic would look -- otherwise a
+      # pass could rest on a library an examiner's Mac does not have.
+      - name: Remove Homebrew's libmagic (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew uninstall --ignore-dependencies --force libmagic 2>/dev/null || true
+          if ls /opt/homebrew/lib/libmagic* /usr/local/lib/libmagic* /opt/local/lib/libmagic* 2>/dev/null; then
+            echo "::error::a system libmagic is still present"; exit 1
+          fi
+
       # The real installers, unattended: they are part of what is tested.
       - name: Install (macOS / Linux)
         if: runner.os != 'Windows'
@@ -84,10 +96,13 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           "$PY" - <<'EOF'
+          import trace_app   # before magic: on macOS it selects the bundled libmagic
           import sys, pytsk3, pyewf, PySide6, magic, py7zr, pymupdf, PIL
+          from trace_app.infra.preflight import libmagic_identity
           print("Python", sys.version.split()[0])
           print("Sleuth Kit", pytsk3.TSK_VERSION_STR, "| libewf", pyewf.get_version())
           print("PySide6", PySide6.__version__, "| Pillow", PIL.__version__)
+          print("libmagic %s from %s" % libmagic_identity())
           EOF
 
       - name: Cache public test images
