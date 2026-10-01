@@ -16,6 +16,7 @@ import os
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
+                               QSizePolicy, QToolBar,
                                QHeaderView, QLabel, QLineEdit, QProgressBar,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
@@ -23,10 +24,14 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
 from trace_app.core.image_handler import ImageHandler
 from trace_app.core.indexer import index_evidence
 from trace_app.core.search_index import (INDEX_DONE, SearchError, SearchIndex)
-from trace_app.infra.constants import CONTROL_HEIGHT, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import (CONTROL_HEIGHT, PANEL_ICON_SIZE,
+                                      TABLE_ROW_HEIGHT)
 from trace_app.infra.utils import FileSystemUtils
+from trace_app.ui import icons
 from trace_app.ui.dialogs import message
+from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
+from trace_app.ui.widgets.toolbars import prepare_toolbar
 
 logger = logging.getLogger('TRACE.SearchPanel')
 
@@ -162,6 +167,9 @@ class SearchPanel(QWidget):
     #: does not know about cases; the window does.
     result_menu_requested = Signal(dict, object)
 
+    #: Emitted with a result row when the examiner lands on it.
+    result_selected = Signal(dict)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case = None
@@ -172,9 +180,36 @@ class SearchPanel(QWidget):
         #: by the host so this panel does not reach into a DatabaseManager.
         self.icon_resolver = None
 
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # The same bar as Listing, Registry and Deleted Files: logo, title,
+        # then the tab's main action on the right. Without it this tab was the
+        # only one in the row that opened straight onto controls.
+        self.toolbar = QToolBar()
+        prepare_toolbar(self.toolbar)
+        self.toolbar.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel()
+        icon_label.setObjectName("panelIcon")
+        icons.apply_pixmap(icon_label, icons.SEARCH_CONTENT, PANEL_ICON_SIZE)
+        self.toolbar.addWidget(icon_label)
+        title = QLabel("Universal Search")
+        title.setObjectName("panelTitle")
+        self.toolbar.addWidget(title)
+        spacer = QLabel()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar.addWidget(spacer)
+
+        self.index_button = QPushButton("Build Index")
+        self.index_button.clicked.connect(self.toggle_indexing)
+        self.toolbar.addWidget(self.index_button)
+        outer.addWidget(self.toolbar)
+
+        layout = QVBoxLayout()
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(6)
+        outer.addLayout(layout)
 
         # --- query row ---
         query_row = QHBoxLayout()
@@ -214,11 +249,10 @@ class SearchPanel(QWidget):
         index_row = QHBoxLayout()
         index_row.setSpacing(6)
 
-        # What the index holds, beside the button that builds it. It says what
-        # is in the evidence before the examiner knows what to ask for, so a
-        # search should not be what makes it disappear -- and it belongs in
-        # the width next to Build Index rather than on a row of its own, which
-        # left that space empty and cost a line of the panel.
+        # What the index holds. It says what is in the evidence before the
+        # examiner knows what to ask for, so a search should not be what makes
+        # it disappear. Build Index itself is in the bar above, where the
+        # other tabs keep their main action.
         #
         # Each count is a link: reading "8 email addresses" and then having to
         # type "email:" is a step that need not exist.
@@ -229,10 +263,6 @@ class SearchPanel(QWidget):
         self.summary_label.linkActivated.connect(self._run_linked_query)
         index_row.addWidget(self.summary_label, 1)
 
-        self.index_button = QPushButton("Build Index")
-        self.index_button.setFixedHeight(CONTROL_HEIGHT)
-        self.index_button.clicked.connect(self.toggle_indexing)
-        index_row.addWidget(self.index_button)
         layout.addLayout(index_row)
 
         # The result count and indexing progress. Below the summary rather
@@ -265,6 +295,9 @@ class SearchPanel(QWidget):
         self.results.horizontalHeader().setSectionResizeMode(
             QHeaderView.Interactive)
         self.results.itemDoubleClicked.connect(self._activate)
+        # A click shows the hit in the viewers and leaves the results where
+        # they are; double-click goes to the file's folder.
+        connect_row_preview(self.results, self.result_selected.emit)
         self.results.setContextMenuPolicy(Qt.CustomContextMenu)
         self.results.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.results)

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QLabel, QPlainTextEdit, QScrollArea, QSizePolicy,
                                QVBoxLayout, QWidget)
 
 from trace_app.infra.constants import UNKNOWN_DATE
+from trace_app.core import content_checks
 from trace_app.ui.widgets.property_table import PropertyTable
 import hashlib
 from magic import Magic
@@ -194,6 +195,7 @@ class MetadataViewer(QWidget):
             ("MD5", md5_hash),
             ("SHA-256", sha256_hash),
         ]
+        rows += self._content_rows(data.get('name') or '', file_content)
         self.property_table.set_rows(rows)
 
         # Carved files have no inode, so there is nothing low-level to show.
@@ -204,6 +206,70 @@ class MetadataViewer(QWidget):
         self.details_view.setVisible(bool(details))
         self.details_heading.setVisible(bool(details))
         self._fit_to_contents()
+
+    @staticmethod
+    def _content_rows(name, content):
+        """Photo, document and hidden-data sections, when the file has them.
+
+        The same checks the analysis pass runs over every file, applied to
+        the one on screen -- which is where the old EXIF tab's information now
+        lives, shown only for files that carry it.
+        """
+        if not content or len(content) > content_checks.MAX_INSPECT_BYTES:
+            return []
+        rows = []
+
+        photo = content_checks.photo_metadata(content)
+        if photo:
+            rows.append((None, "Photo"))
+            camera = ' '.join(p for p in (photo.get('make'),
+                                          photo.get('model')) if p)
+            for label, value in (("Camera", camera),
+                                 ("Lens", photo.get('lens')),
+                                 ("Serial number", photo.get('serial')),
+                                 ("Taken", photo.get('taken')),
+                                 ("Digitised", photo.get('digitized')),
+                                 ("Modified", photo.get('modified')),
+                                 ("Software", photo.get('software')),
+                                 ("Artist", photo.get('artist')),
+                                 ("Copyright", photo.get('copyright'))):
+                if value:
+                    rows.append((label, value))
+            if 'latitude' in photo:
+                rows.append(("Location", f"{photo['latitude']:.6f}, "
+                                         f"{photo['longitude']:.6f}",
+                             "warning"))
+                if photo.get('altitude') is not None:
+                    rows.append(("Altitude", f"{photo['altitude']} m"))
+                if photo.get('gps_date'):
+                    rows.append(("GPS date", photo['gps_date']))
+
+        authors = content_checks.document_authors(content)
+        if authors:
+            rows.append((None, "Document"))
+            for label, key in (("Title", 'title'), ("Author", 'author'),
+                               ("Last saved by", 'last_saved_by'),
+                               ("Company", 'company'),
+                               ("Application", 'application'),
+                               ("Producer", 'producer'),
+                               ("Template", 'template'),
+                               ("Created", 'created'),
+                               ("Modified", 'modified'),
+                               ("Last printed", 'last_printed'),
+                               ("Revision", 'revision'),
+                               ("Editing time (min)", 'editing_minutes')):
+                if authors.get(key):
+                    rows.append((label, authors[key]))
+
+        hidden = [f for f in content_checks.inspect(
+                      name, content, (content_checks.MODULE_HIDDEN,))
+                  if f.grade in content_checks.REPORTED_GRADES]
+        if hidden:
+            rows.append((None, "Hidden data"))
+            for finding in hidden:
+                rows.append((finding.grade.capitalize(), finding.summary,
+                             "warning"))
+        return rows
 
     def get_inode_details(self, offset, inode_number):
         """Render low-level filesystem details for an inode.

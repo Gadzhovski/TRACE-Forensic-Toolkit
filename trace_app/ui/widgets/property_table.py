@@ -28,8 +28,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QLineEdit,
 
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 
-#: Gap between the end of a label and the start of its value.
-LABEL_PADDING = 18
+#: Width added to the longest label. It has to cover the item padding the
+#: themes give property cells (8px left + 12px right) and the style's own text
+#: margin either side, or the longest labels lose their last letters to an
+#: ellipsis -- 18 did exactly that to "SHA-256" and "Last analysed".
+LABEL_PADDING = 30
 
 #: Values shown in a monospaced font: anything where character alignment helps.
 MONO_LABELS = {

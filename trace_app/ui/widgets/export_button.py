@@ -1,4 +1,3 @@
-from trace_app.ui.dialogs import message
 """A toolbar button that saves the current view as text, PDF or HTML.
 
 The Hex viewer had an Export button offering text and HTML; the Text viewer had
@@ -20,6 +19,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QMenu, QToolButton
 
 from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Export')
 

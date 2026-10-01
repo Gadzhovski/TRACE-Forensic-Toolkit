@@ -6,8 +6,8 @@
 
 **Toolkit for Retrieval and Analysis of Cyber Evidence**
 
-Browse the file system of a forensic disk image, inspect file contents and metadata,<br/>
-recover deleted files, and read Windows registry hives — read-only, without mounting.
+Open forensic disk images read-only, organise an investigation into a case,<br/>
+triage what stands out, search inside the evidence, and recover deleted files — without mounting anything.
 
 <p>
   <img src="https://img.shields.io/badge/version-2.0.0-4c8eda?style=flat-square" alt="Version"/>
@@ -38,14 +38,21 @@ TRACE reads disk images directly through [The Sleuth Kit](https://www.sleuthkit.
 read-only and is never mounted, so the image is not modified and no write-blocker
 configuration is required.
 
+Work is organised into **cases**. A case is one investigation and can hold disk
+images from several devices; every file, finding and bookmark is always shown
+with the image it came from. A case is a folder holding a SQLite database plus
+its carved files, exports and search index; the evidence itself is referenced by
+path and hash, never copied.
+
 It began as a final-year project and is intended for learning, lab work, and
 triage rather than as a replacement for a commercial forensic suite.
 
 > [!NOTE]
-> Only **NTFS** and **E01 / raw** images have been tested. Other file systems and
-> formats are handled by the underlying libraries but are not independently
-> verified here. Carving is signature-based and can recover fragments that are
-> not complete files, so verify anything it produces.
+> Tested on **E01** and **raw** images with **NTFS** (including compressed and
+> EFS-encrypted files), **FAT12/16/32**, **exFAT**, **Ext2/3/4**, **HFS+** and
+> **ISO 9660**, against the DFTT, DFRWS, NPS and NIST test corpora. Carving is
+> signature-based and scored against published answer keys (see
+> [Testing](#testing)); verify anything it recovers.
 
 <br/>
 
@@ -55,24 +62,112 @@ triage rather than as a replacement for a commercial forensic suite.
 <tr>
 <td width="50%" valign="top">
 
-### 🗂 File system browsing
+### 📁 Cases across devices
 
-Tree view of partitions and directories with a listing pane showing inode, size
-and the full MAC timestamps. Back / forward / up navigation and wildcard search
-(`*.pdf`) across the whole image.
+Start with **New Case**, **Open Case** or **Quick Triage** (no case). A case
+remembers its evidence and reopens it; several images — a laptop, a phone, a USB
+stick — live in one case, each kept open and clearly named. Every view says which
+image a file belongs to, and opening anything reads its own image.
 
 </td>
 <td width="50%" valign="top">
 
-### 🔍 File carving
+### ✅ Evidence integrity
 
-Recovers deleted files from unallocated space by signature — PDF, JPG, PNG, GIF,
-BMP, WAV, MOV, WMV, ZIP. An allocation map skips space already occupied by live
-files. Shown as a list or thumbnail gallery.
+Recomputes MD5 / SHA-1 for E01 images and compares them with the acquisition
+hashes. Verification is kept as a **history**, not a current value, and every
+check, hash sent out and evidence change is written to the case's audit log.
 
 </td>
 </tr>
 <tr>
+<td width="50%" valign="top">
+
+### 🩺 Triage analysis
+
+One pass over every file, whichever modules are chosen:
+
+- **File type** from content — flags an executable named `.jpg`
+- **Entropy** (mean and peak) — packed or encrypted data
+- **Hashes and duplicates** — MD5 / SHA-256, copies across devices
+- **Hidden data** — `invoice.pdf.exe`, reversed-text names, data appended after
+  the end of a JPEG / PNG / PDF, password-protected archives / Office / PDFs,
+  and files that look like encrypted (VeraCrypt-style) volumes
+- **Photo metadata** — camera, capture time, software, GPS position
+- **Document authors** — author, last saved by, company, application, dates
+
+Findings are graded (suspicious / notable) and appear in the listing, a Triage
+tab with a sub-tab each, and a Findings node in the tree grouped by device.
+
+</td>
+<td width="50%" valign="top">
+
+### 🔎 Universal search
+
+A per-case full-text index over file contents — PDFs, Office documents, registry
+hives, plain text in ASCII and UTF-16 — plus the things inside them: **emails,
+URLs, domains, IPv4/IPv6 addresses, hashes and Bitcoin addresses**. Supports
+`"phrases"`, `prefix*`, `AND` / `OR` / `NOT`, `/regex/` and field prefixes such
+as `email:` and `name:`. Indexing is resumable and runs in the background.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🔖 Bookmarks and notes
+
+Bookmark any file, byte range or registry key and come back to it after
+reopening the case. Write notes against files and bookmarks; notes outlive what
+they describe. Bookmarks sit beside the findings in Triage and in the tree.
+
+</td>
+<td width="50%" valign="top">
+
+### 🗜 Archives without extracting
+
+ZIP, TAR, GZIP, BZIP2 and XZ — and 7z when the optional `py7zr` package is
+installed — are browsed like folders straight from the image, nested archives
+too, and their members open in the viewers. Nothing is
+written to disk; encrypted members are reported as encrypted, and decompression
+bombs are refused.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🔍 File carving
+
+Recovers deleted files from unallocated space by signature — **PDF, JPG, PNG,
+GIF, BMP, TIFF, WAV, MOV, MP4, WMV, ZIP, GZ, RAR, 7Z, OLE (doc/xls/ppt) and
+HTML** — validating every carve before it is kept. An allocation map skips space
+used by live files. Shown as a list or thumbnail gallery; carved files are stored
+in the case.
+
+</td>
+<td width="50%" valign="top">
+
+### 🦠 VirusTotal, on demand
+
+Right-click any file(s) → **VirusTotal ▸ Look Up Hash** (only the SHA-256 leaves
+the machine) or **Upload File…** (after a warning that uploads are shared with
+VirusTotal's subscribers). Lookups queue within the free-tier rate limit, results
+are kept per file in the case and shown in the listing, and every request is
+audited.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🗂 File system browsing
+
+Tree view of partitions and directories with a listing pane showing inode, size,
+full MAC timestamps and analysis results. Back / forward / up navigation and a
+listing filter (`*.pdf`).
+
+</td>
 <td width="50%" valign="top">
 
 ### 🪟 Registry viewer
@@ -81,47 +176,39 @@ Extracts Windows registry hives straight from the image and browses the key tree
 with value names, types and data.
 
 </td>
-<td width="50%" valign="top">
-
-### ✅ Image verification
-
-Recomputes MD5 and SHA-1 for an E01 and compares them with the hashes stored in
-the EWF metadata, reporting whether the acquisition still verifies.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 📤 Export
-
-Files and entire directory trees can be extracted from the image to disk, with
-progress reporting and cancellation.
-
-</td>
-<td width="50%" valign="top">
-
-### 🦠 VirusTotal
-
-Look up a file's hash or submit the file itself through the VirusTotal API,
-with the per-minute and daily request limits enforced client-side.
-
-</td>
 </tr>
 </table>
 
+### Reviewing findings
+
+Clicking a finding, bookmark or search result **shows the file in the viewers
+and leaves you where you are**, so a list can be worked down with the arrow keys.
+Double-click — or **Show in Listing** — goes to the file's folder.
+
 ### Content viewers
 
-Any selected file can be examined through six tabs:
+Any selected file can be examined through these tabs:
 
 | Tab | What it shows |
 |:--|:--|
 | **Hex** | Paginated hex and ASCII view with search and an address bar |
 | **Text** | Text extraction with encoding detection; decodes Base64, hex, URL, HTML, octal and binary from a selection |
-| **Application** | Renders images, PDFs, audio and video — large media streams from the image instead of loading into memory |
-| **File Metadata** | Timestamps, size, MD5 / SHA-256, MIME type, and low-level detail (MFT entry, attributes, resident vs. non-resident sizes) |
-| **Exif Data** | EXIF metadata from photographs |
-| **VirusTotal** | Detection results for the selected file |
+| **Application** | Renders the file by what it **is**, not what it is called — see below |
+| **File Metadata** | Timestamps, size, MD5 / SHA-256, MIME type, low-level detail (MFT entry, attributes), and — when present — photo EXIF with GPS, document authorship and hidden-data findings |
+| **Case** / **Notes** | The case's evidence and integrity status; notes on the selected file |
+| **VirusTotal** | Appears when a lookup is made; history of every lookup with the full report |
+
+The **Application** tab identifies a file from its content as well as its name:
+a JPEG saved as `.txt` is shown as a JPEG, with a notice saying the extension
+does not match.
+
+| Kind | Formats |
+|:--|:--|
+| Images | JPEG, PNG, GIF, BMP, WebP, TIFF, ICO, SVG, TGA, PBM/PGM/PPM, **AVIF**, JPEG 2000, PSD, PCX |
+| Paged documents | PDF, EPUB, XPS, CBZ, FB2, MOBI |
+| Office | DOCX, XLSX, PPTX, ODT/ODS/ODP as structured text — **tracked-change deletions, comments, speaker notes and hidden sheets are shown and flagged**; legacy DOC/XLS/PPT as readable text |
+| Web | HTML, rendered **offline**: scripts never run and nothing is fetched from the network or disk (a fetch would tell a page's owner it was opened, and from where) |
+| Media | MP3, WAV, OGG, AAC, M4A, FLAC, WMA, MP4, M4V, MKV, WebM, AVI, MOV, WMV — large media streams from the image |
 
 <br/>
 
@@ -141,7 +228,7 @@ Any selected file can be examined through six tabs:
 <td><img src="Icons/readme/trace_verify.png" alt="Image verification"/></td>
 </tr>
 <tr>
-<td align="center"><sub><b>Search</b> — wildcard search across the image</sub></td>
+<td align="center"><sub><b>Search</b> — searching across the image</sub></td>
 <td align="center"><sub><b>Verification</b> — stored vs. recomputed hashes</sub></td>
 </tr>
 </table>
@@ -180,7 +267,8 @@ Any selected file can be examined through six tabs:
 </table>
 
 File system support comes from The Sleuth Kit — NTFS, FAT12/16/32, exFAT,
-Ext2/3/4, HFS+, APFS, UFS, ISO 9660 and YAFFS2. Only NTFS has been tested here.
+Ext2/3/4, HFS+, APFS, UFS, ISO 9660 and YAFFS2. NTFS, FAT, exFAT, Ext2/3/4, HFS+
+and ISO 9660 have been tested here.
 
 <br/>
 
@@ -247,7 +335,8 @@ pip install -r requirements.txt
 ```
 
 A single `requirements.txt` covers every platform; Windows-only packages carry
-environment markers.
+environment markers. **Upgrading an existing install?** Run it again — AVIF
+support needs Pillow 11.3 or newer, and legacy Office checks use `olefile`.
 
 </details>
 
@@ -257,19 +346,53 @@ Run `deactivate` when you are finished.
 
 ## Configuration
 
-**VirusTotal API key** — set it under **Options → API Keys**. Without a key that
-tab reports one is required; nothing else is affected.
+**VirusTotal API key** — set it under **Options → API Keys**. A free key allows
+four lookups a minute; TRACE queues requests to stay within it. Without a key,
+nothing else is affected.
+
+**Analysis modules** are offered when a case is opened and can be run any time
+from **Run Analysis** in the Triage tab. They run in the background; the status
+bar shows progress and can cancel, and a cancelled run resumes where it stopped.
 
 Settings and application data live outside the source tree:
 
-| | Configuration | Data (carved files, log) |
+| | Configuration | Data (log; carved files without a case) |
 |:--|:--|:--|
 | **Windows** | `%APPDATA%\TRACE` | `%LOCALAPPDATA%\TRACE` |
 | **macOS** | `~/Library/Application Support/TRACE` | `~/Library/Application Support/TRACE` |
 | **Linux** | `$XDG_CONFIG_HOME/TRACE` | `$XDG_DATA_HOME/TRACE` |
 
+With a case open, carved files, exports and the search index are kept in the
+case folder. Opening a case written by an older version upgrades it in place;
+older builds cannot open it afterwards.
+
 Diagnostics are written to `trace.log` in the data directory — include it when
 reporting a bug.
+
+<br/>
+
+## Testing
+
+Carving is scored rather than eyeballed: `tools/carve_score.py` runs the real
+carvers over the DFTT and DFRWS test images and compares the result with the
+answer keys their authors published.
+
+```bash
+python tools/carve_score.py                  # every image with a known key
+python tools/carve_score.py 11-carve-fat.dd  # one image
+```
+
+| Image | Files located | Byte-exact |
+|:--|:--:|:--:|
+| `11-carve-fat.dd` | 15 / 15 | — |
+| `12-carve-ext2.dd` | 10 / 10 | 1 / 1 |
+| `dfrws-2006-challenge.raw` | 25 / 27 | 10 / 10 |
+| `dfrws-2007-challenge.img` | 30 / 54 | 5 / 5 |
+
+The DFRWS images deliberately store most files fragmented; TRACE does not
+reassemble fragments, so byte-exact recovery is reported for the files a
+contiguous carver can reproduce. Test images are not included — see
+`test_images/README.md` for sources and checksums.
 
 <br/>
 
@@ -280,7 +403,10 @@ reporting a bug.
 [libewf-python](https://github.com/libyal/libewf) ·
 [python-registry](https://github.com/williballenthin/python-registry) ·
 [PyMuPDF](https://pymupdf.readthedocs.io/) ·
-[Pillow](https://python-pillow.org/)
+[Pillow](https://python-pillow.org/) ·
+[python-magic](https://github.com/ahupp/python-magic) ·
+[olefile](https://github.com/decalage2/olefile) ·
+[Tabler Icons](https://tabler.io/icons)
 
 <br/>
 

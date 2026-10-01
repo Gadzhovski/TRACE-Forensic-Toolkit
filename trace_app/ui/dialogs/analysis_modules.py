@@ -16,8 +16,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QLabel,
                                QVBoxLayout)
 
-from trace_app.core.analysis import (MODULE_ENTROPY, MODULE_HASH, MODULE_MAGIC,
-                                     magic_reader)
+from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
+                                     MODULE_HASH, MODULE_HIDDEN, MODULE_MAGIC,
+                                     MODULE_PHOTO, magic_reader)
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.AnalysisDialog')
@@ -42,6 +43,24 @@ _DESCRIPTIONS = {
         "MD5 and SHA-256 for every file, so the case can be searched by hash "
         "and identical copies grouped together.",
         "Slower: reads every file in full."),
+    MODULE_HIDDEN: (
+        "Hidden data",
+        "Disguised names (invoice.pdf.exe, reversed text), data hidden after "
+        "the end of an image or PDF, password-protected archives, documents "
+        "and PDFs, and files that look like encrypted volumes.",
+        "Fast: names cost nothing; only images, PDFs and archives are read."),
+    MODULE_PHOTO: (
+        "Photo metadata",
+        "Camera, capture time, editing software and GPS position from every "
+        "photo's EXIF. Photos that record where they were taken are listed "
+        "as findings.",
+        "Fast: reads photos only."),
+    MODULE_AUTHORS: (
+        "Document authors",
+        "Author, last saved by, company, application and template from "
+        "Office, OpenDocument and PDF files — who made a document, and with "
+        "what.",
+        "Fast: reads documents only."),
 }
 
 

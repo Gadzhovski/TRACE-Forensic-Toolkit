@@ -13,18 +13,25 @@ more than once.
 import logging
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView,
-                               QLabel, QPushButton, QTableWidget,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHeaderView,
+                               QLabel, QPushButton, QSizePolicy,
+                               QTableWidget, QToolBar,
                                QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
 from trace_app.core.analysis import (MODULE_ENTROPY, MODULE_HASH, MODULE_MAGIC,
                                      analyse_evidence)
-from trace_app.core.case import REPORTED_MISMATCHES, Case
+from trace_app.core.case import (REPORTED_FINDING_GRADES,
+                                 REPORTED_MISMATCHES, Case)
 from trace_app.core.image_handler import ImageHandler
-from trace_app.infra.constants import CONTROL_HEIGHT, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
+from trace_app.ui import icons
+from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
+from trace_app.ui.widgets.toolbars import prepare_toolbar
 
 logger = logging.getLogger('TRACE.Triage')
 
@@ -93,8 +100,11 @@ class AnalysisWorker(QThread):
 class TriagePanel(QWidget):
     """The findings, grouped by the reason they are findings."""
 
-    #: Emitted with a row when the examiner opens one, so the host can jump to
-    #: it the same way it jumps to a bookmark or a search result.
+    #: Emitted with a row when the examiner lands on it -- a click or an arrow
+    #: key -- so the host can show the file without leaving this tab.
+    finding_selected = Signal(dict)
+
+    #: Emitted with a row on a double-click: take me to the file's folder.
     finding_activated = Signal(dict)
 
     #: Emitted with (row, global position) on a right-click, so the host can
@@ -109,25 +119,56 @@ class TriagePanel(QWidget):
         self.setObjectName("triagePanel")
         self.case = None
         self.evidence_id = None
+        self._names = {}
         self.icon_resolver = None
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(4)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        header = QHBoxLayout()
-        header.setSpacing(6)
+        # The same bar as Listing, Registry and Deleted Files: logo, title,
+        # then the tab's main action on the right. Without it this tab was the
+        # only one in the row that opened straight onto controls.
+        self.toolbar = QToolBar()
+        prepare_toolbar(self.toolbar)
+        self.toolbar.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel()
+        icon_label.setObjectName("panelIcon")
+        icons.apply_pixmap(icon_label, icons.TRIAGE, PANEL_ICON_SIZE)
+        self.toolbar.addWidget(icon_label)
+        title = QLabel("Triage")
+        title.setObjectName("panelTitle")
+        self.toolbar.addWidget(title)
+
+        # The state of the analysis, after the title and before the button
+        # that runs it, so the bar reads as one sentence.
         self.status_label = QLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setWordWrap(False)
-        header.addWidget(self.status_label, 1)
+        self.status_label.setSizePolicy(QSizePolicy.Expanding,
+                                        QSizePolicy.Preferred)
+        self.toolbar.addWidget(self.status_label)
+
+        # One case is one investigation across every device in it, so the
+        # findings are the whole case's by default; this narrows them to one
+        # image when that is the question.
+        self.evidence_filter = QComboBox()
+        self.evidence_filter.setObjectName("triageEvidenceFilter")
+        self.evidence_filter.setToolTip("Show findings from every image in "
+                                        "the case, or from one.")
+        self.evidence_filter.currentIndexChanged.connect(self._filter_changed)
+        self.toolbar.addWidget(self.evidence_filter)
 
         self.run_button = QPushButton("Run Analysis")
         self.run_button.setObjectName("triageRunButton")
-        self.run_button.setFixedHeight(CONTROL_HEIGHT)
         self.run_button.clicked.connect(self.run_requested.emit)
-        header.addWidget(self.run_button)
-        layout.addLayout(header)
+        self.toolbar.addWidget(self.run_button)
+        outer.addWidget(self.toolbar)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(4)
+        outer.addLayout(layout)
 
         self.tabs = QTabWidget()
         self.tabs.setObjectName("triageTabs")
@@ -146,9 +187,39 @@ class TriagePanel(QWidget):
             ['Name', 'Copies', 'Size', 'Wasted', 'SHA-256', 'Path'])
         self.tabs.addTab(self.duplicate_table, "Duplicates")
 
+        self.hidden_table = self._make_table(
+            ['Name', 'Severity', 'Finding', 'Size', 'Path'])
+        self.tabs.addTab(self.hidden_table, "Hidden data")
+
+        self.photo_table = self._make_table(
+            ['Name', 'Taken', 'Camera', 'Location', 'Software', 'Path'])
+        self.tabs.addTab(self.photo_table, "Photos")
+
+        self.author_table = self._make_table(
+            ['Name', 'Author', 'Last saved by', 'Company', 'Application',
+             'Created', 'Modified', 'Path'])
+        self.tabs.addTab(self.author_table, "Authors")
+
+        #: Widest each free-text column may grow; the full text is in the
+        #: cell's tooltip. Uncapped, one long finding or an eight-author paper
+        #: pushed every column after it off the screen.
+        self._column_caps = {
+            id(self.hidden_table): {3: 520},
+            id(self.photo_table): {3: 220, 5: 200},
+            id(self.author_table): {2: 260, 3: 180, 4: 180, 5: 220},
+        }
+
+        #: Sub-tab index by the name the tree uses for it. The bookmarks tab
+        #: is added by the host (add_bookmarks_tab), since its panel is shared.
+        self._tab_for = {'mismatch': 0, 'entropy': 1, 'duplicates': 2,
+                         'hidden': 3, 'photos': 4, 'authors': 5}
+
         self.refresh()
 
     def _make_table(self, headers):
+        # Every finding says which image it came from, second after its name:
+        # with several devices in a case, a file name alone is not a location.
+        headers = [headers[0], 'Evidence'] + list(headers[1:])
         table = QTableWidget()
         table.setObjectName("triageTable")
         table.setColumnCount(len(headers))
@@ -157,18 +228,78 @@ class TriagePanel(QWidget):
         table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Paints the severity colours, which the theme's item colour would
+        # otherwise override.
+        table.setItemDelegate(NoFocusDelegate(table))
         table.horizontalHeader().setSectionResizeMode(
             QHeaderView.Interactive)
         table.itemDoubleClicked.connect(self._activate)
+        connect_row_preview(table, self.finding_selected.emit)
         table.setContextMenuPolicy(Qt.CustomContextMenu)
         table.customContextMenuRequested.connect(
             lambda point, t=table: self._context_menu(t, point))
         return table
 
+    def add_bookmarks_tab(self, panel):
+        """Make the case's bookmarks a sub-tab here.
+
+        Findings and bookmarks are the two lists an examiner works down, and
+        having both in one tab means reviewing them is one place rather than a
+        tab and a dock that was hidden by default.
+        """
+        self._bookmarks_panel = panel
+        self._tab_for['bookmarks'] = self.tabs.addTab(panel, "Bookmarks")
+        panel.count_changed.connect(self._set_bookmark_count)
+        self._set_bookmark_count(panel.count)
+
+    def _set_bookmark_count(self, count):
+        index = self._tab_for.get('bookmarks')
+        if index is not None:
+            self.tabs.setTabText(index, f"Bookmarks ({count})")
+
+    def show_group(self, name):
+        """Bring a sub-tab forward by name: 'mismatch', 'entropy',
+        'duplicates' or 'bookmarks'. Unknown names leave the current one."""
+        index = self._tab_for.get(name)
+        if index is not None:
+            self.tabs.setCurrentIndex(index)
+
     def set_case(self, case, evidence_id=None):
+        """Show `case`. `evidence_id` narrows to one image; None keeps the
+        examiner's own choice in the filter (all evidence by default)."""
         self.case = case
-        self.evidence_id = evidence_id
+        self._names = {}
+        if case is not None:
+            self._names = {r['id']: r.get('display_name')
+                           or r['path'].replace('\\', '/').rsplit('/', 1)[-1]
+                           for r in case.evidence()}
+        keep = evidence_id if evidence_id is not None else self.evidence_id
+        self._fill_filter(keep if keep in self._names else None)
         self.refresh()
+
+    def set_evidence_filter(self, evidence_id):
+        """Narrow to one image, or None for the whole case."""
+        index = self.evidence_filter.findData(evidence_id)
+        self.evidence_filter.setCurrentIndex(index if index >= 0 else 0)
+
+    def _fill_filter(self, selected):
+        self.evidence_filter.blockSignals(True)
+        self.evidence_filter.clear()
+        self.evidence_filter.addItem("All evidence", None)
+        for evidence_id, name in sorted(self._names.items(),
+                                        key=lambda kv: kv[1].lower()):
+            self.evidence_filter.addItem(name, evidence_id)
+        index = self.evidence_filter.findData(selected)
+        self.evidence_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.evidence_filter.blockSignals(False)
+        self.evidence_id = self.evidence_filter.currentData()
+        # One image needs no choosing.
+        self.evidence_filter.setVisible(len(self._names) > 1)
+
+    def _filter_changed(self, _index):
+        self.evidence_id = self.evidence_filter.currentData()
+        if self.case is not None:
+            self.refresh()
 
     def refresh(self):
         """Redraw from what the case holds now."""
@@ -177,10 +308,9 @@ class TriagePanel(QWidget):
                 "Analysis findings are kept in a case. File ▸ New Case "
                 "starts one.")
             self.run_button.setEnabled(False)
-            for table in (self.mismatch_table, self.entropy_table,
-                          self.duplicate_table):
+            for table in self._finding_tables():
                 table.setRowCount(0)
-            self._set_counts(0, 0, 0)
+            self._set_counts({})
             return
 
         self.run_button.setEnabled(True)
@@ -194,24 +324,106 @@ class TriagePanel(QWidget):
             else:
                 self.status_label.setText(
                     "Nothing analysed yet. Run Analysis examines every file "
-                    "for its true type, entropy and hash.")
+                    "for its true type, entropy, hash, hidden data and "
+                    "metadata.")
         else:
+            images = len(self._names)
+            scope = (f" across {images} images" if self.evidence_id is None
+                     and images > 1 else '')
             self.status_label.setText(
-                f"{summary['analysed']:,} file(s) analysed")
+                f"{summary['analysed']:,} file(s) analysed{scope}")
 
         self._fill_mismatches()
         self._fill_entropy()
         self._fill_duplicates()
-        self._set_counts(summary['mismatches'], summary['high_entropy'],
-                         summary['duplicate_groups'])
+        self._fill_hidden()
+        self._fill_photos()
+        self._fill_authors()
+        self._set_counts(summary)
 
-    def _set_counts(self, mismatches, entropy, duplicates):
+    def _finding_tables(self):
+        return (self.mismatch_table, self.entropy_table, self.duplicate_table,
+                self.hidden_table, self.photo_table, self.author_table)
+
+    def _fill_hidden(self):
+        rows = self.case.findings(self.evidence_id, 'hidden',
+                                  grades=REPORTED_FINDING_GRADES)
+        table = self.hidden_table
+        table.setRowCount(len(rows))
+        for position, row in enumerate(rows):
+            values = [
+                row.get('name') or '',
+                (row.get('grade') or '').capitalize(),
+                row.get('summary') or '',
+                FileSystemUtils.get_readable_size(row.get('size') or 0),
+                row.get('path') or '',
+            ]
+            self._fill_row(table, position, values, row)
+            # Severity in its colour: suspicious red, notable amber.
+            state = ('malicious' if row.get('grade') == 'suspicious'
+                     else 'suspicious')
+            for column in (2, 3):
+                table.item(position, column).setForeground(
+                    verdict_brush(state))
+                table.item(position, column).setToolTip(
+                    row.get('summary') or '')
+
+    def _fill_photos(self):
+        rows = self.case.findings(self.evidence_id, 'photo')
+        table = self.photo_table
+        table.setRowCount(len(rows))
+        for position, row in enumerate(rows):
+            facts = row.get('detail') or {}
+            camera = ' '.join(p for p in (facts.get('make'),
+                                          facts.get('model')) if p)
+            location = (f"{facts['latitude']:.5f}, {facts['longitude']:.5f}"
+                        if 'latitude' in facts else '')
+            values = [
+                row.get('name') or '',
+                facts.get('taken') or facts.get('modified') or '',
+                camera,
+                location,
+                facts.get('software') or '',
+                row.get('path') or '',
+            ]
+            self._fill_row(table, position, values, row)
+            if location:
+                # A position is the finding here; it is what an examiner
+                # scans the column for.
+                table.item(position, 4).setForeground(
+                    verdict_brush('suspicious'))
+
+    def _fill_authors(self):
+        rows = self.case.findings(self.evidence_id, 'authors')
+        table = self.author_table
+        table.setRowCount(len(rows))
+        for position, row in enumerate(rows):
+            facts = row.get('detail') or {}
+            values = [
+                row.get('name') or '',
+                facts.get('author') or '',
+                facts.get('last_saved_by') or '',
+                facts.get('company') or '',
+                facts.get('application') or facts.get('producer') or '',
+                facts.get('created') or '',
+                facts.get('modified') or '',
+                row.get('path') or '',
+            ]
+            self._fill_row(table, position, values, row)
+
+    def _set_counts(self, summary):
         # The count belongs on the tab, so it is readable whichever tab is
         # open -- an examiner should be able to see there are findings without
-        # clicking through all three.
-        self.tabs.setTabText(0, f"Type mismatches ({mismatches})")
-        self.tabs.setTabText(1, f"High entropy ({entropy})")
-        self.tabs.setTabText(2, f"Duplicates ({duplicates})")
+        # clicking through every one.
+        labels = (('mismatch', "Type mismatches", 'mismatches'),
+                  ('entropy', "High entropy", 'high_entropy'),
+                  ('duplicates', "Duplicates", 'duplicate_groups'),
+                  ('hidden', "Hidden data", 'hidden'),
+                  ('photos', "Photos", 'photos'),
+                  ('authors', "Authors", 'authors'))
+        for key, label, field in labels:
+            self.tabs.setTabText(self._tab_for[key],
+                                 f"{label} ({summary.get(field, 0)})")
 
     def _icon_for(self, name):
         if not self.icon_resolver:
@@ -277,8 +489,12 @@ class TriagePanel(QWidget):
             self._fill_row(table, position, values, member)
 
     def _fill_row(self, table, position, values, payload):
+        values = [values[0], self._names.get(payload.get('evidence_id'), '')] \
+            + list(values[1:])
         for column, value in enumerate(values):
             cell = QTableWidgetItem(str(value))
+            if column != 0 and value:
+                cell.setToolTip(str(value))
             if column == 0:
                 cell.setData(Qt.UserRole, payload)
                 icon = self._icon_for(payload.get('name') or '')
@@ -287,7 +503,12 @@ class TriagePanel(QWidget):
                 cell.setToolTip(payload.get('path') or '')
             table.setItem(position, column, cell)
         if position == table.rowCount() - 1:
-            fit_columns(table, {table.columnCount() - 1: 260})
+            caps = {table.columnCount() - 1: 260}
+            caps.update(self._column_caps.get(id(table), {}))
+            fit_columns(table, caps)
+            # Room for the file icon as well as the name: fitted to the text
+            # alone, a short name like "mum.jpg" was elided to "mu…".
+            table.setColumnWidth(0, max(table.columnWidth(0), 160))
 
     def _activate(self, item):
         row = item.tableWidget().item(item.row(), 0).data(Qt.UserRole)

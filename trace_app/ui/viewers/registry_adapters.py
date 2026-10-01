@@ -3,7 +3,7 @@
 Each viewer widget grew its own vocabulary: `display_hex_content`,
 `display_text_content`, `display_application_content`, `display_metadata`,
 `load_and_display_exif_data`, and VirusTotal's `set_file_hash` /
-`set_file_content` pair. Clearing was split between `clear_content()` and
+`set_file_content` pair (both since retired). Clearing was split between `clear_content()` and
 `clear()`.
 
 MainWindow therefore dispatched on the tab's *integer index*::
@@ -22,14 +22,11 @@ hardcoding an index. Adapting rather than renaming the widgets' own methods
 keeps their existing call sites (toolbars, paging, context menus) untouched.
 """
 
-import hashlib
-import os
+from trace_app.core.filetypes import VIEW_AUDIO, VIEW_VIDEO, plan_from_name
 
-# Extensions the Application viewer plays via a streaming device rather than
-# loading the whole file into memory.
-AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.aac', '.m4a'}
-VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.flv', '.avi', '.mov', '.webm', '.wmv', '.m4v'}
-MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
+# Audio and video are streamed from the image rather than read into memory.
+# Which extensions count comes from core/filetypes, the same table that
+# decides how every other file is shown, so the two cannot disagree.
 
 
 class ViewerAdapter:
@@ -86,8 +83,8 @@ class ApplicationAdapter(ViewerAdapter):
         self.widget.display_application_content(content, data.get('name', ''))
 
     def wants_stream(self, data):
-        extension = os.path.splitext(data.get('name', ''))[-1].lower()
-        return extension in MEDIA_EXTENSIONS
+        plan = plan_from_name(data.get('name', ''))
+        return plan is not None and plan.kind in (VIEW_AUDIO, VIEW_VIDEO)
 
     def display_stream(self, file_obj, file_size, data):
         """Hand the viewer a streaming handle instead of loaded bytes."""
@@ -102,11 +99,9 @@ class ApplicationAdapter(ViewerAdapter):
     @staticmethod
     def mime_type_for(path):
         """Best-effort MIME type from the file extension."""
-        extension = os.path.splitext(path)[-1].lower()
-        if extension in AUDIO_EXTENSIONS:
-            return f'audio/{extension[1:]}'
-        if extension in VIDEO_EXTENSIONS:
-            return 'video/mp4'
+        plan = plan_from_name(path)
+        if plan is not None and plan.mime:
+            return plan.mime
         return 'application/octet-stream'
 
 
@@ -119,25 +114,6 @@ class MetadataAdapter(ViewerAdapter):
     def needs_content(self):
         # display_metadata() reads the file itself via the image handler.
         return False
-
-
-class ExifAdapter(ViewerAdapter):
-    label = 'Exif Data'
-
-    def display(self, content, data):
-        self.widget.load_and_display_exif_data(content)
-
-
-class VirusTotalAdapter(ViewerAdapter):
-    label = 'Virus Total API'
-
-    def display(self, content, data):
-        self.widget.set_file_hash(hashlib.md5(content).hexdigest())
-        self.widget.set_file_content(content, data.get('name', ''))
-
-    def clear(self):
-        # VirusTotal keeps its own report until a new file is submitted.
-        pass
 
 
 class CaseAdapter(ViewerAdapter):
@@ -175,8 +151,6 @@ VIEWER_ADAPTERS = (
     TextAdapter,
     ApplicationAdapter,
     MetadataAdapter,
-    ExifAdapter,
-    VirusTotalAdapter,
     CaseAdapter,
     NotesAdapter,
 )

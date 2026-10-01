@@ -24,6 +24,7 @@ test without starting a GUI.
 
 import datetime
 import hashlib
+import json
 import logging
 import os
 import re
@@ -43,7 +44,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -82,6 +83,10 @@ _REGISTRY_REF = re.compile(r'^reg:([^:]+):(.*)$')
 #: document looks like from outside. Benign disagreements are recorded but not
 #: reported: a list opening with every .jpe teaches people to close the list.
 REPORTED_MISMATCHES = ('suspicious', 'notable')
+
+#: The content-check grades worth showing; benign ones (a motion photo's
+#: clip, an owner-password PDF) are recorded but not put in front of anyone.
+REPORTED_FINDING_GRADES = ('suspicious', 'notable')
 
 
 def make_artifact_ref(start_offset, inode, sequence=None):
@@ -539,6 +544,62 @@ class Case:
                 "ORDER BY id DESC LIMIT ?", (evidence_id, limit)).fetchall()
         return [dict(row) for row in rows]
 
+    # --- VirusTotal ---------------------------------------------------------
+
+    def record_vt_result(self, evidence_id, artifact_ref, name, path, sha256,
+                         method, result, sent=True):
+        """Append one VirusTotal query and, if anything left, its audit line.
+
+        `sent` says whether the hash or the file actually reached VirusTotal.
+        A query that failed before sending -- the file could not be read --
+        is recorded as an error but not audited as a disclosure, because
+        nothing was disclosed.
+        """
+        status = result.get('status') or 'error'
+        report = {k: v for k, v in result.items() if k != 'error'}
+        cursor = self._db.execute(
+            "INSERT INTO vt_results (evidence_id, artifact_ref, name, path, "
+            "sha256, method, status, positives, total, scan_date, report, "
+            "detail, queried_utc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, artifact_ref, name, path, sha256 or '', method,
+             status, result.get('positives'), result.get('total'),
+             result.get('scan_date') or '', json.dumps(report),
+             result.get('error') or '', _utc_now()))
+        self._db.commit()
+
+        if sent:
+            what = ('file uploaded to VirusTotal' if method == 'upload'
+                    else 'hash sent to VirusTotal')
+            self._record_activity(
+                what, f"{path or name} sha256={sha256} result={status}")
+        return cursor.lastrowid
+
+    def vt_results(self, evidence_id=None, limit=500):
+        """VirusTotal history, newest first, with the report decoded."""
+        query = "SELECT * FROM vt_results"
+        params = []
+        if evidence_id is not None:
+            query += " WHERE evidence_id = ?"
+            params.append(evidence_id)
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        return [_decode_vt(row) for row in self._db.execute(query, params)]
+
+    def vt_latest(self, evidence_id, refs):
+        """The newest result for each of `refs` that has one, by ref."""
+        refs = list(refs)
+        found = {}
+        for start in range(0, len(refs), 500):
+            chunk = refs[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            rows = self._db.execute(
+                f"SELECT * FROM vt_results WHERE id IN ("
+                f"  SELECT MAX(id) FROM vt_results WHERE evidence_id = ? "
+                f"  AND artifact_ref IN ({marks}) GROUP BY artifact_ref)",
+                [evidence_id] + chunk).fetchall()
+            found.update({r['artifact_ref']: _decode_vt(r) for r in rows})
+        return found
+
     # --- read-only status -------------------------------------------------
 
     def set_evidence_readonly(self, evidence_id, read_only=True):
@@ -783,11 +844,28 @@ class Case:
             " mime, extension, mismatch, entropy, entropy_peak, "
             " entropy_peak_offset, md5, sha256, note, analysed_utc) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", payload)
+
+        # Findings ride the same batch and the same commit, so a file's row
+        # and what was found in it are never written apart.
+        findings = []
+        for ref, name, path, _deleted, facts in rows:
+            for module, kind, grade, summary, detail in \
+                    facts.get('findings') or ():
+                findings.append((evidence_id, ref, name, path,
+                                 facts.get('size'), module, kind, grade,
+                                 summary, detail, now))
+        if findings:
+            self._db.executemany(
+                "INSERT INTO file_findings (evidence_id, artifact_ref, name, "
+                "path, size, module, kind, grade, summary, detail, "
+                "analysed_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?)", findings)
         self._db.commit()
 
     def clear_analysis(self, evidence_id):
         """Drop a previous run's findings for one piece of evidence."""
         self._db.execute("DELETE FROM file_analysis WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.execute("DELETE FROM file_findings WHERE evidence_id = ?",
                          (evidence_id,))
         self._db.commit()
 
@@ -887,16 +965,34 @@ class Case:
         params.append(limit)
         return [dict(r) for r in self._db.execute(query, params)]
 
-    def high_entropy_files(self, evidence_id=None, threshold=7.5, limit=1000):
-        """Files that look like random data, most extreme first."""
-        query = "SELECT * FROM file_analysis WHERE entropy >= ?"
-        params = [threshold]
+    def high_entropy_files(self, evidence_id=None, limit=1000):
+        """Files that look random with no business doing so, most extreme first.
+
+        Judged by analysis.is_high_entropy, the same rule the listing's flag
+        column uses. A bare `entropy >= 7.5` listed every JPEG, MP3 and ZIP on
+        the volume -- formats that score near 8 by design -- so the group was
+        mostly noise and disagreed with the listing about the same file.
+        """
+        # Imported here: analysis imports this module for make_artifact_ref.
+        from trace_app.core.analysis import (HIGH_ENTROPY, HIGH_PEAK_ENTROPY,
+                                             is_high_entropy)
+
+        query = ("SELECT * FROM file_analysis "
+                 "WHERE (entropy >= ? OR entropy_peak >= ?)")
+        params = [HIGH_ENTROPY, HIGH_PEAK_ENTROPY]
         if evidence_id is not None:
             query += " AND evidence_id = ?"
             params.append(evidence_id)
-        query += " ORDER BY entropy DESC LIMIT ?"
-        params.append(limit)
-        return [dict(r) for r in self._db.execute(query, params)]
+        query += " ORDER BY entropy DESC"
+
+        found = []
+        for row in self._db.execute(query, params):
+            if is_high_entropy(row['entropy'] or 0, row['entropy_peak'] or 0,
+                               row['mime'] or ''):
+                found.append(dict(row))
+                if len(found) >= limit:
+                    break
+        return found
 
     def duplicate_groups(self, evidence_id=None, limit=500):
         """Files sharing a SHA-256, grouped, biggest waste first.
@@ -924,6 +1020,64 @@ class Case:
                            'size': row['size'],
                            'members': [dict(m) for m in members]})
         return groups
+
+    def findings(self, evidence_id=None, module=None, grades=None,
+                 kind=None, limit=2000):
+        """Content-check findings, most serious first, detail decoded.
+
+        `grades` narrows to those grades -- pass REPORTED_FINDING_GRADES for
+        the ones worth showing; leave it None for everything recorded.
+        """
+        query = "SELECT * FROM file_findings WHERE 1 = 1"
+        params = []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        if module:
+            query += " AND module = ?"
+            params.append(module)
+        if kind:
+            query += " AND kind = ?"
+            params.append(kind)
+        if grades:
+            grades = list(grades)
+            query += f" AND grade IN ({','.join('?' * len(grades))})"
+            params.extend(grades)
+        query += (" ORDER BY CASE grade WHEN 'suspicious' THEN 0 "
+                  "WHEN 'notable' THEN 1 ELSE 2 END, name LIMIT ?")
+        params.append(limit)
+        rows = []
+        for row in self._db.execute(query, params):
+            row = dict(row)
+            try:
+                row['detail'] = json.loads(row.get('detail') or '{}')
+            except ValueError:
+                row['detail'] = {}
+            rows.append(row)
+        return rows
+
+    def findings_map(self, evidence_id, refs, module=None, grades=None):
+        """{artifact_ref: [finding, ...]} for the refs on screen."""
+        refs = list(refs)
+        found = {}
+        for start in range(0, len(refs), 500):
+            chunk = refs[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            query = (f"SELECT * FROM file_findings WHERE evidence_id = ? "
+                     f"AND artifact_ref IN ({marks})")
+            params = [evidence_id] + chunk
+            if module:
+                query += " AND module = ?"
+                params.append(module)
+            if grades:
+                query += f" AND grade IN ({','.join('?' * len(grades))})"
+                params.extend(grades)
+            query += (" ORDER BY CASE grade WHEN 'suspicious' THEN 0 "
+                      "WHEN 'notable' THEN 1 ELSE 2 END")
+            for row in self._db.execute(query, params):
+                row = dict(row)
+                found.setdefault(row['artifact_ref'], []).append(row)
+        return found
 
     def find_by_hash(self, digest):
         """Every file matching a hash, whichever algorithm it is.
@@ -956,8 +1110,26 @@ class Case:
             + " sha256 IS NOT NULL AND sha256 != '' GROUP BY sha256"
               " HAVING COUNT(*) > 1)", params).fetchone()[0]
 
+        def count(module, grades=None, located=False):
+            query = ("SELECT COUNT(DISTINCT artifact_ref) FROM file_findings "
+                     "WHERE module = ?")
+            args = [module]
+            if evidence_id is not None:
+                query += " AND evidence_id = ?"
+                args.append(evidence_id)
+            if grades:
+                query += f" AND grade IN ({','.join('?' * len(grades))})"
+                args.extend(grades)
+            if located:
+                query += " AND detail LIKE '%\"latitude\"%'"
+            return self._db.execute(query, args).fetchone()[0]
+
         return {'analysed': analysed, 'mismatches': mismatches,
-                'high_entropy': entropy, 'duplicate_groups': duplicates}
+                'high_entropy': entropy, 'duplicate_groups': duplicates,
+                'hidden': count('hidden', REPORTED_FINDING_GRADES),
+                'photos': count('photo'),
+                'photos_located': count('photo', located=True),
+                'authors': count('authors')}
 
     def _create_schema(self):
         """Create every table, including the ones no feature uses yet.
@@ -1090,6 +1262,52 @@ class Case:
                 ON notes(evidence_id, artifact_ref);
             CREATE INDEX IF NOT EXISTS idx_bookmarks_artifact
                 ON bookmarks(evidence_id, artifact_ref);
+
+            -- One row per VirusTotal query, never updated: "clean in March,
+            -- detected by 12 engines in October" is the history a report
+            -- needs, and an overwrite would keep only its last line.
+            CREATE TABLE IF NOT EXISTS vt_results (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT,
+                name          TEXT,
+                path          TEXT,
+                sha256        TEXT NOT NULL,
+                method        TEXT NOT NULL,
+                status        TEXT NOT NULL,
+                positives     INTEGER,
+                total         INTEGER,
+                scan_date     TEXT,
+                report        TEXT,
+                detail        TEXT,
+                queried_utc   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_vt_artifact
+                ON vt_results(evidence_id, artifact_ref, id DESC);
+
+            -- What the content checks found: deceptive names, appended data,
+            -- encryption, photo metadata, document authors. A row per
+            -- finding, not per file -- one file can wear a double extension
+            -- and carry an archive after its end.
+            CREATE TABLE IF NOT EXISTS file_findings (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT NOT NULL,
+                name          TEXT,
+                path          TEXT,
+                size          INTEGER,
+                module        TEXT NOT NULL,
+                kind          TEXT NOT NULL,
+                grade         TEXT NOT NULL,
+                summary       TEXT,
+                detail        TEXT,
+                analysed_utc  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_findings_module
+                ON file_findings(evidence_id, module, grade);
+            CREATE INDEX IF NOT EXISTS idx_findings_artifact
+                ON file_findings(evidence_id, artifact_ref);
         """)
         self._db.commit()
         self._set('schema_version', SCHEMA_VERSION)
@@ -1114,6 +1332,16 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 6:
+            # file_findings is created unconditionally above; an older case
+            # simply has no findings until the new modules are run.
+            self._db.commit()
+
+        if version < 5:
+            # vt_results is created unconditionally above. VirusTotal results
+            # were never stored before, so there is nothing to carry over.
+            self._db.commit()
 
         if version < 4:
             # file_analysis and analysis_state are created unconditionally
@@ -1154,6 +1382,16 @@ class Case:
             self._set('schema_version', SCHEMA_VERSION)
 
 # --- module helpers -------------------------------------------------------
+
+def _decode_vt(row):
+    """A vt_results row as a dict, its stored report parsed back out."""
+    result = dict(row)
+    try:
+        result['report'] = json.loads(result.get('report') or '{}')
+    except ValueError:
+        result['report'] = {}
+    return result
+
 
 def _utc_now():
     """Now, as UTC ISO-8601 seconds.

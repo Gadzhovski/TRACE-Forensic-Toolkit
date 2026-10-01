@@ -23,6 +23,13 @@ section below) and the files in `Icons/tabler/themed/`, which are upstream
 glyphs with their `currentColor` stroke replaced by a fixed per-theme colour,
 because Qt's SVG renderer does not resolve `currentColor` in a stylesheet.
 
+`Icons/tabler/trace/` holds glyphs drawn for TRACE where the set has no fitting
+icon -- the Findings groups (type mismatch, high entropy, duplicates) and the
+Search and Triage panel logos (`search-content.svg`, `triage.svg`). They
+follow Tabler's conventions (24×24 grid, 2px round stroke, `currentColor`) so
+they are tinted with the rest, and `duplicates.svg` reuses Tabler's `files`
+geometry. They are TRACE's own work, not upstream files.
+
 The directory holds more icons than the interface currently uses. They are kept
 so that adding a control does not mean going back to the upstream repository
 and risking a mixed set of versions.

@@ -1,4 +1,3 @@
-from trace_app.ui.dialogs import message
 """Audio and video player.
 
 Plays either from a QBuffer or straight from the disk image via
@@ -9,16 +8,16 @@ import logging
 import os
 import platform
 
-from PySide6.QtCore import Qt, QUrl, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-                               QSlider, QSizePolicy)
+from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+                               QLabel, QPushButton, QSlider, QSizePolicy)
 
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Viewer.Media')
 
@@ -183,37 +182,9 @@ class AudioVideoPlayer(QWidget):
 
     def update_controls(self):
         if self._is_playing:
-            # Try different pause icon paths
-            pause_icon_paths = [
-                icons.path(icons.PAUSE),
-                icons.path(icons.PAUSE),
-                icons.path(icons.PAUSE)
-            ]
-            icon_set = False
-            for path in pause_icon_paths:
-                if os.path.exists(path):
-                    self.play_button.setIcon(QIcon(path))
-                    icon_set = True
-                    break
-
-            if not icon_set:
-                self.play_button.setText("Pause")
+            self.play_button.setIcon(icons.icon(icons.PAUSE))
         else:
-            # Try different play icon paths
-            play_icon_paths = [
-                icons.path(icons.PLAY),
-                icons.path(icons.PLAY),
-                icons.path(icons.PLAY)
-            ]
-            icon_set = False
-            for path in play_icon_paths:
-                if os.path.exists(path):
-                    self.play_button.setIcon(QIcon(path))
-                    icon_set = True
-                    break
-
-            if not icon_set:
-                self.play_button.setText("Play")
+            self.play_button.setIcon(icons.icon(icons.PLAY))
 
     def set_position(self, position):
         self.media_player.setPosition(position)
@@ -242,37 +213,10 @@ class AudioVideoPlayer(QWidget):
         if self._is_muted:
             self._previous_volume = self._current_volume
             self.set_volume(0)
-            # Try different mute icon paths
-            mute_icon_paths = [
-                icons.path(icons.MUTE),
-                icons.path(icons.MUTE)
-            ]
-            icon_set = False
-            for path in mute_icon_paths:
-                if os.path.exists(path):
-                    self.volume_button.setIcon(QIcon(path))
-                    icon_set = True
-                    break
-
-            if not icon_set:
-                self.volume_button.setText("Mute")
+            self.volume_button.setIcon(icons.icon(icons.MUTE))
         else:
             self.set_volume(self._previous_volume)
-            # Try different volume icon paths
-            volume_icon_paths = [
-                icons.path(icons.AUDIO),
-                icons.path(icons.VOLUME),
-                icons.path(icons.AUDIO)
-            ]
-            icon_set = False
-            for path in volume_icon_paths:
-                if os.path.exists(path):
-                    self.volume_button.setIcon(QIcon(path))
-                    icon_set = True
-                    break
-
-            if not icon_set:
-                self.volume_button.setText("Vol")
+            self.volume_button.setIcon(icons.icon(icons.VOLUME))
 
         # Update system volume if enabled
         self.set_os_volume(self._current_volume)
@@ -289,37 +233,10 @@ class AudioVideoPlayer(QWidget):
         # Update mute button icon based on volume
         if volume == 0:
             self._is_muted = True
-            # Try different mute icon paths
-            mute_icon_paths = [
-                icons.path(icons.MUTE),
-                icons.path(icons.MUTE)
-            ]
-            icon_set = False
-            for path in mute_icon_paths:
-                if os.path.exists(path):
-                    self.volume_button.setIcon(QIcon(path))
-                    icon_set = True
-                    break
-
-            if not icon_set:
-                self.volume_button.setText("Mute")
+            self.volume_button.setIcon(icons.icon(icons.MUTE))
         else:
             self._is_muted = False
-            # Try different volume icon paths
-            volume_icon_paths = [
-                icons.path(icons.AUDIO),
-                icons.path(icons.VOLUME),
-                icons.path(icons.AUDIO)
-            ]
-            icon_set = False
-            for path in volume_icon_paths:
-                if os.path.exists(path):
-                    self.volume_button.setIcon(QIcon(path))
-                    icon_set = True
-                    break
-
-            if not icon_set:
-                self.volume_button.setText("Vol")
+            self.volume_button.setIcon(icons.icon(icons.VOLUME))
 
         # Update system volume if enabled
         self.set_os_volume(volume)
@@ -353,41 +270,17 @@ class AudioVideoPlayer(QWidget):
         self.control_layout.setContentsMargins(2, 2, 2, 2)
         self.control_layout.setSpacing(2)
 
-        # Play/Pause button with fallback icon paths
+        # Play/Pause button 
         self.play_button = QPushButton(self)
-        # Try different icon paths
-        play_icon_paths = [
-            icons.path(icons.PLAY),
-            icons.path(icons.PLAY),
-            icons.path(icons.PLAY)
-        ]
-        for path in play_icon_paths:
-            if os.path.exists(path):
-                self.play_button.setIcon(QIcon(path))
-                break
-        else:
-            # Fallback - create a text button
-            self.play_button.setText("Play")
+        self.play_button.setIcon(icons.icon(icons.PLAY))
 
         self.play_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         self.play_button.setFlat(True)
         self.play_button.setToolTip("Play/Pause")
 
-        # Stop button with fallback icon paths
+        # Stop button 
         self.stop_button = QPushButton(self)
-        # Try different icon paths
-        stop_icon_paths = [
-            icons.path(icons.STOP),
-            icons.path(icons.STOP),
-            icons.path(icons.STOP)
-        ]
-        for path in stop_icon_paths:
-            if os.path.exists(path):
-                self.stop_button.setIcon(QIcon(path))
-                break
-        else:
-            # Fallback - create a text button
-            self.stop_button.setText("Stop")
+        self.stop_button.setIcon(icons.icon(icons.STOP))
 
         self.stop_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         self.stop_button.setFlat(True)
@@ -404,21 +297,9 @@ class AudioVideoPlayer(QWidget):
         self.total_time_label = QLabel("00:00", self)
         self.total_time_label.setMinimumWidth(40)
 
-        # Volume button with fallback icon paths
+        # Volume button 
         self.volume_button = QPushButton(self)
-        # Try different icon paths
-        volume_icon_paths = [
-            icons.path(icons.AUDIO),
-            icons.path(icons.VOLUME),
-            icons.path(icons.AUDIO)
-        ]
-        for path in volume_icon_paths:
-            if os.path.exists(path):
-                self.volume_button.setIcon(QIcon(path))
-                break
-        else:
-            # Fallback - create a text button
-            self.volume_button.setText("Vol")
+        self.volume_button.setIcon(icons.icon(icons.VOLUME))
 
         self.volume_button.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         self.volume_button.setFlat(True)
@@ -472,7 +353,5 @@ class AudioVideoPlayer(QWidget):
                     except Exception as e:
                         logger.error(f"Error clearing media source: {e}")
 
-                # Wait a moment for resources to be released
-                time.sleep(0.1)
         except Exception as e:
             logger.error(f"Error in safe_stop: {e}")

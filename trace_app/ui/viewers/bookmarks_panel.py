@@ -1,8 +1,9 @@
-"""The Bookmarks dock: every artifact the examiner marked worth returning to.
+"""The Bookmarks list: every artifact the examiner marked worth returning to.
 
 A bookmark is a fast way back, not a place to write things down -- that is what
-notes are for. So this panel is a list you scan and double-click, and it stays
-out of the way otherwise.
+notes are for. So this panel is a list you scan: a click shows the artifact in
+the viewers, a double-click takes you to its folder. It lives as a sub-tab of
+Triage, beside the findings, rather than in a dock of its own.
 
 The list is the case's, so it survives closing the application. What makes that
 work is `artifact_ref` (see trace_app/core/case.py): a bookmark records the
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QLabel, QMenu,
 from trace_app.core.case import parse_artifact_ref
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.ui.dialogs import message
+from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 
 logger = logging.getLogger('TRACE.Bookmarks')
@@ -34,10 +36,20 @@ KIND_TEXT = {
 
 
 class BookmarksPanel(QWidget):
-    """Lists the case's bookmarks. Double-click jumps to the artifact."""
+    """Lists the case's bookmarks.
+
+    A click previews the artifact; a double-click jumps to it.
+    """
+
+    #: Emitted with a bookmark row when the examiner lands on it.
+    bookmark_selected = Signal(dict)
 
     #: Emitted with a bookmark row when the user wants to go there.
     jump_requested = Signal(dict)
+
+    #: Emitted with the number of bookmarks after every refresh, so the tab
+    #: holding this panel can show it.
+    count_changed = Signal(int)
 
     #: Emitted after the panel changes the list, so the tree can redraw.
     bookmarks_changed = Signal()
@@ -45,9 +57,11 @@ class BookmarksPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.case = None
+        self.count = 0
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        # Flush, like the findings tables beside it in Triage.
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
         self.empty_label = QLabel()
@@ -58,8 +72,10 @@ class BookmarksPanel(QWidget):
 
         self.table = QTableWidget()
         self.table.setObjectName("bookmarksTable")
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(['Label', 'Kind', 'Name', 'Added'])
+        # Path last, as in the findings tables beside it in Triage.
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(
+            ['Label', 'Evidence', 'Kind', 'Name', 'Added', 'Path'])
         self.table.verticalHeader().setVisible(False)
         self.table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -67,6 +83,7 @@ class BookmarksPanel(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.Interactive)
         self.table.itemDoubleClicked.connect(self._jump)
+        connect_row_preview(self.table, self.bookmark_selected.emit)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         layout.addWidget(self.table)
@@ -80,6 +97,10 @@ class BookmarksPanel(QWidget):
         self.refresh()
 
     def refresh(self):
+        rows = self.case.bookmarks() if self.case is not None else []
+        self.count = len(rows)
+        self.count_changed.emit(self.count)
+
         if self.case is None:
             self.empty_label.setText(
                 "Quick triage — no case is open, so there is nowhere to keep "
@@ -88,7 +109,6 @@ class BookmarksPanel(QWidget):
             self.table.setVisible(False)
             return
 
-        rows = self.case.bookmarks()
         if not rows:
             self.empty_label.setText(
                 "No bookmarks yet. Right-click a file, a registry key, a "
@@ -101,13 +121,18 @@ class BookmarksPanel(QWidget):
         self.table.setVisible(True)
         self.table.setRowCount(len(rows))
 
+        names = {r['id']: r.get('display_name')
+                 or r['path'].replace('\\', '/').rsplit('/', 1)[-1]
+                 for r in self.case.evidence()}
         for index, row in enumerate(rows):
             kind = parse_artifact_ref(row.get('artifact_ref'))['kind']
             values = [
                 row.get('label') or '(unlabelled)',
+                names.get(row.get('evidence_id'), ''),
                 KIND_TEXT.get(kind, kind),
                 row.get('artifact_name') or row.get('artifact_path') or '—',
                 (row.get('created_utc') or '')[:19].replace('T', ' '),
+                row.get('artifact_path') or '',
             ]
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(str(value))
@@ -119,7 +144,7 @@ class BookmarksPanel(QWidget):
                         cell.setToolTip(row['artifact_path'])
                 self.table.setItem(index, column, cell)
 
-        fit_columns(self.table, {2: 300})
+        fit_columns(self.table, {3: 300, 5: 420})
 
     # --- actions ----------------------------------------------------------
 
@@ -140,7 +165,7 @@ class BookmarksPanel(QWidget):
             return
 
         menu = QMenu(self)
-        go = menu.addAction("Go to Artifact")
+        go = menu.addAction("Show in Listing")
         rename = menu.addAction("Rename...")
         menu.addSeparator()
         remove = menu.addAction("Remove Bookmark")

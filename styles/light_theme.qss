@@ -833,20 +833,84 @@ QLabel#panelIcon {
     padding: 0 4px 0 8px;
 }
 
-QLabel#vtVerdict {
-    font-size: 15px;
-    font-weight: 600;
-    padding: 6px 2px;
-    color: #495057;
+/* ==================== VirusTotal ==================== */
+/* The verdict is a tinted badge rather than coloured text alone: it is the
+   answer the tab exists to give, and it should be readable from across the
+   room. Each state pairs a pale wash with a strong foreground from the same
+   hue, so the badge never depends on colour alone -- the score is in it. */
+
+QLabel#vtStatus {
+    color: #6b7480;
 }
 
+QLabel#vtScore {
+    font-size: 20px;
+    font-weight: 700;
+    min-width: 64px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background-color: #f1f3f5;
+    color: #6b7480;
+}
+QLabel#vtScore[state="malicious"] { background-color: #fdecec; color: #c02b2b; }
+QLabel#vtScore[state="suspicious"] { background-color: #fff4e5; color: #b45309; }
+QLabel#vtScore[state="error"] { background-color: #fff4e5; color: #b45309; }
+QLabel#vtScore[state="clean"] { background-color: #e9f6ec; color: #1a7f37; }
+
+QLabel#vtVerdict {
+    font-size: 14px;
+    font-weight: 600;
+    color: #212529;
+}
 QLabel#vtVerdict[state="malicious"] { color: #c02b2b; }
+QLabel#vtVerdict[state="suspicious"] { color: #b45309; }
 QLabel#vtVerdict[state="clean"] { color: #1a7f37; }
 
-QLabel#vtSectionLabel {
-    font-weight: 600;
+QLabel#vtVerdictDetail {
     color: #6b7480;
-    padding-top: 8px;
+}
+
+QPushButton#vtActionButton {
+    padding: 0px 10px;
+}
+
+QTableWidget#vtHistory,
+QTableWidget#vtEngines {
+    gridline-color: #dee2e6;
+}
+
+/* ==================== Application tab ==================== */
+/* Why a file is shown as it is: "Shown as JPEG image: its content does not
+   match the .txt extension", or that an HTML page was rendered offline. A
+   band rather than a dialog -- it describes the evidence on screen, and must
+   not be something to click away. */
+QLabel#viewerNotice {
+    background-color: #fff8e1;
+    color: #7a5200;
+    border-bottom: 1px solid #f0d58c;
+    padding: 5px 10px;
+}
+
+/* Evidence pages and Office documents are shown as paper: they were written
+   for a white background, and a page that sets only its text colour would
+   vanish on the dark theme. The page's own colours come from the document. */
+QTextBrowser#documentPage {
+    background-color: #ffffff;
+    color: #1f2328;
+    border: none;
+    padding: 8px;
+}
+
+/* The close button on the VirusTotal tab -- the only closable viewer tab. */
+QToolButton#tabCloseButton {
+    border: none;
+    border-radius: 3px;
+    padding: 1px;
+    margin-left: 4px;
+    background: transparent;
+}
+QToolButton#tabCloseButton:hover {
+    background-color: rgba(0, 0, 0, 0.08);
 }
 
 /* ==================== Metadata pane ==================== */
@@ -942,10 +1006,17 @@ QToolBar QToolButton:pressed {
    Qt warn "the largest allowed size is (16777215,16777215)" on every such
    button at startup. */
 QToolBar QToolButton[popupMode="1"],
-QToolBar QToolButton#clearSearchBtn,
-QToolBar QPushButton {
+QToolBar QToolButton#clearSearchBtn {
     min-width: 0px;
     max-width: none;
+}
+
+/* Push buttons in a toolbar size to their label. They are not under the 28px
+   square cap above, so there is nothing to undo -- and sharing the rule above
+   did harm: Qt reads "max-width: none" as a cap at the button's unpadded
+   width, which clipped any label longer than "Start" ("uild Ind"). */
+QToolBar QPushButton {
+    min-width: 0px;
 }
 
 /* Labels inside a toolbar: match the control height so text baselines line up

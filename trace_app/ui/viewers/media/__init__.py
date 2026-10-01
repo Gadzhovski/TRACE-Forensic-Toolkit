@@ -1,8 +1,14 @@
 """Multi-format file viewer.
 
-UnifiedViewer inspects the content it is handed and delegates to the right
-specialised viewer: images, PDFs, or audio/video. Each of those lives in its own
-module in this package.
+UnifiedViewer asks trace_app.core.filetypes how to show a file -- from its name
+and its content, so a JPEG named .txt is shown as a JPEG -- and delegates to
+the specialised viewer: pictures, paged documents (PDF, EPUB, XPS, CBZ, FB2,
+MOBI), audio/video, or the offline HTML viewer, which also shows Office
+documents read into static HTML. Each lives in its own module here.
+
+When the content and the extension disagree, a notice above the file says so:
+in a forensic tool, why a file is shown the way it is matters as much as the
+picture.
 """
 
 import logging
@@ -16,9 +22,14 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolB
                                QPushButton, QMessageBox, QFileDialog, QSizePolicy,
                                QApplication)
 
+from trace_app.core import document_preview
+from trace_app.core.filetypes import (VIEW_AUDIO, VIEW_DOCUMENT, VIEW_HTML,
+                                      VIEW_IMAGE, VIEW_OFFICE, VIEW_VIDEO,
+                                      plan_view)
 from trace_app.core.stream_device import PyTsk3StreamDevice
 from trace_app.infra.paths import resource_path
 from trace_app.ui.viewers.media.audiovideo import AudioVideoPlayer
+from trace_app.ui.viewers.media.html import SafeHtmlViewer
 from trace_app.ui.viewers.media.pdf import PDFViewer
 from trace_app.ui.viewers.media.picture import PictureViewer
 
@@ -38,16 +49,27 @@ class UnifiedViewer(QWidget):
 
         # Check if Icons directory exists and create it if needed
 
+        # Why the file is shown as it is, when that is not obvious from its
+        # name: "Shown as JPEG image: its content does not match .txt".
+        self.notice = QLabel()
+        self.notice.setObjectName("viewerNotice")
+        self.notice.setWordWrap(True)
+        self.notice.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.notice.setVisible(False)
+        self.layout.addWidget(self.notice)
+
         # Create placeholder widget to show when nothing is loaded
         self.placeholder = QLabel("No content loaded")
         self.placeholder.setObjectName("placeholderLabel")  # For stylesheet targeting
         self.placeholder.setAlignment(Qt.AlignCenter)
-        self.layout.addWidget(self.placeholder)
+        self.placeholder.setWordWrap(True)
+        self.layout.addWidget(self.placeholder, 1)
 
         # Initialize viewers as None for lazy loading
         self._pdf_viewer = None
         self._picture_viewer = None
         self._audio_video_player = None
+        self._html_viewer = None
 
         # Store media buffer for in-memory playback (keeps buffer alive during playback)
         self._media_buffer = None
@@ -71,6 +93,14 @@ class UnifiedViewer(QWidget):
             self._picture_viewer.setVisible(False)
             self.layout.addWidget(self._picture_viewer)
         return self._picture_viewer
+
+    def get_html_viewer(self):
+        """Lazy initialization of the offline HTML / document viewer"""
+        if self._html_viewer is None:
+            self._html_viewer = SafeHtmlViewer(self)
+            self._html_viewer.setVisible(False)
+            self.layout.addWidget(self._html_viewer, 1)
+        return self._html_viewer
 
     def get_audio_video_player(self):
         """Lazy initialization of audio/video player"""
@@ -116,7 +146,11 @@ class UnifiedViewer(QWidget):
                 # identify the format correctly
                 hint_url = QUrl()
                 hint_url.setScheme("memory")
-                suffix = mimetypes.guess_extension(mime_type) or '.tmp'
+                # The file's own extension first: the backend picks a demuxer
+                # from it, and "video/mp4" for every video told it an MKV or
+                # WebM was an MP4.
+                suffix = (os.path.splitext(path or '')[1]
+                          or mimetypes.guess_extension(mime_type) or '.tmp')
                 hint_url.setPath(f"media{suffix}")
 
                 # OPTION 1: Stream from pytsk3 file object (for large files from disk images)
@@ -202,6 +236,13 @@ class UnifiedViewer(QWidget):
             self._picture_viewer.clear()
             self._picture_viewer.setVisible(False)
 
+        if self._html_viewer:
+            self._html_viewer.clear()
+            self._html_viewer.setVisible(False)
+
+        self.notice.clear()
+        self.notice.setVisible(False)
+
         # Clean up media player
         if self._audio_video_player:
             try:
@@ -251,25 +292,82 @@ class UnifiedViewer(QWidget):
         self.current_path = None
 
     def display_application_content(self, file_content, full_file_path):
-        """Wrapper for backward compatibility - converts file extension to MIME type."""
-        file_extension = os.path.splitext(full_file_path)[-1].lower()
-        mime_type = None
+        """Show a file, choosing the viewer from its name and its content."""
+        self.clear()
+        self.current_path = full_file_path
+        if not file_content:
+            return self._unavailable("This file is empty.")
 
-        # Map common extensions to MIME types
-        if file_extension in ['.pdf']:
-            mime_type = 'application/pdf'
-        elif file_extension in ['.jpg', '.jpeg', '.png', '.bmp', '.gif']:
-            mime_type = f'image/{file_extension[1:]}'
-        elif file_extension in ['.mp3', '.wav', '.ogg', '.aac', '.m4a']:
-            mime_type = f'audio/{file_extension[1:]}'
-        elif file_extension in ['.mp4', '.mkv', '.flv', '.avi', '.mov', '.wmv']:
-            mime_type = 'video/mp4'
-        else:
-            # Default to binary data
-            mime_type = 'application/octet-stream'
+        plan = plan_view(full_file_path, file_content)
+        if plan is None:
+            return self._unavailable(
+                "There is no preview for this kind of file.\n"
+                "The Hex and Text tabs show its contents.")
 
-        # Call the new load method with the determined MIME type
-        return self.load(file_content, mime_type, full_file_path)
+        try:
+            if plan.kind == VIEW_IMAGE:
+                viewer = self.get_picture_viewer()
+                problem = viewer.display(file_content)
+                if problem:
+                    return self._unavailable(problem, plan.note)
+                return self._showing(viewer, plan.note)
+
+            if plan.kind == VIEW_DOCUMENT:
+                viewer = self.get_pdf_viewer()
+                viewer.display(file_content, plan.subtype)
+                if getattr(viewer, 'pdf', None) is None:
+                    return self._unavailable(
+                        f"This {plan.label} could not be opened; it may be "
+                        f"damaged or not what it appears to be.", plan.note)
+                return self._showing(viewer, plan.note)
+
+            if plan.kind in (VIEW_AUDIO, VIEW_VIDEO):
+                mime = plan.mime or f"{plan.kind}/{plan.subtype}"
+                loaded = self.load(file_content, mime, full_file_path)
+                self._set_notice(plan.note)
+                return loaded
+
+            if plan.kind == VIEW_HTML:
+                text, _encoding = document_preview.decode_html(file_content)
+                viewer = self.get_html_viewer()
+                viewer.display(text, "HTML page", [plan.note])
+                return self._showing(viewer)
+
+            if plan.kind == VIEW_OFFICE:
+                try:
+                    markup, findings = document_preview.to_html(
+                        file_content, plan.subtype)
+                except document_preview.PreviewError as exc:
+                    return self._unavailable(
+                        f"This {plan.label} could not be read: {exc}",
+                        plan.note)
+                viewer = self.get_html_viewer()
+                viewer.display(markup, plan.label.capitalize(), [
+                    plan.note or f"{plan.label.capitalize()}.", *findings,
+                    "Text and structure only; the original layout, fonts "
+                    "and images are not reproduced."], from_evidence=False)
+                return self._showing(viewer)
+        except Exception as exc:
+            logger.error("Could not display %s: %s", full_file_path, exc)
+            return self._unavailable(f"Error loading content: {exc}")
+
+        return self._unavailable("There is no preview for this kind of file.")
+
+    def _showing(self, viewer, note=''):
+        viewer.setVisible(True)
+        self.placeholder.setVisible(False)
+        self._set_notice(note)
+        return True
+
+    def _unavailable(self, text, note=''):
+        self.placeholder.setText(text)
+        self.placeholder.setVisible(True)
+        self._set_notice(note)
+        return False
+
+    def _set_notice(self, note):
+        self.notice.setText(note or '')
+        self.notice.setVisible(bool(note))
 
     def closeEvent(self, event):
         """Handle proper cleanup when the widget is closed"""
@@ -329,6 +427,9 @@ class UnifiedViewer(QWidget):
 
             if self._picture_viewer:
                 self._picture_viewer.clear()
+
+            if self._html_viewer:
+                self._html_viewer.clear()
 
             # Explicit shutdown of audio/video player
             if self._audio_video_player:

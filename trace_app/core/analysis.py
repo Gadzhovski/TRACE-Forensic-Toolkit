@@ -21,24 +21,34 @@ import math
 
 import pytsk3
 
+from trace_app.core import content_checks
 from trace_app.core.case import make_artifact_ref
+from trace_app.core.content_checks import (MODULE_AUTHORS, MODULE_HIDDEN,
+                                           MODULE_PHOTO)
 
 logger = logging.getLogger('TRACE.Analysis')
 
-#: The three things this module can be asked for. A run does whatever subset
-#: the examiner selected; anything not asked for is not computed, and more
-#: importantly not read.
+#: What this module can be asked for. A run does whatever subset the examiner
+#: selected; anything not asked for is not computed, and more importantly not
+#: read. The last three are the checks in content_checks.
 MODULE_MAGIC = 'magic'
 MODULE_ENTROPY = 'entropy'
 MODULE_HASH = 'hash'
-MODULES = (MODULE_MAGIC, MODULE_ENTROPY, MODULE_HASH)
+MODULES = (MODULE_MAGIC, MODULE_ENTROPY, MODULE_HASH, MODULE_HIDDEN,
+           MODULE_PHOTO, MODULE_AUTHORS)
 
 #: How each module reads in a dialog and a progress line.
 MODULE_LABELS = {
     MODULE_MAGIC: "File type detection",
     MODULE_ENTROPY: "Entropy analysis",
     MODULE_HASH: "File hashes and duplicates",
+    MODULE_HIDDEN: "Hidden data",
+    MODULE_PHOTO: "Photo metadata",
+    MODULE_AUTHORS: "Document authors",
 }
+
+#: Modules whose checks live in content_checks.
+_CONTENT_MODULES = (MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS)
 
 #: Enough for every magic signature in practice -- the longest are a few dozen
 #: bytes, and libmagic's own heuristics look at rather less than this. Reading
@@ -348,9 +358,26 @@ def analyse_bytes(name, data, modules, magic=None, size=None):
         result['md5'] = hashlib.md5(data).hexdigest()
         result['sha256'] = hashlib.sha256(data).hexdigest()
 
+    _add_findings(result, name, data, modules,
+                  size if size is not None else len(data or b''))
+
     if size is not None:
         result['size'] = size
     return result
+
+
+def _add_findings(result, name, data, modules, size):
+    """Run the content checks and attach what they find to `result`."""
+    if not any(m in modules for m in _CONTENT_MODULES):
+        return
+    findings = content_checks.inspect(name, data, modules, size)
+    if MODULE_HIDDEN in modules:
+        volume = content_checks.possible_encrypted_volume(
+            result.get('mime'), result.get('entropy'), size)
+        if volume is not None:
+            findings.append(volume)
+    if findings:
+        result['findings'] = [f.as_row() for f in findings]
 
 
 def _analyse_stream(file_object, size, name, modules, magic):
@@ -379,18 +406,29 @@ def _analyse_stream(file_object, size, name, modules, magic):
 
     wants_entropy = MODULE_ENTROPY in modules
     wants_hash = MODULE_HASH in modules
-    if not (wants_entropy or wants_hash):
+    # The content checks want the whole file, but only for formats they have
+    # something to say about -- decided from the head already read -- and
+    # only up to a size where a photo or a document plausibly sits. They ride
+    # the same stream as entropy and hashing, so nothing is read twice.
+    wants_content = (any(m in modules for m in _CONTENT_MODULES)
+                     and size <= content_checks.MAX_INSPECT_BYTES
+                     and content_checks.wants_full_read(head, modules))
+
+    if not (wants_entropy or wants_hash or wants_content):
+        _add_findings(result, name, None, modules, size)
         return result
 
     if size > MAX_ANALYSIS_BYTES:
         # Recorded, with its type, but not scored: one enormous file should
         # not consume the run that is meant to triage the rest.
         result['note'] = 'too large to hash or score'
+        _add_findings(result, name, None, modules, size)
         return result
 
     meter = Entropy() if wants_entropy else None
     md5 = hashlib.md5() if wants_hash else None
     sha256 = hashlib.sha256() if wants_hash else None
+    kept = [] if wants_content else None
 
     offset = 0
     while offset < size:
@@ -403,6 +441,8 @@ def _analyse_stream(file_object, size, name, modules, magic):
         if md5 is not None:
             md5.update(block)
             sha256.update(block)
+        if kept is not None:
+            kept.append(block)
         offset += len(block)
 
     if meter is not None:
@@ -415,6 +455,8 @@ def _analyse_stream(file_object, size, name, modules, magic):
     if md5 is not None:
         result['md5'] = md5.hexdigest()
         result['sha256'] = sha256.hexdigest()
+    _add_findings(result, name, b''.join(kept) if kept is not None else None,
+                  modules, size)
     return result
 
 

@@ -1,4 +1,3 @@
-from trace_app.ui.dialogs import message
 """PDF viewer: paging, zoom, fit modes, pan and print."""
 
 import logging
@@ -13,6 +12,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
 
 from fitz import open as fitz_open, Matrix
 
+from trace_app.ui.dialogs import message
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import CONTROL_HEIGHT, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
@@ -304,21 +304,28 @@ class PDFViewer(QWidget):
         except Exception as e:
             message.critical(self, "Error", f"Failed to render page: {e}")
 
-    def display(self, content):
-        """Load and display a PDF from content bytes."""
+    def display(self, content, filetype="pdf"):
+        """Load and display a paged document from content bytes.
+
+        `filetype` is PyMuPDF's name for the format: pdf, epub, xps, cbz, fb2
+        or mobi. The cleanup retry below is PDF-specific (trailing bytes after
+        %%EOF, common in carved PDFs) and is skipped for the others.
+        """
         # Clear existing PDF and cache
         self.clear()
 
         if content:
             try:
-                # Try to open PDF directly first
-                self.pdf = fitz_open(stream=content, filetype="pdf")
+                self.pdf = fitz_open(stream=content, filetype=filetype)
                 self.current_page = 0
                 self.zoom_factor = 1.0
                 self.rotation_angle = 0
                 self.show_page(self.current_page)
                 self.update_navigation_states()
             except Exception as e:
+                if filetype != "pdf":
+                    logger.error("Could not open %s document: %s", filetype, e)
+                    return False
                 # If direct open fails, try to clean up the PDF (common with carved files)
                 logger.error(f"Initial PDF load failed: {e}, attempting cleanup...")
                 try:

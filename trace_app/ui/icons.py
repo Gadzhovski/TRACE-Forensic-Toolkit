@@ -53,6 +53,23 @@ CASE = "Icons/tabler/folder.svg"
 #: invisible against a dark tree, and pixelated once scaled to a row.
 BOOKMARK = "Icons/tabler/bookmark.svg"
 
+#: The Findings node in the tree. A flag rather than the alert triangle, which
+#: dialogs use for errors: a finding is something to look at, not a failure.
+FINDINGS = "Icons/tabler/flag.svg"
+
+#: The groups under Findings. Drawn for TRACE on Tabler's grid and stroke, so
+#: they sit with the rest of the set and are tinted to the theme like it.
+FINDING_MISMATCH = "Icons/tabler/trace/type-mismatch.svg"
+FINDING_ENTROPY = "Icons/tabler/trace/high-entropy.svg"
+FINDING_DUPLICATES = "Icons/tabler/trace/duplicates.svg"
+FINDING_HIDDEN = "Icons/tabler/trace/hidden-data.svg"
+FINDING_LOCATION = "Icons/tabler/trace/photo-location.svg"
+
+#: Panel logos for the Search and Triage tabs, drawn in the same style so the
+#: tab bars match Listing, Registry and Deleted Files.
+SEARCH_CONTENT = "Icons/tabler/trace/search-content.svg"
+TRIAGE = "Icons/tabler/trace/triage.svg"
+
 # --- Navigation ------------------------------------------------------------
 BACK = "Icons/tabler/arrow-left.svg"
 FORWARD = "Icons/tabler/arrow-right.svg"
@@ -91,6 +108,10 @@ SEARCH_BROWSER = "Icons/tabler/world-search.svg"
 PAN = "Icons/tabler/hand-move.svg"
 
 # --- Domain ----------------------------------------------------------------
+REFRESH = "Icons/tabler/refresh.svg"
+UPLOAD = "Icons/tabler/upload.svg"
+EXTERNAL_LINK = "Icons/tabler/external-link.svg"
+CLOSE = "Icons/tabler/x.svg"
 CARVING = "Icons/tabler/file-search.svg"
 REGISTRY = "Icons/tabler/database.svg"
 REGISTRY_HIVE = "Icons/tabler/folder.svg"
@@ -186,15 +207,13 @@ def action(name, text, parent=None):
     return result
 
 
-def _auto_tint(name):
-    """Tint for `name` under the current theme, or None to leave it alone.
+def _is_monochrome(name):
+    """Whether `name` is line art to be tinted to the theme's foreground.
 
-    Only monochrome line art is tinted. Anything that carries its own colours
-    -- logos, the file-type icons from the themed set -- is left as authored.
+    Anything that carries its own colours -- logos, the file-type icons from
+    the desktop theme -- is left as authored.
     """
-    if not name.startswith('Icons/tabler/'):
-        return None
-    return _THEME_TINTS.get(_theme)
+    return name.startswith('Icons/tabler/') and name.lower().endswith('.svg')
 
 
 def current_theme():
@@ -239,19 +258,23 @@ def path(name):
 def icon(name, tint=None):
     """QIcon for a registry entry, optionally tinted.
 
-    `tint` recolours the icon, which only makes sense for monochrome art. It is
-    ignored for icons that carry their own colours. Results are cached, since
-    the same icon is often requested for every row of a table.
+    `tint` recolours the icon to a fixed colour, which only makes sense for
+    monochrome art. Without one, monochrome art follows the theme: the colour
+    is looked up each time the icon is painted, not when it is handed out.
+    Fixing it at hand-out time meant every tree row, table cell and button
+    kept the colour of the theme it was created under -- the Bookmarks and
+    Findings nodes stayed #3C3C3C on a #2E2E2E tree after switching to dark,
+    which is to say invisible. Results are cached, since the same icon is
+    often requested for every row of a table.
     """
-    if tint is None:
-        tint = _auto_tint(name)
+    follows_theme = tint is None and _is_monochrome(name)
 
-    key = (name, tint)
+    key = (name, 'theme' if follows_theme else tint)
     if key in _cache:
         return _cache[key]
 
     resolved = resource_path(name)
-    if tint and name.lower().endswith('.svg'):
+    if (tint or follows_theme) and name.lower().endswith('.svg'):
         # Scalable: rendered from the vector at whatever size is requested.
         result = QIcon(_TintedSvgEngine(resolved, tint))
     else:
@@ -275,18 +298,30 @@ class _TintedSvgEngine(QIconEngine):
 
     Rendering from the vector on demand keeps every size sharp, including the
     fractional sizes a device pixel ratio asks for.
+
+    `colour` None means the theme's foreground, resolved at paint time, so an
+    icon already placed in a view changes with the theme. Renders are kept per
+    size and colour: a tree repaints every visible row's icon on each scroll.
     """
 
     def __init__(self, path, colour):
         super().__init__()
         self._path = path
         self._colour = colour
+        self._renders = {}
 
     def clone(self):
         return _TintedSvgEngine(self._path, self._colour)
 
     def paint(self, painter, rect, mode, state):
-        painter.drawPixmap(rect, self.pixmap(rect.size(), mode, state))
+        # Item views -- the tree, the listing -- draw icons through here, not
+        # through scaledPixmap(). Rendering at scale 1 and letting drawPixmap
+        # stretch it to the device made every tree icon soft and stair-stepped
+        # on a 125% display while the toolbar stayed sharp. Render for the
+        # device the painter is actually on.
+        scale = painter.device().devicePixelRatioF() if painter.device() else 1.0
+        painter.drawPixmap(rect, self._render(rect.width(), rect.height(),
+                                              scale))
 
     def scaledPixmap(self, size, mode, state, scale):
         """Render for a display scale factor.
@@ -305,6 +340,17 @@ class _TintedSvgEngine(QIconEngine):
         return self._render(size.width(), size.height(), 1.0)
 
     def _render(self, logical_width, logical_height, scale):
+        colour = self._colour or foreground()
+        key = (logical_width, logical_height, scale, colour)
+        cached = self._renders.get(key)
+        if cached is None:
+            if len(self._renders) > 32:
+                self._renders.clear()
+            cached = self._draw(logical_width, logical_height, scale, colour)
+            self._renders[key] = cached
+        return cached
+
+    def _draw(self, logical_width, logical_height, scale, colour):
         # The pixmap is allocated in device pixels, but once it carries a
         # device pixel ratio QPainter addresses it in logical ones -- so
         # everything painted below works in logical units.
@@ -324,8 +370,9 @@ class _TintedSvgEngine(QIconEngine):
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         # Keep the aspect ratio and centre, as QIcon would. width and height
-        # are already device pixels, so this fits the glyph to the full
-        # rendered surface -- do not reuse the `scale` parameter here.
+        # are logical pixels, which is what the painter addresses once the
+        # pixmap carries a device pixel ratio -- do not multiply by `scale`
+        # here as well.
         bounds = renderer.viewBoxF()
         if bounds.width() > 0 and bounds.height() > 0:
             fit = min(width / bounds.width(), height / bounds.height())
@@ -337,9 +384,9 @@ class _TintedSvgEngine(QIconEngine):
             target = QRectF(0, 0, width, height)
         renderer.render(painter, target)
 
-        if self._colour:
+        if colour:
             painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-            painter.fillRect(QRectF(0, 0, width, height), QColor(self._colour))
+            painter.fillRect(QRectF(0, 0, width, height), QColor(colour))
         painter.end()
         return out
 

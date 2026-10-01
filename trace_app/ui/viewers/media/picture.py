@@ -1,6 +1,11 @@
-from trace_app.ui.dialogs import message
-"""Image viewer with zoom, rotation and save."""
+"""Image viewer with zoom, rotation and save.
 
+Qt decodes most formats itself. What it cannot -- AVIF, JPEG 2000, PSD, PCX,
+DDS -- goes through Pillow, so the list of viewable images is the union of
+both rather than whichever one happened to be called.
+"""
+
+import io
 import logging
 
 from PySide6.QtCore import Qt, QSize
@@ -11,6 +16,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QToolBar, QScrollAr
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
+from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
 
 logger = logging.getLogger('TRACE.Viewer.Picture')
@@ -106,12 +112,25 @@ class PictureViewer(QWidget):
         align_controls(self.toolbar)
 
     def display(self, content):
-        self.original_image_bytes = content  # Save the original image bytes
-        # Convert byte data to QPixmap
+        """Show `content`. Returns '' on success, or why it could not be read.
+
+        A null image used to be set as an empty pixmap, so a corrupt or
+        unsupported picture showed as a blank pane -- indistinguishable from
+        an image that is genuinely empty.
+        """
+        self.original_image_bytes = content
         qt_image = QImage.fromData(content)
+        problem = ''
+        if qt_image.isNull():
+            qt_image, problem = _decode_with_pillow(content)
+        if qt_image is None or qt_image.isNull():
+            self.original_pixmap = None
+            self.image_label.clear()
+            return problem or "The image data could not be decoded."
         pixmap = QPixmap.fromImage(qt_image)
-        self.original_pixmap = pixmap.copy()  # Save the original pixmap
+        self.original_pixmap = pixmap.copy()
         self.image_label.setPixmap(pixmap)
+        return ''
 
     def clear(self):
         self.image_label.clear()
@@ -155,3 +174,34 @@ class PictureViewer(QWidget):
             with open(file_name, 'wb') as f:
                 f.write(self.original_image_bytes)
             message.information(self, "Export Success", "Image exported successfully!")
+
+
+def _decode_with_pillow(content):
+    """(QImage, '') via Pillow, or (None, reason) when it cannot either.
+
+    Pillow's decompression-bomb guard stays on: a crafted header claiming
+    billions of pixels is refused rather than allocated. Only the first frame
+    of an animation is shown, as Qt does.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return None, "Pillow is not installed."
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            image.load()
+            rgba = image.convert('RGBA')
+            data = rgba.tobytes('raw', 'RGBA')
+            result = QImage(data, rgba.width, rgba.height, rgba.width * 4,
+                            QImage.Format_RGBA8888)
+            # copy(): the QImage above borrows `data`, which is about to go.
+            return result.copy(), ''
+    except Image.UnidentifiedImageError:
+        return None, ("The content is not in any image format TRACE can read. "
+                      "It may be damaged, encrypted, or not an image at all; "
+                      "the Hex tab shows the raw bytes.")
+    except Image.DecompressionBombError as exc:
+        return None, f"Refused: the image claims to be too large to decode "                      f"safely ({exc})."
+    except Exception as exc:
+        logger.debug("Pillow could not decode the image: %s", exc)
+        return None, f"The image data could not be decoded ({exc})."

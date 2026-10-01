@@ -21,8 +21,10 @@ libewf-python>=20230212
 # --- Evidence parsing ------------------------------------------------------
 python-registry>=1.3.1   # Windows registry hives
 PyMuPDF>=1.23.0          # PDF rendering, validation and metadata
-Pillow>=10.0.0           # image decoding and EXIF
+Pillow>=11.3.0           # image decoding and EXIF; 11.3 is the first whose
+                         # wheels decode AVIF, which the Application tab shows
 chardet>=5.2.0           # text encoding detection
+olefile>=0.46            # legacy Office (.doc/.xls/.ppt): authors and encryption
 requests>=2.31.0         # VirusTotal API
 
 # --- libmagic bindings -----------------------------------------------------
