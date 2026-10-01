@@ -345,6 +345,44 @@ it again: the forensic engines moved to their first wheel-built releases
 
 Run `deactivate` when you are finished.
 
+<details>
+<summary><b>Standalone application (Windows .zip, macOS .dmg)</b></summary>
+<br/>
+
+To build TRACE as an application that needs no Python, use an installed TRACE
+environment (with the venv active):
+
+```bash
+python tools/fetch_test_images.py   # public images the build is tested on
+python build_exe.py
+```
+
+| Platform | Result in `dist/` |
+|---|---|
+| Windows | `TRACE-<version>-windows-x64.zip`, holding `TRACE\TRACE.exe` |
+| macOS | `TRACE-<version>-macos-arm64.dmg` or `-x86_64.dmg`, holding `TRACE.app` |
+
+Each comes with a `.sha256`. **A build is only kept once it has been shown
+to work.** The script unpacks the zip into a folder whose name has spaces and
+an accented letter, or mounts the DMG read-only. It then starts the packaged
+app with `--self-test` against six public images (E01/NTFS, FAT, exFAT,
+ext3, HFS+, ISO 9660). The self-test opens each image and builds a full case:
+verify, analyse, index, search, reopen, and the main window on top. What the
+packaged app reads from every image must match the test suite's reviewed
+manifests exactly. Every push builds and checks all three packages on GitHub
+Actions ([`build.yml`](.github/workflows/build.yml)), and they can be
+downloaded from the run.
+
+A macOS build is for the architecture it was built on (Apple Silicon or
+Intel). Neither package is signed by a publisher, so Windows SmartScreen and
+macOS Gatekeeper ask once before the first launch. The README inside each
+package explains how to allow it.
+
+An installed copy can be checked the same way at any time:
+`TRACE --self-test report.json path/to/image.E01`.
+
+</details>
+
 <br/>
 
 ## Configuration

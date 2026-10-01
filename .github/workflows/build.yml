@@ -1,0 +1,130 @@
+# Builds the standalone application -- a Windows zip and macOS DMGs for Apple
+# Silicon and Intel -- and proves each one works before keeping it: the
+# package is unpacked or mounted, started with --self-test against public
+# test images, and must read them exactly as the test suite verified
+# (build_exe.py). The results are kept as workflow artifacts for 30 days.
+#
+# Public repository, so: a read-only token, no secrets, actions pinned by
+# commit SHA, pull_request (never pull_request_target). Nothing is signed by a
+# publisher and nothing is released from here.
+
+name: Build
+
+on:
+  push:
+    paths:
+      - 'main.py'
+      - 'trace_app/**'
+      - 'Icons/**'
+      - 'styles/**'
+      - 'requirements.txt'
+      - 'build_exe.py'
+      - 'TRACE.spec'
+      - 'install.sh'
+      - 'install_windows.ps1'
+      - '.github/workflows/build.yml'
+  pull_request:
+    paths:
+      - 'main.py'
+      - 'trace_app/**'
+      - 'Icons/**'
+      - 'styles/**'
+      - 'requirements.txt'
+      - 'build_exe.py'
+      - 'TRACE.spec'
+      - 'install.sh'
+      - 'install_windows.ps1'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, label: Windows x64 }
+          - { os: macos-latest,   label: macOS Apple Silicon }
+          - { os: macos-15-intel, label: macOS Intel }
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        id: python
+        with:
+          python-version: '3.12'
+
+      # The DMG must work on a Mac without Homebrew: build where Homebrew's
+      # libmagic cannot be picked up, as the tests do.
+      - name: Remove Homebrew's libmagic (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew uninstall --ignore-dependencies --force libmagic 2>/dev/null || true
+          if ls /opt/homebrew/lib/libmagic* /usr/local/lib/libmagic* /opt/local/lib/libmagic* 2>/dev/null; then
+            echo "::error::a system libmagic is still present"; exit 1
+          fi
+
+      - name: Install (macOS)
+        if: runner.os == 'macOS'
+        env:
+          TRACE_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: ./install.sh --yes
+
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install_windows.ps1 -Yes
+
+      - name: Cache the self-test images
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images
+          key: build-images-${{ hashFiles('tools/fetch_test_images.py', 'build_exe.py') }}
+
+      - name: Fetch and verify the self-test images
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/fetch_test_images.py ntfs1-gen2.E01 8-jpeg-search.dd \
+            dfr-01-xfat.dd ext3-img-kw-1.dd image.gen1.dmg iso-endian.iso
+
+      - name: Build, package and self-test
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" build_exe.py --require-images
+
+      - name: Keep the package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: TRACE-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            dist/TRACE-*.zip
+            dist/TRACE-*.dmg
+            dist/TRACE-*.sha256
+            dist/selftest-*.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Keep the self-test report (failed build)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: selftest-report-${{ runner.os }}-${{ runner.arch }}
+          path: dist/selftest-*.json
+          if-no-files-found: ignore
+          retention-days: 30
