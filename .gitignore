@@ -1,29 +1,28 @@
-# Forensic test images (never commit evidence files). Un-anchored on purpose:
-# a leading slash would match only the repository root, so evidence moved into
-# test_images/ -- or any other subdirectory -- would be committable.
-*.E01
-*.Ex01
-*.s01
-*.L01
-*.dd
-*.raw
-*.img
-*.iso
-*.ad1
-*.001
-*.vmdk
-*.dmg
-*.aff
-
-# IDE-specific folders and files
-.idea/
-.vscode/
-
-# User config (may contain API keys)
-/config.ini
-
-# Application output
-/carved_files/
+# Forensic evidence -- never commit it. Un-anchored on purpose: a leading slash
+# would match only the repository root, so evidence moved into test_images/ --
+# or any other subdirectory -- would be committable. Bracketed so lower-case
+# names match too: git is case-sensitive on macOS and Linux.
+# EnCase / EWF, every segment (E01, E02 ... E99), and its logical variants
+*.[Ee][0-9][0-9]
+*.[Ee][Xx][0-9][0-9]
+*.[Ss][0-9][0-9]
+*.[Ll][0-9][0-9]
+*.[Ll][Xx][0-9][0-9]
+# Raw images, including split segments (.001, .002 ...)
+*.[Dd][Dd]
+*.[Rr][Aa][Ww]
+*.[Ii][Mm][Gg]
+*.[0-9][0-9][0-9]
+# Optical, AccessData, AFF, virtual and Apple disk images, memory captures
+*.[Ii][Ss][Oo]
+*.[Aa][Dd]1
+*.[Aa][Ff][Ff]
+*.[Aa][Ff][Ff]4
+*.[Vv][Mm][Dd][Kk]
+*.[Vv][Hh][Dd]
+*.[Vv][Hh][Dd][Xx]
+*.[Dd][Mm][Gg]
+*.[Mm][Ee][Mm]
 
 # Case working data. A case is created wherever the examiner points TRACE,
 # which during testing is often inside the repository; its database and search
@@ -31,13 +30,25 @@
 case.db
 search.db
 
-# Virtual environment
+# The maintainer's working case and notes, kept beside the source
+/New folder/
+/features_to_add.txt
+
+# User config (may contain API keys)
+/config.ini
+
+# Application output
+/carved_files/
+
+# Virtual environments
 /venv/
 /.venv/
+/venv-*/
 
-# Python cache
+# Python cache and test output
 __pycache__/
 *.py[cod]
+.pytest_cache/
 
 # PyInstaller build artifacts
 /build/
@@ -47,11 +58,17 @@ __pycache__/
 /tools/Arsenal-Image-Mounter-*/
 /tools/sleuthkit-*/
 
-
-# docs folder
+# Local docs
 /docs/
 
 # Full local copy of the original icon set, kept so an icon can be recovered
 # without going through git history. Only the icons the application actually
 # uses are committed.
 /Icons_archive/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
