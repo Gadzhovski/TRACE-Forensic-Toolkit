@@ -1,0 +1,82 @@
+{
+ "image": "ext3-img-kw-1.dd",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 1281,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 1069617834,
+     "crtime": 0,
+     "ctime": 1069617834,
+     "deleted": false,
+     "inode": 12,
+     "mtime": 1069617834,
+     "path": "/file1",
+     "sha256": "60293236f85ab7369b18981cb4ed2a1aa0767666c79f732206d23debe9610599",
+     "size": 601,
+     "type": "file"
+    },
+    {
+     "atime": 1069617846,
+     "crtime": 0,
+     "ctime": 1069617963,
+     "deleted": false,
+     "inode": 13,
+     "mtime": 1069617963,
+     "path": "/file2",
+     "sha256": "5dd9967df6b9983fc7c1040c5f956a986e23bcdbc6d918e2720f2ba66311f015",
+     "size": 1300,
+     "type": "file"
+    },
+    {
+     "atime": 1069617863,
+     "crtime": 0,
+     "ctime": 1069617988,
+     "deleted": true,
+     "inode": 14,
+     "mtime": 1069617988,
+     "path": "/file3",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1069617876,
+     "crtime": 0,
+     "ctime": 1069617876,
+     "deleted": false,
+     "inode": 15,
+     "mtime": 1069617876,
+     "path": "/first",
+     "sha256": "818e8e4ec56b72ff0f8ece022e0f417bb2ed9009461cb533afbda1c555c28ff8",
+     "size": 63,
+     "type": "file"
+    },
+    {
+     "atime": 1069617256,
+     "crtime": 0,
+     "ctime": 1069617256,
+     "deleted": false,
+     "inode": 11,
+     "mtime": 1069617256,
+     "path": "/lost+found",
+     "size": 12288,
+     "type": "dir"
+    }
+   ],
+   "fs_type": "Ext3",
+   "offset": 0
+  }
+ ]
+}

@@ -1,0 +1,235 @@
+{
+ "image": "dfr-01-xfat.dd",
+ "partitions": [
+  {
+   "addr": 0,
+   "desc": "Safety Table",
+   "length": 1,
+   "start": 0
+  },
+  {
+   "addr": 1,
+   "desc": "Unallocated",
+   "length": 2048,
+   "start": 0
+  },
+  {
+   "addr": 2,
+   "desc": "GPT Header",
+   "length": 1,
+   "start": 1
+  },
+  {
+   "addr": 3,
+   "desc": "Partition Table",
+   "length": 32,
+   "start": 2
+  },
+  {
+   "addr": 4,
+   "desc": "exFat",
+   "length": 124928,
+   "start": 2048
+  },
+  {
+   "addr": 5,
+   "desc": "Unallocated",
+   "length": 1024,
+   "start": 126976
+  }
+ ],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 388,
+     "mtime": 0,
+     "path": "/$ALLOC_BITMAP",
+     "sha256": "4611f2b0b38d4418ed1a887688db37537574e8eb608685ec188f02e23e160857",
+     "size": 1948,
+     "type": "file"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 1994756,
+     "mtime": 0,
+     "path": "/$FAT1",
+     "size": 65536,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 1994755,
+     "mtime": 0,
+     "path": "/$MBR",
+     "size": 512,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 1994757,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 389,
+     "mtime": 0,
+     "path": "/$UPCASE_TABLE",
+     "sha256": "8344f27a410a16df14ad98decde32b48c4db0b8e7fa8b9dc4394b58ced972f11",
+     "size": 5836,
+     "type": "file"
+    },
+    {
+     "atime": 1318787842,
+     "crtime": 1318787842,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 393,
+     "mtime": 1318787842,
+     "path": "/.Trashes",
+     "size": 4096,
+     "type": "dir"
+    },
+    {
+     "atime": 1318787918,
+     "crtime": 1318787918,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 518,
+     "mtime": 1318787918,
+     "path": "/.Trashes/._501",
+     "sha256": "01e0366a39e9d05982c007fb18dd2feb3516c3de4a5d7f9a3b7fee91f4f4cea7",
+     "size": 4096,
+     "type": "file"
+    },
+    {
+     "atime": 1318787918,
+     "crtime": 1318787918,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 515,
+     "mtime": 1318787918,
+     "path": "/.Trashes/501",
+     "size": 4096,
+     "type": "dir"
+    },
+    {
+     "atime": 1318787918,
+     "crtime": 1318787842,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 390,
+     "mtime": 1318787842,
+     "path": "/._.Trashes",
+     "sha256": "fee488f9f3f6824b126a9a5c4b63a8208cb9b64ea28f2150f27b6976018834df",
+     "size": 4096,
+     "type": "file"
+    },
+    {
+     "atime": 1318787896,
+     "crtime": 1318787897,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 396,
+     "mtime": 1318787897,
+     "path": "/.fseventsd",
+     "size": 4096,
+     "type": "dir"
+    },
+    {
+     "atime": 1318787918,
+     "crtime": 1318787919,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 774,
+     "mtime": 1318787919,
+     "path": "/.fseventsd/0000000000a871a0",
+     "sha256": "d5a99ea52d57bffc778d95c770839e5afb2e548ff4546e0b8618dc153a3ff7a2",
+     "size": 178,
+     "type": "file"
+    },
+    {
+     "atime": 1318787918,
+     "crtime": 1318787897,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 771,
+     "mtime": 1318787918,
+     "path": "/.fseventsd/fseventsd-uuid",
+     "sha256": "ac96cf1b72520fbb3b355b0180dfc4ed05152bb31f5db7df91aa53c912e0b127",
+     "size": 36,
+     "type": "file"
+    },
+    {
+     "atime": 915184860,
+     "crtime": 1318787869,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 399,
+     "mtime": 915184860,
+     "path": "/Alcor.TXT",
+     "sha256": "73eda4943f8fa863a117349e153c554f1b4c80f566f62a49ae12e40ebf03490d",
+     "size": 4096,
+     "type": "file"
+    },
+    {
+     "atime": 915278520,
+     "crtime": 1318787869,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 402,
+     "mtime": 951862320,
+     "path": "/Betelgeuse.txt",
+     "sha256": "13b163c5ee9c2f9e02c78e91eef4ccaf5374b5c6cfeb7601c6c0e95f83263a0e",
+     "size": 4396,
+     "type": "file"
+    },
+    {
+     "atime": 915184860,
+     "crtime": 1318787869,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 405,
+     "mtime": 915184860,
+     "path": "/Capella.txt",
+     "sha256": "f978d9ca35c37ecb965c42ad48801f38fce9ac6641f5c3707f625b69545e163a",
+     "size": 4096,
+     "type": "file"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 387,
+     "mtime": 0,
+     "path": "/exFat (Volume Label Entry)",
+     "size": 0,
+     "type": "file"
+    }
+   ],
+   "fs_type": "ExFAT",
+   "offset": 2048
+  }
+ ]
+}

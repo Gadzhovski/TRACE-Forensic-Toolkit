@@ -1,0 +1,153 @@
+{
+ "image": "fat-img-kw.dd",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 487700,
+     "mtime": 0,
+     "path": "/$FAT1",
+     "size": 60928,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 487701,
+     "mtime": 0,
+     "path": "/$FAT2",
+     "size": 60928,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 487699,
+     "mtime": 0,
+     "path": "/$MBR",
+     "size": 512,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 487702,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061428896,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 12,
+     "mtime": 1061428896,
+     "path": "/_ILE5.DAT",
+     "sha256": "753d783af396b5e39a0218aa2f49b881a5ff5858e3e5accbc24bfbb151b55448",
+     "size": 512,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061428838,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 4,
+     "mtime": 1061428838,
+     "path": "/file1.dat",
+     "sha256": "91c7400132e2322123e96241fbe5bde9fe8b69a17fe009a3d1e86e2f5ddb6512",
+     "size": 512,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061429662,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 6,
+     "mtime": 1061429662,
+     "path": "/file2.dat",
+     "sha256": "1b3c0f37a01acf3b5865925791ceb53f4c042ec70da7527d6fad96cdbfb5baa8",
+     "size": 400,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061428846,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 8,
+     "mtime": 1061428846,
+     "path": "/file3.dat",
+     "sha256": "ebfdc597735954863222b102b35af6052713ea7787730b5177de773a978c8065",
+     "size": 900,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061429056,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 10,
+     "mtime": 1061429056,
+     "path": "/file4.dat",
+     "sha256": "ce1b9457f7837adb2bd99f2b503cde82b85b15b116b21a7d1d043ef522338ec2",
+     "size": 631,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061429456,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 14,
+     "mtime": 1061429456,
+     "path": "/file6.dat",
+     "sha256": "834d247b6bb2bdcaf104957127019912c8dfabacced30894428e62b09f39b0f7",
+     "size": 694,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061430524,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 16,
+     "mtime": 1061430524,
+     "path": "/file7.dat",
+     "sha256": "389d2aa39b5b35b1ed7559242d1b5bc3d21228912bd7387ff8cb639e0b55a117",
+     "size": 512,
+     "type": "file"
+    },
+    {
+     "atime": 1061424000,
+     "crtime": 1061429500,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 18,
+     "mtime": 1061429500,
+     "path": "/second",
+     "sha256": "6f92b61e8dffe6ac1dd7b3f05c613315c0cd5b2de44be92d4e5aea949876d6a6",
+     "size": 512,
+     "type": "file"
+    }
+   ],
+   "fs_type": "FAT16",
+   "offset": 0
+  }
+ ]
+}
