@@ -4,11 +4,19 @@
 Kept at the repository root so `python main.py` continues to work, as the
 install scripts and documentation describe. The application itself lives in
 the trace_app package.
+
+`--self-test REPORT.json [IMAGE ...]` checks this copy of TRACE instead of
+starting it (trace_app/selftest.py). It is dispatched before the application
+module is imported, so its sandbox is in place before anything reads a
+per-user setting.
 """
 
 import sys
 
-from trace_app.app import main
-
 if __name__ == '__main__':
+    if sys.argv[1:2] == ['--self-test']:
+        from trace_app.selftest import main as self_test
+        sys.exit(self_test(sys.argv[2:]))
+
+    from trace_app.app import main
     sys.exit(main())

@@ -54,7 +54,7 @@ def _describe(expected, actual):
                          ids=[os.path.basename(m).replace('.manifest.json', '')
                               for m in MANIFESTS])
 def test_walk_matches_manifest(manifest):
-    from tests.manifest import build_manifest
+    from trace_app.core.manifest import build_manifest
     expected = _load(manifest)
     actual = build_manifest(image_path(expected['image']))
     assert actual == expected, _describe(expected, actual)
