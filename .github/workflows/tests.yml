@@ -1,0 +1,115 @@
+# Installs TRACE from scratch and tests it on Windows, macOS (Apple Silicon
+# and Intel) and Linux, on Python 3.10, 3.12 and 3.14.
+#
+# Public-repository hygiene, deliberately:
+#   * the token is read-only (permissions: contents: read);
+#   * no secrets are used anywhere -- VirusTotal is tested against a faked
+#     network, never a real key;
+#   * forks run through `pull_request`, never `pull_request_target`, so code
+#     from a fork cannot reach anything privileged;
+#   * third-party actions are pinned to full commit SHAs (tags can be moved);
+#   * only public test images are used, downloaded from their publishers and
+#     checked against recorded SHA-256s -- no evidence is ever stored here.
+
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  no-evidence-in-repo:
+    name: No evidence in the repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Refuse disk images and case databases
+        run: |
+          found=$(git ls-files | grep -iE '\.(e0[0-9]|ex01|l01|s01|ad1|dd|raw|img|dmg|iso|vmdk|vhdx?|aff4?|001)$|(^|/)case\.db$|(^|/)search\.db$' || true)
+          if [ -n "$found" ]; then
+            echo "These must never be committed:"; echo "$found"; exit 1
+          fi
+          echo "No evidence files tracked."
+
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-latest]
+        python: ['3.10', '3.12', '3.14']
+
+    env:
+      QT_QPA_PLATFORM: offscreen
+      TRACE_REQUIRE_IMAGES: '1'
+      PYTHONUTF8: '1'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+
+      # The real installers, unattended: they are part of what is tested.
+      - name: Install (macOS / Linux)
+        if: runner.os != 'Windows'
+        env:
+          TRACE_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: ./install.sh --yes
+
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install_windows.ps1 -Yes
+
+      - name: Nothing was compiled
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" - <<'EOF'
+          import sys, pytsk3, pyewf, PySide6, magic, py7zr, pymupdf, PIL
+          print("Python", sys.version.split()[0])
+          print("Sleuth Kit", pytsk3.TSK_VERSION_STR, "| libewf", pyewf.get_version())
+          print("PySide6", PySide6.__version__, "| Pillow", PIL.__version__)
+          EOF
+
+      - name: Cache public test images
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images
+          key: test-images-${{ hashFiles('tools/fetch_test_images.py') }}
+
+      - name: Fetch and verify public test images
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/fetch_test_images.py
+
+      - name: Tests (image handling, core, UI)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" -m pytest -v
+
+      - name: Carving against published answer keys
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/carve_score.py 11-carve-fat.dd 12-carve-ext2.dd
