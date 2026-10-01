@@ -40,6 +40,9 @@ search.db
 # Application output
 /carved_files/
 
+# Installer log (install.sh / install_windows.ps1)
+/install.log
+
 # Virtual environments
 /venv/
 /.venv/

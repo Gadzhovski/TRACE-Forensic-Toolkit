@@ -132,6 +132,104 @@ banner() {
     return 0
 }
 
+# === Progress =============================================================
+# Long commands write everything to install.log. On a terminal one line,
+# rewritten in place, says what is happening now; the log is shown only if a
+# step fails. Off a terminal (CI) the steps' results are all that is printed.
+LOG="$SCRIPT_DIR/install.log"
+: > "$LOG"
+LIVE=0
+[[ -t 1 ]] && LIVE=1
+if [[ "$UNICODE" -eq 1 ]]; then
+    FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+else
+    FRAMES=("|" "/" "-" "\\")
+fi
+FRAME=0
+TERM_COLS=80
+
+# What a line of pip or apt output means, in a few words; nothing for noise.
+describe() {
+    local line="$1" rest
+    line="${line#"${line%%[![:space:]]*}"}"          # leading blanks
+    case "$line" in
+        "Collecting "*)
+            rest="${line#Collecting }"; echo "Resolving ${rest%%[ <>=;\[]*}" ;;
+        "Downloading "*|"Using cached "*)
+            # pyside6_addons-6.11.2-cp310-abi3-manylinux_2_34_x86_64.whl (175.1 MB)
+            #   -> Downloading pyside6_addons 6.11.2 (175.1 MB)
+            rest="${line#Downloading }"; rest="${rest#Using cached }"
+            local file="${rest%% *}" size="" name version verb="Downloading"
+            file="${file##*/}"
+            [[ "$rest" == *" ("*")" ]] && size=" (${rest##* (}"
+            name="${file%%-*}"; version="${file#*-}"; version="${version%%-*}"
+            version="${version%.tar.gz}"; version="${version%.zip}"
+            [[ "$line" == "Using cached "* ]] && verb="Cached"
+            if [[ "$file" == *.metadata ]]; then
+                echo "Checking $name $version"
+            else
+                echo "$verb $name $version$size"
+            fi ;;
+        "Requirement already satisfied: "*)
+            rest="${line#Requirement already satisfied: }"
+            echo "Already installed ${rest%%[ <>=;\[]*}" ;;
+        "Installing collected packages: "*)
+            rest="${line#Installing collected packages: }"
+            local n=$(( $(printf '%s' "$rest" | tr -cd ',' | wc -c) + 1 ))
+            if [[ "$n" -eq 1 ]]; then echo "Installing 1 package"
+            else echo "Installing $n packages"; fi ;;
+        "Get:"*)
+            echo "Downloading $(echo "$line" | awk '{print $5}')" ;;
+        "Unpacking "*|"Setting up "*)
+            rest="${line%% (*}"; echo "${rest%%:*}" ;;
+        "Reading package lists"*|"Building dependency tree"*|"Hit:"*)
+            echo "Reading package lists" ;;
+        *) return 1 ;;
+    esac
+}
+
+live() {
+    local text="$1" width=$(( TERM_COLS - 6 ))
+    (( width < 10 )) && width=10
+    printf '\r  %s%s%s %-*s' "$ACCENT" "${FRAMES[$FRAME]}" "$R" "$width" "${text:0:$width}"
+    FRAME=$(( (FRAME + 1) % ${#FRAMES[@]} ))
+}
+
+clear_live() {
+    [[ "$LIVE" -eq 1 ]] && printf '\r%*s\r' "$(( TERM_COLS - 1 ))" ''
+    return 0
+}
+
+# quietly LABEL COMMAND...: run COMMAND into the log, showing progress.
+quietly() {
+    local label="$1" rc line text
+    shift
+    printf '\n$ %s\n' "$*" >> "$LOG"
+    if [[ "$LIVE" -eq 1 ]]; then
+        TERM_COLS=$(term_width)
+        live "$label"
+        set +e
+        "$@" 2>&1 | while IFS= read -r line; do
+            printf '%s\n' "$line" >> "$LOG"
+            text=$(describe "$line") && live "$text"
+        done
+        rc=${PIPESTATUS[0]}
+        set -e
+        clear_live
+    else
+        set +e
+        "$@" >> "$LOG" 2>&1
+        rc=$?
+        set -e
+    fi
+    return "$rc"
+}
+
+log_tail() {
+    note "Last lines of $LOG:"
+    tail -n 25 "$LOG" | sed 's/^/      /'
+}
+
 # === Detect OS type =======================================================
 OS_TYPE=$(uname)
 if [[ "$OS_TYPE" == "Darwin" ]]; then
@@ -228,20 +326,37 @@ install_linux_deps() {
     # libmagic1: file-type detection (python-magic loads it at runtime).
     # libxcb-cursor0 and friends: the Qt 6 platform plugins.
     SUDO=""
-    [[ "$(id -u)" -ne 0 ]] && SUDO="sudo"
-    $SUDO apt-get update
+    if [[ "$(id -u)" -ne 0 ]]; then
+        SUDO="sudo"
+        # Ask for the password now, in plain sight: with apt's output going
+        # to the log, a prompt from inside it would never be seen.
+        sudo -v
+    fi
+    if ! quietly "Reading package lists" $SUDO apt-get update; then
+        fail "apt-get update failed."; log_tail; exit 1
+    fi
     # libpulse0: Qt Multimedia (the audio/video player) fails to import
     #   without it, which stops the whole window opening.
     # libgssapi-krb5-2: Qt Network.
     # --no-install-recommends: python3-pip otherwise pulls in a C/C++
     #   compiler that nothing here needs.
-    $SUDO apt-get install -y --no-install-recommends \
+    local before count
+    before=$(wc -l < "$LOG")
+    if ! quietly "Installing system packages" \
+        $SUDO apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip \
         libmagic1 \
         libxcb-cursor0 libxcb-xinerama0 libegl1 libxkbcommon-x11-0 libgl1 \
         libglib2.0-0 libfontconfig1 libdbus-1-3 \
-        libpulse0 libgssapi-krb5-2
-    ok "System packages installed"
+        libpulse0 libgssapi-krb5-2; then
+        fail "Installing system packages failed."; log_tail; exit 1
+    fi
+    count=$(tail -n +"$((before + 1))" "$LOG" | grep -c '^Setting up ' || true)
+    if [[ "$count" -gt 0 ]]; then
+        ok "$count system packages installed"
+    else
+        ok "System packages already installed"
+    fi
 }
 
 install_wsl_deps() {
@@ -259,25 +374,37 @@ esac
 find_python
 
 step "Creating virtual environment"
-"$PY" -m venv venv
+if ! quietly "Creating venv" "$PY" -m venv venv; then
+    fail "Could not create the virtual environment."; log_tail; exit 1
+fi
 ok "venv ready"
 
 step "Installing Python packages (this can take a few minutes)"
-# shellcheck disable=SC1091
-source venv/bin/activate
-pip install --upgrade pip
+VENV_PY="venv/bin/python"
+if ! quietly "Updating pip" "$VENV_PY" -m pip install --upgrade pip; then
+    fail "Could not update pip."; log_tail; exit 1
+fi
+BEFORE=$(wc -l < "$LOG")
 # --only-binary for the two forensic engines: if no wheel exists for this
 # platform, say so plainly rather than attempt a C build that will fail.
-if ! pip install --only-binary=pytsk3,libewf-python -r requirements.txt; then
-    deactivate
+if ! quietly "Installing packages" \
+    "$VENV_PY" -m pip install --only-binary=pytsk3,libewf-python -r requirements.txt; then
     fail "Dependency installation failed."
+    log_tail
+    note ""
     note "pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
     note "on Windows, macOS (Apple Silicon and Intel) and Linux (x86_64 and"
     note "aarch64). Check that $PY is one of those versions and this machine"
     note "one of those platforms."
     exit 1
 fi
-deactivate
+INSTALLED=$(tail -n +"$((BEFORE + 1))" "$LOG" | grep '^Successfully installed' | wc -w || true)
+if [[ "$INSTALLED" -gt 2 ]]; then
+    ok "$((INSTALLED - 2)) packages installed"
+else
+    ok "Every package already installed"
+fi
+note "${DIM}Full log: install.log${R}"
 
 echo
 printf '  %s%s TRACE is installed.%s\n\n' "$GREEN$BOLD" "$G_OK" "$R"

@@ -57,6 +57,6 @@ comtypes>=1.2.0 ; sys_platform == 'win32'
 # same suite runs locally. Not needed to run TRACE.
 pytest>=8.0
 
-# --- Building a standalone executable (build_exe.py) -----------------------
+# --- Building a standalone executable (build_app.py) -----------------------
 # Not needed to run TRACE from source; included so one install covers both.
 pyinstaller>=6.0

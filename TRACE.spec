@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller build of TRACE for Windows and macOS.
 
-Run through build_exe.py, which also packages the result and proves it works
-(`python build_exe.py`); `python -m PyInstaller TRACE.spec` builds alone.
+Run through build_app.py, which also packages the result and proves it works
+(`python build_app.py`); `python -m PyInstaller TRACE.spec` builds alone.
 
     Windows: dist/TRACE/TRACE.exe     (a folder: Qt and the engines beside it)
     macOS:   dist/TRACE.app

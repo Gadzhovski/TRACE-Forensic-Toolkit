@@ -34,15 +34,27 @@ $Esc = [char]27
 $script:Vt = [bool]$Host.UI.SupportsVirtualTerminal -and -not $env:NO_COLOR
 $script:Plain = [bool]$env:NO_COLOR
 
+# Redirected output (a CI log, a file) is written in the console's code page;
+# unless that is UTF-8, anything outside ASCII arrives garbled, so the banner
+# and symbols fall back to plain text, as install.sh does without a UTF-8
+# locale.
+$script:Unicode = (-not [Console]::IsOutputRedirected) -or
+                  ([Console]::OutputEncoding.CodePage -eq 65001)
+
 # The classic console's fonts (Consolas, Lucida) have the box-drawing and
 # block characters but not check marks; Windows Terminal and VS Code have all.
-if ($env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode') {
+if ($script:Unicode -and ($env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode')) {
     $G = @{ Step = (U 0x25B8); Ok = (U 0x2713); Warn = '!'; Fail = (U 0x2717) }
 } else {
     $G = @{ Step = '>'; Ok = '+'; Warn = '!'; Fail = 'x' }
 }
-$G.Rule = U 0x2500
-$G.Dot = U 0x00B7
+if ($script:Unicode) {
+    $G.Rule = U 0x2500
+    $G.Dot = U 0x00B7
+} else {
+    $G.Rule = '-'
+    $G.Dot = '-'
+}
 
 function Write-Seg {
     param([string]$Text, [int]$Color = -1, [string]$Fallback = '',
@@ -108,7 +120,7 @@ function Show-Banner {
     } catch { }
 
     Write-Host ''
-    if ($width -ge 56) {
+    if ($script:Unicode -and $width -ge 56) {
         for ($i = 0; $i -lt $Logo.Count; $i++) {
             Write-Seg ('  ' + (Convert-Glyphs $Logo[$i])) -Color $Gradient[$i] -Fallback Cyan
             if (-not $Yes) { Start-Sleep -Milliseconds 30 }
@@ -116,7 +128,7 @@ function Show-Banner {
         Write-Host ''
         Write-Seg '  Toolkit for Retrieval and Analysis of Cyber Evidence' -Dim -Fallback DarkGray
         $ruleWidth = 52
-    } elseif ($width -ge 24) {
+    } elseif ($script:Unicode -and $width -ge 24) {
         Write-Seg ('  ' + (Convert-Glyphs $LogoSmall[0])) -Color $Gradient[1] -Fallback Cyan
         Write-Seg ('  ' + (Convert-Glyphs $LogoSmall[1])) -Color $Gradient[3] -Fallback Cyan
         Write-Host ''
@@ -134,6 +146,90 @@ function Show-Banner {
     Write-Seg $detail -Dim -Fallback DarkGray
     $ruleWidth = [Math]::Min($ruleWidth, $width - 4)
     if ($ruleWidth -gt 0) { Write-Seg ('  ' + ($G.Rule * $ruleWidth)) -Dim -Fallback DarkGray }
+}
+
+# === Progress =============================================================
+# Long commands write everything to install.log. In a console one line,
+# rewritten in place, says what is happening now; the log is shown only if a
+# step fails. Redirected (CI), only the steps' results are printed.
+$LogFile = Join-Path $PSScriptRoot 'install.log'
+Set-Content -Path $LogFile -Value '' -Encoding UTF8
+$script:Live = -not [Console]::IsOutputRedirected
+if ($G.Ok -ne '+') {
+    $Frames = @(0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827,
+                0x2807, 0x280F) | ForEach-Object { U $_ }
+} else {
+    $Frames = @('|', '/', '-', '\')
+}
+$script:Frame = 0
+
+# What a line of pip output means, in a few words; nothing for noise.
+function Get-Status([string]$Line) {
+    $Line = $Line.Trim()
+    if ($Line -match '^Collecting ([A-Za-z0-9_.\-]+)') { return "Resolving $($Matches[1])" }
+    if ($Line -match '^(Downloading|Using cached) (\S+)(?: \((.+)\))?$') {
+        # pyside6_addons-6.11.2-cp310-abi3-win_amd64.whl (175.1 MB)
+        #   -> Downloading pyside6_addons 6.11.2 (175.1 MB)
+        $verb = if ($Matches[1] -eq 'Using cached') { 'Cached' } else { 'Downloading' }
+        $size = if ($Matches[3]) { " ($($Matches[3]))" } else { '' }
+        $file = ($Matches[2] -split '/')[-1]
+        $bits = $file -split '-'
+        $version = if ($bits.Count -gt 1) { $bits[1] -replace '\.tar\.gz$|\.zip$', '' } else { '' }
+        if ($file.EndsWith('.metadata')) { return "Checking $($bits[0]) $version" }
+        return "$verb $($bits[0]) $version$size"
+    }
+    if ($Line -match '^Requirement already satisfied: ([A-Za-z0-9_.\-]+)') {
+        return "Already installed $($Matches[1])"
+    }
+    if ($Line -match '^Installing collected packages: (.+)$') {
+        $n = ($Matches[1] -split ',').Count
+        if ($n -eq 1) { return 'Installing 1 package' }
+        return "Installing $n packages"
+    }
+    return $null
+}
+
+function Show-Live([string]$Text) {
+    $width = [Math]::Max(10, (Get-Width) - 6)
+    if ($Text.Length -gt $width) { $Text = $Text.Substring(0, $width) }
+    Write-Host "`r  " -NoNewline
+    Write-Seg $Frames[$script:Frame] -Color 39 -Fallback Cyan -NoNewline
+    Write-Host (' ' + $Text.PadRight($width)) -NoNewline
+    $script:Frame = ($script:Frame + 1) % $Frames.Count
+}
+
+function Clear-Live {
+    if ($script:Live) { Write-Host ("`r" + (' ' * ((Get-Width) - 1)) + "`r") -NoNewline }
+}
+
+# Run a command into the log, showing progress. Returns its exit status.
+function Invoke-Quietly {
+    param([string]$Label, [string]$Exe, [string[]]$Arguments)
+    Add-Content -Path $LogFile -Value "`n> $Exe $($Arguments -join ' ')" -Encoding UTF8
+    if ($script:Live) { Show-Live $Label }
+    # pip's warnings arrive on stderr; they are log lines, not failures.
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object {
+            $line = "$_"
+            Add-Content -Path $LogFile -Value $line -Encoding UTF8
+            if ($script:Live) {
+                $status = Get-Status $line
+                if ($status) { Show-Live $status }
+            }
+        }
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $saved
+    }
+    Clear-Live
+    return $code
+}
+
+function Write-LogTail {
+    Write-Note "Last lines of ${LogFile}:"
+    Get-Content $LogFile -Tail 25 | ForEach-Object { Write-Host "      $_" }
 }
 
 Show-Banner
@@ -173,31 +269,49 @@ if (Test-Path 'venv') {
     $reply = if ($Yes) { 'n' } else { Read-Host "    Recreate it? Existing packages will be lost. [y/N]" }
     if ($reply -match '^[Yy]') {
         Remove-Item -Recurse -Force venv
-        & $python -m venv venv
+        if ((Invoke-Quietly 'Creating venv' $python @('-m', 'venv', 'venv')) -ne 0) {
+            Write-Fail "Could not create the virtual environment."; Write-LogTail; exit 1
+        }
         Write-Ok "venv recreated"
     } else {
         Write-Ok "Reusing the existing venv"
     }
 } else {
-    & $python -m venv venv
+    if ((Invoke-Quietly 'Creating venv' $python @('-m', 'venv', 'venv')) -ne 0) {
+        Write-Fail "Could not create the virtual environment."; Write-LogTail; exit 1
+    }
     Write-Ok "venv ready"
 }
 
 # --- Dependencies ----------------------------------------------------------
 Write-Step "Installing Python packages (this can take a few minutes)"
 $venvPy = Join-Path (Resolve-Path 'venv') 'Scripts\python.exe'
-& $venvPy -m pip install --upgrade pip
+if ((Invoke-Quietly 'Updating pip' $venvPy @('-m', 'pip', 'install', '--upgrade', 'pip')) -ne 0) {
+    Write-Fail "Could not update pip."; Write-LogTail; exit 1
+}
+$before = (Get-Content $LogFile).Count
 # --only-binary for the two forensic engines: if no wheel exists for this
 # Python, say so plainly rather than attempt a C build that will fail.
-& $venvPy -m pip install --only-binary=pytsk3,libewf-python -r requirements.txt
+$code = Invoke-Quietly 'Installing packages' $venvPy @('-m', 'pip', 'install',
+    '--only-binary=pytsk3,libewf-python', '-r', 'requirements.txt')
 
-if ($LASTEXITCODE -ne 0) {
+if ($code -ne 0) {
     Write-Fail "Dependency installation failed."
+    Write-LogTail
+    Write-Note ""
     Write-Note "pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
     Write-Note "on x64, x86 and ARM64 Windows. Check that '$python' is one of"
     Write-Note "those versions."
     exit 1
 }
+$installed = Get-Content $LogFile | Select-Object -Skip $before |
+    Where-Object { $_ -like 'Successfully installed *' } | Select-Object -Last 1
+if ($installed) {
+    Write-Ok "$(($installed -split ' ').Count - 2) packages installed"
+} else {
+    Write-Ok "Every package already installed"
+}
+Write-Seg '    Full log: install.log' -Dim -Fallback DarkGray
 
 Write-Host ''
 Write-Seg "  $($G.Ok) TRACE is installed." -Color 42 -Fallback Green -Bold

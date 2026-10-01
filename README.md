@@ -354,7 +354,7 @@ environment (with the venv active):
 
 ```bash
 python tools/fetch_test_images.py   # public images the build is tested on
-python build_exe.py
+python build_app.py
 ```
 
 | Platform | Result in `dist/` |
