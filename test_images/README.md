@@ -179,6 +179,20 @@ c863ccad01804b840a6dfa623a94996ca876e15ded41c6c0d8ae148620eb6493  dfr-01-ntfs.dd
 a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA-1.E01
 ```
 
+## The carving corpus
+
+`carve-corpus.dd` is built, not downloaded:
+
+```bash
+python tools/carve_corpus.py
+```
+
+It fetches 45 real published files of the formats the DFTT/DFRWS images do
+not hold (SQLite, PST, EVTX, registry hives, LNK, Office Open XML, HEIC,
+Opus, Matroska, Mach-O and more) into `carve_samples/`, checks each against
+its pinned SHA-256, and lays them out with a fixed seed -- so the image, and
+its answer key in `tools/carve_ground_truth.json`, are the same every time.
+
 ## Re-downloading
 
 The public images the tests use are fetched and checksum-verified by

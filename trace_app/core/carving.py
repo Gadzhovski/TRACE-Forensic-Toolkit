@@ -20,14 +20,18 @@ larger than CARVE_OVERLAP that straddles a chunk boundary is found only if it
 also starts within the next read. Fragmented files are not reassembled.
 """
 
+import bisect
 import hashlib
+import io
 import logging
 import os
 import re
 import struct
 import time
+import zipfile
 import zlib
 
+from trace_app.core import carving_formats as formats
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.core.image_handler import ImageHandler
@@ -39,11 +43,48 @@ from trace_app.infra.constants import (CARVE_MAX_FOOTER_CANDIDATES,
 logger = logging.getLogger('TRACE.Carving')
 
 
-#: File signatures the carver can search for. Order is the menu order.
-#: "OLE" covers the legacy Office trio (.doc/.xls/.ppt), which share one
-#: compound-document container and cannot be told apart from the header alone.
-CARVABLE_TYPES = ["PDF", "JPG", "PNG", "GIF", "BMP", "TIFF", "WAV", "MOV",
-                  "MP4", "WMV", "ZIP", "GZ", "RAR", "7Z", "OLE", "HTML"]
+#: What can be carved, by category -- the order of the selector's menu.
+#: Each entry is the extension a recovered file is saved under. "OLE" covers
+#: the legacy Office trio (.doc/.xls/.ppt) and Outlook .msg, which share one
+#: compound-document container and cannot be told apart from the header.
+CARVE_CATEGORIES = {
+    "Pictures": ["JPG", "PNG", "GIF", "BMP", "TIFF", "WEBP", "HEIC", "AVIF",
+                 "PSD"],
+    "Documents": ["PDF", "DOCX", "XLSX", "PPTX", "VSDX", "ODT", "ODS", "ODP",
+                  "ODG", "EPUB", "OLE", "RTF", "HTML"],
+    "Email": ["PST", "OST", "MBOX", "EML"],
+    "Databases & logs": ["SQLITE", "EVTX", "REGF"],
+    "Windows artifacts": ["LNK"],
+    "Executables": ["EXE", "DLL", "SYS", "ELF", "MACHO", "APK", "JAR"],
+    "Archives": ["ZIP", "GZ", "BZ2", "XZ", "TAR", "RAR", "7Z"],
+    "Audio": ["WAV", "MP3", "OGG", "OPUS", "M4A"],
+    "Video": ["MP4", "MOV", "M4V", "3GP", "AVI", "WMV", "FLV", "MPG", "MKV",
+              "WEBM"],
+}
+
+#: Every carvable extension, in menu order.
+CARVABLE_TYPES = [t for types in CARVE_CATEGORIES.values() for t in types]
+
+#: Which carver finds each extension. A carver can name what it found more
+#: precisely than the selector that ran it: the ZIP carver recovers a .docx,
+#: the MP4 atom walk a .heic. Only the selected extensions are kept.
+EXTENSION_CARVER = {
+    'jpg': 'jpg', 'png': 'png', 'gif': 'gif', 'bmp': 'bmp', 'tiff': 'tiff',
+    'pdf': 'pdf', 'ole': 'ole', 'html': 'html', 'rar': 'rar', '7z': '7z',
+    'gz': 'gz', 'wmv': 'wmv',
+    **{ext: 'zip' for ext in ('zip', 'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
+                              'ods', 'odp', 'odg', 'epub', 'apk', 'jar')},
+    **{ext: 'isobmff' for ext in ('mov', 'mp4', 'm4v', '3gp', 'heic', 'avif',
+                                  'm4a')},
+    **{ext: 'riff' for ext in ('wav', 'webp', 'avi')},
+    'sqlite': 'sqlite', 'regf': 'regf', 'evtx': 'evtx',
+    'pst': 'pst', 'ost': 'pst',
+    'exe': 'pe', 'dll': 'pe', 'sys': 'pe',
+    'lnk': 'lnk', 'mp3': 'mp3', 'ogg': 'ogg', 'opus': 'ogg', 'flv': 'flv',
+    'mpg': 'mpg', 'mkv': 'mkv', 'webm': 'mkv', 'tar': 'tar', 'bz2': 'bz2',
+    'xz': 'xz', 'rtf': 'rtf', 'elf': 'elf', 'macho': 'macho', 'psd': 'psd',
+    'mbox': 'mbox', 'eml': 'eml',
+}
 
 # Signatures are named rather than inlined so a format's header and footer are
 # stated once, next to each other, and read as a pair.
@@ -98,16 +139,52 @@ class Carver:
     offset is its identity, so each is passed on once.
     """
 
-    def __init__(self, sink):
+    def __init__(self, sink, wanted=None, reader=None, image_size=None):
         self._sink = sink
         self._seen = set()
         self.found = 0
+        #: Extensions to keep, or None for all. A carver may find more than
+        #: was asked for -- the ZIP carver sees every .docx and .apk too.
+        self.wanted = set(wanted) if wanted is not None else None
+        #: `reader(offset, length)` for bytes beyond the chunk; None limits
+        #: every carve to what the chunk holds.
+        self._reader = reader
+        self._image_size = image_size
+        #: Byte ranges already carved, sorted, by carver family. A signature
+        #: inside a file of its own family is part of that file -- an MPEG
+        #: repeats its pack header every 2 KB, an MP4 nests atoms -- not the
+        #: start of another. Across families it may well be another file: a
+        #: carve sized from a fragmented file's header spans the gap where
+        #: the image keeps other files, so skipping everything inside it
+        #: loses them (two real files on DFRWS 2007 when this was global).
+        self._spans = {}
+
+    def inside_carved(self, offset, family=None):
+        """Is `offset` inside (not at the start of) a file already carved --
+        of `family`, or of any family when it is None?"""
+        lists = ([self._spans.get(family, [])] if family is not None
+                 else self._spans.values())
+        for spans in lists:
+            index = bisect.bisect_right(spans, (offset, float('inf'))) - 1
+            if index >= 0:
+                begin, end = spans[index]
+                if begin < offset < end:
+                    return True
+        return False
+
+    def wants(self, file_type):
+        return self.wanted is None or file_type in self.wanted
 
     def save_file(self, file_content, file_type, offset):
+        if not self.wants(file_type):
+            return
         key = (offset, file_type)
         if key in self._seen:
             return
         self._seen.add(key)
+        family = EXTENSION_CARVER.get(file_type, file_type)
+        bisect.insort(self._spans.setdefault(family, []),
+                      (offset, offset + len(file_content)))
         self.found += 1
         self._sink(file_content, file_type, offset)
 
@@ -205,30 +282,10 @@ class Carver:
             else:
                 offset = start_index + 1
 
-    def carve_wav_files(self, chunk, base_offset):
-        wav_start_signature = WAV_HEADER
-        cursor = 0
-        while cursor < len(chunk):
-            start_index = chunk.find(wav_start_signature, cursor)
-            if start_index == -1:
-                break
-
-            if chunk[start_index + 8:start_index + 12] != b'WAVE':
-                cursor = start_index + 4
-                continue
-
-            file_size_bytes = chunk[start_index + 4:start_index + 8]
-            file_size = int.from_bytes(file_size_bytes, byteorder='little') + 8
-
-            if start_index + file_size > len(chunk):
-                wav_content = chunk[start_index:]
-                cursor = len(chunk)
-            else:
-                wav_content = chunk[start_index:start_index + file_size]
-                cursor = start_index + file_size
-
-            if is_valid_file(wav_content, 'wav'):
-                self.save_file(wav_content, 'wav', base_offset + start_index)
+    def carve_riff_files(self, chunk, base_offset):
+        """WAV, WEBP and AVI: a RIFF container, sized by its own header."""
+        self._carve_sized(chunk, base_offset, (b'RIFF',), formats.measure_riff,
+                          aligned=False)
 
     @staticmethod
     def _starts_a_file(offset):
@@ -351,15 +408,6 @@ class Carver:
         """
         self._carve_atom_chain(chunk, base_offset)
 
-    def carve_mp4_files(self, chunk, base_offset):
-        """MP4 shares QuickTime's container, and so shares carve_mov_files.
-
-        Deliberately empty: the atom walk already emits MP4s with the right
-        extension. Carving here as well would write the same bytes a second
-        time under a second name.
-        """
-        return
-
     def _carve_atom_chain(self, chunk, base_offset):
         cap = max(CARVE_MAX_SIZE.get('mov', 0), CARVE_MAX_SIZE.get('mp4', 0))
         cursor = 0
@@ -367,6 +415,11 @@ class Carver:
             anchor = self._next_atom_start(chunk, cursor)
             if anchor is None:
                 break
+            if self.inside_carved(base_offset + anchor, family='isobmff'):
+                # Atoms nested in a file already carved -- a HEIC's items, a
+                # video's tracks -- are that file, not another one.
+                cursor = anchor + 4
+                continue
 
             end = self._walk_atoms(chunk, anchor, cap)
             if end is None:
@@ -376,25 +429,12 @@ class Carver:
                 continue
 
             content = chunk[anchor:end]
-            file_type = self._isobmff_extension(content)
-            if is_valid_file(content, file_type):
+            file_type = formats.isobmff_kind(content)
+            if self.wants(file_type) and is_valid_file(content, file_type):
                 self.save_file(content, file_type, base_offset + anchor)
                 cursor = end
             else:
                 cursor = anchor + 4
-
-    @staticmethod
-    def _isobmff_extension(content):
-        """'mp4' or 'mov', from the brand the file declares.
-
-        A `ftyp` atom names the specification the file was written to. Classic
-        QuickTime predates `ftyp` and simply has none, so its absence is itself
-        the answer.
-        """
-        if content[4:8] != b'ftyp':
-            return 'mov'
-        brand = content[8:12]
-        return 'mov' if brand in (b'qt  ', b'moov') else 'mp4'
 
     @staticmethod
     def _next_atom_start(chunk, cursor):
@@ -518,10 +558,20 @@ class Carver:
 
             content = chunk[start_index:end]
             if is_valid_file(content, 'zip'):
-                self.save_file(content, 'zip', base_offset + start_index)
+                self.save_file(content, self._zip_kind(content),
+                               base_offset + start_index)
                 cursor = end
             else:
                 cursor = start_index + len(ZIP_LOCAL_HEADER)
+
+    @staticmethod
+    def _zip_kind(content):
+        """docx, odt, apk... or zip: what the archive's members say it is."""
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                return formats.zip_kind(archive.namelist(), archive.read)
+        except (zipfile.BadZipFile, OSError, KeyError, ValueError):
+            return 'zip'
 
     @staticmethod
     def _zip_extent(chunk, start_index, cap):
@@ -925,8 +975,154 @@ class Carver:
             return found
         return tag
 
-    #: Which carver handles each selected type. Keys are lowercase because the
-    #: menu labels are lowercased before dispatch.
+    # --- formats sized by their own structure ----------------------------
+
+    def _carve_sized(self, chunk, base_offset, signatures, measure,
+                     aligned=True, signature_at=0, *args):
+        """Carve every file whose extent `measure` can establish.
+
+        For each signature hit (found `signature_at` bytes into the file) that
+        starts a sector, `measure` reads the file's own structure for its
+        size and extension. Only a wanted extension within its cap is then
+        read in full -- from the chunk, or past it from the image -- and kept
+        if it validates.
+        """
+        source = formats.Source(chunk, base_offset, self._reader,
+                                self._image_size)
+        for signature in signatures:
+            cursor = 0
+            while True:
+                hit = chunk.find(signature, cursor)
+                if hit == -1:
+                    break
+                cursor = hit + 1
+                start = hit - signature_at
+                if start < 0:
+                    continue
+                offset = base_offset + start
+                if aligned and not self._starts_a_file(offset):
+                    continue
+                if (offset, None) in self._seen:
+                    continue
+                if self.inside_carved(offset, family=self._family(measure)):
+                    continue
+                try:
+                    measured = measure(source, offset, *args)
+                except (struct.error, ValueError, IndexError, OverflowError,
+                        TypeError):
+                    measured = None
+                if not measured:
+                    continue
+                size, file_type = measured
+                if not self.wants(file_type):
+                    continue
+                cap = CARVE_MAX_SIZE.get(file_type)
+                if size < CARVE_MIN_SIZE or (cap and size > cap):
+                    continue
+                content = source.get(offset, size)
+                if len(content) != size:
+                    continue
+                if is_valid_file(content, file_type):
+                    self.save_file(content, file_type, offset)
+                    # A later signature inside this file is part of it.
+                    self._seen.add((offset, None))
+
+    #: The family each measuring function carves for. MP3 is checked against
+    #: every family: its frame sync is weak enough to occur in any audio or
+    #: video stream, and an MPEG's or an AVI's audio is that file's, not an
+    #: MP3 of its own.
+    _MEASURE_FAMILY = {}
+
+    def _family(self, measure):
+        if measure is formats.measure_mp3:
+            return None
+        return self._MEASURE_FAMILY.get(measure.__name__,
+                                        measure.__name__.replace('measure_', ''))
+
+    def carve_sqlite_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'SQLite format 3\x00',),
+                          formats.measure_sqlite)
+
+    def carve_regf_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'regf',), formats.measure_regf)
+
+    def carve_evtx_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'ElfFile\x00',),
+                          formats.measure_evtx)
+
+    def carve_pst_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'!BDN',), formats.measure_pst)
+
+    def carve_pe_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'MZ',), formats.measure_pe)
+
+    def carve_lnk_files(self, chunk, base_offset):
+        # A shortcut is a few hundred bytes; on NTFS it is often resident in
+        # its MFT record, so it need not start a sector. The 20-byte header
+        # signature is specific enough to search for anywhere.
+        self._carve_sized(chunk, base_offset,
+                          (b'\x4c\x00\x00\x00' + formats.LNK_CLSID,),
+                          formats.measure_lnk, aligned=False)
+
+    def carve_mp3_files(self, chunk, base_offset):
+        # With a tag, or straight into frames (MPEG-1 and -2 Layer III).
+        self._carve_sized(chunk, base_offset,
+                          (b'ID3', b'\xff\xfb', b'\xff\xfa', b'\xff\xf3',
+                           b'\xff\xf2'), formats.measure_mp3)
+
+    def carve_ogg_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'OggS\x00\x02',),
+                          formats.measure_ogg)
+
+    def carve_flv_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'FLV\x01',), formats.measure_flv)
+
+    def carve_mpg_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'\x00\x00\x01\xba',),
+                          formats.measure_mpg)
+
+    def carve_mkv_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'\x1a\x45\xdf\xa3',),
+                          formats.measure_mkv)
+
+    def carve_tar_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'ustar',), formats.measure_tar,
+                          True, 257)
+
+    def carve_bz2_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'BZh',), formats.measure_bz2,
+                          True, 0, CARVE_MAX_SIZE['bz2'])
+
+    def carve_xz_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'\xfd7zXZ\x00',),
+                          formats.measure_xz, True, 0, CARVE_MAX_SIZE['xz'])
+
+    def carve_rtf_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'{\\rtf1',),
+                          formats.measure_rtf, True, 0, CARVE_MAX_SIZE['rtf'])
+
+    def carve_elf_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'\x7fELF',), formats.measure_elf)
+
+    def carve_macho_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset,
+                          (b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe',
+                           b'\xfe\xed\xfa\xcf', b'\xfe\xed\xfa\xce',
+                           b'\xca\xfe\xba\xbe'), formats.measure_macho)
+
+    def carve_psd_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'8BPS\x00\x01',),
+                          formats.measure_psd)
+
+    def carve_mbox_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (b'From ',), formats.measure_mbox,
+                          True, 0, CARVE_MAX_SIZE['mbox'])
+
+    def carve_eml_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, formats.EML_STARTS,
+                          formats.measure_eml, True, 0, CARVE_MAX_SIZE['eml'])
+
+    #: Which carver each family name runs (see EXTENSION_CARVER).
     CARVERS = {
         'pdf': carve_pdf_files,
         'jpg': carve_jpg_files,
@@ -934,9 +1130,8 @@ class Carver:
         'gif': carve_gif_files,
         'bmp': carve_bmp_files,
         'tiff': carve_tiff_files,
-        'wav': carve_wav_files,
-        'mov': carve_mov_files,
-        'mp4': carve_mp4_files,
+        'riff': carve_riff_files,
+        'isobmff': carve_mov_files,
         'wmv': carve_wmv_files,
         'zip': carve_zip_files,
         'gz': carve_gz_files,
@@ -944,8 +1139,41 @@ class Carver:
         '7z': carve_7z_files,
         'ole': carve_ole_files,
         'html': carve_html_files,
+        'sqlite': carve_sqlite_files,
+        'regf': carve_regf_files,
+        'evtx': carve_evtx_files,
+        'pst': carve_pst_files,
+        'pe': carve_pe_files,
+        'lnk': carve_lnk_files,
+        'mp3': carve_mp3_files,
+        'ogg': carve_ogg_files,
+        'flv': carve_flv_files,
+        'mpg': carve_mpg_files,
+        'mkv': carve_mkv_files,
+        'tar': carve_tar_files,
+        'bz2': carve_bz2_files,
+        'xz': carve_xz_files,
+        'rtf': carve_rtf_files,
+        'elf': carve_elf_files,
+        'macho': carve_macho_files,
+        'psd': carve_psd_files,
+        'mbox': carve_mbox_files,
+        'eml': carve_eml_files,
     }
 
+
+
+#: The order carvers run in, per chunk. Containers before what they contain:
+#: a video's audio, an archive's members and an executable's resources are
+#: then recognised as inside a file already carved, rather than carved again
+#: as files of their own. MP3 last -- its frame sync is the weakest signature.
+_CARVE_ORDER = [
+    'pst', 'sqlite', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
+    'ogg', 'wmv', 'zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'ole', 'pdf',
+    'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'tiff',
+    'png',
+    'gif', 'bmp', 'jpg', 'mp3',
+]
 
 
 def allocation_map(image_handler):
@@ -979,8 +1207,10 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     `should_stop()` consulted as often -- CarvingCancelled leaves the loop
     with everything found so far already handed to the sink.
     """
-    file_types = [t.lower() for t in file_types if t.lower() in Carver.CARVERS]
-    if not file_types:
+    wanted = {t.lower() for t in file_types if t.lower() in EXTENSION_CARVER}
+    families = sorted({EXTENSION_CARVER[t] for t in wanted},
+                      key=_CARVE_ORDER.index)
+    if not families:
         return 0
     allocated = allocation_map(image_handler) if unallocated_only else []
     if allocated:
@@ -988,8 +1218,9 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
                     len(allocated),
                     sum(end - begin for begin, end in allocated) / 1048576)
 
-    carver = Carver(sink)
     size = image_handler.get_size()
+    carver = Carver(sink, wanted=wanted, reader=image_handler.read,
+                    image_size=size)
     offset = 0
     while offset < size:
         if should_stop and should_stop():
@@ -1013,13 +1244,13 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
         chunk = image_handler.read(offset, span)
         if not chunk:
             break
-        for file_type in file_types:
+        for family in families:
             try:
-                Carver.CARVERS[file_type](carver, chunk, offset)
+                Carver.CARVERS[family](carver, chunk, offset)
             except Exception as exc:
                 # One malformed span must not end the scan.
                 logger.warning("%s carver failed at offset %d: %s: %s",
-                               file_type, offset, type(exc).__name__, exc)
+                               family, offset, type(exc).__name__, exc)
         offset += CHUNK_SIZE
 
     if progress:

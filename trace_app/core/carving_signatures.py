@@ -4,13 +4,20 @@ Pure functions over a bytes buffer -- no widget, no disk access, no state.
 They live in core so this logic can be exercised without starting a GUI.
 """
 
+import bz2
 import datetime
+import email
+import email.utils
 import gzip
 import io
 import logging
+import lzma
 import re
+import sqlite3
 import struct
+import tarfile
 import zipfile
+import zlib
 
 from pymupdf import open as fitz_open
 from PIL import Image, UnidentifiedImageError
@@ -71,13 +78,23 @@ def is_valid_file(data, file_type):
         if kind == 'wav':
             return _valid_riff(data)
 
-        if kind in ('mov', 'mp4'):
+        if kind in ('webp', 'avif'):
+            # Pillow parses both; verify() reads the structure, not pixels.
+            image = Image.open(io.BytesIO(data))
+            image.verify()
+            return _valid_isobmff(data) if kind == 'avif' else \
+                _valid_riff(data, b'WEBP')
+
+        if kind == 'avi':
+            return _valid_avi(data)
+
+        if kind in ('mov', 'mp4', 'm4v', 'm4a', '3gp', 'heic'):
             return _valid_isobmff(data)
 
         if kind == 'wmv':
             return _valid_asf(data)
 
-        if kind == 'zip':
+        if kind in ZIP_KINDS:
             with zipfile.ZipFile(io.BytesIO(data)) as archive:
                 if not archive.namelist():
                     return False
@@ -90,6 +107,10 @@ def is_valid_file(data, file_type):
         if kind == 'ole':
             return _valid_ole(data)
 
+        validator = _VALIDATORS.get(kind)
+        if validator is not None:
+            return validator(data)
+
         if kind in ('rar', '7z', 'html'):
             # Carved by structure rather than parsed: the carver for each of
             # these establishes its own end, and there is no cheap library
@@ -98,7 +119,8 @@ def is_valid_file(data, file_type):
 
     except (IOError, OSError, UnidentifiedImageError, ValueError, RuntimeError,
             struct.error, zipfile.BadZipFile, SyntaxError, EOFError,
-            IndexError, KeyError) as exc:
+            IndexError, KeyError, sqlite3.Error, tarfile.TarError,
+            lzma.LZMAError, UnicodeDecodeError) as exc:
         logger.debug("Rejected %s candidate: %s: %s",
                      file_type, type(exc).__name__, exc)
         return False
@@ -110,9 +132,10 @@ def is_valid_file(data, file_type):
     return False
 
 
-def _valid_riff(data):
-    """RIFF/WAVE with a length field that agrees with the buffer."""
-    if data[:4] != b'RIFF' or data[8:12] != b'WAVE':
+def _valid_riff(data, form=b'WAVE'):
+    """RIFF of the given form, with a length field that agrees with the
+    buffer."""
+    if data[:4] != b'RIFF' or data[8:12] != form:
         return False
     declared = int.from_bytes(data[4:8], 'little') + 8
     # The buffer may legitimately be longer (trailing slack), never shorter.
@@ -198,12 +221,24 @@ def extract_original_timestamp(file_content, file_type):
             if stamp:
                 return stamp
 
-        elif kind == 'zip':
+        elif kind in ('docx', 'xlsx', 'pptx', 'vsdx', 'odt', 'ods', 'odp',
+                      'odg'):
+            stamp = _office_timestamp(file_content) or \
+                _zip_timestamp(file_content)
+            if stamp:
+                return stamp
+
+        elif kind in ZIP_KINDS:
             stamp = _zip_timestamp(file_content)
             if stamp:
                 return stamp
 
-        elif kind in ('mov', 'mp4'):
+        elif kind in _TIMESTAMPS:
+            stamp = _TIMESTAMPS[kind](file_content)
+            if stamp:
+                return stamp
+
+        elif kind in ('mov', 'mp4', 'm4v', 'm4a', '3gp'):
             stamp = _mov_timestamp(file_content)
             if stamp:
                 return stamp
@@ -435,3 +470,362 @@ def _plausible(stamp):
     a value is worse than no value, because it looks like evidence.
     """
     return datetime.datetime(1990, 1, 1) <= stamp <= datetime.datetime.now()
+
+
+# --- formats added with the size-from-structure carvers ---------------------
+
+#: Every extension a carved ZIP can be named as (carving_formats.zip_kind).
+ZIP_KINDS = frozenset({'zip', 'docx', 'xlsx', 'pptx', 'vsdx', 'odt', 'ods',
+                       'odp', 'odg', 'epub', 'apk', 'jar'})
+
+
+def _remeasure(measure, data, *args):
+    """Does the carver's own walk of `data`, alone, land exactly on its end?
+
+    For formats with no library to parse them, the structure walk is the
+    check -- run again over the carved bytes alone, it must account for every
+    one of them, which random data and a misjudged extent do not.
+    """
+    from trace_app.core.carving_formats import Source
+    result = measure(Source(data, 0), 0, *args)
+    return bool(result) and result[0] == len(data)
+
+
+def _valid_avi(data):
+    if not _valid_riff(data, b'AVI '):
+        return False
+    # The first chunk of an AVI is the header list.
+    return data[12:16] == b'LIST' and data[20:24] == b'hdrl'
+
+
+def _valid_sqlite(data):
+    from trace_app.core.carving_formats import measure_sqlite
+    if not _remeasure(measure_sqlite, data):
+        return False
+    # Page 1 holds the schema table: a table b-tree page, leaf or interior.
+    if data[100] not in (0x0D, 0x05):
+        return False
+    connection = sqlite3.connect(':memory:')
+    try:
+        if hasattr(connection, 'deserialize'):          # Python 3.11+
+            connection.deserialize(bytes(data))
+            connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        return True
+    finally:
+        connection.close()
+
+
+def _valid_regf(data):
+    from trace_app.core.carving_formats import measure_regf
+    if not _remeasure(measure_regf, data):
+        return False
+    words = struct.unpack_from('<127I', data, 0)
+    checksum = 0
+    for word in words:
+        checksum ^= word
+    if checksum == 0xFFFFFFFF:
+        checksum = 0xFFFFFFFE
+    elif checksum == 0:
+        checksum = 1
+    if checksum != struct.unpack_from('<I', data, 0x1FC)[0]:
+        return False
+    # The root key cell: a negative (allocated) size, then 'nk'.
+    root = 4096 + struct.unpack_from('<I', data, 0x24)[0]
+    return data[root + 4:root + 6] == b'nk' and \
+        struct.unpack_from('<i', data, root)[0] < 0
+
+
+def _valid_evtx(data):
+    from trace_app.core.carving_formats import EVTX_CHUNK, measure_evtx
+    if not _remeasure(measure_evtx, data):
+        return False
+    # Every chunk carries a CRC32 of its header (first 120 bytes, then the
+    # 384 bytes from 128); one valid chunk proves the log is real.
+    chunk = data[4096:4096 + EVTX_CHUNK]
+    header_crc = zlib.crc32(chunk[:120] + chunk[128:512]) & 0xFFFFFFFF
+    return header_crc == struct.unpack_from('<I', chunk, 0x7C)[0]
+
+
+def _ms_pst_crc(data):
+    """MS-PST's CRC-32: the standard polynomial, no pre- or post-inversion."""
+    return (zlib.crc32(data, 0xFFFFFFFF) ^ 0xFFFFFFFF) & 0xFFFFFFFF
+
+
+def _valid_pst(data):
+    from trace_app.core.carving_formats import measure_pst
+    if not _remeasure(measure_pst, data):
+        return False
+    return _ms_pst_crc(data[8:8 + 471]) == struct.unpack_from('<I', data, 4)[0]
+
+
+def _valid_pe(data):
+    from trace_app.core.carving_formats import measure_pe
+    if not _remeasure(measure_pe, data):
+        return False
+    lfanew = struct.unpack_from('<I', data, 0x3C)[0]
+    headers = struct.unpack_from('<I', data, lfanew + 24 + 60)[0]
+    return 0 < headers <= len(data)
+
+
+def _valid_lnk(data):
+    from trace_app.core.carving_formats import measure_lnk
+    return _remeasure(measure_lnk, data)
+
+
+def _valid_mp3(data):
+    from trace_app.core.carving_formats import measure_mp3
+    return _remeasure(measure_mp3, data)
+
+
+def _valid_ogg(data):
+    from trace_app.core.carving_formats import measure_ogg
+    return _remeasure(measure_ogg, data)
+
+
+def _valid_flv(data):
+    from trace_app.core.carving_formats import measure_flv
+    return _remeasure(measure_flv, data)
+
+
+def _valid_mpg(data):
+    from trace_app.core.carving_formats import measure_mpg
+    if not _remeasure(measure_mpg, data):
+        return False
+    # A program stream carries video or audio packets, not only packs.
+    return re.search(rb'\x00\x00\x01[\xc0-\xef]', data[:1 << 20]) is not None
+
+
+def _valid_mkv(data):
+    from trace_app.core.carving_formats import _ebml_id, _ebml_vint, measure_mkv
+    if not _remeasure(measure_mkv, data):
+        return False
+    # The segment's top-level elements must tile it exactly, and include its
+    # Info and Tracks.
+    size, width = _ebml_vint(data, 4)
+    pos = 4 + width + size
+    seg_size, seg_width = _ebml_vint(data, pos + 4)
+    pos += 4 + seg_width
+    end = pos + seg_size
+    seen = set()
+    while pos < end:
+        element = _ebml_id(data, pos)
+        if element is None:
+            return False
+        length = _ebml_vint(data, pos + element[1])
+        if length is None:
+            return False
+        seen.add(element[0])
+        pos += element[1] + length[1] + length[0]
+    return pos == end and {b'\x15\x49\xa9\x66', b'\x16\x54\xae\x6b'} <= seen
+
+
+def _valid_tar(data):
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as archive:
+        return bool(archive.getmembers())
+
+
+def _valid_bz2(data):
+    stream = bz2.BZ2Decompressor()
+    stream.decompress(data, max_length=1 << 20)
+    return True
+
+
+def _valid_xz(data):
+    stream = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+    stream.decompress(data, max_length=1 << 20)
+    return True
+
+
+def _valid_rtf(data):
+    from trace_app.core.carving_formats import measure_rtf
+    if not data.startswith(b'{\\rtf1'):
+        return False
+    return _remeasure(measure_rtf, data, len(data) + 1) and \
+        (b'\\fonttbl' in data[:1 << 16] or b'\\ansi' in data[:64])
+
+
+def _valid_elf(data):
+    from trace_app.core.carving_formats import measure_elf
+    return _remeasure(measure_elf, data)
+
+
+def _valid_macho(data):
+    from trace_app.core.carving_formats import measure_macho
+    return _remeasure(measure_macho, data)
+
+
+def _valid_psd(data):
+    from trace_app.core.carving_formats import measure_psd
+    if not _remeasure(measure_psd, data):
+        return False
+    Image.open(io.BytesIO(data)).verify()
+    return True
+
+
+def _valid_eml(data):
+    message = email.message_from_bytes(data[:1 << 16])
+    return bool(message.get('From') and (message.get('Date')
+                                         or message.get('Received')))
+
+
+def _valid_mbox(data):
+    # Every message the extent covers must parse with real mail headers;
+    # the first one is required to.
+    text = data.decode('utf-8', 'replace')
+    first = text.split('\nFrom ', 1)[0]
+    message = email.message_from_string(first.split('\n', 1)[1]
+                                        if '\n' in first else '')
+    return bool(message.get('From') and (message.get('Date')
+                                         or message.get('Received')))
+
+
+_VALIDATORS = {
+    'sqlite': _valid_sqlite, 'regf': _valid_regf, 'evtx': _valid_evtx,
+    'pst': _valid_pst, 'ost': _valid_pst,
+    'exe': _valid_pe, 'dll': _valid_pe, 'sys': _valid_pe,
+    'lnk': _valid_lnk, 'mp3': _valid_mp3, 'ogg': _valid_ogg,
+    'opus': _valid_ogg, 'flv': _valid_flv, 'mpg': _valid_mpg,
+    'mkv': _valid_mkv, 'webm': _valid_mkv, 'tar': _valid_tar,
+    'bz2': _valid_bz2, 'xz': _valid_xz, 'rtf': _valid_rtf,
+    'elf': _valid_elf, 'macho': _valid_macho, 'psd': _valid_psd,
+    'mbox': _valid_mbox, 'eml': _valid_eml,
+}
+
+
+# --- dates the new formats carry --------------------------------------------
+
+def _filetime(value):
+    if not value:
+        return None
+    stamp = _FILETIME_EPOCH + datetime.timedelta(microseconds=value // 10)
+    return stamp if _plausible(stamp) else None
+
+
+def _regf_timestamp(data):
+    stamp = _filetime(struct.unpack_from('<Q', data, 0x0C)[0])
+    return (stamp, "Hive last written") if stamp else None
+
+
+def _evtx_timestamp(data):
+    # The first record of the first chunk: signature, size, id, then time.
+    record = 4096 + 512
+    if data[record:record + 4] != b'**\x00\x00':
+        return None
+    stamp = _filetime(struct.unpack_from('<Q', data, record + 16)[0])
+    return (stamp, "First event in log") if stamp else None
+
+
+def _pe_timestamp(data):
+    lfanew = struct.unpack_from('<I', data, 0x3C)[0]
+    seconds = struct.unpack_from('<I', data, lfanew + 8)[0]
+    if not seconds:
+        return None
+    stamp = datetime.datetime(1970, 1, 1) + datetime.timedelta(seconds=seconds)
+    # Reproducible builds write a hash here, not a time; and any linker
+    # value can be set by hand. Say so in the source.
+    return (stamp, "PE linker timestamp (can be forged)") \
+        if _plausible(stamp) else None
+
+
+def _lnk_timestamp(data):
+    # The target's own times, recorded when the shortcut was made or used:
+    # modified first, then created.
+    for at, label in ((0x2C, "LNK target modified"),
+                      (0x1C, "LNK target created")):
+        stamp = _filetime(struct.unpack_from('<Q', data, at)[0])
+        if stamp:
+            return stamp, label
+    return None
+
+
+_CORE_DATE = re.compile(rb'<dcterms:(modified|created)[^>]*>([^<]+)<')
+_ODF_DATE = re.compile(rb'<(meta:creation-date|dc:date)>([^<]+)<')
+
+
+def _parse_iso(text):
+    text = text.strip().rstrip('Z')
+    for fmt in ('%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%d'):
+        try:
+            stamp = datetime.datetime.strptime(text[:26], fmt)
+            return stamp if _plausible(stamp) else None
+        except ValueError:
+            continue
+    return None
+
+
+def _office_timestamp(data):
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = set(archive.namelist())
+        if 'docProps/core.xml' in names:
+            found = dict((kind, value) for kind, value in
+                         _CORE_DATE.findall(archive.read('docProps/core.xml')))
+            for kind, label in ((b'modified', "Document modified (core.xml)"),
+                                (b'created', "Document created (core.xml)")):
+                if kind in found:
+                    stamp = _parse_iso(found[kind].decode('ascii', 'replace'))
+                    if stamp:
+                        return stamp, label
+        if 'meta.xml' in names:
+            for tag, value in _ODF_DATE.findall(archive.read('meta.xml')):
+                stamp = _parse_iso(value.decode('ascii', 'replace'))
+                if stamp:
+                    label = ("Document created (meta.xml)"
+                             if tag == b'meta:creation-date'
+                             else "Document modified (meta.xml)")
+                    return stamp, label
+    return None
+
+
+_RTF_TIME = re.compile(rb'\\(revtim|creatim)\\yr(\d+)\\mo(\d+)\\dy(\d+)'
+                       rb'(?:\\hr(\d+))?(?:\\min(\d+))?')
+
+
+def _rtf_timestamp(data):
+    found = {m.group(1): m for m in _RTF_TIME.finditer(data[:1 << 16])}
+    for kind, label in ((b'revtim', "RTF revised"), (b'creatim', "RTF created")):
+        match = found.get(kind)
+        if match:
+            try:
+                stamp = datetime.datetime(
+                    int(match.group(2)), int(match.group(3)),
+                    int(match.group(4)), int(match.group(5) or 0),
+                    int(match.group(6) or 0))
+            except ValueError:
+                continue
+            if _plausible(stamp):
+                return stamp, label
+    return None
+
+
+def _mbox_timestamp(data):
+    head = data[:1 << 16].decode('utf-8', 'replace')
+    match = re.search(r'^Date:\s*(.+)$', head, re.M)
+    if not match:
+        return None
+    try:
+        stamp = email.utils.parsedate_to_datetime(match.group(1).strip())
+    except (TypeError, ValueError):
+        return None
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return (stamp, "Date: of first message") if _plausible(stamp) else None
+
+
+def _tar_timestamp(data):
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as archive:
+        first = archive.next()
+        if first and first.mtime:
+            stamp = datetime.datetime(1970, 1, 1) + \
+                datetime.timedelta(seconds=first.mtime)
+            if _plausible(stamp):
+                return stamp, "TAR first member mtime"
+    return None
+
+
+_TIMESTAMPS = {
+    'regf': _regf_timestamp, 'evtx': _evtx_timestamp,
+    'exe': _pe_timestamp, 'dll': _pe_timestamp, 'sys': _pe_timestamp,
+    'lnk': _lnk_timestamp, 'rtf': _rtf_timestamp, 'mbox': _mbox_timestamp,
+    'eml': _mbox_timestamp,
+    'tar': _tar_timestamp,
+}

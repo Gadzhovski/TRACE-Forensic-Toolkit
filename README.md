@@ -142,9 +142,27 @@ bombs are refused.
 
 ### 🔍 File carving
 
-Recovers deleted files by signature — **PDF, JPG, PNG, GIF, BMP, TIFF, WAV, MOV,
-MP4, WMV, ZIP, GZ, RAR, 7Z, OLE (doc/xls/ppt) and HTML** — validating every
-carve before it is kept. Carve one image or all of them, from unallocated space
+Recovers deleted files by signature — **59 types** in nine groups:
+
+- **Pictures:** JPG, PNG, GIF, BMP, TIFF, WEBP, HEIC, AVIF, PSD
+- **Documents:** PDF, DOCX/XLSX/PPTX/VSDX, ODT/ODS/ODP/ODG, EPUB, OLE
+  (doc/xls/ppt/msg), RTF, HTML
+- **Email:** PST, OST, mbox, EML
+- **Databases & logs:** SQLite, EVTX, registry hives
+- **Windows artifacts:** LNK
+- **Executables:** EXE/DLL/SYS, ELF, Mach-O, APK, JAR
+- **Archives:** ZIP, GZ, BZ2, XZ, TAR, RAR, 7Z
+- **Audio:** WAV, MP3, OGG, Opus, M4A
+- **Video:** MP4, MOV, M4V, 3GP, AVI, WMV, FLV, MPG, MKV, WebM
+
+A file's extent comes from its own structure — a size in its header or a walk
+of its blocks — never a guess, and every carve is validated before it is kept.
+Files sized by their header are read whole from the image, however large, so a
+big SQLite database or PST is not cut off. A ZIP is named for what it is (a
+.docx, .apk...), and a carved archive opens like a folder. Embedded dates are
+kept with their source: LNK target times, EVTX first event, hive last write,
+Office core.xml, RTF \creatim, a PE's linker time (labelled as forgeable).
+Carve one image or all of them, from unallocated space
 (an allocation map skips live files) or the whole image, from the Triage tab or
 as an analysis module. In a case each file is recorded with its image, offset,
 SHA-256 and embedded date, saved per image, audited and listed under Findings;
@@ -462,12 +480,24 @@ python tools/carve_score.py 11-carve-fat.dd  # one image
 | `11-carve-fat.dd` | 15 / 15 | — |
 | `12-carve-ext2.dd` | 10 / 10 | 1 / 1 |
 | `dfrws-2006-challenge.raw` | 25 / 27 | 10 / 10 |
-| `dfrws-2007-challenge.img` | 30 / 54 | 5 / 5 |
+| `dfrws-2007-challenge.img` | 75 / 114 | 12 / 12 |
+| `carve-corpus.dd` | 45 / 45 | 45 / 45 |
 
-The DFRWS images deliberately store most files fragmented; TRACE does not
-reassemble fragments, so byte-exact recovery is reported for the files a
-contiguous carver can reproduce. Test images are not included — see
-`test_images/README.md` for sources and checksums.
+DFRWS 2007 is scored against its full official key — MP3, MPG, AVI, FLV, EXE,
+ELF and mail as well as the original types. The DFRWS images deliberately
+store most files fragmented; TRACE does not reassemble fragments, so
+byte-exact recovery is reported for the files a contiguous carver can
+reproduce, and every miss there is a fragmented or incomplete file.
+
+`carve-corpus.dd` covers the formats those images do not hold. It is built by
+`tools/carve_corpus.py` from 45 real published files — test files from
+Pillow, python-docx, python-evtx, yarp, LnkParse3, java-libpst, CPython and
+the Matroska working group; release binaries of PuTTY, SQLite, BusyBox,
+ripgrep and JUnit; sample media — each pinned by SHA-256 and laid among
+random filler with a decoy for every signature. Every file comes back
+byte-exact and no decoy is carved. CI builds and scores it on every push.
+Test images are not included — see `test_images/README.md` for sources and
+checksums.
 
 <br/>
 

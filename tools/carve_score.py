@@ -38,7 +38,14 @@ BASELINE = {
     '11-carve-fat.dd': 15,      # every planted file of a supported type
     '12-carve-ext2.dd': 10,     # likewise
     'dfrws-2006-challenge.raw': 25,  # 27 planted; the 2 misses are frag'd ZIPs
-    'dfrws-2007-challenge.img': 30,  # 54 planted, only 5 contiguous
+    # 114 planted of carvable types once MP3/MPG/AVI/FLV/EXE/ELF/mbox were
+    # added (30 of the original 54); every miss is fragmented or incomplete.
+    # Mail recovered as .eml -- the challenge's ".mbox" files are saved
+    # RFC 5322 messages -- raised this from 63.
+    'dfrws-2007-challenge.img': 75,
+    # Real published files of 40+ formats (tools/carve_corpus.py): every one,
+    # byte-exact, and none of its 21 signature decoys.
+    'carve-corpus.dd': 45,
 }
 
 #: How close a recovered offset must be to the documented one to count as the
@@ -55,11 +62,12 @@ def carve_image(path):
     the same Carver class (trace_app/core/carving.py) an examiner runs.
     """
     found = []
-    carver = Carver(lambda content, file_type, offset:
-                    found.append((file_type, offset, content)))
-
     with open(path, 'rb') as handle:
         data = handle.read()
+    carver = Carver(lambda content, file_type, offset:
+                    found.append((file_type, offset, content)),
+                    reader=lambda offset, length: data[offset:offset + length],
+                    image_size=len(data))
 
     offset = 0
     while offset < len(data):

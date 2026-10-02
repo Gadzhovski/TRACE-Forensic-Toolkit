@@ -50,6 +50,44 @@ CARVE_MAX_SIZE = {
     'mov': 32 * 1024 * 1024,
     'mp4': 32 * 1024 * 1024,
     'wmv': 32 * 1024 * 1024,
+    # Office and other formats named from a carved ZIP share its cap.
+    **{ext: 32 * 1024 * 1024 for ext in ('docx', 'xlsx', 'pptx', 'vsdx',
+                                         'odt', 'ods', 'odp', 'odg', 'epub',
+                                         'apk', 'jar')},
+    **{ext: 32 * 1024 * 1024 for ext in ('m4v', '3gp', 'heic', 'avif',
+                                         'm4a')},
+    # Formats sized by their own header or structure are read from the image
+    # in full rather than out of the read-ahead, so they are not bound by
+    # CARVE_OVERLAP. Their caps only bound memory: a carved file is held
+    # whole while it is validated and hashed.
+    'webp': 64 * 1024 * 1024,
+    'avi': 256 * 1024 * 1024,
+    'sqlite': 256 * 1024 * 1024,
+    'regf': 256 * 1024 * 1024,
+    'evtx': 256 * 1024 * 1024,
+    'pst': 256 * 1024 * 1024,
+    'ost': 256 * 1024 * 1024,
+    'exe': 256 * 1024 * 1024,
+    'dll': 256 * 1024 * 1024,
+    'sys': 64 * 1024 * 1024,
+    'lnk': 1024 * 1024,
+    'mp3': 64 * 1024 * 1024,
+    'ogg': 64 * 1024 * 1024,
+    'opus': 64 * 1024 * 1024,
+    'flv': 256 * 1024 * 1024,
+    'mpg': 256 * 1024 * 1024,
+    'mkv': 256 * 1024 * 1024,
+    'webm': 256 * 1024 * 1024,
+    'tar': 256 * 1024 * 1024,
+    'bz2': 256 * 1024 * 1024,
+    'xz': 256 * 1024 * 1024,
+    'rtf': 32 * 1024 * 1024,
+    'elf': 256 * 1024 * 1024,
+    'macho': 256 * 1024 * 1024,
+    'psd': 256 * 1024 * 1024,
+    # The one heuristic extent: kept small, since it is where text stops.
+    'mbox': 64 * 1024 * 1024,
+    'eml': 64 * 1024 * 1024,
 }
 
 #: Smallest carve worth writing. Below this a "file" is a header and little

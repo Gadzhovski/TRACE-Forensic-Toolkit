@@ -117,6 +117,21 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           "$PY" tools/fetch_test_images.py
 
+      # Real published files of every format the DFTT/DFRWS images do not
+      # hold, pinned by SHA-256 (tools/carve_corpus.py). Cached with the
+      # other test images.
+      - name: Cache the carving corpus samples
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/carve_samples
+          key: carve-samples-${{ hashFiles('tools/carve_corpus.py') }}
+
+      - name: Build the carving corpus
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/carve_corpus.py
+
       - name: Tests (image handling, core, UI)
         shell: bash
         run: |
@@ -127,4 +142,4 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" tools/carve_score.py 11-carve-fat.dd 12-carve-ext2.dd
+          "$PY" tools/carve_score.py 11-carve-fat.dd 12-carve-ext2.dd carve-corpus.dd
