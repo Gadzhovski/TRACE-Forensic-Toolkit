@@ -27,7 +27,7 @@ from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.dialogs.about import AboutDialog
 from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
-                                       GROUP_SPACING,
+                                       GROUP_SPACING, UNKNOWN_DATE,
                                        TABLE_ROW_HEIGHT,
                                        CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
                                        DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
@@ -36,7 +36,8 @@ from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_
                                        TREE_ICON_SIZE, TREE_INDENTATION, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
 from trace_app.core.database import DatabaseManager
-from trace_app.ui.viewers.carving import FileCarvingWidget
+from trace_app.ui.viewers.carved_panel import (CarvedFilesPanel,
+                                               CarvingWorker)
 from trace_app.ui.viewers.hex import HexViewer
 from trace_app.core import archives
 from trace_app.infra.theme import read_theme, save_theme
@@ -72,7 +73,8 @@ from trace_app.ui.viewers.notes_panel import NotesPanel
 from trace_app.ui.viewers.search_panel import SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
 from trace_app.ui.widgets.job_bar import Job, JobBar
-from trace_app.ui.dialogs.analysis_modules import choose_modules
+from trace_app.ui.dialogs.analysis_modules import (choose_modules,
+                                                   default_choice)
 from trace_app.core.analysis import MODULES, is_high_entropy
 
 #: The listing's Flag text for each hidden-data finding.
@@ -434,8 +436,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         #: What was chosen last time, so a second run does not start from
-        #: nothing. Everything, until something is chosen.
-        self._last_modules = list(MODULES)
+        #: nothing. Every file module, until something is chosen; carving is
+        #: the slowest pass and is only run when asked for.
+        self._last_choice = default_choice(MODULES)
         self._build_status_bar()
 
     def _build_status_bar(self):
@@ -949,15 +952,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self.result_viewer.addTab(self.listing_widget, 'Listing')
 
-        self.deleted_files_widget = FileCarvingWidget(self)
-        # Inject what the widget needs rather than letting it reach back up
-        # through a MainWindow reference into db_manager.
-        self.deleted_files_widget.icon_resolver = self.db_manager.get_icon_path
-        self.deleted_files_widget.carved_file_opened.connect(self.update_viewer_with_file_content)
-        self.deleted_files_widget.carved_menu_requested.connect(
-            self.open_carved_menu)
-        self.result_viewer.addTab(self.deleted_files_widget, 'Deleted Files')
-
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
         # Hive reading runs on a worker thread, so its progress belongs in the
         # status bar with everything else rather than only as a placeholder row
@@ -989,6 +983,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.triage_panel.finding_menu_requested.connect(
             self.open_finding_menu)
         self.triage_panel.run_requested.connect(self.run_analysis_modules)
+
+        # Carving is a Triage sub-tab: what it recovers is reviewed like any
+        # other finding, and with a case it runs as an analysis job.
+        self.carved_panel = CarvedFilesPanel()
+        self.carved_panel.icon_resolver = self._get_file_icon
+        self.carved_panel.carve_requested.connect(self.start_carving)
+        self.carved_panel.file_selected.connect(self.preview_carved)
+        self.carved_panel.file_menu_requested.connect(self.open_carved_menu)
+        self.triage_panel.add_carved_tab(self.carved_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
     def _build_viewer_dock(self):
@@ -1446,30 +1449,30 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.update_viewer_with_file_content(content, data)
         self.set_status(f"{name} — read from inside an archive")
 
-    def open_carved_menu(self, info, position):
+    def open_carved_menu(self, row, position):
         """The context menu for a carved file.
 
         A carved file has no inode -- it was recovered from unallocated space,
-        which is the whole point -- so it is referenced by the offset it was
-        found at, which is also what names it on disk.
+        which is the whole point -- so it is referenced by the byte span it
+        was found at, which is also what names it on disk.
         """
         menu = QMenu(self)
+        path = row.get('path') or ''
         open_action = menu.addAction("Open Externally")
-        location_action = menu.addAction("Open File Location")
+        location_action = menu.addAction("Show in Folder")
+        open_action.setEnabled(os.path.isfile(path))
+        location_action.setEnabled(os.path.isfile(path))
+        copy_hash = None
+        if row.get('sha256'):
+            copy_hash = menu.addAction("Copy SHA-256")
 
-        offset_hex = os.path.splitext(info['name'])[0]
-        try:
-            offset = int(offset_hex, 16)
-        except ValueError:
-            offset = None
-
-        if offset is not None and self.case:
+        evidence_id = row.get('evidence_id')
+        if self.case and evidence_id is not None:
             menu.addSeparator()
-            size = info.get('size') or 0
-            size = int(size) if str(size).isdigit() else 0
-            ref = make_span_ref(self.current_offset or 0, offset, offset + size)
-            existing = self.case.bookmark_for_artifact(
-                self.evidence_id_for_current_image(), ref)
+            offset, size = int(row.get('offset') or 0), int(row.get('size') or 0)
+            ref = row.get('artifact_ref') or make_span_ref(0, offset,
+                                                           offset + size)
+            existing = self.case.bookmark_for_artifact(evidence_id, ref)
             if existing:
                 remove = menu.addAction("Remove Bookmark")
                 remove.triggered.connect(
@@ -1477,24 +1480,166 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             else:
                 add = menu.addAction("Add Bookmark")
                 add.triggered.connect(
-                    lambda: self._bookmark_carved(info, ref))
+                    lambda: self._bookmark_carved(row, ref))
 
         chosen = menu.exec_(position)
         if chosen == open_action:
-            self.deleted_files_widget.open_image()
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
         elif chosen == location_action:
-            self.deleted_files_widget.open_file_location()
+            QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
+        elif copy_hash is not None and chosen == copy_hash:
+            QApplication.clipboard().setText(row['sha256'])
+            self.set_status("SHA-256 copied")
 
-    def _bookmark_carved(self, info, ref):
+    def _bookmark_carved(self, row, ref):
         label, ok = QInputDialog.getText(
-            self, "Add bookmark", "Label:", text=info['name'])
+            self, "Add bookmark", "Label:", text=row.get('name') or '')
         if not ok or not label.strip():
             return
         self.case.add_bookmark(
-            self.evidence_id_for_current_image(), ref, label.strip(),
-            artifact_name=info['name'], artifact_path=info.get('path') or '')
+            row['evidence_id'], ref, label.strip(),
+            artifact_name=row.get('name') or '',
+            artifact_path=row.get('path') or '')
         self.refresh_bookmarks()
         self.set_status(f"Bookmarked {label.strip()}")
+
+    # --- carving ---------------------------------------------------------
+
+    def _carving_targets(self):
+        """The images carving can search: [(key, label)].
+
+        With a case, its evidence (by id); without one, the images open in
+        this session (by path).
+        """
+        if self.case is not None:
+            return [(row['id'], row.get('display_name')
+                     or os.path.basename(row['path']))
+                    for row in self.case.evidence()
+                    if os.path.exists(row['path'])]
+        return [(path, os.path.basename(path))
+                for path in self._image_handlers]
+
+    def _refresh_carving_targets(self):
+        panel = getattr(self, 'carved_panel', None)
+        if panel is not None:
+            panel.set_targets(self._carving_targets())
+
+    def start_carving(self, targets, file_types, unallocated_only):
+        """Queue one carve per image: those in `targets`, or every one.
+
+        Jobs share the status-bar queue with analysis and indexing -- two
+        readers of one image are slower than one -- and are cancelled from
+        there the same way.
+        """
+        jobs = []
+        if self.case is not None:
+            for row in self.case.evidence():
+                if targets is None or row['id'] in targets:
+                    jobs.append((row['id'], row['path'],
+                                 row.get('display_name')
+                                 or os.path.basename(row['path'])))
+        else:
+            for path in (list(self._image_handlers) if targets is None
+                         else targets):
+                jobs.append((None, path, os.path.basename(path)))
+
+        queued = 0
+        for evidence_id, path, label in jobs:
+            if not os.path.exists(path):
+                logger.warning("Skipping carving of missing %s", path)
+                continue
+            if self._queue_carving_job(evidence_id, path, label, file_types,
+                                       unallocated_only):
+                queued += 1
+        if queued:
+            self.set_status(f"Carving {queued} image(s) in the background")
+        return queued
+
+    def _queue_carving_job(self, evidence_id, path, label, file_types,
+                           unallocated_only):
+        key = evidence_id if evidence_id is not None else path
+        case_folder = self.case.folder if self.case is not None else None
+
+        def start(job):
+            self.carved_panel.forget(key)
+            worker = CarvingWorker(path, file_types, unallocated_only,
+                                   case_folder=case_folder,
+                                   evidence_id=evidence_id, label=label,
+                                   parent=self)
+            worker.progressed.connect(
+                lambda done, total, found: self.job_bar.report(
+                    done, total, f"{found:,} file(s) found"))
+            worker.file_carved.connect(self.carved_panel.add_record)
+            worker.finished_carving.connect(
+                lambda count, error: self._carving_finished(label, count,
+                                                            error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"carving:{key}",
+            title=f"Carving {label}",
+            start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _carving_finished(self, label, count, error):
+        if error:
+            self.set_status(f"Carving {label} failed: {error}")
+        else:
+            self.set_status(f"Carved {count:,} file(s) from {label}")
+        self.job_bar.job_finished()
+        if self.case is not None:
+            self.refresh_analysis_views()
+
+    def preview_carved(self, row):
+        """Show a carved file, read back from the image at its offset.
+
+        Not the copy written to disk: what is examined is the evidence, and
+        the copy could have been changed since.
+        """
+        if row.get('evidence_id') is not None and self.case is not None:
+            if not self.activate_evidence(row['evidence_id']):
+                return
+        elif row.get('image_path'):
+            if not self.activate_image(row['image_path']):
+                return
+        if not self.image_handler:
+            return
+        offset, size = int(row.get('offset') or 0), int(row.get('size') or 0)
+        key = f"carved:{row.get('evidence_key', row.get('evidence_id'))}:{offset}"
+        if (self.current_selected_data or {}).get('_preview_ref') == key:
+            return
+        try:
+            content = self.image_handler.read(offset, size)
+        except Exception as exc:
+            logger.error("Could not read carved data at %d: %s", offset, exc)
+            content = None
+        if not content:
+            self.set_status(f"Could not read {row.get('name')} from the image.",
+                            5000)
+            return
+        name = row.get('name') or f"{offset:x}"
+        data = {
+            'name': name,
+            'size': size,
+            'type': row.get('type') or (name.rsplit('.', 1)[-1]
+                                        if '.' in name else ''),
+            'offset': offset,
+            'is_carved': True,
+            'source': 'carved_file',
+            'file_content': content,
+            'carved_timestamp': row.get('embedded_date'),
+            'carved_timestamp_source': row.get('date_source') or '',
+            '_preview_ref': key,
+        }
+        self.clear_viewers()
+        self.current_selected_data = data
+        if self.active_viewer_adapter() is None:
+            self.viewer_tab.setCurrentWidget(self.viewer_adapters[0].widget)
+        self.update_viewer_with_file_content(content, data)
+        self.viewer_dock.show()
+        self.set_status(f"{name}: carved from byte {offset:,}")
 
     def open_search_result_menu(self, row, position):
         """The context menu for a search result.
@@ -1903,12 +2048,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.refresh_analysis_views()
             return
 
-        modules = choose_modules(self, preselected=self._last_modules)
-        if not modules:
-            return
-
-        self._last_modules = modules
-        self.queue_analysis(rows, modules)
+        self._ask_and_queue(rows)
 
     def run_analysis_modules(self):
         """Ask which modules to run, then queue a run per piece of evidence."""
@@ -1927,15 +2067,31 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 "Add an image to the case first.")
             return
 
-        # Everything, the first time: an examiner opening this dialog has
-        # asked to analyse the image, and unticking what they do not want is
-        # less work than finding what they do.
-        modules = choose_modules(self, preselected=self._last_modules or MODULES)
-        if not modules:
-            return          # "Just browse" is an answer, not a failure
+        self._ask_and_queue(rows)
 
-        self._last_modules = modules
-        self.queue_analysis(rows, modules)
+    def _ask_and_queue(self, rows):
+        """Ask what to run, and against which evidence; queue the jobs.
+
+        Every file module the first time: an examiner opening this dialog
+        has asked to analyse the image, and unticking what they do not want
+        is less work than finding what they do. "Just browse" is an answer,
+        not a failure.
+        """
+        evidence = [(row['id'], row.get('display_name')
+                     or os.path.basename(row['path'])) for row in rows]
+        choice = choose_modules(self, preselected=self._last_choice,
+                                evidence=evidence)
+        if not choice:
+            return
+        self._last_choice = choice
+        chosen = [row for row in rows if choice['evidence_ids'] is None
+                  or row['id'] in choice['evidence_ids']]
+        if choice['modules']:
+            self.queue_analysis(chosen, choice['modules'])
+        if choice['carve_types']:
+            self.start_carving([row['id'] for row in chosen],
+                               choice['carve_types'],
+                               choice['unallocated_only'])
 
     def queue_analysis(self, rows, modules):
         """Put one analysis job per piece of evidence on the shared queue."""
@@ -2027,7 +2183,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # The whole case, so every device's findings are here.
         evidence_id = None
         summary = self.case.analysis_summary(evidence_id)
-        if not summary['analysed']:
+        if not summary['analysed'] and not summary['carved']:
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
                  for r in self.case.evidence()}
@@ -2050,12 +2206,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             ('hidden', 'Hidden data', icons.FINDING_HIDDEN, summary['hidden'],
              lambda: self._one_per_file(self.case.findings(
                  evidence_id, 'hidden', grades=REPORTED_FINDING_GRADES))),
-            # Only photos that say where they were taken: a camera model
-            # alone is a detail, not a finding. The Photos sub-tab has all.
-            ('photos', 'Photos with location', icons.FINDING_LOCATION,
-             summary['photos_located'],
-             lambda: [f for f in self.case.findings(evidence_id, 'photo')
-                      if 'latitude' in (f.get('detail') or {})]),
+            # Every photo with camera metadata; those that say where they
+            # were taken carry the location pin, and sort first.
+            ('photos', 'Photos', icons.FINDING_PHOTO, summary['photos'],
+             lambda: self._photos_located_first(
+                 self._one_per_file(self.case.findings(evidence_id,
+                                                       'photo')))),
+            ('authors', 'Document authors', icons.FINDING_AUTHOR,
+             summary['authors'],
+             lambda: self._one_per_file(self.case.findings(evidence_id,
+                                                           'authors'))),
+            ('carved', 'Carved files', icons.FINDING_CARVED,
+             summary['carved'],
+             lambda: [dict(row, is_carved=True, summary=(
+                 f"{row['type'].upper()} carved at byte {row['offset']:,}"
+                 + (f", dated {row['embedded_date']}"
+                    if row.get('embedded_date')
+                    and row['embedded_date'] != UNKNOWN_DATE else '')))
+                 for row in self.case.carved_files(evidence_id)]),
         ]
         if not any(count for _, _, _, count, _ in groups):
             return          # analysed, and nothing stood out: say nothing
@@ -2118,11 +2286,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             for finding in findings[:shown_limit]:
                 child = QTreeWidgetItem(parents[finding.get('evidence_id')])
                 child.setText(0, finding.get('name') or '(unnamed)')
-                child.setToolTip(0, finding.get('path') or '')
+                if key == 'photos' and 'latitude' in (finding.get('detail')
+                                                      or {}):
+                    child.setText(0, f"{finding.get('name') or ''}  \u2014 "
+                                     f"with location")
                 extension = (finding.get('extension') or
                              (finding.get('name') or '').rsplit('.', 1)[-1]
                              if '.' in (finding.get('name') or '') else '')
-                child.setIcon(0, self._get_file_icon(extension or 'unknown'))
+                if key == 'photos' and 'latitude' in (finding.get('detail')
+                                                      or {}):
+                    child.setIcon(0, icons.icon(icons.FINDING_LOCATION))
+                else:
+                    child.setIcon(0, self._get_file_icon(extension
+                                                         or 'unknown'))
                 image = names.get(finding.get('evidence_id'), '')
                 child.setToolTip(0, '\n'.join(p for p in (
                     finding.get('summary'), finding.get('path'),
@@ -2131,6 +2307,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                'finding': finding})
 
         root.setExpanded(True)
+
+    @staticmethod
+    def _photos_located_first(findings):
+        return sorted(findings, key=lambda f: 'latitude' not in
+                      (f.get('detail') or {}))
 
     @staticmethod
     def _one_per_file(findings):
@@ -2163,6 +2344,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         if not finding.get('artifact_ref'):
             return
+        if finding.get('is_carved'):
+            self.show_triage('carved', finding.get('evidence_id'))
+            return
         self.go_to_bookmark({
             'artifact_ref': finding['artifact_ref'],
             'evidence_id': finding.get('evidence_id'),
@@ -2173,6 +2357,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def open_finding_menu(self, finding, position):
         """The same right-click menu findings deserve everywhere else."""
+        if finding.get('is_carved'):
+            self.open_carved_menu(finding, position)
+            return
         # Bookmarking and VirusTotal below act on the finding's own image.
         if not self.activate_evidence(finding.get('evidence_id')):
             return
@@ -2770,9 +2957,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.activate_evidence(row.get('evidence_id')):
             return
 
+        if parsed['kind'] == 'span':
+            self.preview_artifact(row)
+            return
         if parsed['kind'] != 'file':
-            # Byte ranges and registry keys need their own viewers; say so
-            # rather than silently doing nothing.
+            # Registry keys need their own viewer; say so rather than
+            # silently doing nothing.
             self.set_status(
                 f"{row.get('label') or 'Bookmark'} points at a "
                 f"{parsed['kind']}, which opens in its own viewer.")
@@ -2838,6 +3028,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.activate_evidence(row.get('evidence_id')):
             return
         ref_key = f"{row.get('evidence_id')}:{ref}"
+        if parsed['kind'] == 'span':
+            # Carved data, or a bookmarked byte range: read it back.
+            name = name or f"{parsed['begin']:x}"
+            self.preview_carved({
+                'evidence_id': row.get('evidence_id'),
+                'name': name,
+                'offset': parsed['begin'],
+                'size': parsed['end'] - parsed['begin'],
+                'type': name.rsplit('.', 1)[-1] if '.' in name else '',
+                'embedded_date': row.get('embedded_date'),
+                'date_source': row.get('date_source'),
+            })
+            return
         if parsed['kind'] != 'file':
             self.set_status(
                 f"{name or 'This item'} is a {parsed['kind']} reference — "
@@ -3191,7 +3394,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.result_viewer.setEnabled(state)
         self.viewer_tab.setEnabled(state)
         self.listing_table.setEnabled(state)
-        self.deleted_files_widget.setEnabled(state)
         self.registry_extractor_widget.setEnabled(state)
         self.search_panel.setEnabled(state)
 
@@ -3232,7 +3434,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.current_image_path = None
         self.current_offset = None
         self.evidence_files.clear()
-        self.deleted_files_widget.clear()
+        self._refresh_carving_targets()
 
         # Clear search bar and reset filters
         self.listing_search_bar.clear()
@@ -3489,6 +3691,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 logger.error("Error closing handler for %s: %s", path, exc)
         self._image_handlers.clear()
         self.image_handler = None
+        self._refresh_carving_targets()
 
     def activate_image(self, image_path):
         """Make `image_path` the image the window reads from.
@@ -3512,15 +3715,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.current_image_path = image_path
         # These widgets are built before any image is loaded, with
         # image_handler=None, and pointed at the active handler here.
-        for widget in (self.deleted_files_widget,
-                       self.registry_extractor_widget,
+        for widget in (self.registry_extractor_widget,
                        self.metadata_viewer):
             widget.set_image_handler(handler)
-        # Carved output belongs inside the case when there is one: carved
-        # files are named after their offset alone, so two images sharing one
-        # directory overwrite each other.
-        self.deleted_files_widget.set_case_folder(
-            self.case.folder if self.case else None)
+        self._refresh_carving_targets()
         self.search_panel.set_image_handler(handler)
         self.set_status_context(
             f"{os.path.basename(image_path)}   ·   "

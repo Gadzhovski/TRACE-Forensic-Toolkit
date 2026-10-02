@@ -64,6 +64,10 @@ FINDING_ENTROPY = "Icons/tabler/trace/high-entropy.svg"
 FINDING_DUPLICATES = "Icons/tabler/trace/duplicates.svg"
 FINDING_HIDDEN = "Icons/tabler/trace/hidden-data.svg"
 FINDING_LOCATION = "Icons/tabler/trace/photo-location.svg"
+FINDING_PHOTO = "Icons/tabler/trace/photo-metadata.svg"
+FINDING_AUTHOR = "Icons/tabler/trace/document-author.svg"
+#: Carved files share the carving tool's icon: the group is that tool's output.
+FINDING_CARVED = "Icons/tabler/file-search.svg"
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the
 #: tab bars match Listing, Registry and Deleted Files.

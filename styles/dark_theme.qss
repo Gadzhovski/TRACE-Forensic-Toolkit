@@ -1516,3 +1516,23 @@ QTableWidget#triageTable {
        inheritance. Declaring one here is how the last mismatch happened. */
     gridline-color: #3C3C3C;
 }
+
+/* Carved files (Triage sub-tab): the Table / Thumbnails switch and status. */
+QPushButton#carvedViewButton {
+    padding: 3px 10px;
+    border: 1px solid #4C4C4C;
+    background: #2E2E2E;
+    color: #E0E0E0;
+}
+QPushButton#carvedViewButton:hover:!checked {
+    background: #3C3C3C;
+}
+QPushButton#carvedViewButton:checked {
+    background: #1E90FF;
+    border-color: #1E90FF;
+    color: #FFFFFF;
+}
+QLabel#carvedStatus {
+    color: #B0B0B0;
+    padding: 2px 6px;
+}

@@ -126,7 +126,7 @@ class TriagePanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # The same bar as Listing, Registry and Deleted Files: logo, title,
+        # The same bar as Listing, Registry and Search: logo, title,
         # then the tab's main action on the right. Without it this tab was the
         # only one in the row that opened straight onto controls.
         self.toolbar = QToolBar()
@@ -240,6 +240,24 @@ class TriagePanel(QWidget):
             lambda point, t=table: self._context_menu(t, point))
         return table
 
+    def add_carved_tab(self, panel):
+        """Make carving a sub-tab here (ui/viewers/carved_panel.py).
+
+        Recovered files are findings like any other: one place to review
+        them, following the same image filter. Added by the host, which
+        owns the jobs that carve.
+        """
+        self._carved_panel = panel
+        self._tab_for['carved'] = self.tabs.addTab(panel, "Carved files")
+        panel.count_changed.connect(self._set_carved_count)
+        panel.case = self.case
+        panel.set_evidence_filter(self.evidence_id)
+
+    def _set_carved_count(self, count):
+        index = self._tab_for.get('carved')
+        if index is not None:
+            self.tabs.setTabText(index, f"Carved files ({count})")
+
     def add_bookmarks_tab(self, panel):
         """Make the case's bookmarks a sub-tab here.
 
@@ -259,7 +277,8 @@ class TriagePanel(QWidget):
 
     def show_group(self, name):
         """Bring a sub-tab forward by name: 'mismatch', 'entropy',
-        'duplicates' or 'bookmarks'. Unknown names leave the current one."""
+        'duplicates', 'hidden', 'photos', 'authors', 'carved' or
+        'bookmarks'. Unknown names leave the current one."""
         index = self._tab_for.get(name)
         if index is not None:
             self.tabs.setCurrentIndex(index)
@@ -276,6 +295,10 @@ class TriagePanel(QWidget):
         keep = evidence_id if evidence_id is not None else self.evidence_id
         self._fill_filter(keep if keep in self._names else None)
         self.refresh()
+        carved = getattr(self, '_carved_panel', None)
+        if carved is not None:
+            carved.case = case
+            carved.set_evidence_filter(self.evidence_id)
 
     def set_evidence_filter(self, evidence_id):
         """Narrow to one image, or None for the whole case."""
@@ -300,6 +323,9 @@ class TriagePanel(QWidget):
         self.evidence_id = self.evidence_filter.currentData()
         if self.case is not None:
             self.refresh()
+        carved = getattr(self, '_carved_panel', None)
+        if carved is not None:
+            carved.set_evidence_filter(self.evidence_id)
 
     def refresh(self):
         """Redraw from what the case holds now."""

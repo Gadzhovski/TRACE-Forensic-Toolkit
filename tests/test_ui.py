@@ -432,3 +432,107 @@ def test_virustotal_lookup_and_upload_are_recorded_and_audited(
     assert window.viewer_tab.indexOf(window.vt_panel) == -1
     window.show_vt_panel()
     assert window.viewer_tab.indexOf(window.vt_panel) != -1
+
+
+# --- carving in Triage, and Findings in the tree ----------------------------------
+
+def _findings_group(window, prefix):
+    from PySide6.QtCore import Qt
+    for i in range(window.tree_viewer.topLevelItemCount()):
+        root = window.tree_viewer.topLevelItem(i)
+        if (root.data(0, Qt.UserRole) or {}).get('is_analysis_root'):
+            for j in range(root.childCount()):
+                if root.child(j).text(0).startswith(prefix):
+                    return root.child(j)
+    return None
+
+
+def _leaves(item):
+    from PySide6.QtCore import Qt
+    if (item.data(0, Qt.UserRole) or {}).get('is_finding'):
+        return [item]
+    return [leaf for i in range(item.childCount())
+            for leaf in _leaves(item.child(i))]
+
+
+def test_photos_and_authors_are_findings_in_the_tree(qapp, window):
+    """Every photo with metadata (located ones marked) and every document's
+    author are under Findings, not only in their Triage sub-tabs."""
+    import json
+    from trace_app.core.case import make_artifact_ref
+    evidence = window.case.evidence()[0]['id']
+    window.case._db.execute(
+        "INSERT INTO file_findings (evidence_id, artifact_ref, name, path, "
+        "size, module, kind, grade, summary, detail, analysed_utc) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (evidence, make_artifact_ref(0, 99999, 1), 'holiday.jpg',
+         '/holiday.jpg', 1000, 'photo', 'exif', 'info', 'Canon, with GPS',
+         json.dumps({'latitude': 42.69, 'longitude': 23.32}),
+         '2026-10-02T00:00:00'))
+    window.case._db.commit()
+    window.refresh_analysis_views()
+
+    photos = _findings_group(window, 'Photos')
+    authors = _findings_group(window, 'Document authors')
+    assert photos is not None and photos.text(0) == 'Photos (1)'
+    assert 'with location' in _leaves(photos)[0].text(0)
+    assert authors is not None
+    assert len(_leaves(authors)) == window.case.analysis_summary()['authors']
+    window.case._db.execute("DELETE FROM file_findings WHERE name = ?",
+                            ('holiday.jpg',))
+    window.case._db.commit()
+
+
+def test_carving_is_a_triage_tab_with_its_findings(qapp, window, truth):
+    """Carving replaces the Deleted Files tab: a Triage sub-tab whose files
+    are case records, listed under Findings, previewed from the image."""
+    from PySide6.QtCore import Qt
+    tabs = [window.result_viewer.tabText(i)
+            for i in range(window.result_viewer.count())]
+    assert 'Deleted Files' not in tabs
+
+    evidence = next(r for r in window.case.evidence()
+                    if r['path'].endswith(SECOND))
+    window.start_carving([evidence['id']], ['jpg'], False)
+    assert pump(qapp, 120, lambda: not window.job_bar.busy)
+    pump(qapp, 0.5)
+
+    rows = window.case.carved_files(evidence['id'])
+    assert rows, "the whole-image carve found no JPEG"
+    assert window.carved_panel.count == len(rows)
+    tab = window.triage_panel._tab_for['carved']
+    assert window.triage_panel.tabs.tabText(tab) == f"Carved files ({len(rows)})"
+
+    group = _findings_group(window, 'Carved files')
+    assert group is not None and group.text(0) == f"Carved files ({len(rows)})"
+    finding = _leaves(group)[0].data(0, Qt.UserRole)['finding']
+    window.preview_artifact(finding)
+    pump(qapp, 0.5)
+    shown = window.current_selected_data or {}
+    assert shown.get('is_carved')
+    assert shown['file_content'] == truth[SECOND].read(finding['offset'],
+                                                       finding['size'])
+
+
+def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs):
+    """Without a case, carving still works -- for the session, in the
+    per-user folder, one folder per image."""
+    from trace_app.core.carving import CARVABLE_TYPES
+    from trace_app.ui.main_window import MainWindow
+    window = MainWindow()
+    try:
+        assert window.open_evidence_image(image_path('11-carve-fat.dd'))
+        window.start_carving(None, [t.lower() for t in CARVABLE_TYPES], True)
+        assert pump(qapp, 120, lambda: not window.job_bar.busy
+                    and window.carved_panel.count)
+        pump(qapp, 0.5)
+        assert window.case is None
+        assert window.carved_panel.count == 16
+        row = window.carved_panel._rows[0]
+        assert os.path.basename(os.path.dirname(row['path'])) == '11-carve-fat.dd'
+        assert os.path.isfile(row['path'])
+        window.preview_carved(row)
+        pump(qapp, 0.5)
+        assert (window.current_selected_data or {}).get('is_carved')
+    finally:
+        window.cleanup_resources()

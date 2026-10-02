@@ -6,6 +6,12 @@ The dialog asks once, at the point a case is opened, and then gets out of the
 way: the chosen modules run in the background while the examiner works, and
 the findings appear as they arrive.
 
+Which evidence is asked once too: every image in the case, or one. File
+carving is offered beside the file-by-file modules but is a different kind of
+pass -- it reads the raw image rather than its files -- so it has its own
+options (which types, unallocated space or the whole image) and runs as its
+own job.
+
 Nothing here is mandatory. "Just browse" is a first-class answer -- a quick
 look at an image should not cost a full pass over it.
 """
@@ -13,15 +19,22 @@ look at an image should not cost a full pass over it.
 import logging
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QLabel,
-                               QVBoxLayout)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
+                               QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
+                               QVBoxLayout, QWidget)
 
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
                                      MODULE_HASH, MODULE_HIDDEN, MODULE_MAGIC,
                                      MODULE_PHOTO, magic_reader)
+from trace_app.core.carving import CARVABLE_TYPES
 from trace_app.ui import icons
+from trace_app.ui.widgets.multi_select import MultiSelectButton
 
 logger = logging.getLogger('TRACE.AnalysisDialog')
+
+#: The carving option's key in a choice: not one of analysis.MODULES, since
+#: it does not walk the file systems.
+MODULE_CARVE = 'carve'
 
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
@@ -52,8 +65,7 @@ _DESCRIPTIONS = {
     MODULE_PHOTO: (
         "Photo metadata",
         "Camera, capture time, editing software and GPS position from every "
-        "photo's EXIF. Photos that record where they were taken are listed "
-        "as findings.",
+        "photo's EXIF.",
         "Fast: reads photos only."),
     MODULE_AUTHORS: (
         "Document authors",
@@ -63,18 +75,33 @@ _DESCRIPTIONS = {
         "Fast: reads documents only."),
 }
 
+_CARVING = (
+    "File carving",
+    "Recover deleted files whose directory entries are gone, by searching "
+    "the raw image for file signatures (pictures, documents, archives, "
+    "audio and video). Recovered files are saved in the case.",
+    "Slowest: reads the whole image, or all of its unallocated space.")
+
+
+def default_choice(modules=None):
+    """What the dialog offers before the examiner has chosen anything."""
+    return {'modules': list(modules or ()), 'evidence_ids': None,
+            'carve_types': [], 'unallocated_only': True}
+
 
 class AnalysisModulesDialog(QDialog):
-    """Ask which analysis modules to run against the evidence."""
+    """Ask which analysis modules to run, and against which evidence."""
 
-    def __init__(self, parent=None, preselected=None):
+    def __init__(self, parent=None, preselected=None, evidence=None):
         super().__init__(parent)
         self.setWindowTitle("Analysis Modules")
         self.setObjectName("analysisModulesDialog")
         self.setWindowIcon(icons.icon(icons.LOGO))
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(560)
 
-        self.selected = []
+        choice = preselected or default_choice()
+        evidence = list(evidence or [])
+        self.choice = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 14, 16, 14)
@@ -88,32 +115,73 @@ class AnalysisModulesDialog(QDialog):
         heading.setWordWrap(True)
         layout.addWidget(heading)
 
+        # Which evidence: the whole case unless the examiner narrows it. One
+        # image needs no choosing.
+        self.evidence_combo = QComboBox()
+        self.evidence_combo.setObjectName("analysisEvidenceCombo")
+        if len(evidence) > 1:
+            self.evidence_combo.addItem(f"All {len(evidence)} images", None)
+        for evidence_id, name in evidence:
+            self.evidence_combo.addItem(name, evidence_id)
+        wanted = choice.get('evidence_ids')
+        if wanted and len(wanted) == 1:
+            index = self.evidence_combo.findData(wanted[0])
+            self.evidence_combo.setCurrentIndex(max(index, 0))
+        if len(evidence) > 1:
+            row = QHBoxLayout()
+            label = QLabel("Evidence:")
+            label.setObjectName("analysisEvidenceLabel")
+            row.addWidget(label)
+            row.addWidget(self.evidence_combo, 1)
+            layout.addLayout(row)
+
         # Magic detection is the one module with a system dependency. Offering
         # a tick box that silently does nothing is worse than saying why it is
         # unavailable.
         magic_available = magic_reader() is not None
 
         self.boxes = {}
-        preselected = set(preselected or ())
+        preselected_modules = set(choice.get('modules') or ())
         for key, (title, description, cost) in _DESCRIPTIONS.items():
-            box = QCheckBox(title)
-            box.setObjectName("analysisModuleCheck")
-            box.setChecked(key in preselected)
+            box = self._module(layout, title, description, cost)
+            box.setChecked(key in preselected_modules)
             if key == MODULE_MAGIC and not magic_available:
                 box.setChecked(False)
                 box.setEnabled(False)
                 box.setToolTip(
                     "libmagic is not available on this system, so file type "
                     "detection cannot run.")
-            layout.addWidget(box)
             self.boxes[key] = box
 
-            note = QLabel(f"{description}  <i>{cost}</i>")
-            note.setObjectName("analysisModuleNote")
-            note.setWordWrap(True)
-            note.setTextFormat(Qt.RichText)
-            note.setIndent(22)
-            layout.addWidget(note)
+        rule = QFrame()
+        rule.setObjectName("analysisModulesRule")
+        rule.setFrameShape(QFrame.HLine)
+        layout.addWidget(rule)
+
+        self.carve_box = self._module(layout, *_CARVING)
+        self.carve_box.setChecked(bool(choice.get('carve_types')))
+        self.boxes[MODULE_CARVE] = self.carve_box
+
+        self.carve_options = QWidget()
+        options = QHBoxLayout(self.carve_options)
+        options.setContentsMargins(22, 0, 0, 0)
+        options.addWidget(QLabel("Look for"))
+        self.carve_types = MultiSelectButton(CARVABLE_TYPES, self,
+                                             noun="types")
+        self.carve_types.set_selected(
+            [t.upper() for t in choice.get('carve_types') or ()]
+            or CARVABLE_TYPES)
+        options.addWidget(self.carve_types)
+        self.unallocated_box = QCheckBox("Unallocated space only")
+        self.unallocated_box.setChecked(choice.get('unallocated_only', True))
+        self.unallocated_box.setToolTip(
+            "Skip space that belongs to live files: they are already in the "
+            "tree. Untick to search the whole image.")
+        options.addWidget(self.unallocated_box)
+        options.addStretch(1)
+        layout.addWidget(self.carve_options)
+        self.carve_box.toggled.connect(self.carve_options.setEnabled)
+        self.carve_options.setEnabled(self.carve_box.isChecked())
 
         footer = QLabel(
             "You can run these later from Analysis ▸ Run Analysis Modules, "
@@ -137,6 +205,18 @@ class AnalysisModulesDialog(QDialog):
             box.toggled.connect(self._update_run_button)
         self._update_run_button()
 
+    def _module(self, layout, title, description, cost):
+        box = QCheckBox(title)
+        box.setObjectName("analysisModuleCheck")
+        layout.addWidget(box)
+        note = QLabel(f"{description}  <i>{cost}</i>")
+        note.setObjectName("analysisModuleNote")
+        note.setWordWrap(True)
+        note.setTextFormat(Qt.RichText)
+        note.setIndent(22)
+        layout.addWidget(note)
+        return box
+
     def _update_run_button(self):
         chosen = any(box.isChecked() for box in self.boxes.values())
         self.run_button.setEnabled(chosen)
@@ -144,14 +224,27 @@ class AnalysisModulesDialog(QDialog):
             '' if chosen else "Select at least one module, or just browse.")
 
     def _accept(self):
-        self.selected = [key for key, box in self.boxes.items()
-                         if box.isChecked()]
+        target = self.evidence_combo.currentData()
+        carving = self.carve_box.isChecked()
+        self.choice = {
+            'modules': [key for key, box in self.boxes.items()
+                        if key != MODULE_CARVE and box.isChecked()],
+            'evidence_ids': None if target is None else [target],
+            'carve_types': ([t.lower() for t in self.carve_types.selected()]
+                            if carving else []),
+            'unallocated_only': self.unallocated_box.isChecked(),
+        }
         self.accept()
 
 
-def choose_modules(parent=None, preselected=None):
-    """Ask, and return the chosen modules. Empty means browse only."""
-    dialog = AnalysisModulesDialog(parent, preselected)
+def choose_modules(parent=None, preselected=None, evidence=None):
+    """Ask; return the choice, or None for "just browse".
+
+    `evidence` is [(evidence_id, name)]. The choice is a dict: `modules`
+    (analysis.MODULES to run), `evidence_ids` (None for every image),
+    `carve_types` (empty: no carving) and `unallocated_only`.
+    """
+    dialog = AnalysisModulesDialog(parent, preselected, evidence)
     if dialog.exec() == QDialog.Accepted:
-        return dialog.selected
-    return []
+        return dialog.choice
+    return None

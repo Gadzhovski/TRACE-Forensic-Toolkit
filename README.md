@@ -96,9 +96,12 @@ One pass over every file, whichever modules are chosen:
   and files that look like encrypted (VeraCrypt-style) volumes
 - **Photo metadata** — camera, capture time, software, GPS position
 - **Document authors** — author, last saved by, company, application, dates
+- **File carving** — deleted files recovered from the raw image (below)
 
-Findings are graded (suspicious / notable) and appear in the listing, a Triage
-tab with a sub-tab each, and a Findings node in the tree grouped by device.
+Run against every image in the case or one. Findings are graded (suspicious /
+notable) and appear in the listing, a Triage tab with a sub-tab each, and a
+Findings node in the tree grouped by device — photos, authors and carved files
+included.
 
 </td>
 <td width="50%" valign="top">
@@ -139,11 +142,14 @@ bombs are refused.
 
 ### 🔍 File carving
 
-Recovers deleted files from unallocated space by signature — **PDF, JPG, PNG,
-GIF, BMP, TIFF, WAV, MOV, MP4, WMV, ZIP, GZ, RAR, 7Z, OLE (doc/xls/ppt) and
-HTML** — validating every carve before it is kept. An allocation map skips space
-used by live files. Shown as a list or thumbnail gallery; carved files are stored
-in the case.
+Recovers deleted files by signature — **PDF, JPG, PNG, GIF, BMP, TIFF, WAV, MOV,
+MP4, WMV, ZIP, GZ, RAR, 7Z, OLE (doc/xls/ppt) and HTML** — validating every
+carve before it is kept. Carve one image or all of them, from unallocated space
+(an allocation map skips live files) or the whole image, from the Triage tab or
+as an analysis module. In a case each file is recorded with its image, offset,
+SHA-256 and embedded date, saved per image, audited and listed under Findings;
+without a case, carving still works for the session. Previews read the bytes
+back from the image, not the copy.
 
 </td>
 <td width="50%" valign="top">
