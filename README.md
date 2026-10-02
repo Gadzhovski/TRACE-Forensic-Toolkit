@@ -96,12 +96,14 @@ One pass over every file, whichever modules are chosen:
   and files that look like encrypted (VeraCrypt-style) volumes
 - **Photo metadata** — camera, capture time, software, GPS position
 - **Document authors** — author, last saved by, company, application, dates
+- **Search index and indicators** — every file's text indexed for search,
+  and the indicators in it listed (right)
 - **File carving** — deleted files recovered from the raw image (below)
 
 Run against every image in the case or one. Findings are graded (suspicious /
 notable) and appear in the listing, a Triage tab with a sub-tab each, and a
-Findings node in the tree grouped by device — photos, authors and carved files
-included.
+Findings node in the tree grouped by device — photos, authors, carved files
+and indicators included.
 
 </td>
 <td width="50%" valign="top">
@@ -109,10 +111,17 @@ included.
 ### 🔎 Universal search
 
 A per-case full-text index over file contents — PDFs, Office documents, registry
-hives, plain text in ASCII and UTF-16 — plus the things inside them: **emails,
-URLs, domains, IPv4/IPv6 addresses, hashes and Bitcoin addresses**. Supports
-`"phrases"`, `prefix*`, `AND` / `OR` / `NOT`, `/regex/` and field prefixes such
-as `email:` and `name:`. Indexing is resumable and runs in the background.
+hives, plain text in ASCII and UTF-16 — built as an analysis module on the
+background queue, for every image or one. Supports `"phrases"`, `prefix*`,
+`AND` / `OR` / `NOT`, `/regex/` and field prefixes such as `email:` and `name:`.
+
+**Indicators** are pulled out as it indexes: **emails, URLs, domains,
+IPv4/IPv6 addresses, phone numbers, card numbers, IBANs, Bitcoin addresses and
+hashes**. Card numbers must pass the Luhn check under a real scheme's prefix,
+and IBANs their country's length and mod-97 check digits, so a run of digits
+is not reported as one. Triage ▸ Indicators lists every distinct value — by
+kind, per image — and the files holding each, with the text around it;
+Findings ▸ Indicators in the tree counts them by kind.
 
 </td>
 </tr>

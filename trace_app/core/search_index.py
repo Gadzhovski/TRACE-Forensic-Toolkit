@@ -11,9 +11,12 @@ afterwards. Measured on this machine: 25 MB of text indexes in 0.7 s and
 queries return in single-digit milliseconds. The index lives in the case
 folder, beside the case it describes.
 
-Entities -- emails, URLs, domains, IPs, hashes -- are pulled out during
-extraction and stored separately, because "show me every email address in this
-case" is a question an examiner asks and full-text search answers badly.
+Entities -- emails, URLs, domains, IPs, hashes, Bitcoin addresses, phone
+numbers, card numbers, IBANs -- are pulled out during extraction and stored
+separately, because "show me every email address in this case" is a question
+an examiner asks and full-text search answers badly. They are what the
+Indicators tab lists. Card numbers and IBANs must pass their own check digits
+(Luhn, ISO 7064 mod 97), so a run of digits is not reported as one.
 
 No Qt imports belong here: indexing runs on a worker thread the UI owns, but
 the work itself is drivable from a script.
@@ -29,7 +32,7 @@ logger = logging.getLogger('TRACE.Search')
 #: Bumped when the index schema changes. The index is a cache -- it can always
 #: be rebuilt from the evidence -- so a version bump discards it rather than
 #: migrating.
-INDEX_VERSION = 2
+INDEX_VERSION = 3          # 3: phone, card and IBAN indicators
 
 #: Largest amount of text taken from one file. A 20 MB log is worth indexing;
 #: taking all of a 2 GB one costs more than it returns.
@@ -65,6 +68,114 @@ _ENTITY_PATTERNS = {
         r'\b(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b'),
     'btc': re.compile(
         r'\b(?:bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b'),
+    # International form only (a leading +): national formats differ by
+    # country and, unanchored, match every other number in a document.
+    'phone': re.compile(
+        r'(?<![\w+])\+\d{1,3}(?:[ .\-]?\(?\d{1,4}\)?){2,5}(?![\w])'),
+    # 13-19 digits, alone or in groups of four; kept only if Luhn-valid and
+    # issued under a known scheme's prefix (_valid_card).
+    'card': re.compile(
+        r'(?<![\d\-])(?:\d{4}[ \-]){3}\d{1,7}(?![\d\-])'
+        r'|(?<![\d\-])\d{13,19}(?![\d\-])'),
+    # Upper-case country code, two check digits, then the account in groups of
+    # four or run together; kept only if its length is right for the country
+    # and the mod-97 check holds (_valid_iban).
+    'iban': re.compile(
+        r'\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b'),
+}
+
+#: IBAN length by country (ISO 13616 registry). A code not listed here is not
+#: an IBAN country, which rules out most upper-case words followed by digits.
+IBAN_LENGTHS = {
+    'AD': 24, 'AE': 23, 'AL': 28, 'AT': 20, 'AZ': 28, 'BA': 20, 'BE': 16,
+    'BG': 22, 'BH': 22, 'BR': 29, 'CH': 21, 'CR': 22, 'CY': 28, 'CZ': 24,
+    'DE': 22, 'DK': 18, 'DO': 28, 'EE': 20, 'EG': 29, 'ES': 24, 'FI': 18,
+    'FO': 18, 'FR': 27, 'GB': 22, 'GE': 22, 'GI': 23, 'GL': 18, 'GR': 27,
+    'GT': 28, 'HR': 21, 'HU': 28, 'IE': 22, 'IL': 23, 'IQ': 23, 'IS': 26,
+    'IT': 27, 'JO': 30, 'KW': 30, 'KZ': 20, 'LB': 28, 'LC': 32, 'LI': 21,
+    'LT': 20, 'LU': 20, 'LV': 21, 'MC': 27, 'MD': 24, 'ME': 22, 'MK': 19,
+    'MR': 27, 'MT': 31, 'MU': 30, 'NL': 18, 'NO': 15, 'PK': 24, 'PL': 28,
+    'PS': 29, 'PT': 25, 'QA': 29, 'RO': 24, 'RS': 22, 'SA': 24, 'SC': 31,
+    'SE': 24, 'SI': 19, 'SK': 24, 'SM': 27, 'ST': 25, 'SV': 28, 'TL': 23,
+    'TN': 24, 'TR': 26, 'UA': 29, 'VA': 22, 'VG': 24, 'XK': 20,
+}
+
+#: Card schemes by number prefix and lengths: Visa, Mastercard (51-55 and
+#: 2221-2720), American Express, Discover, JCB, Diners Club, Maestro/UnionPay.
+_CARD_SCHEMES = re.compile(
+    r'^(?:4\d{12}(?:\d{3}){0,2}'
+    r'|(?:5[1-5]\d{2}|222[1-9]|22[3-9]\d|2[3-6]\d{2}|27[01]\d|2720)\d{12}'
+    r'|3[47]\d{13}'
+    r'|6(?:011|5\d{2}|4[4-9]\d)\d{12,15}'
+    r'|35(?:2[89]|[3-8]\d)\d{12,15}'
+    r'|3(?:0[0-5]|[689]\d)\d{11,16}'
+    r'|62\d{14,17})$')
+
+
+def luhn_valid(digits):
+    """Does a string of digits pass the Luhn check every card number does?"""
+    total = 0
+    for position, char in enumerate(reversed(digits)):
+        value = ord(char) - 48
+        if position % 2:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
+def _valid_card(text):
+    """The card number in `text` (digits only), or None."""
+    digits = re.sub(r'[ \-]', '', text)
+    # The scheme prefix rules out 0000 0000 0000 0000, which passes Luhn.
+    if not 13 <= len(digits) <= 19 or not _CARD_SCHEMES.match(digits)             or not luhn_valid(digits):
+        return None
+    return digits
+
+
+def iban_valid(iban):
+    """Is `iban` (no spaces) the right length for its country, with check
+    digits that hold under ISO 7064 mod 97?"""
+    if IBAN_LENGTHS.get(iban[:2]) != len(iban):
+        return False
+    moved = iban[4:] + iban[:4]
+    number = ''.join(str(int(c, 36)) for c in moved)
+    return int(number) % 97 == 1
+
+
+def _valid_iban(text):
+    iban = text.replace(' ', '')
+    return iban if iban_valid(iban) else None
+
+
+def _valid_phone(text):
+    """The number as +digits, if it has as many as a real one: 8-15
+    (E.164 allows at most 15)."""
+    digits = re.sub(r'\D', '', text)
+    if not 8 <= len(digits) <= 15:
+        return None
+    return '+' + digits
+
+
+#: Normalises a match to the value stored, or rejects it (None). Kinds not
+#: listed are stored as matched.
+_ENTITY_CHECKS = {'card': _valid_card, 'iban': _valid_iban,
+                  'phone': _valid_phone}
+
+#: What each indicator kind is called, singular and plural, for the
+#: Indicators tab and the Findings tree.
+INDICATOR_KINDS = {
+    'email': ('Email address', 'Email addresses'),
+    'url': ('URL', 'URLs'),
+    'domain': ('Domain', 'Domains'),
+    'ip': ('IPv4 address', 'IPv4 addresses'),
+    'ipv6': ('IPv6 address', 'IPv6 addresses'),
+    'phone': ('Phone number', 'Phone numbers'),
+    'card': ('Card number', 'Card numbers'),
+    'iban': ('IBAN', 'IBANs'),
+    'btc': ('Bitcoin address', 'Bitcoin addresses'),
+    'hash': ('Hash', 'Hashes'),
 }
 
 #: Domains are derived from URLs and email addresses rather than matched
@@ -210,8 +321,11 @@ class SearchIndex:
         """Pull emails, URLs, IPs and hashes out of the text."""
         found = set()
         for kind, pattern in _ENTITY_PATTERNS.items():
+            check = _ENTITY_CHECKS.get(kind)
             for match in pattern.findall(text):
                 value = match.strip().rstrip('.,;:)')
+                if value and check is not None:
+                    value = check(value)
                 if value:
                     found.add((kind, value))
                     if kind == 'url':
@@ -286,17 +400,107 @@ class SearchIndex:
         state = self.state(evidence_id)
         return bool(state and state['status'] == INDEX_DONE)
 
-    def statistics(self):
-        """What the index holds, for the search panel to report."""
+    def statistics(self, evidence_id=None):
+        """What the index holds -- the whole case, or one image."""
+        where, params = self._evidence_clause(evidence_id, 'evidence_id')
         items = self._db.execute(
-            "SELECT count(*) FROM indexed_items").fetchone()[0]
-        entities = self._db.execute(
-            "SELECT kind, count(DISTINCT value) FROM entities "
-            "GROUP BY kind").fetchall()
+            f"SELECT count(*) FROM indexed_items{where}", params).fetchone()[0]
+        images = self._db.execute(
+            "SELECT count(DISTINCT evidence_id) FROM indexed_items"
+            + where, params).fetchone()[0]
         return {
             'items': items,
-            'entities': {row[0]: row[1] for row in entities},
+            'images': images,
+            'entities': self.indicator_summary(evidence_id),
         }
+
+    # --- indicators -------------------------------------------------------
+
+    @staticmethod
+    def _evidence_clause(evidence_id, column, prefix=' WHERE'):
+        if evidence_id is None:
+            return '', []
+        return f"{prefix} {column} = ?", [evidence_id]
+
+    def indicator_summary(self, evidence_id=None):
+        """{kind: distinct values} -- the whole case, or one image."""
+        where, params = self._evidence_clause(evidence_id, 'i.evidence_id')
+        rows = self._db.execute(
+            "SELECT e.kind, count(DISTINCT e.value) FROM entities e "
+            "JOIN indexed_items i ON i.id = e.item_id" + where
+            + " GROUP BY e.kind", params).fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    def indicators(self, kind=None, evidence_id=None, contains='',
+                   limit=20000):
+        """One row per distinct value: kind, value, files (how many items
+        hold it) and evidence_ids (which images). Most widespread first."""
+        clauses, params = [], []
+        if kind:
+            clauses.append("e.kind = ?")
+            params.append(kind)
+        if evidence_id is not None:
+            clauses.append("i.evidence_id = ?")
+            params.append(evidence_id)
+        if contains:
+            clauses.append("e.value LIKE ?")
+            params.append(f'%{contains}%')
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+        rows = self._db.execute(
+            "SELECT e.kind, e.value, count(DISTINCT e.item_id) AS files, "
+            "group_concat(DISTINCT i.evidence_id) AS images "
+            "FROM entities e JOIN indexed_items i ON i.id = e.item_id"
+            + where + " GROUP BY e.kind, e.value "
+            "ORDER BY files DESC, e.kind, e.value LIMIT ?",
+            params + [limit]).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item['evidence_ids'] = sorted(
+                int(v) for v in (item.pop('images') or '').split(',') if v)
+            out.append(item)
+        return out
+
+    def items_with(self, kind, value, evidence_id=None, limit=2000):
+        """The indexed items holding one indicator, each with an `excerpt`
+        of the text around it. The same shape as a search result."""
+        params = [kind, value]
+        query = ("SELECT DISTINCT i.* FROM entities e "
+                 "JOIN indexed_items i ON i.id = e.item_id "
+                 "WHERE e.kind = ? AND e.value = ?")
+        if evidence_id is not None:
+            query += " AND i.evidence_id = ?"
+            params.append(evidence_id)
+        query += " ORDER BY i.evidence_id, i.path LIMIT ?"
+        params.append(limit)
+        # Stored values are normalised (a card's digits, a phone's +digits);
+        # in the text they may be spaced or hyphenated.
+        loose = re.compile(
+            r'[ ().\-]{0,2}'.join(re.escape(c) for c in value.lstrip('+')),
+            re.IGNORECASE)
+        out = []
+        for row in self._db.execute(query, params).fetchall():
+            item = dict(row)
+            body = item.pop('body', '') or ''
+            match = loose.search(body)
+            if match:
+                # Up to a few words either side, cut at word boundaries so
+                # the context does not open on half a word.
+                start = max(0, match.start() - 50)
+                end = min(len(body), match.end() + 60)
+                if start:
+                    space = body.find(' ', start, match.start())
+                    start = space + 1 if space != -1 else start
+                if end < len(body):
+                    space = body.rfind(' ', match.end(), end)
+                    end = space if space != -1 else end
+                text = ' '.join(body[start:end].split())
+                item['excerpt'] = (('… ' if start else '') + text
+                                   + (' …' if end < len(body) else ''))
+            else:
+                item['excerpt'] = value
+            out.append(item)
+        return out
 
     # --- querying ---------------------------------------------------------
 
@@ -396,7 +600,7 @@ class SearchError(Exception):
 # --- query language -------------------------------------------------------
 
 #: Field prefixes the query language understands.
-ENTITY_FIELDS = ('email', 'url', 'domain', 'ip', 'ipv6', 'hash', 'btc')
+ENTITY_FIELDS = tuple(INDICATOR_KINDS)
 TEXT_FIELDS = ('name', 'path', 'body')
 
 

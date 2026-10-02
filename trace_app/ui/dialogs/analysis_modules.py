@@ -36,6 +36,10 @@ logger = logging.getLogger('TRACE.AnalysisDialog')
 #: it does not walk the file systems.
 MODULE_CARVE = 'carve'
 
+#: The search index's key: its own walk (core/indexer.py), into search.db
+#: rather than case.db, so it too runs as a job of its own.
+MODULE_INDEX = 'index'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -75,6 +79,15 @@ _DESCRIPTIONS = {
         "Fast: reads documents only."),
 }
 
+_INDEXING = (
+    "Search index and indicators",
+    "Extract the text of every file, registry value and archive member so "
+    "the whole case can be searched, and list the email addresses, URLs, "
+    "domains, IPs, phone numbers, card numbers, IBANs, Bitcoin addresses and "
+    "hashes found in it (Triage ▸ Indicators).",
+    "Slower: reads every file in full; replaces a previous index of the "
+    "same image.")
+
 _CARVING = (
     "File carving",
     "Recover deleted files whose directory entries are gone, by searching "
@@ -86,7 +99,8 @@ _CARVING = (
 def default_choice(modules=None):
     """What the dialog offers before the examiner has chosen anything."""
     return {'modules': list(modules or ()), 'evidence_ids': None,
-            'carve_types': [], 'unallocated_only': True}
+            'index': bool(modules), 'carve_types': [],
+            'unallocated_only': True}
 
 
 class AnalysisModulesDialog(QDialog):
@@ -152,6 +166,10 @@ class AnalysisModulesDialog(QDialog):
                     "libmagic is not available on this system, so file type "
                     "detection cannot run.")
             self.boxes[key] = box
+
+        self.index_box = self._module(layout, *_INDEXING)
+        self.index_box.setChecked(bool(choice.get('index')))
+        self.boxes[MODULE_INDEX] = self.index_box
 
         rule = QFrame()
         rule.setObjectName("analysisModulesRule")
@@ -229,8 +247,10 @@ class AnalysisModulesDialog(QDialog):
         carving = self.carve_box.isChecked()
         self.choice = {
             'modules': [key for key, box in self.boxes.items()
-                        if key != MODULE_CARVE and box.isChecked()],
+                        if key not in (MODULE_CARVE, MODULE_INDEX)
+                        and box.isChecked()],
             'evidence_ids': None if target is None else [target],
+            'index': self.index_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),
@@ -243,7 +263,8 @@ def choose_modules(parent=None, preselected=None, evidence=None):
 
     `evidence` is [(evidence_id, name)]. The choice is a dict: `modules`
     (analysis.MODULES to run), `evidence_ids` (None for every image),
-    `carve_types` (empty: no carving) and `unallocated_only`.
+    `index` (build the search index), `carve_types` (empty: no carving) and
+    `unallocated_only`.
     """
     dialog = AnalysisModulesDialog(parent, preselected, evidence)
     if dialog.exec() == QDialog.Accepted:

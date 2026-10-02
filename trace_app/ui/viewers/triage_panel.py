@@ -253,6 +253,20 @@ class TriagePanel(QWidget):
         panel.case = self.case
         panel.set_evidence_filter(self.evidence_id)
 
+    def add_indicators_tab(self, panel):
+        """Make the case's indicators a sub-tab here
+        (ui/viewers/indicators_panel.py), following the same image filter."""
+        self._indicators_panel = panel
+        self._tab_for['indicators'] = self.tabs.addTab(panel, "Indicators")
+        panel.count_changed.connect(self._set_indicator_count)
+        panel.set_case(self.case)
+        panel.set_evidence_filter(self.evidence_id)
+
+    def _set_indicator_count(self, count):
+        index = self._tab_for.get('indicators')
+        if index is not None:
+            self.tabs.setTabText(index, f"Indicators ({count:,})")
+
     def _set_carved_count(self, count):
         index = self._tab_for.get('carved')
         if index is not None:
@@ -277,8 +291,8 @@ class TriagePanel(QWidget):
 
     def show_group(self, name):
         """Bring a sub-tab forward by name: 'mismatch', 'entropy',
-        'duplicates', 'hidden', 'photos', 'authors', 'carved' or
-        'bookmarks'. Unknown names leave the current one."""
+        'duplicates', 'hidden', 'photos', 'authors', 'carved', 'indicators'
+        or 'bookmarks'. Unknown names leave the current one."""
         index = self._tab_for.get(name)
         if index is not None:
             self.tabs.setCurrentIndex(index)
@@ -299,6 +313,10 @@ class TriagePanel(QWidget):
         if carved is not None:
             carved.case = case
             carved.set_evidence_filter(self.evidence_id)
+        indicators = getattr(self, '_indicators_panel', None)
+        if indicators is not None:
+            indicators.evidence_id = self.evidence_id
+            indicators.set_case(case)
 
     def set_evidence_filter(self, evidence_id):
         """Narrow to one image, or None for the whole case."""
@@ -326,6 +344,9 @@ class TriagePanel(QWidget):
         carved = getattr(self, '_carved_panel', None)
         if carved is not None:
             carved.set_evidence_filter(self.evidence_id)
+        indicators = getattr(self, '_indicators_panel', None)
+        if indicators is not None:
+            indicators.set_evidence_filter(self.evidence_id)
 
     def refresh(self):
         """Redraw from what the case holds now."""
@@ -351,7 +372,7 @@ class TriagePanel(QWidget):
                 self.status_label.setText(
                     "Nothing analysed yet. Run Analysis examines every file "
                     "for its true type, entropy, hash, hidden data and "
-                    "metadata.")
+                    "metadata, and indexes it for search and indicators.")
         else:
             images = len(self._names)
             scope = (f" across {images} images" if self.evidence_id is None

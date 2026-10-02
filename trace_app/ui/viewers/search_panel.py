@@ -2,8 +2,12 @@
 
 This replaces a search that matched filenames and nothing else. It looks in
 file contents, paths, registry values and archive members, and it answers
-questions about entities -- every email address, every URL, every IP -- which
-full-text search answers badly.
+questions about entities with the email:, url:, ip: and other prefixes.
+
+Building the index is an analysis module (Analysis > Run Analysis Modules),
+run on the shared job queue like every other reader of the evidence; the
+indicators it extracts are listed in Triage > Indicators and under Findings.
+This tab only asks questions of what has been indexed.
 
 Results appear here rather than in the listing table. Overloading the listing
 meant search and browsing fought over the same widget: columns were toggled,
@@ -17,18 +21,17 @@ import os
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
                                QSizePolicy, QToolBar,
-                               QHeaderView, QLabel, QLineEdit, QProgressBar,
+                               QHeaderView, QLabel, QLineEdit,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
 from trace_app.core.image_handler import ImageHandler
 from trace_app.core.indexer import index_evidence
-from trace_app.core.search_index import (INDEX_DONE, SearchError, SearchIndex)
+from trace_app.core.search_index import SearchError, SearchIndex
 from trace_app.infra.constants import (CONTROL_HEIGHT, PANEL_ICON_SIZE,
                                       TABLE_ROW_HEIGHT)
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
-from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.toolbars import prepare_toolbar
@@ -60,11 +63,7 @@ EXAMPLES = [
     ('Databases', '/\\.(db|sqlite3?|mdb|accdb)$/'),
 
     ('— Contact and network —', ''),
-    ('Every email address', 'email:'),
-    ('Every URL', 'url:'),
-    ('Every domain', 'domain:'),
-    ('Every IPv4 address', 'ip:'),
-    ('Every IPv6 address', 'ipv6:'),
+    ('An email address', 'email:example.com'),
     ('Private IPv4 ranges', '/\\b(?:10\\.|192\\.168\\.|172\\.(?:1[6-9]|2\\d|3[01])\\.)\\d{1,3}\\.\\d{1,3}\\b/'),
     ('MAC addresses', '/\\b[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}\\b/'),
     ('UK phone numbers', '/\\b(?:0|\\+?44\\s?)(?:\\d\\s?){9,10}\\b/'),
@@ -73,12 +72,10 @@ EXAMPLES = [
     ('— Financial —', ''),
     ('Credit card numbers', '/\\b(?:4\\d{12}(?:\\d{3})?|5[1-5]\\d{14}|3[47]\\d{13}|6(?:011|5\\d{2})\\d{12})\\b/'),
     ('IBAN', '/\\b[A-Z]{2}\\d{2}[A-Z0-9]{11,30}\\b/'),
-    ('Bitcoin addresses', 'btc:'),
     ('Currency amounts', '/[£$€]\\s?\\d[\\d,]*(?:\\.\\d{2})?/'),
 
     ('— Identifiers —', ''),
     ('A known hash', 'hash:d41d8cd98f00b204e9800998ecf8427e'),
-    ('Every hash-like string', 'hash:'),
     ('UK National Insurance', '/\\b[A-CEGHJ-PR-TW-Z]{2}\\d{6}[A-D]\\b/'),
     ('US Social Security', '/\\b\\d{3}-\\d{2}-\\d{4}\\b/'),
     ('GUIDs', '/\\b[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\\b/'),
@@ -94,21 +91,9 @@ EXAMPLES = [
 ]
 
 
-#: How each entity kind reads in the summary. Plural, because the summary is
-#: always reporting a count.
-ENTITY_LABELS = {
-    'email': 'email addresses',
-    'url': 'URLs',
-    'domain': 'domains',
-    'ip': 'IPv4 addresses',
-    'ipv6': 'IPv6 addresses',
-    'hash': 'hashes',
-    'btc': 'Bitcoin addresses',
-}
-
-
 class IndexWorker(QThread):
-    """Runs the indexer off the UI thread."""
+    """Runs the indexer off the UI thread, as a job on the window's queue
+    (MainWindow.queue_indexing)."""
 
     progressed = Signal(int, int, str)
     finished_indexing = Signal(int, str)
@@ -174,8 +159,6 @@ class SearchPanel(QWidget):
         super().__init__(parent)
         self.case = None
         self.index = None
-        self.image_handler = None
-        self._worker = None
         #: Resolves an extension to the icon the listing would use. Injected
         #: by the host so this panel does not reach into a DatabaseManager.
         self.icon_resolver = None
@@ -200,10 +183,6 @@ class SearchPanel(QWidget):
         spacer = QLabel()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
-
-        self.index_button = QPushButton("Build Index")
-        self.index_button.clicked.connect(self.toggle_indexing)
-        self.toolbar.addWidget(self.index_button)
         outer.addWidget(self.toolbar)
 
         layout = QVBoxLayout()
@@ -245,38 +224,20 @@ class SearchPanel(QWidget):
         query_row.addWidget(self.search_button)
         layout.addLayout(query_row)
 
-        # --- index row ---
-        index_row = QHBoxLayout()
-        index_row.setSpacing(6)
-
-        # What the index holds. It says what is in the evidence before the
-        # examiner knows what to ask for, so a search should not be what makes
-        # it disappear. Build Index itself is in the bar above, where the
-        # other tabs keep their main action.
-        #
-        # Each count is a link: reading "8 email addresses" and then having to
-        # type "email:" is a step that need not exist.
+        # What the index covers -- or, before anything is indexed, how to
+        # index it. The indicators themselves are Triage's (Indicators).
         self.summary_label = QLabel()
         self.summary_label.setObjectName("searchSummary")
         self.summary_label.setWordWrap(True)
         self.summary_label.setTextFormat(Qt.RichText)
-        self.summary_label.linkActivated.connect(self._run_linked_query)
-        index_row.addWidget(self.summary_label, 1)
+        layout.addWidget(self.summary_label)
 
-        layout.addLayout(index_row)
-
-        # The result count and indexing progress. Below the summary rather
-        # than beside it, because it changes with every search while the
-        # summary stays.
+        # The result count. Below the summary rather than beside it, because
+        # it changes with every search while the summary stays.
         self.status_label = QLabel()
         self.status_label.setObjectName("searchStatus")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
-
-        self.progress = QProgressBar()
-        self.progress.setObjectName("searchProgress")
-        self.progress.setVisible(False)
-        layout.addWidget(self.progress)
 
         # --- results ---
         self.results = QTableWidget()
@@ -318,15 +279,15 @@ class SearchPanel(QWidget):
                 logger.error("Could not open the search index: %s", exc)
         self._update_status()
 
-    def set_image_handler(self, image_handler):
-        self.image_handler = image_handler
-        self._update_status()
+    def reload_index(self):
+        """Reopen the index after an indexing job has written to it through
+        its own connection, and redraw what it covers."""
+        self.set_case(self.case)
 
     def _update_status(self):
         has_case = self.case is not None and self.index is not None
         self.query_input.setEnabled(has_case)
         self.search_button.setEnabled(has_case)
-        self.index_button.setEnabled(has_case and self.image_handler is not None)
 
         if not has_case:
             self._set_status(
@@ -356,79 +317,18 @@ class SearchPanel(QWidget):
         stats = self.index.statistics()
         if not stats['items']:
             self.summary_label.setText(
-                "Nothing indexed yet. Build the index to search inside file "
-                "contents, registry values and archives.")
+                "Nothing indexed yet. To search inside file contents, "
+                "registry values and archives, run <b>Search index and "
+                "indicators</b> from Analysis ▸ Run Analysis Modules.")
             return
 
-        parts = [f"<b>{stats['items']:,}</b> item(s) indexed"]
-        links = []
-        for kind, count in sorted(stats['entities'].items()):
-            if not count:
-                continue
-            # Each count runs its own query when clicked.
-            links.append(
-                f'<a href="{kind}:">{count:,} {ENTITY_LABELS.get(kind, kind)}</a>')
-        if links:
-            parts.append(' · '.join(links))
-
-        self.summary_label.setText(' — '.join(parts))
-
-    def _run_linked_query(self, query):
-        """A count in the summary was clicked; run it."""
-        self.query_input.setText(query)
-        self.run_search()
-
-    # --- indexing ---------------------------------------------------------
-
-    def toggle_indexing(self):
-        if self._worker and self._worker.isRunning():
-            self._worker.stop()
-            self.index_button.setText("Stopping…")
-            self.index_button.setEnabled(False)
-            return
-        self.start_indexing()
-
-    def start_indexing(self):
-        if not (self.case and self.index and self.image_handler):
-            return
-
-        path = getattr(self.image_handler, 'image_path', None)
-        row = self.case.evidence_for_path(path) if path else None
-        evidence_id = row['id'] if row else self.case.add_evidence(path)
-
-        self._worker = IndexWorker(path, self.case.folder, evidence_id, self)
-        self._worker.progressed.connect(self._on_progress)
-        self._worker.finished_indexing.connect(self._on_indexed)
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-        self.index_button.setText("Stop")
-        self._worker.start()
-
-    def _on_progress(self, done, total, path):
-        if total:
-            self.progress.setMaximum(total)
-            self.progress.setValue(done)
-        self._set_status(f"Indexing {done:,} of {total:,} — {path}")
-
-    def _on_indexed(self, count, error):
-        self.progress.setVisible(False)
-        self.index_button.setText("Rebuild Index")
-        self.index_button.setEnabled(True)
-        self._set_status()
-        if error:
-            message.warning(self, "Indexing failed", error)
-
-        # Reopen this thread's connection: the worker wrote through its own,
-        # and a connection opened before those writes does not see them.
-        if self.case is not None:
-            try:
-                if self.index is not None:
-                    self.index.close()
-                self.index = SearchIndex(self.case.folder)
-            except Exception as exc:
-                logger.error("Could not reopen the search index: %s", exc)
-
-        self._update_status()
+        images = len(self.case.evidence()) if self.case else 0
+        scope = (f" from {stats['images']} of {images} images"
+                 if images > 1 else '')
+        self.summary_label.setText(
+            f"<b>{stats['items']:,}</b> item(s) indexed{scope}. The emails, "
+            f"URLs, numbers and other indicators found are listed in "
+            f"Triage ▸ Indicators.")
 
     # --- searching --------------------------------------------------------
 
@@ -528,10 +428,7 @@ class SearchPanel(QWidget):
     # --- teardown ---------------------------------------------------------
 
     def shutdown(self):
-        """Stop any running index before the application closes."""
-        if self._worker and self._worker.isRunning():
-            self._worker.stop()
-            self._worker.wait(3000)
+        """Close the index before the application closes."""
         if self.index is not None:
             self.index.close()
             self.index = None

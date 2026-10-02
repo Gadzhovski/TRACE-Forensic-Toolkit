@@ -623,3 +623,83 @@ def test_a_carved_archive_is_browsed_like_a_folder(qapp, stubbed_dialogs):
         assert window.triage_panel.tabs.currentWidget() is window.carved_panel
     finally:
         window.cleanup_resources()
+
+
+# --- indexing and indicators ----------------------------------------------------
+
+def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
+        qapp, window, truth):
+    """Indexing runs from the analysis modules on the shared queue, for
+    every image; what it extracts is listed in Triage > Indicators and
+    under Findings, by kind; a file holding a value previews from its own
+    image. The Search tab no longer builds anything."""
+    from PySide6.QtCore import Qt
+    from trace_app.core.case import parse_artifact_ref
+    assert not hasattr(window.search_panel, 'index_button')
+
+    assert window.queue_indexing(window.case.evidence()) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    pump(qapp, 0.5)
+
+    index = window.indicators_panel.index
+    by_image = {r['id']: index.indicator_summary(r['id'])
+                for r in window.case.evidence()}
+    assert all(by_image.values()), by_image     # both images have some
+    total = sum(index.indicator_summary().values())
+    tab = window.triage_panel._tab_for['indicators']
+    assert window.triage_panel.tabs.tabText(tab) == f"Indicators ({total:,})"
+    assert 'indexed' in window.search_panel.summary_label.text()
+
+    # The tree: one group, one child per kind, the case's counts.
+    group = _findings_group(window, 'Indicators')
+    assert group is not None and group.text(0) == f"Indicators ({total:,})"
+    kinds = {group.child(i).data(0, Qt.UserRole)['indicator_kind']:
+             group.child(i).text(0) for i in range(group.childCount())}
+    assert set(kinds) == set(index.indicator_summary())
+
+    # Clicking a kind opens Triage on it.
+    url_node = next(group.child(i) for i in range(group.childCount())
+                    if group.child(i).data(0, Qt.UserRole)
+                    ['indicator_kind'] == 'url')
+    window.tree_viewer.setCurrentItem(url_node)
+    window.tree_viewer.itemClicked.emit(url_node, 0)
+    pump(qapp, 0.5)
+    panel = window.indicators_panel
+    assert window.result_viewer.currentWidget() is window.triage_panel
+    assert window.triage_panel.tabs.currentWidget() is panel
+    assert panel.kind == 'url'
+    assert {panel.values_table.item(r, 1).text()
+            for r in range(panel.values_table.rowCount())} == {'URL'}
+
+    # Triage's image filter narrows the values to that image's.
+    second = next(r['id'] for r in window.case.evidence()
+                  if r['path'].endswith(SECOND))
+    panel.set_kind('ip')
+    window.triage_panel.set_evidence_filter(second)
+    pump(qapp, 0.3)
+    shown = {panel.values_table.item(r, 0).text()
+             for r in range(panel.values_table.rowCount())}
+    assert shown == {r['value'] for r in index.indicators('ip', second)}
+
+    # A value's files are that image's, and preview from that image.
+    panel.values_table.selectRow(0)
+    pump(qapp, 0.3)
+    assert panel.files_table.rowCount()
+    position = next(r for r in range(panel.files_table.rowCount())
+                    if panel.files_table.item(r, 0).data(Qt.UserRole)
+                    ['kind'] == 'file')
+    row = panel.files_table.item(position, 0).data(Qt.UserRole)
+    assert row['evidence_id'] == second
+    captured = _capture_viewer(window)
+    window.current_selected_data = None
+    panel.files_table.clearSelection()
+    panel.files_table.selectRow(position)
+    pump(qapp, 10, lambda: bool(captured))
+    ref = parse_artifact_ref(row['artifact_ref'])
+    expected, _ = truth[SECOND].get_file_content(ref['inode'],
+                                                 ref['start_offset'])
+    assert captured and captured[-1] == expected
+    assert window.result_viewer.currentWidget() is window.triage_panel
+    window.triage_panel.set_evidence_filter(None)
+    panel.set_kind(None)
+    pump(qapp, 0.3)

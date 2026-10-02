@@ -68,6 +68,7 @@ FINDING_PHOTO = "Icons/tabler/trace/photo-metadata.svg"
 FINDING_AUTHOR = "Icons/tabler/trace/document-author.svg"
 #: Carved files share the carving tool's icon: the group is that tool's output.
 FINDING_CARVED = "Icons/tabler/file-search.svg"
+FINDING_INDICATORS = "Icons/tabler/trace/indicators.svg"
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the
 #: tab bars match Listing, Registry and Deleted Files.

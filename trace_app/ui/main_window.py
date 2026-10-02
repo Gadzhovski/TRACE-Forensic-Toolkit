@@ -71,7 +71,8 @@ from trace_app.ui.dialogs import message
 from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
 from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
-from trace_app.ui.viewers.search_panel import SearchPanel
+from trace_app.ui.viewers.indicators_panel import IndicatorsPanel, kind_label
+from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
 from trace_app.ui.widgets.job_bar import Job, JobBar
 from trace_app.ui.dialogs.analysis_modules import (choose_modules,
@@ -1006,6 +1007,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.carved_panel.file_activated.connect(self.open_carved)
         self.carved_panel.file_menu_requested.connect(self.open_carved_menu)
         self.triage_panel.add_carved_tab(self.carved_panel)
+
+        # What indexing extracted: every email, URL, number and address,
+        # and the files each is in. Its files are search-index rows, so they
+        # open, preview and get the menu exactly as search results do.
+        self.indicators_panel = IndicatorsPanel()
+        self.indicators_panel.icon_resolver = self._get_file_icon
+        self.indicators_panel.file_selected.connect(self.preview_search_result)
+        self.indicators_panel.file_activated.connect(self.open_search_result)
+        self.indicators_panel.file_menu_requested.connect(
+            self.open_search_result_menu)
+        self.indicators_panel.search_requested.connect(self.search_for)
+        self.triage_panel.add_indicators_tab(self.indicators_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
     def _build_viewer_dock(self):
@@ -2178,6 +2191,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   or row['id'] in choice['evidence_ids']]
         if choice['modules']:
             self.queue_analysis(chosen, choice['modules'])
+        if choice.get('index'):
+            self.queue_indexing(chosen)
         if choice['carve_types']:
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
@@ -2236,6 +2251,60 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished()
         self.refresh_analysis_views()
 
+    def queue_indexing(self, rows):
+        """Put one indexing job per piece of evidence on the shared queue:
+        the search index and the indicators extracted with it."""
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                logger.warning("Skipping indexing of missing %s", row['path'])
+                continue
+            if self._queue_indexing_job(row):
+                queued += 1
+        if queued:
+            self.set_status(f"Indexing {queued} image(s) in the background")
+        return queued
+
+    def _queue_indexing_job(self, row):
+        evidence_id = row['id']
+        name = row.get('display_name') or os.path.basename(row['path'])
+
+        def start(job):
+            worker = IndexWorker(row['path'], self.case.folder, evidence_id,
+                                 self)
+            worker.progressed.connect(
+                lambda done, total, path: self.job_bar.report(
+                    done, total, os.path.basename(path)))
+            worker.finished_indexing.connect(
+                lambda count, error: self._indexing_finished(name, count,
+                                                             error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"index:{evidence_id}",
+            title=f"Indexing {name}",
+            start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _indexing_finished(self, name, count, error):
+        if error:
+            self.set_status(f"Indexing {name} failed: {error}")
+            logger.error("Indexing %s failed: %s", name, error)
+        else:
+            self.set_status(f"Indexed {count:,} item(s) from {name}")
+        self.job_bar.job_finished()
+        # The job wrote through its own connection; reopen to see it.
+        self.search_panel.reload_index()
+        self.refresh_analysis_views()
+
+    def search_for(self, query):
+        """Bring the Search tab forward and run `query` there."""
+        self.result_viewer.setCurrentWidget(self.search_panel)
+        self.search_panel.query_input.setText(query)
+        self.search_panel.run_search()
+
     def _on_jobs_finished(self):
         """The queue has emptied; show everything the runs produced."""
         self.refresh_analysis_views()
@@ -2273,7 +2342,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # The whole case, so every device's findings are here.
         evidence_id = None
         summary = self.case.analysis_summary(evidence_id)
-        if not summary['analysed'] and not summary['carved']:
+        indicators = self._case_indicator_summary()
+        if not summary['analysed'] and not summary['carved'] \
+                and not indicators:
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
                  for r in self.case.evidence()}
@@ -2315,11 +2386,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     and row['embedded_date'] != UNKNOWN_DATE else '')))
                  for row in self.case.carved_files(evidence_id)]),
         ]
-        if not any(count for _, _, _, count, _ in groups):
+        if not any(count for _, _, _, count, _ in groups) and not indicators:
             return          # analysed, and nothing stood out: say nothing
 
         root = QTreeWidgetItem(self.tree_viewer)
-        total = sum(count for _, _, _, count, _ in groups)
+        total = sum(count for _, _, _, count, _ in groups) \
+            + sum(indicators.values())
         root.setText(0, f"Findings ({total})")
         root.setIcon(0, icons.icon(icons.FINDINGS))
         root.setData(0, Qt.UserRole, {'is_analysis_root': True})
@@ -2396,7 +2468,42 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 child.setData(0, Qt.UserRole, {'is_finding': True,
                                                'finding': finding})
 
+        # Indicators by kind, not by file: "40 URLs" is the finding, and the
+        # files holding each one are a click away in Triage.
+        if indicators:
+            group = QTreeWidgetItem(root)
+            group.setText(0, f"Indicators ({sum(indicators.values()):,})")
+            group.setIcon(0, icons.icon(icons.FINDING_INDICATORS))
+            group.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                           'group': 'indicators'})
+            for kind, count in self._ordered_indicators(indicators):
+                node = QTreeWidgetItem(group)
+                node.setText(0, f"{kind_label(kind, True)} ({count:,})")
+                node.setIcon(0, icons.icon(icons.FINDING_INDICATORS))
+                node.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                              'group': 'indicators',
+                                              'indicator_kind': kind})
+
         root.setExpanded(True)
+
+    def _case_indicator_summary(self):
+        """{kind: distinct values} across the whole case, whatever image
+        Triage is filtered to -- the tree covers the case."""
+        panel = getattr(self, 'indicators_panel', None)
+        index = panel.index if panel is not None else None
+        if index is None:
+            return {}
+        try:
+            return index.indicator_summary(None)
+        except Exception as exc:
+            logger.error("Could not read indicators: %s", exc)
+            return {}
+
+    @staticmethod
+    def _ordered_indicators(counts):
+        from trace_app.core.search_index import INDICATOR_KINDS
+        return [(kind, counts[kind]) for kind in INDICATOR_KINDS
+                if counts.get(kind)]
 
     @staticmethod
     def _photos_located_first(findings):
@@ -3647,11 +3754,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # The search index holds a connection and may have a worker walking
         # the image; both have to stop before the handler closes under them.
-        if getattr(self, 'search_panel', None) is not None:
-            try:
-                self.search_panel.shutdown()
-            except Exception as exc:
-                logger.error("Error stopping the search index: %s", exc)
+        for panel in ('search_panel', 'indicators_panel'):
+            if getattr(self, panel, None) is not None:
+                try:
+                    getattr(self, panel).shutdown()
+                except Exception as exc:
+                    logger.error("Error closing the search index: %s", exc)
 
         # A case holds an open SQLite connection; closing it also writes
         # the closing line of the audit trail.
@@ -3816,7 +3924,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                        self.metadata_viewer):
             widget.set_image_handler(handler)
         self._refresh_carving_targets()
-        self.search_panel.set_image_handler(handler)
         self.set_status_context(
             f"{os.path.basename(image_path)}   ·   "
             f"{len(handler.get_partitions())} partitions")
@@ -4141,6 +4248,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
         if data.get('is_analysis_group'):
             self.show_triage(data.get('group'), data.get('evidence_id'))
+            if data.get('group') == 'indicators':
+                self.indicators_panel.set_kind(data.get('indicator_kind'))
             return
 
         # Everything below reads the image this node belongs to.
