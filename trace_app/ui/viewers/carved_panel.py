@@ -175,6 +175,8 @@ class CarvedFilesPanel(QWidget):
     carve_requested = Signal(object, list, bool)
     #: A row the examiner landed on: preview it.
     file_selected = Signal(dict)
+    #: A double-click: open it -- an archive is browsed like a folder.
+    file_activated = Signal(dict)
     #: (row, global position): the host builds the menu.
     file_menu_requested = Signal(dict, object)
     count_changed = Signal(int)
@@ -267,6 +269,9 @@ class CarvedFilesPanel(QWidget):
         self.table.setWordWrap(False)
         self.table.setTextElideMode(Qt.ElideMiddle)
         connect_row_preview(self.table, self.file_selected.emit)
+        self.table.itemDoubleClicked.connect(
+            lambda item: self.file_activated.emit(
+                self.table.item(item.row(), 0).data(Qt.UserRole)))
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._table_menu)
         self.stack.addWidget(self.table)
@@ -282,6 +287,8 @@ class CarvedFilesPanel(QWidget):
         self.gallery.currentItemChanged.connect(
             lambda item, _old: item and self.file_selected.emit(
                 item.data(Qt.UserRole)))
+        self.gallery.itemDoubleClicked.connect(
+            lambda item: self.file_activated.emit(item.data(Qt.UserRole)))
         self.gallery.setContextMenuPolicy(Qt.CustomContextMenu)
         self.gallery.customContextMenuRequested.connect(self._gallery_menu)
         self.stack.addWidget(self.gallery)

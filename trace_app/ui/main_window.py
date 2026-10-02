@@ -98,6 +98,11 @@ class SizeTableWidgetItem(QTableWidgetItem):
 
 
 
+#: Carved types the archive browser can open (RAR is listed by the carver but
+#: needs unrar, which is not bundled; it is reported, not browsed).
+CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', '7z', 'rar'})
+
+
 class MainWindow(VolumeInfoMixin, QMainWindow):
     # Class variable for icon caching
     _icon_cache = {}
@@ -992,6 +997,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.carved_panel.icon_resolver = self._get_file_icon
         self.carved_panel.carve_requested.connect(self.start_carving)
         self.carved_panel.file_selected.connect(self.preview_carved)
+        self.carved_panel.file_activated.connect(self.open_carved)
         self.carved_panel.file_menu_requested.connect(self.open_carved_menu)
         self.triage_panel.add_carved_tab(self.carved_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
@@ -1464,6 +1470,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         location_action = menu.addAction("Show in Folder")
         open_action.setEnabled(os.path.isfile(path))
         location_action.setEnabled(os.path.isfile(path))
+        browse = None
+        if (row.get('type') or '').lower() in CARVED_ARCHIVE_TYPES:
+            browse = menu.addAction("Browse Archive")
+            menu.setDefaultAction(browse)
         copy_hash = None
         if row.get('sha256'):
             copy_hash = menu.addAction("Copy SHA-256")
@@ -1485,7 +1495,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     lambda: self._bookmark_carved(row, ref))
 
         chosen = menu.exec_(position)
-        if chosen == open_action:
+        if browse is not None and chosen == browse:
+            if not self.browse_carved_archive(row):
+                self.set_status(f"{row.get('name')} could not be opened as an "
+                                f"archive.", 5000)
+        elif chosen == open_action:
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
         elif chosen == location_action:
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
@@ -1594,24 +1608,21 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if self.case is not None:
             self.refresh_analysis_views()
 
-    def preview_carved(self, row):
-        """Show a carved file, read back from the image at its offset.
+    def _read_carved(self, row):
+        """A carved file's bytes, read back from its image at its offset.
 
         Not the copy written to disk: what is examined is the evidence, and
-        the copy could have been changed since.
+        the copy could have been changed since. None if it cannot be read.
         """
         if row.get('evidence_id') is not None and self.case is not None:
             if not self.activate_evidence(row['evidence_id']):
-                return
+                return None
         elif row.get('image_path'):
             if not self.activate_image(row['image_path']):
-                return
+                return None
         if not self.image_handler:
-            return
+            return None
         offset, size = int(row.get('offset') or 0), int(row.get('size') or 0)
-        key = f"carved:{row.get('evidence_key', row.get('evidence_id'))}:{offset}"
-        if (self.current_selected_data or {}).get('_preview_ref') == key:
-            return
         try:
             content = self.image_handler.read(offset, size)
         except Exception as exc:
@@ -1620,6 +1631,47 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not content:
             self.set_status(f"Could not read {row.get('name')} from the image.",
                             5000)
+            return None
+        return content
+
+    def open_carved(self, row):
+        """Double-click on a carved file: browse an archive, show the rest."""
+        if not self.browse_carved_archive(row):
+            self.preview_carved(row)
+
+    def browse_carved_archive(self, row):
+        """List a carved archive in the Listing, as a folder.
+
+        Through the same in-memory browser an archive on the file system
+        uses: members open in the viewers, nested archives are stepped into,
+        nothing is extracted to disk. Up from the top level returns to the
+        Carved files tab, which is where this archive lives. Returns True
+        when it was an archive and was listed.
+        """
+        if (row.get('type') or '').lower() not in CARVED_ARCHIVE_TYPES:
+            return False
+        content = self._read_carved(row)
+        if not content or not archives.detect_archive(content):
+            return False
+        name = row.get('name') or 'carved archive'
+        label = row.get('evidence_label') or ''
+        source = {
+            'name': name,
+            'path': f"Carved/{label}/{name}" if label else f"Carved/{name}",
+            'start_offset': 0,
+            'is_carved_archive': True,
+        }
+        self._archive_stack = [(name, content, source)]
+        return self.show_archive_level()
+
+    def preview_carved(self, row):
+        """Show a carved file in the viewers, read back from the image."""
+        offset, size = int(row.get('offset') or 0), int(row.get('size') or 0)
+        key = f"carved:{row.get('evidence_key', row.get('evidence_id'))}:{offset}"
+        if (self.current_selected_data or {}).get('_preview_ref') == key:
+            return
+        content = self._read_carved(row)
+        if not content:
             return
         name = row.get('name') or f"{offset:x}"
         data = {
@@ -1878,9 +1930,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self._archive_stack:
             return False
 
+        base = self._archive_stack[0][2]
         self._archive_stack.pop()
         if self._archive_stack:
             self.show_archive_level()
+            return True
+
+        if base.get('is_carved_archive'):
+            # A carved archive has no folder on the volume; it came from the
+            # Carved files tab, so that is where Up goes.
+            self.current_path = '/'
+            self.update_directory_up_button()
+            self.show_triage('carved')
             return True
 
         # Back to the filesystem, in the directory the archive was in.

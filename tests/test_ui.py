@@ -588,3 +588,38 @@ def test_carving_an_image_added_to_a_case_carves_only_that_image(
         assert seen['evidence_ids'] == [new_id]
     finally:
         window.cleanup_resources()
+
+
+def test_a_carved_archive_is_browsed_like_a_folder(qapp, stubbed_dialogs):
+    """Double-clicking a carved ZIP lists its members in the Listing, read
+    in memory from the image; a member opens in the viewers; Up returns to
+    the Carved files tab."""
+    from trace_app.core import archives
+    from trace_app.ui.main_window import MainWindow
+    window = MainWindow()
+    try:
+        assert window.open_evidence_image(image_path('11-carve-fat.dd'))
+        window.start_carving(None, ['zip'], True)
+        assert pump(qapp, 120, lambda: not window.job_bar.busy
+                    and window.carved_panel.count)
+        row = next(r for r in window.carved_panel._rows if r['type'] == 'zip')
+
+        window.open_carved(row)
+        assert window.result_viewer.currentIndex() == window.LISTING_TAB
+        content = window.image_handler.read(row['offset'], row['size'])
+        members = [m['name'] for m in archives.list_members(content)
+                   if not m['is_dir']]
+        assert members and members[0] in _listed(window)
+        assert window.archive_trail().endswith(row['name'])
+
+        window.open_archive_member_row({'archive_member': members[0],
+                                        'name': members[0]})
+        shown = window.current_selected_data or {}
+        assert shown['size'] == len(archives.read_member(content, members[0]))
+
+        window.navigate_up_directory()
+        assert not window._archive_stack
+        assert window.result_viewer.currentWidget() is window.triage_panel
+        assert window.triage_panel.tabs.currentWidget() is window.carved_panel
+    finally:
+        window.cleanup_resources()
