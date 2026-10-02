@@ -237,29 +237,47 @@ def test_a_version_7_case_gains_the_fragments_column(tmp_path):
         case.close()
 
 
-@pytest.mark.parametrize('name, rebuilt', [
-    ('dfrws-2006-challenge.raw', {'4b.zip', '4c.zip'}),
-])
-def test_dfrws_fragmented_zips_are_rebuilt(name, rebuilt):
-    """The two ZIPs of the DFRWS 2006 challenge stored in two fragments come
-    back byte-exact, matching the MD5s the challenge's authors published."""
+def _rebuilt_against_key(path, name, reassemble, rebuilt):
     import hashlib
     import json
-    from tests.conftest import ROOT, image_path
+    from tests.conftest import ROOT
     from trace_app.core import carving_formats as formats
-    from trace_app.core.reassembly import reassemble_zip
 
-    path = image_path(name)
     with open(os.path.join(ROOT, 'tools', 'carve_ground_truth.json'),
               encoding='utf-8') as handle:
         key = json.load(handle)[name]['files']
     with open(path, 'rb') as handle:
-        data = handle.read()
-    source = formats.Source(data, 0)
+        source = formats.Source(handle.read(), 0)
+    checked = set()
     for item in key:
         if item['name'] in rebuilt:
-            result = reassemble_zip(source, int(item['offset'], 16),
-                                    32 * 1024 * 1024)
+            result = reassemble(source, int(item['offset'], 16),
+                                32 * 1024 * 1024)
             assert result, item['name']
             assert hashlib.md5(result[0]).hexdigest() == item['md5']
             assert len(result[1]) == 2
+            checked.add(item['name'])
+    assert checked == rebuilt
+
+
+def test_a_pdf_split_by_an_ext2_indirect_block_is_rebuilt():
+    """DFTT #12's lin_test.pdf: twelve 1 KB blocks, ext2's indirect block,
+    then the rest -- rebuilt to the MD5 in the test's published key."""
+    from tests.conftest import image_path
+    from trace_app.core.reassembly import reassemble_pdf
+    name = '12-carve-ext2.dd'
+    _rebuilt_against_key(image_path(name), name, reassemble_pdf,
+                         {'lin_test.pdf'})
+
+
+def test_dfrws_2006_fragmented_zips_are_rebuilt():
+    """The two ZIPs DFRWS 2006 stores in two fragments, byte-exact. The
+    DFRWS images are scored locally by tools/carve_score.py and are not
+    fetched in CI, so this one skips without them even there."""
+    from tests.conftest import IMAGE_DIR
+    from trace_app.core.reassembly import reassemble_zip
+    name = 'dfrws-2006-challenge.raw'
+    path = os.path.join(IMAGE_DIR, name)
+    if not os.path.exists(path):
+        pytest.skip(f"{name} is not in test_images/ (not used by CI)")
+    _rebuilt_against_key(path, name, reassemble_zip, {'4b.zip', '4c.zip'})
