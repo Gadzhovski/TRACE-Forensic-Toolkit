@@ -19,16 +19,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 # Rejected candidates are logged per-attempt and are the normal case; they are
 # noise here, not findings.
 logging.disable(logging.ERROR)
 
-from PySide6.QtWidgets import QApplication
-
+from trace_app.core.carving import Carver
 from trace_app.infra.constants import CARVE_OVERLAP, CHUNK_SIZE
-from trace_app.ui.viewers.carving import FileCarvingWidget
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -51,27 +48,15 @@ OFFSET_TOLERANCE = 0
 
 
 def carve_image(path):
-    """Run every carver over `path`, returning [(type, offset, bytes)]."""
-    app = QApplication.instance() or QApplication([])          # noqa: F841
+    """Run every carver over `path`, returning [(type, offset, bytes)].
 
-    widget = FileCarvingWidget.__new__(FileCarvingWidget)      # no GUI
-    widget.carved_files = []
-    widget.carved_file_names = set()
-
+    The whole image, every type, no allocation map: the answer keys list
+    files wherever they lie, and the score is of the carvers themselves --
+    the same Carver class (trace_app/core/carving.py) an examiner runs.
+    """
     found = []
-
-    def collect(self, content, file_type, offset):
-        name = f"{offset:x}.{file_type}"
-        if name in self.carved_file_names:
-            return                      # same file seen again in an overlap
-        self.carved_file_names.add(name)
-        found.append((file_type, offset, content))
-
-    widget.save_file = collect.__get__(widget, FileCarvingWidget)
-
-    carvers = [n for n in dir(FileCarvingWidget)
-               if n.startswith('carve_') and n.endswith('_files')
-               and n != 'carve_files']
+    carver = Carver(lambda content, file_type, offset:
+                    found.append((file_type, offset, content)))
 
     with open(path, 'rb') as handle:
         data = handle.read()
@@ -81,15 +66,13 @@ def carve_image(path):
         chunk = data[offset:offset + CHUNK_SIZE + CARVE_OVERLAP]
         if not chunk:
             break
-        for name in carvers:
+        for name, function in Carver.CARVERS.items():
             try:
-                getattr(FileCarvingWidget, name)(widget, chunk, offset)
+                function(carver, chunk, offset)
             except Exception as exc:
                 print(f"    !! {name} raised {type(exc).__name__}: {exc}")
         offset += CHUNK_SIZE
-
     return found
-
 
 
 def _is_fragmented(item):

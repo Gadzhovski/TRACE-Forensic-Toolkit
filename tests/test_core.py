@@ -348,12 +348,15 @@ def test_old_case_migrates_to_the_current_schema(tmp_path):
     db = sqlite3.connect(os.path.join(folder, 'case.db'))
     db.execute("DROP TABLE vt_results")
     db.execute("DROP TABLE file_findings")
+    db.execute("DROP TABLE carved_files")
+    db.execute("DROP TABLE carving_state")
     db.execute("UPDATE case_info SET value='4' WHERE key='schema_version'")
     db.commit()
     db.close()
     case = Case.open(folder)
     assert str(case._get('schema_version')) == str(SCHEMA_VERSION)
     assert case.vt_results() == [] and case.findings() == []
+    assert case.carved_files() == [] and case.carving_state(1) is None
     case.close()
 
 
@@ -368,3 +371,75 @@ def test_analysis_records_findings_in_one_pass():
     modules = {row[0]: json.loads(row[4]) for row in facts['findings']}
     assert 'photo' in modules and 'latitude' in modules['photo']
     assert facts['sha256'] and facts['entropy'] is not None
+
+
+# --- carving ------------------------------------------------------------------------------
+
+def test_carving_into_a_case_is_recorded_per_image(tmp_path):
+    """Every carved file is a row addressed by its byte span, written under
+    its own image's folder, hashed, and audited; a second carve replaces
+    the first rather than doubling it."""
+    import hashlib
+    from trace_app.core.carving import CARVABLE_TYPES, carve_evidence
+    from trace_app.core.case import Case, parse_artifact_ref
+    from trace_app.core.image_handler import ImageHandler
+
+    path = image_path('11-carve-fat.dd')
+    case = Case.create(str(tmp_path / 'case'), 'Carving')
+    evidence = case.add_evidence(path)
+    handler = ImageHandler(path)
+    try:
+        found = carve_evidence(handler, case, evidence, CARVABLE_TYPES)
+        assert found == 16
+        rows = case.carved_files(evidence)
+        assert len(rows) == found
+        for row in rows:
+            span = parse_artifact_ref(row['artifact_ref'])
+            assert span['kind'] == 'span'
+            assert span['begin'] == row['offset']
+            assert span['end'] - span['begin'] == row['size']
+            assert os.path.dirname(row['path']) == case.carved_dir_for(evidence)
+            with open(row['path'], 'rb') as handle:
+                content = handle.read()
+            assert hashlib.sha256(content).hexdigest() == row['sha256']
+            # The copy is the evidence's own bytes at that offset.
+            assert handler.read(row['offset'], row['size']) == content
+        assert case.carving_state(evidence)['status'] == 'done'
+        assert case.analysis_summary()['carved'] == found
+
+        assert carve_evidence(handler, case, evidence, ['jpg']) ==             len([r for r in rows if r['type'] == 'jpg'])
+        assert {r['type'] for r in case.carved_files(evidence)} == {'jpg'}
+        actions = [a['action'] for a in case.activity(10)]
+        assert actions.count('carving done') == 2
+        assert 'carving started' in actions
+    finally:
+        handler.close_resources()
+        case.close()
+
+
+def test_carving_can_be_cancelled_and_keeps_what_it_found(tmp_path):
+    from trace_app.core.carving import CARVABLE_TYPES, carve_evidence
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+
+    path = image_path('11-carve-fat.dd')
+    case = Case.create(str(tmp_path / 'case'), 'Carving')
+    evidence = case.add_evidence(path)
+    handler = ImageHandler(path)
+    calls = [0]
+
+    def stop():
+        calls[0] += 1
+        return calls[0] > 3          # a few chunks, then Stop
+    try:
+        found = carve_evidence(handler, case, evidence, CARVABLE_TYPES,
+                               should_stop=stop)
+        state = case.carving_state(evidence)
+        assert state['status'] == 'cancelled'
+        assert state['found'] == found == len(case.carved_files(evidence))
+        # It left at the check that said stop, not at the end of the image.
+        assert calls[0] == 4
+        assert 'carving cancelled' in [a['action'] for a in case.activity(5)]
+    finally:
+        handler.close_resources()
+        case.close()

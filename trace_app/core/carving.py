@@ -1,43 +1,40 @@
+"""Recovering deleted files from the raw bytes of a disk image.
+
+The engine behind file carving, with no Qt in it: the analysis job, the
+quick-triage carve and tools/carve_score.py all drive this one module, so the
+carvers that are scored against the DFTT/DFRWS answer keys are exactly the
+ones an examiner runs.
+
+    carve_image(image_handler, ['jpg', 'pdf'], sink, unallocated_only=True)
+
+walks the image in CHUNK_SIZE steps (reading CARVE_OVERLAP beyond each, so a
+file across a boundary is whole in the next read), skips allocated space when
+asked to, and hands every file a carver finds and `is_valid_file` accepts to
+`sink(content, file_type, offset)` -- once per offset, however many
+overlapping reads find it. `write_carved` is the usual sink's body: it writes
+the file, named after the absolute offset it was found at, and returns what
+is known about it.
+
+A carver abandons a file that runs off the end of its buffer, so a file
+larger than CARVE_OVERLAP that straddles a chunk boundary is found only if it
+also starts within the next read. Fragmented files are not reassembled.
+"""
+
+import hashlib
 import logging
-import datetime
-import io
 import os
 import re
 import struct
-import zlib
 import time
-import zipfile
-from concurrent.futures import ThreadPoolExecutor
-
-from PIL import Image, UnidentifiedImageError
-from PIL.ExifTags import TAGS
-from PySide6.QtCore import QSize, QUrl, QRectF
-from PySide6.QtCore import Qt
-from PySide6.QtCore import Signal, Slot
-from PySide6.QtGui import QIcon, QAction, QDesktopServices, QPixmap, QPainter, QImage
-from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtWidgets import QListWidget, QListWidgetItem, QToolBar, QSizePolicy, QHBoxLayout, \
-    QCheckBox, QHeaderView
-from PySide6.QtWidgets import QMenu
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
-                               QPushButton, QLabel, QTabWidget, QMessageBox)
-from pymupdf import open as fitz_open, Matrix
+import zlib
 
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.core.image_handler import ImageHandler
-from trace_app.infra.paths import carved_files_dir, resource_path
 from trace_app.infra.constants import (CARVE_MAX_FOOTER_CANDIDATES,
-                                       SECTOR_SIZE,
                                        CARVE_MAX_SIZE, CARVE_MIN_SIZE,
-                                       CARVE_OVERLAP, CHUNK_SIZE,
-                                       PANEL_ICON_SIZE, TABLE_ICON_SIZE,
+                                       CARVE_OVERLAP, CHUNK_SIZE, SECTOR_SIZE,
                                        UNKNOWN_DATE)
-from trace_app.ui import icons
-from trace_app.ui.widgets.multi_select import MultiSelectButton
-from trace_app.ui.widgets.table_columns import fit_columns
-from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
-from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Carving')
 
@@ -53,15 +50,6 @@ CARVABLE_TYPES = ["PDF", "JPG", "PNG", "GIF", "BMP", "TIFF", "WAV", "MOV",
 #: An ISO-BMFF atom type is four printable ASCII characters. Requiring that is
 #: what stops the walk reading arbitrary bytes as a chain of tiny atoms.
 _ATOM_NAME_RE = re.compile(rb'[A-Za-z0-9 _\-]{4}')
-
-#: Carved types that get a generic icon rather than a rendered preview,
-#: grouped by the icon each one takes.
-VIDEO_TYPES = frozenset({'mov', 'mp4', 'wmv'})
-ARCHIVE_TYPES = frozenset({'zip', 'gz', 'rar', '7z'})
-AUDIO_TYPES = frozenset({'wav'})
-DOCUMENT_TYPES = frozenset({'ole', 'html'})
-#: Everything above: these already arrive square, so cropping only trims them.
-ICON_TYPES = VIDEO_TYPES | ARCHIVE_TYPES | AUDIO_TYPES | DOCUMENT_TYPES
 
 #: Bytes per value for each TIFF field type, used to work out how far an IFD's
 #: out-of-line values push the end of the file.
@@ -98,364 +86,30 @@ ASF_HEADER_GUID = bytes.fromhex('3026B2758E66CF11A6D900AA0062CE6C')
 ASF_PROPERTIES_GUID = bytes.fromhex('A1DCAB8C47A9CF118EE400C00C205365')
 
 
+class CarvingCancelled(Exception):
+    """Raised inside a carve when the examiner presses Stop."""
 
 
-class NumericTableWidgetItem(QTableWidgetItem):
-    def __lt__(self, other):
-        self_value = self.text().split()[0]  # Extract numeric part of the text
-        other_value = other.text().split()[0]  # Extract numeric part of the text
-        self_unit = self.text().split()[1]  # Extract unit part of the text
-        other_unit = other.text().split()[1]  # Extract unit part of the text
-        units = {'B': 0, 'KB': 1, 'MB': 2, 'GB': 3, 'TB': 4}
+class Carver:
+    """The signature carvers, each searching one chunk for one file type.
 
-        # Convert to bytes for comparison
-        self_bytes = float(self_value) * (1024 ** units[self_unit])
-        other_bytes = float(other_value) * (1024 ** units[other_unit])
+    Found files go to `sink(content, file_type, absolute_offset)`. The same
+    file is found again in every overlapping read that contains it; the
+    offset is its identity, so each is passed on once.
+    """
 
-        return self_bytes < other_bytes
+    def __init__(self, sink):
+        self._sink = sink
+        self._seen = set()
+        self.found = 0
 
-
-class FileCarvingWidget(QWidget):
-    file_carved = Signal(str, str, str, str, str, str)  # Unified signal for file carving
-    #: Emitted when a scan ends. Carrying this as a signal rather than calling
-    #: straight from the worker matters: file_carved is a queued cross-thread
-    #: signal, so its rows are still waiting in the event queue when the worker
-    #: finishes. Anything the worker does directly -- such as sizing columns --
-    #: therefore runs against a table that is not filled in yet.
-    carving_finished = Signal()
-    #: Emitted with (file info, global position) when a carved file is
-    #: right-clicked, so the host can offer bookmark actions. This widget does
-    #: not know about cases; the window does.
-    carved_menu_requested = Signal(dict, object)
-
-    #: Emitted when the user opens a carved file, so the host can show it in a
-    #: viewer. Replaces reaching up into MainWindow directly.
-    carved_file_opened = Signal(bytes, dict)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.image_handler = None
-        #: Resolves (type, extension) -> icon path. Injected by the host so
-        #: this widget does not have to reach through a MainWindow reference
-        #: into its DatabaseManager.
-        self.icon_resolver = None
-        self.executor = ThreadPoolExecutor(max_workers=4)  # ThreadPoolExecutor for background tasks
-        self._stop_requested = False  # cooperative cancellation flag for carve_files()
-        self.carved_files = []
-        self.carved_file_names = set()  # Track carved file names to avoid duplicates
-        self.allocation_map = []  # Map of allocated disk regions to skip during carving
-        #: Case folder to write carved output into, or None for the shared
-        #: triage directory. See set_case_folder.
-        self._case_folder = None
-        self.init_ui()
-
-    def init_ui(self):
-        self.layout = QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)  # Set the spacing to zero
-
-        self.toolbar = QToolBar()
-
-        prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        self.layout.addWidget(self.toolbar)
-
-        self.icon_label = QLabel()
-        self.icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(self.icon_label, icons.CARVING, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(self.icon_label)
-
-        self.title_label = QLabel("File Carving")
-        self.title_label.setObjectName("panelTitle")
-        self.toolbar.addWidget(self.title_label)
-
-        self.spacer = QLabel()
-        self.spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.toolbar.addWidget(self.spacer)
-
-        self.table_widget = self.create_table_widget()
-        # Column widths come from the content once a scan finishes; the
-        # resize handler that used to split the width between Name and File
-        # Path fought that on every resize.
-
-        self.list_widget = self.create_list_widget()
-
-        # One dropdown instead of ten check boxes. The old row also carried an
-        # "All" check box that was treated as a file type in its own right, so
-        # ticking it searched for a signature named "all"; select-all is now a
-        # menu command rather than an option.
-        self.file_type_button = MultiSelectButton(CARVABLE_TYPES, self, noun="types")
-        self.file_type_button.set_selected(CARVABLE_TYPES)
-        self.toolbar.addWidget(QLabel("Carve:"))
-        self.toolbar.addWidget(self.file_type_button)
-
-        self.start_button = QPushButton("Start")
-        self.start_button.clicked.connect(self.start_carving)
-
-        self.toolbar.addWidget(self.start_button)
-
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.clicked.connect(self.stop_carving)
-        self.stop_button.setEnabled(False)
-
-        self.toolbar.addWidget(self.stop_button)
-        self.layout.addWidget(self.tab_widget)
-
-        self.file_carved.connect(self.display_carved_file)
-        self.carving_finished.connect(self._fit_carved_columns)
-        # Every control in this toolbar gets the shared height, once it is built.
-        align_controls(self.toolbar)
-
-    def create_table_widget(self):
-        table_widget = QTableWidget()
-        # Id, Name, Size, Type, Embedded Date, Date Source, File Path
-        table_widget.setColumnCount(7)
-        table_widget.setSelectionBehavior(QTableWidget.SelectRows)
-        table_widget.setEditTriggers(QTableWidget.NoEditTriggers)
-        table_widget.setSortingEnabled(True)
-        table_widget.verticalHeader().setVisible(False)
-        table_widget.setObjectName("fileCarvingTable")  # For CSS styling
-
-        # Set size policy to expand with window
-        table_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        # Use alternate row colors (matching Listing tab)
-        table_widget.setAlternatingRowColors(True)
-        table_widget.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
-
-        # Enable horizontal scrolling for smaller windows (matching Listing tab)
-        table_widget.setHorizontalScrollMode(QTableWidget.ScrollPerPixel)
-        table_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-
-        # Configure header - all columns use Interactive mode for horizontal scrolling
-        header = table_widget.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Interactive)  # Id - fixed, manually resizable
-        header.setSectionResizeMode(1, QHeaderView.Interactive)  # Name - fixed, manually resizable
-        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Size - fixed, manually resizable
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Type - fixed, manually resizable
-        header.setSectionResizeMode(4, QHeaderView.Interactive)  # Embedded Date
-        header.setSectionResizeMode(5, QHeaderView.Interactive)  # Date Source
-        header.setSectionResizeMode(5, QHeaderView.Interactive)  # File Path - fixed, manually resizable
-
-        # Set column widths (matching Listing tab style)
-        table_widget.setColumnWidth(0, 100)   # Id - compact
-        table_widget.setColumnWidth(1, 400)  # Name - widest (matching Listing tab)
-        table_widget.setColumnWidth(2, 100)   # Size - compact (matching Listing tab)
-        table_widget.setColumnWidth(3, 100)   # Type - compact (matching Listing tab)
-        table_widget.setColumnWidth(4, 160)   # Embedded Date - matching Listing
-        table_widget.setColumnWidth(5, 170)   # Date Source
-        table_widget.setColumnWidth(5, 1100)  # File Path - wide (matching Listing tab)
-
-        # Set header alignment (matching Listing tab)
-        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-
-        # Set the header labels
-        table_widget.setHorizontalHeaderLabels(
-            ['Id', 'Name', 'Size', 'Type', 'Embedded Date', 'Date Source',
-             'File Path'])
-
-        # Context menu and click handlers
-        table_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        table_widget.customContextMenuRequested.connect(self.open_context_menu)
-        table_widget.cellClicked.connect(self.on_carved_file_clicked)
-
-        self.tab_widget = QTabWidget()
-        self.tab_widget.addTab(table_widget, "File List")
-        return table_widget
-
-    def create_list_widget(self):
-        list_widget = QListWidget()
-        list_widget.setViewMode(QListWidget.IconMode)
-        list_widget.setIconSize(QSize(120, 120))
-        list_widget.setResizeMode(QListWidget.Adjust)
-        list_widget.setUniformItemSizes(True)
-        list_widget.setSpacing(5)
-        list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        list_widget.customContextMenuRequested.connect(self.open_context_menu)
-        # Connect click event to open file in internal viewer
-        list_widget.itemClicked.connect(self.on_carved_file_clicked)
-
-        toolbar = QToolBar()
-
-        # Define actions
-        action_small_size = (QAction("Small Size", self))
-        icons.apply_to(action_small_size, icons.ICONS_SMALL)
-
-        action_medium_size = (QAction("Medium Size", self))
-        icons.apply_to(action_medium_size, icons.ICONS_MEDIUM)
-
-        action_large_size = (QAction("Large Size", self))
-        icons.apply_to(action_large_size, icons.ICONS_LARGE)
-
-        # Set icons
-
-        # Connect actions to new slot methods
-        action_small_size.triggered.connect(self.set_small_size)
-        action_medium_size.triggered.connect(self.set_medium_size)
-        action_large_size.triggered.connect(self.set_large_size)
-
-        # Add actions to the toolbar
-        toolbar.addAction(action_small_size)
-        toolbar.addAction(action_medium_size)
-        toolbar.addAction(action_large_size)
-
-        # Create a layout and add the toolbar and the list widget to it
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(toolbar)
-        layout.addWidget(list_widget)
-
-        # Create a new widget, set its layout and add it to the tab widget
-        widget = QWidget()
-        widget.setLayout(layout)
-        self.tab_widget.addTab(widget, "Thumbnails")
-        return list_widget
-
-    @staticmethod
-    def center_crop_to_square(pixmap, target_size):
-        """Crop pixmap to center square and scale to target size for uniform thumbnails."""
-        if pixmap.isNull():
-            return pixmap
-
-        width = pixmap.width()
-        height = pixmap.height()
-
-        if width == height:
-            # Already square, just scale
-            return pixmap.scaled(target_size, target_size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-
-        # Determine the crop size (smaller dimension)
-        crop_size = min(width, height)
-
-        # Calculate crop position to center the crop
-        x = (width - crop_size) // 2
-        y = (height - crop_size) // 2
-
-        # Crop to square
-        cropped = pixmap.copy(x, y, crop_size, crop_size)
-
-        # Scale to target size
-        return cropped.scaled(target_size, target_size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
-
-    @staticmethod
-    def render_svg_to_pixmap(svg_path, target_size):
-        """Render SVG file at target resolution for crisp icons."""
-        renderer = QSvgRenderer(svg_path)
-        if not renderer.isValid():
-            return QPixmap()
-
-        # Create QImage at target size with transparency
-        image = QImage(target_size, target_size, QImage.Format_ARGB32)
-        image.fill(Qt.transparent)
-
-        # Render SVG onto the image
-        painter = QPainter(image)
-        renderer.render(painter, QRectF(0, 0, target_size, target_size))
-        painter.end()
-
-        # Convert QImage to QPixmap
-        return QPixmap.fromImage(image)
-
-    def set_icon_size(self, size):
-        self.list_widget.setIconSize(QSize(size, size))
-        for index in range(self.list_widget.count()):
-            item = self.list_widget.item(index)
-            item.setSizeHint(QSize(size + 10, size + 25))  # Compact padding with space for text
-
-    def set_small_size(self):
-        self.set_icon_size(80)
-
-    def set_medium_size(self):
-        self.set_icon_size(120)
-
-    def set_large_size(self):
-        self.set_icon_size(180)
-
-    def start_carving(self):
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.clear_ui()
-        self.carved_files.clear()
-        self.carved_file_names.clear()
-
-        # Carved output goes to the per-user data dir, not the working
-        # directory -- the CWD is not reliably writable (a macOS .app bundle
-        # runs with CWD '/') and output does not belong in the source tree.
-        carved_dir = carved_files_dir(self._case_folder)
-        thumbnail_folder = os.path.join(carved_dir, "thumbnails")
-
-        # Build allocation map for all partitions to skip allocated files
-        logger.debug("Building allocation map for allocated files...")
-        self.allocation_map = []
-
-        try:
-            partitions = self.image_handler.get_partitions()
-
-            if partitions:
-                # Process each partition
-                for partition_info in partitions:
-                    # partition_info is (addr, desc, start, len)
-                    start_offset = partition_info[2]  # start offset in sectors
-
-                    # Build allocation map for this partition
-                    partition_map = self.image_handler.build_allocation_map(start_offset)
-                    self.allocation_map.extend(partition_map)
-                    logger.debug(f"  Partition at offset {start_offset}: {len(partition_map)} allocated regions")
-            else:
-                # No partitions, try offset 0 (single filesystem)
-                if self.image_handler.has_filesystem(0):
-                    partition_map = self.image_handler.build_allocation_map(0)
-                    self.allocation_map.extend(partition_map)
-                    logger.debug(f"  Single filesystem: {len(partition_map)} allocated regions")
-
-            # Merge, not just sort. is_offset_allocated binary searches this
-            # list, which is only valid if the ranges are ordered AND do not
-            # overlap; combining several partitions' maps can produce overlaps
-            # that a plain sort leaves in place.
-            self.allocation_map = ImageHandler._merge_ranges(self.allocation_map)
-            covered = sum(end - begin for begin, end in self.allocation_map)
-            logger.info("Skipping %d allocated regions (%.1f MB) while carving",
-                        len(self.allocation_map), covered / (1024 * 1024))
-
-        except Exception as e:
-            logger.error(f"Warning: Could not build allocation map: {e}")
-            logger.debug("Will carve from entire disk (may include duplicates)")
-            self.allocation_map = []
-
-        selected_file_types = [name.lower() for name in self.file_type_button.selected()]
-        if not selected_file_types:
-            message.information(self, "Nothing to carve",
-                                    "Select at least one file type to search for.")
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
+    def save_file(self, file_content, file_type, offset):
+        key = (offset, file_type)
+        if key in self._seen:
             return
-        self.executor.submit(self.carve_files, selected_file_types)
-
-    def stop_carving(self):
-        """Ask the running carve to stop.
-
-        Cooperative: carve_files() checks _stop_requested once per chunk. The
-        executor is deliberately not shut down here -- shutdown() does not
-        cancel a running task, it blocks until that task finishes (freezing the
-        UI), and it is terminal, so the widget could never carve again.
-        """
-        self._stop_requested = True
-        self.stop_button.setEnabled(False)
-
-    def set_case_folder(self, case_folder):
-        """Where carved files go: inside the case, or the shared directory.
-
-        Carved files are named after the offset they were found at and nothing
-        else, so two images carved into one directory overwrite each other
-        wherever both hold the same file type at the same offset. A case gives
-        each investigation its own space; triage keeps the shared default.
-        """
-        self._case_folder = case_folder
-
-    def set_image_handler(self, image_handler):
-        self.image_handler = image_handler
-        self.start_button.setEnabled(True)
+        self._seen.add(key)
+        self.found += 1
+        self._sink(file_content, file_type, offset)
 
     @staticmethod
     def is_offset_allocated(offset, chunk_size, allocation_map):
@@ -515,150 +169,6 @@ class FileCarvingWidget(QWidget):
         start, end = allocation_map[low]
         # A region already covering `offset` leaves no room to read at all.
         return offset if start <= offset < end else start
-
-    def selected_carved_file(self):
-        """The carved file the user right-clicked, as a dict, or None."""
-        item = self.table_widget.currentItem()
-        if item is None:
-            return None
-        name = self.table_widget.item(item.row(), 1)
-        if name is None:
-            return None
-        for info in self.carved_files:
-            if info[0] == name.text():
-                return {
-                    'name': info[0],
-                    'size': info[1],
-                    'type': info[2],
-                    'path': info[3],
-                    'embedded_date': info[4],
-                    'date_source': info[5],
-                }
-        return None
-
-    def open_context_menu(self, position):
-        menu = QMenu()
-
-        # A carved file is an artifact like any other, so it gets the same
-        # bookmark actions. The host fills them in: it owns the case.
-        info = self.selected_carved_file()
-        if info is not None:
-            self.carved_menu_requested.emit(
-                info, self.table_widget.viewport().mapToGlobal(position))
-            return
-
-        open_location_action = QAction("Open File Location")
-        open_location_action.triggered.connect(self.open_file_location)
-
-        open_image_action = QAction("Open Externally")
-        open_image_action.triggered.connect(self.open_image)
-
-        menu.addAction(open_location_action)
-        menu.addAction(open_image_action)
-        menu.exec_(self.table_widget.viewport().mapToGlobal(position))
-
-    def open_image(self):
-        if self.tab_widget.currentIndex() == 0:  # If the table tab is active
-            current_item = self.table_widget.currentItem()
-        else:  # If the thumbnail tab is active
-            current_item = self.list_widget.currentItem()
-
-        if current_item:
-            file_name = current_item.text()
-            for file_info in self.carved_files:
-                if file_info[0] == file_name:
-                    file_path = file_info[3]  # The file path is now at index 3
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(file_path))
-                    break
-
-    def open_file_location(self):
-        current_item = self.list_widget.currentItem()
-        if current_item:
-            file_name = current_item.text()
-            for file_info in self.carved_files:
-                if file_info[0] == file_name:
-                    file_path = file_info[3]  # The file path is now at index 3
-                    QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(file_path)))
-                    break
-
-    def get_carved_timestamp(self, file_name):
-        """The date this carved file carries in its own bytes, if any."""
-        for file_info in self.carved_files:
-            if file_info[0] == file_name:
-                return file_info[4]
-        return None
-
-    def get_carved_timestamp_source(self, file_name):
-        """Which field the carved file's date was read from."""
-        for file_info in self.carved_files:
-            if file_info[0] == file_name:
-                return file_info[5]
-        return ''
-
-    def on_carved_file_clicked(self, *args):
-        """Handle click on carved file to display in internal viewer.
-
-        Reads file content directly from disk image (forensically sound) instead of
-        from the carved file on disk. This ensures we're analyzing the original data.
-        """
-        # Get clicked file name (works for both table cellClicked and list itemClicked)
-        if len(args) == 2:  # cellClicked(row, column) from table
-            row = args[0]
-            # Get file name from column 1 (Name column, column 0 is Id)
-            file_name_item = self.table_widget.item(row, 1)
-            if not file_name_item:
-                return
-            file_name = file_name_item.text()
-        elif len(args) == 1:  # itemClicked(item) from list
-            item = args[0]
-            file_name = item.text()
-        else:
-            return
-
-        # Find file info in carved_files list
-        for file_info in self.carved_files:
-            if file_info[0] == file_name:
-                file_size_str = file_info[1]  # Size at index 1
-                file_type = file_info[2]  # Type at index 2
-                file_size = int(file_size_str)
-
-                try:
-                    # Extract disk offset from filename (hex format without extension)
-                    offset_hex = os.path.splitext(file_name)[0]
-                    offset = int(offset_hex, 16)
-
-                    # Read file content directly from disk image (forensically sound!)
-                    if not self.image_handler:
-                        logger.debug("No image handler available")
-                        return
-
-                    file_content = self.image_handler.read(offset, file_size)
-                    if not file_content:
-                        logger.error(f"Unable to read content from offset {hex(offset)}")
-                        return
-
-                    # Create data dict for viewer (matches mainwindow's format)
-                    data = {
-                        'name': file_name,
-                        'size': file_size,
-                        'type': file_type,
-                        'offset': offset,
-                        'is_carved': True,  # Flag indicating this is a carved file
-                        'source': 'carved_file',
-                        'file_content': file_content,  # Include content so metadata viewer doesn't re-read
-                        'carved_timestamp': self.get_carved_timestamp(file_name),
-                        'carved_timestamp_source': self.get_carved_timestamp_source(file_name)
-                    }
-
-                    self.carved_file_opened.emit(file_content, data)
-
-                except Exception as e:
-                    logger.error(f"Error opening carved file in viewer: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-                break
-
 
     def carve_pdf_files(self, chunk, global_offset):
         pdf_start_signature = PDF_HEADER
@@ -1436,287 +946,173 @@ class FileCarvingWidget(QWidget):
         'html': carve_html_files,
     }
 
-    def carve_files(self, selected_file_types):
+
+
+def allocation_map(image_handler):
+    """The allocated byte ranges of every file system in the image, merged.
+
+    Carving skips them: what is allocated is a live file the tree already
+    shows, and carving it again only buries the deleted data in duplicates.
+    Empty (carve everything) if no file system can be read.
+    """
+    ranges = []
+    try:
+        partitions = image_handler.get_partitions()
+        offsets = [p[2] for p in partitions] if partitions else [0]
+        for start in offsets:
+            if partitions or image_handler.has_filesystem(start):
+                ranges.extend(image_handler.build_allocation_map(start))
+    except Exception as exc:
+        logger.warning("Could not build the allocation map (%s); carving "
+                       "the whole image", exc)
+        return []
+    # Merge, not just sort: is_offset_allocated binary searches this list,
+    # which is only valid if the ranges are ordered AND do not overlap.
+    return ImageHandler._merge_ranges(ranges)
+
+
+def carve_image(image_handler, file_types, sink, unallocated_only=True,
+                progress=None, should_stop=None):
+    """Carve `file_types` out of the image; returns how many were found.
+
+    `progress(position, size, found)` is called once per chunk, and
+    `should_stop()` consulted as often -- CarvingCancelled leaves the loop
+    with everything found so far already handed to the sink.
+    """
+    file_types = [t.lower() for t in file_types if t.lower() in Carver.CARVERS]
+    if not file_types:
+        return 0
+    allocated = allocation_map(image_handler) if unallocated_only else []
+    if allocated:
+        logger.info("Skipping %d allocated regions (%.1f MB) while carving",
+                    len(allocated),
+                    sum(end - begin for begin, end in allocated) / 1048576)
+
+    carver = Carver(sink)
+    size = image_handler.get_size()
+    offset = 0
+    while offset < size:
+        if should_stop and should_stop():
+            raise CarvingCancelled()
+        if progress:
+            progress(offset, size, carver.found)
+
+        if Carver.is_offset_allocated(offset, CHUNK_SIZE, allocated):
+            offset += CHUNK_SIZE
+            continue
+        # Stop the read at the next allocated region: the overlap window
+        # beyond the chunk is not covered by the test above, and reading it
+        # blindly pulls live file data into the carvers.
+        limit = Carver.next_allocated_start(offset, allocated)
+        read_size = CHUNK_SIZE + CARVE_OVERLAP
+        span = read_size if limit is None else min(read_size, limit - offset)
+        if span <= 0:
+            offset += CHUNK_SIZE
+            continue
+
+        chunk = image_handler.read(offset, span)
+        if not chunk:
+            break
+        for file_type in file_types:
+            try:
+                Carver.CARVERS[file_type](carver, chunk, offset)
+            except Exception as exc:
+                # One malformed span must not end the scan.
+                logger.warning("%s carver failed at offset %d: %s: %s",
+                               file_type, offset, type(exc).__name__, exc)
+        offset += CHUNK_SIZE
+
+    if progress:
+        progress(size, size, carver.found)
+    return carver.found
+
+
+def carved_name(offset, file_type):
+    """A carved file is named after where on disk it was found."""
+    return f"{offset:x}.{file_type}"
+
+
+def write_carved(folder, content, file_type, offset):
+    """Write one carved file into `folder`; return what is known about it.
+
+    Only a date the file carries in its own bytes means anything: a carved
+    file has no directory entry, so its file-system times are gone, and
+    stamping it with the time of recovery would present our own clock as
+    evidence. When there is one, the written file is given it too, so the
+    copy still reads correctly outside TRACE.
+    """
+    os.makedirs(folder, exist_ok=True)
+    name = carved_name(offset, file_type)
+    path = os.path.join(folder, name)
+    with open(path, 'wb') as handle:
+        handle.write(content)
+
+    stamp, source = extract_original_timestamp(content, file_type)
+    if stamp:
+        seconds = time.mktime(stamp.timetuple())
         try:
-            self._stop_requested = False
-            # Advance by CHUNK_SIZE but read CARVE_OVERLAP beyond it. Two
-            # reasons, both measured on the test image:
-            #
-            # The allocation check is only as precise as this step, and any
-            # span holding a single allocated byte is skipped whole. At the
-            # 100 MB used previously that skipped 1.37 GB where 1.25 GB is
-            # actually allocated -- 120 MB of deleted data never scanned. At
-            # 4 MB the over-skip is about 10 MB.
-            #
-            # Chunks do not overlap by default, and a carver abandons any file
-            # that runs off the end of its buffer, so a smaller step alone
-            # would turn 163 boundaries into 4096 places a file can be lost.
-            # The overlap makes a file crossing a boundary whole in the next
-            # read; duplicates cost nothing because save_file names each file
-            # after its absolute offset, so the second find rewrites the same
-            # path.
-            chunk_size = CHUNK_SIZE
-            read_size = CHUNK_SIZE + CARVE_OVERLAP
-            offset = 0
-            chunks_processed = 0
-            chunks_skipped = 0
-
-            while offset < self.image_handler.get_size():
-                # Check if this chunk overlaps with allocated space
-                if self.is_offset_allocated(offset, chunk_size, self.allocation_map):
-                    # Skip this chunk - it's in allocated space (existing files)
-                    chunks_skipped += 1
-                    offset += chunk_size
-                    continue
-
-                chunks_processed += 1
-
-                # Stop the read at the next allocated region. The chunk itself
-                # is known unallocated, but the overlap window beyond it is not
-                # checked by the test above -- reading it blindly pulled live
-                # file data into the carvers, which is precisely what the
-                # allocation map exists to prevent.
-                limit = self.next_allocated_start(offset, self.allocation_map)
-                span = read_size if limit is None else min(read_size, limit - offset)
-                if span <= 0:
-                    offset += chunk_size
-                    continue
-
-                chunk = self.image_handler.read(offset, span)
-                if not chunk:
-                    break
-
-                if self._stop_requested:
-                    self._stop_requested = False
-                    logger.info(
-                        "Carving stopped. Processed %d unallocated chunks, "
-                        "skipped %d allocated chunks",
-                        chunks_processed, chunks_skipped)
-                    # The buttons are restored by the carving_finished slot,
-                    # which runs on the UI thread. Touching a widget from this
-                    # worker is a data race Qt does not police.
-                    self.carving_finished.emit()
-                    return
-
-                # One carver per selected type. A mapping rather than a
-                # chain of elifs: adding a format is one entry here, and the
-                # unreachable 'all' branch the old chain carried -- left over
-                # from a check box the UI no longer has -- cannot come back.
-                for file_type in selected_file_types:
-                    carver = self.CARVERS.get(file_type)
-                    if carver is None:
-                        continue
-                    try:
-                        carver(self, chunk, offset)
-                    except Exception as exc:
-                        # One malformed span must not end the scan. Without
-                        # this a struct.error on a chunk tail killed the whole
-                        # carve, and the future swallowed it so the UI showed
-                        # a clean finish.
-                        logger.warning(
-                            "%s failed at offset %d: %s: %s",
-                            carver.__name__, offset, type(exc).__name__, exc)
-
-                offset += chunk_size
-
-            logger.info(
-                "Carving complete. Recovered %d file(s) from %d unallocated "
-                "chunks; skipped %d allocated chunks",
-                len(self.carved_files), chunks_processed, chunks_skipped)
-        finally:
-            # Both the buttons and the column sizing happen in the
-            # carving_finished slot: it is queued behind the rows this scan
-            # emitted, so it runs on the UI thread against a filled table.
-            self.carving_finished.emit()
-
-    #: Widest a carving column may grow. File Path holds a full path, which
-    #: would otherwise set the table's width on its own.
-    _CARVED_COLUMN_CAPS = {6: 420}
-
-    @Slot()
-    def _fit_carved_columns(self):
-        """Finish a scan: restore the buttons and size the columns.
-
-        A slot, so it is delivered on the UI thread after every queued
-        display_carved_file has run; called directly from the worker it
-        measured an empty table -- and would touch widgets from the wrong
-        thread.
-        """
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        try:
-            fit_columns(self.table_widget, self._CARVED_COLUMN_CAPS)
-        except Exception as e:
-            logger.debug("Could not fit the carving columns: %s", e)
-
-    @staticmethod
-    def render_pdf_thumbnail(pdf_path, thumbnail_folder, name):
-        """Render page 1 of a carved PDF to a QPixmap via PyMuPDF.
-
-        Returns an empty QPixmap if the PDF is too damaged to open, which is
-        common for carved fragments; the caller falls back to a blank tile.
-        """
-        thumbnail_path = os.path.join(thumbnail_folder, name.rsplit('.', 1)[0] + '.png')
-        try:
-            with fitz_open(pdf_path) as doc:
-                if doc.page_count < 1:
-                    return QPixmap()
-                page = doc.load_page(0)
-                pix = page.get_pixmap(matrix=Matrix(1.5, 1.5))
-                pix.save(thumbnail_path)
-            return QPixmap(thumbnail_path)
-        except Exception as e:
-            logger.error(f"Could not render PDF thumbnail for {name}: {e}")
-            return QPixmap()
+            os.utime(path, (seconds, seconds))
+        except (OSError, OverflowError):
+            pass
+        embedded = stamp.strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        embedded = UNKNOWN_DATE
+    return {
+        'name': name,
+        'path': path,
+        'offset': offset,
+        'size': len(content),
+        'type': file_type,
+        'sha256': hashlib.sha256(content).hexdigest(),
+        'embedded_date': embedded,
+        'date_source': source or '',
+    }
 
 
-    def save_file(self, file_content, file_type, offset):
-        """Write one recovered file, named after where on disk it was found.
+def carve_evidence(image_handler, case, evidence_id, file_types,
+                   unallocated_only=True, progress=None, should_stop=None,
+                   on_file=None):
+    """Carve one piece of evidence into its case; returns files found.
 
-        `offset` must be absolute within the image, not relative to the chunk:
-        it is the file's identity. Chunks overlap by CARVE_OVERLAP so that a
-        file straddling a boundary is whole in the following read, which means
-        the same file is genuinely found several times -- the absolute offset
-        is what lets us recognise it as one file rather than nine.
-        """
-        carved_dir = carved_files_dir(self._case_folder)
+    Results replace the previous carve of the same evidence, are written to
+    the case's carved/<evidence>/ folder and recorded as rows, and the run's
+    start and end go to the case's audit trail. A cancelled carve keeps what
+    it found. `progress(position, size, found)` as in carve_image;
+    `on_file(record)` hears of each file as it is written.
+    """
+    types = [t.lower() for t in file_types]
+    folder = case.carved_dir_for(evidence_id)
+    case.clear_carved(evidence_id)
+    size = image_handler.get_size()
+    case.set_carving_state(evidence_id, 'running', types=','.join(types),
+                           unallocated_only=unallocated_only, bytes_done=0,
+                           bytes_total=size, found=0)
+    found = [0]
 
-        offset_hex = format(offset, 'x')
-        file_name = f"{offset_hex}.{file_type}"
+    def sink(content, file_type, offset):
+        record = write_carved(folder, content, file_type, offset)
+        case.add_carved(evidence_id, record)
+        found[0] += 1
+        if on_file:
+            on_file(record)
+        if found[0] % 50 == 0:
+            case.commit()
 
-        # Already recovered from an earlier, overlapping chunk.
-        if file_name in self.carved_file_names:
-            return
-
-        file_path = os.path.join(carved_dir, file_name)
-
-        # Write file content to disk
-        with open(file_path, "wb") as f:
-            f.write(file_content)
-
-        # Only a date the file carries in its own bytes means anything here.
-        # A carved file has no directory entry, so its filesystem created,
-        # modified and deleted times are gone; stamping it with the time of
-        # recovery would present our own clock as evidence.
-        original_timestamp, source = extract_original_timestamp(file_content,
-                                                                file_type)
-
-        if original_timestamp:
-            # Give the extracted file the date it claims, so it still reads
-            # correctly outside TRACE.
-            timestamp = time.mktime(original_timestamp.timetuple())
-            os.utime(file_path, (timestamp, timestamp))
-            embedded_date = original_timestamp.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            embedded_date = UNKNOWN_DATE
-
-        file_size = str(len(file_content))
-        self.carved_file_names.add(file_name)
-        self.carved_files.append((file_name, file_size, file_type, file_path,
-                                  embedded_date, source))
-        self.file_carved.emit(file_name, file_size, file_type, embedded_date,
-                              file_path, source)
-
-    @Slot(str, str, str, str, str, str)
-    def display_carved_file(self, name, size, type_, embedded_date, file_path,
-                            source=""):
-        row = self.table_widget.rowCount()
-        readable_size = self.image_handler.get_readable_size(int(size))
-        self.table_widget.insertRow(row)
-
-        # Get file icon based on type/extension
-        extension = type_.lower() if type_ else 'unknown'
-        icon_path = self.icon_resolver('file', extension) if self.icon_resolver else ''
-
-        # Set Id column
-        self.table_widget.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-
-        # Set Name column with icon
-        name_item = QTableWidgetItem(name)
-        name_item.setIcon(QIcon(icon_path))
-        self.table_widget.setItem(row, 1, name_item)
-
-        # Set other columns
-        self.table_widget.setItem(row, 2, NumericTableWidgetItem(readable_size))
-        self.table_widget.setItem(row, 3, QTableWidgetItem(type_))
-        date_item = QTableWidgetItem(embedded_date)
-        if embedded_date == UNKNOWN_DATE:
-            # Say why there is no date, rather than leaving the examiner to
-            # wonder whether the scan failed.
-            date_item.setToolTip(
-                f"{type_.upper()} carries no timestamp in its own data, and a "
-                "carved file has no filesystem record to read one from.")
-        self.table_widget.setItem(row, 4, date_item)
-        self.table_widget.setItem(row, 5, QTableWidgetItem(source))
-        self.table_widget.setItem(row, 6, QTableWidgetItem(file_path))
-
-        # Only proceed if the file type is one of the supported formats
-        if type_.lower() in ['jpg', 'jpeg', 'png', 'gif', 'mov', 'pdf', 'wmv', 'bmp', 'zip', 'wav']:
-            carved_dir = carved_files_dir(self._case_folder)
-            file_full_path = os.path.join(carved_dir, name)
-            thumbnail_folder = os.path.join(carved_dir, "thumbnails")
-
-            if type_.lower() == 'pdf':
-                # Render the first page with PyMuPDF, which is already a
-                # dependency (the Application viewer uses it). This replaces
-                # pdf2image, which needed a separate poppler install.
-                pixmap = self.render_pdf_thumbnail(file_full_path, thumbnail_folder, name)
-
-            elif type_.lower() in VIDEO_TYPES:
-                # Video frame extraction previously needed moviepy (ffmpeg) for
-                # .mov and OpenCV for .wmv -- roughly 100 MB of wheels plus an
-                # ffmpeg binary, for a thumbnail. Carved video fragments are
-                # frequently truncated and fail to decode anyway, so show a
-                # generic icon instead.
-                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_VIDEO), 120)
-
-            elif type_.lower() in ARCHIVE_TYPES:
-                # Render archive icon at target size for crisp display
-                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_ARCHIVE), 120)
-
-            elif type_.lower() in AUDIO_TYPES:
-                # Render audio icon at target size for crisp display
-                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_AUDIO), 120)
-
-            elif type_.lower() == 'ole':
-                # A carved OLE file could be Word, Excel or PowerPoint: they
-                # share one container and the header does not say which.
-                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_DOC), 120)
-
-            elif type_.lower() == 'html':
-                pixmap = self.render_svg_to_pixmap(icons.path(icons.FILE_HTML), 120)
-
-            else:
-                # For image files, use the original file path
-                thumbnail_path = file_full_path
-                pixmap = QPixmap(thumbnail_path)
-
-            # Center-crop to a square for a uniform gallery. Skipped for the
-            # generic SVG icons, which are already square and would only lose
-            # their margins.
-            if type_.lower() not in ICON_TYPES:
-                pixmap = self.center_crop_to_square(pixmap, 120)
-            icon = QIcon(pixmap)
-
-            # Create a QListWidgetItem, set its icon, and provide a size hint to ensure the text is visible
-            item = QListWidgetItem(icon, name)
-            # Set a compact size for the QListWidgetItem with minimal padding for text
-            item.setSizeHint(QSize(130, 145))
-
-            # Set the item flags to not be movable and to be selectable
-            item.setFlags(item.flags() & ~Qt.ItemIsDragEnabled & ~Qt.ItemIsDropEnabled)
-
-            # Add the QListWidgetItem to the list widget
-            self.list_widget.addItem(item)
-
-    def clear(self):
-        self.table_widget.setRowCount(0)
-        self.list_widget.clear()
-        self.carved_files.clear()
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-
-    def clear_ui(self):
-        self.table_widget.setRowCount(0)
-        self.list_widget.clear()
-
+    try:
+        carve_image(image_handler, types, sink, unallocated_only,
+                    progress=progress, should_stop=should_stop)
+    except CarvingCancelled:
+        case.commit()
+        case.set_carving_state(evidence_id, 'cancelled', found=found[0])
+        logger.info("Carving cancelled after %d file(s)", found[0])
+        return found[0]
+    except Exception as exc:
+        case.commit()
+        case.set_carving_state(evidence_id, 'failed', found=found[0],
+                               last_error=str(exc))
+        raise
+    case.commit()
+    case.set_carving_state(evidence_id, 'done', bytes_done=size,
+                           found=found[0])
+    logger.info("Carved %d file(s) from evidence %s", found[0], evidence_id)
+    return found[0]

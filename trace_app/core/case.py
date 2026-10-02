@@ -44,7 +44,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -903,6 +903,114 @@ class Case:
             (evidence_id,)).fetchone()
         return dict(row) if row else None
 
+    # --- carving -----------------------------------------------------
+
+    def carved_dir_for(self, evidence_id):
+        """Where one piece of evidence's carved files are written.
+
+        A folder per image: carved files are named after their offset alone,
+        so two images sharing one folder overwrite each other wherever both
+        hold the same type at the same offset.
+        """
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        label = ''
+        if row is not None:
+            row = dict(row)
+            label = row.get('display_name') or os.path.basename(row['path'])
+        safe = ''.join(c if c.isalnum() or c in '-_.' else '_'
+                       for c in label)[:60].strip('._')
+        folder = os.path.join(self.carved_dir,
+                              f"{evidence_id}-{safe}" if safe else
+                              str(evidence_id))
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def clear_carved(self, evidence_id):
+        """Forget a previous carve of one piece of evidence.
+
+        The rows only: the files already written stay where they are, and a
+        new carve writes the same names over them.
+        """
+        self._db.execute("DELETE FROM carved_files WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.commit()
+
+    def add_carved(self, evidence_id, record):
+        """Record one carved file (a record from carving.write_carved)."""
+        offset, size = int(record['offset']), int(record['size'])
+        path = record['path']
+        try:
+            path = os.path.relpath(path, self.folder)
+        except ValueError:
+            pass            # another drive: keep it absolute
+        self._db.execute(
+            "INSERT INTO carved_files (evidence_id, artifact_ref, name, path, "
+            "offset, size, type, sha256, embedded_date, date_source, "
+            "carved_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (evidence_id, make_span_ref(0, offset, offset + size),
+             record['name'], path, offset, size, record['type'],
+             record.get('sha256'), record.get('embedded_date'),
+             record.get('date_source'), _utc_now()))
+
+    def carved_files(self, evidence_id=None, file_type=None, limit=20000):
+        """Carved files in image order, with an absolute `path`."""
+        query = "SELECT * FROM carved_files WHERE 1 = 1"
+        params = []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        if file_type:
+            query += " AND type = ?"
+            params.append(file_type)
+        query += " ORDER BY evidence_id, offset LIMIT ?"
+        params.append(limit)
+        rows = []
+        for row in self._db.execute(query, params):
+            row = dict(row)
+            if not os.path.isabs(row['path']):
+                row['path'] = os.path.join(self.folder, row['path'])
+            rows.append(row)
+        return rows
+
+    def set_carving_state(self, evidence_id, status, types=None,
+                          unallocated_only=None, bytes_done=None,
+                          bytes_total=None, found=None, last_error=None):
+        """Record how far a carve got; the end of one goes to the audit."""
+        existing = self.carving_state(evidence_id) or {}
+
+        def pick(value, key, default):
+            return value if value is not None else existing.get(key, default)
+
+        self._db.execute(
+            "INSERT OR REPLACE INTO carving_state (evidence_id, status, types, "
+            "unallocated_only, bytes_done, bytes_total, found, last_error, "
+            "updated_utc) VALUES (?,?,?,?,?,?,?,?,?)",
+            (evidence_id, status, pick(types, 'types', ''),
+             int(pick(unallocated_only, 'unallocated_only', 1)),
+             pick(bytes_done, 'bytes_done', 0),
+             pick(bytes_total, 'bytes_total', 0),
+             pick(found, 'found', 0), last_error, _utc_now()))
+        self._db.commit()
+
+        if status == 'running' and not existing.get('status') == 'running':
+            self._record_activity(
+                "carving started",
+                f"evidence id={evidence_id} types={types or ''} "
+                f"{'unallocated space' if unallocated_only else 'whole image'}")
+        if status in ('done', 'cancelled', 'failed'):
+            self._record_activity(
+                f"carving {status}",
+                f"evidence id={evidence_id} files={found or 0}"
+                + (f" error={last_error}" if last_error else ''))
+
+    def carving_state(self, evidence_id):
+        """How the last carve of this evidence ended, or None."""
+        row = self._db.execute(
+            "SELECT * FROM carving_state WHERE evidence_id = ?",
+            (evidence_id,)).fetchone()
+        return dict(row) if row else None
+
     def analysis_for_artifact(self, evidence_id, artifact_ref):
         """What is known about one file, for the listing to show."""
         row = self._db.execute(
@@ -1124,7 +1232,11 @@ class Case:
                 query += " AND detail LIKE '%\"latitude\"%'"
             return self._db.execute(query, args).fetchone()[0]
 
+        carved = self._db.execute(
+            f"SELECT COUNT(*) FROM carved_files{where}", params).fetchone()[0]
+
         return {'analysed': analysed, 'mismatches': mismatches,
+                'carved': carved,
                 'high_entropy': entropy, 'duplicate_groups': duplicates,
                 'hidden': count('hidden', REPORTED_FINDING_GRADES),
                 'photos': count('photo'),
@@ -1308,6 +1420,43 @@ class Case:
                 ON file_findings(evidence_id, module, grade);
             CREATE INDEX IF NOT EXISTS idx_findings_artifact
                 ON file_findings(evidence_id, artifact_ref);
+
+            -- Files recovered by carving, one row each. A carved file has no
+            -- inode, so it is referenced by the byte span it was found at
+            -- (make_span_ref), which is also what names it on disk. The copy
+            -- lives under carved/<evidence>/; `path` is relative to the case
+            -- folder, so a case that moves keeps finding it.
+            CREATE TABLE IF NOT EXISTS carved_files (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id    INTEGER NOT NULL
+                               REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref   TEXT NOT NULL,
+                name           TEXT NOT NULL,
+                path           TEXT NOT NULL,
+                offset         INTEGER NOT NULL,
+                size           INTEGER NOT NULL,
+                type           TEXT NOT NULL,
+                sha256         TEXT,
+                embedded_date  TEXT,
+                date_source    TEXT,
+                carved_utc     TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_carved_evidence
+                ON carved_files(evidence_id, offset);
+
+            -- How the last carve of each piece of evidence went.
+            CREATE TABLE IF NOT EXISTS carving_state (
+                evidence_id      INTEGER PRIMARY KEY
+                                 REFERENCES evidence(id) ON DELETE CASCADE,
+                status           TEXT NOT NULL,
+                types            TEXT,
+                unallocated_only INTEGER NOT NULL DEFAULT 1,
+                bytes_done       INTEGER NOT NULL DEFAULT 0,
+                bytes_total      INTEGER NOT NULL DEFAULT 0,
+                found            INTEGER NOT NULL DEFAULT 0,
+                last_error       TEXT,
+                updated_utc      TEXT NOT NULL
+            );
         """)
         self._db.commit()
         self._set('schema_version', SCHEMA_VERSION)
@@ -1332,6 +1481,12 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 7:
+            # carved_files and carving_state are created unconditionally
+            # above. Carving results were never stored before, so there is
+            # nothing to carry over.
+            self._db.commit()
 
         if version < 6:
             # file_findings is created unconditionally above; an older case
