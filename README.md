@@ -130,10 +130,12 @@ they describe. Bookmarks sit beside the findings in Triage and in the tree.
 
 ### 🗜 Archives without extracting
 
-ZIP, TAR, GZIP, BZIP2, XZ and 7z are browsed like folders straight from the
-image — nested archives too — and their members open in the viewers. Nothing is
-written to disk; encrypted members are reported as encrypted, and decompression
-bombs are refused.
+ZIP, TAR, GZIP, BZIP2, XZ, 7z and RAR are browsed like folders straight from
+the image — nested archives too — and their members open in the viewers.
+Nothing is written to disk; encrypted members are reported as encrypted, and
+decompression bombs are refused. RAR is listed in full, but only its stored
+(uncompressed) members can be opened: decompressing RAR needs the proprietary
+unrar tool, and evidence is never handed to an outside program.
 
 </td>
 </tr>
@@ -162,6 +164,10 @@ big SQLite database or PST is not cut off. A ZIP is named for what it is (a
 .docx, .apk...), and a carved archive opens like a folder. Embedded dates are
 kept with their source: LNK target times, EVTX first event, hive last write,
 Office core.xml, RTF \creatim, a PE's linker time (labelled as forgeable).
+**Files split in two are rebuilt** where their own structure proves the split:
+a ZIP's central directory or a PDF's cross-reference table gives the gap, and
+a checksum (the member's CRC-32, the stream's Adler-32) confirms where it
+falls. Each rebuilt file is listed with the pieces it was joined from.
 Carve one image or all of them, from unallocated space
 (an allocation map skips live files) or the whole image, from the Triage tab or
 as an analysis module. In a case each file is recorded with its image, offset,
@@ -478,22 +484,28 @@ python tools/carve_score.py 11-carve-fat.dd  # one image
 | Image | Files located | Byte-exact |
 |:--|:--:|:--:|
 | `11-carve-fat.dd` | 15 / 15 | — |
-| `12-carve-ext2.dd` | 10 / 10 | 1 / 1 |
-| `dfrws-2006-challenge.raw` | 25 / 27 | 10 / 10 |
-| `dfrws-2007-challenge.img` | 75 / 114 | 12 / 12 |
-| `carve-corpus.dd` | 45 / 45 | 45 / 45 |
+| `12-carve-ext2.dd` | 10 / 10 | 2 / 2 (1 rebuilt) |
+| `dfrws-2006-challenge.raw` | 27 / 27 | 12 / 12 (2 rebuilt) |
+| `dfrws-2007-challenge.img` | 78 / 114 | 16 / 16 (4 rebuilt) |
+| `carve-corpus.dd` | 51 / 51 | 51 / 51 |
 
 DFRWS 2007 is scored against its full official key — MP3, MPG, AVI, FLV, EXE,
 ELF and mail as well as the original types. The DFRWS images deliberately
-store most files fragmented; TRACE does not reassemble fragments, so
-byte-exact recovery is reported for the files a contiguous carver can
-reproduce, and every miss there is a fragmented or incomplete file.
+store most files fragmented. TRACE rebuilds ZIPs and PDFs stored in two
+fragments, in order — the two ZIPs DFRWS 2006 split, four of the DFRWS 2007
+PDFs, and a PDF on ext2 interrupted by its indirect block — byte-exact
+against the published MD5s. Anything else fragmented is located but not
+rebuilt: three or more pieces, pieces out of order, an encrypted PDF (its
+checksum is under the encryption), and formats without a structure that
+proves the split (JPEG, MP3, video). Every miss is a fragmented or
+incomplete file.
 
 `carve-corpus.dd` covers the formats those images do not hold. It is built by
-`tools/carve_corpus.py` from 45 real published files — test files from
-Pillow, python-docx, python-evtx, yarp, LnkParse3, java-libpst, CPython and
-the Matroska working group; release binaries of PuTTY, SQLite, BusyBox,
-ripgrep and JUnit; sample media — each pinned by SHA-256 and laid among
+`tools/carve_corpus.py` from 51 real published files — test files from
+Pillow, pillow-heif, python-docx, python-evtx, yarp, LnkParse3, java-libpst,
+rarfile, py7zr, CPython and the Matroska working group; release files of
+PuTTY, SQLite, BusyBox, ripgrep, JUnit and GNU hello (a pre-POSIX tar);
+sample media — each pinned by SHA-256 and laid among
 random filler with a decoy for every signature. Every file comes back
 byte-exact and no decoy is carved. CI builds and scores it on every push.
 Test images are not included — see `test_images/README.md` for sources and
@@ -513,6 +525,8 @@ checksums.
 [pylibmagic](https://github.com/kratsg/pylibmagic) ·
 [olefile](https://github.com/decalage2/olefile) ·
 [py7zr](https://github.com/miurahr/py7zr) ·
+[rarfile](https://github.com/markokr/rarfile) ·
+[pi-heif](https://github.com/bigcat88/pillow_heif) ·
 [Tabler Icons](https://tabler.io/icons)
 
 <br/>

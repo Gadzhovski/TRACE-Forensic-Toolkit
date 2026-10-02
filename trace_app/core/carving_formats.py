@@ -559,8 +559,44 @@ def _tar_checksum_ok(block):
     return stored == total
 
 
-def measure_tar(src, start):
-    """ustar headers walked, each checksummed, to the two zero blocks."""
+#: A V7 header's checksum field: six octal digits, then NUL and space (or
+#: the other way round), as tar has always written it.
+_V7_CHECKSUM = re.compile(rb'[0-7 ]{6}(\x00 | \x00|\x00\x00|  )')
+_V7_TYPES = frozenset(b'\x0001234567')
+
+
+def plausible_v7_header(block):
+    """Could this 512-byte block be a pre-POSIX (V7) tar header?
+
+    V7 tar has no magic -- bytes 257 on are zero -- so the header's own
+    checksum is what finds it, together with fields that must be printable
+    or octal. Random data almost never passes the checksum.
+    """
+    if len(block) < 512 or block[257:263] != b'\x00' * 6:
+        return False
+    if not _V7_CHECKSUM.fullmatch(block[148:156]):
+        return False
+    if block[156] not in _V7_TYPES or not 0x20 < block[0] < 0x7F:
+        return False
+    name = block[:100].split(b'\x00', 1)[0]
+    if not name or any(b < 0x20 or b > 0x7E for b in name):
+        return False
+    for field in (block[100:108], block[124:136], block[136:148]):
+        if not re.fullmatch(rb'[0-7 ]*\x00?[ \x00]*', field):
+            return False
+    return _tar_checksum_ok(block)
+
+
+def measure_tar_v7(src, start):
+    """A V7 tar, found by its header checksum (see plausible_v7_header)."""
+    if not plausible_v7_header(src.get(start, 512)):
+        return None
+    return measure_tar(src, start, v7=True)
+
+
+def measure_tar(src, start, v7=False):
+    """Headers walked, each checksummed, to the two zero blocks. ustar
+    headers carry their magic; V7 ones (`v7`) are checked field by field."""
     pos = start
     members = 0
     for _ in range(100000):
@@ -578,7 +614,10 @@ def measure_tar(src, start):
             if pad and pad == b'\x00' * len(pad):
                 pos = start + record
             return (pos - start, 'tar') if members else None
-        if block[257:262] != b'ustar' or not _tar_checksum_ok(block):
+        if v7:
+            if not plausible_v7_header(block):
+                return None
+        elif block[257:262] != b'ustar' or not _tar_checksum_ok(block):
             return None
         try:
             size = int(block[124:136].split(b'\x00')[0].strip() or b'0', 8)
@@ -586,6 +625,119 @@ def measure_tar(src, start):
             return None
         pos += 512 + (size + 511) // 512 * 512
         members += 1
+    return None
+
+
+SEVENZIP_SIGNATURE = b"7z\xbc\xaf\x27\x1c"
+
+
+def measure_7z(src, start):
+    """The signature header records where the end header is: the archive is
+    32 + next-header offset + next-header size bytes, both CRC-protected."""
+    head = src.get(start, 32)
+    if len(head) < 32 or head[:6] != SEVENZIP_SIGNATURE:
+        return None
+    if (zlib.crc32(head[12:32]) & 0xFFFFFFFF) != _u32le(head, 8):
+        return None
+    offset, size = _u64le(head, 12), _u64le(head, 20)
+    if not size or size > 64 * 1024 * 1024:
+        return None
+    tail = src.get(start + 32 + offset, size)
+    if len(tail) < size or \
+            (zlib.crc32(tail) & 0xFFFFFFFF) != _u32le(head, 28):
+        return None
+    return 32 + offset + size, '7z'
+
+
+RAR3_SIGNATURE = b'Rar!\x1a\x07\x00'
+RAR5_SIGNATURE = b'Rar!\x1a\x07\x01\x00'
+
+
+def measure_rar(src, start):
+    """RAR blocks walked, each header CRC-checked, to the end-of-archive
+    block. An archive whose headers are encrypted (RAR5 -hp) cannot be
+    walked and is not carved."""
+    head = src.get(start, 8)
+    if head.startswith(RAR5_SIGNATURE):
+        return _measure_rar5(src, start)
+    if head.startswith(RAR3_SIGNATURE):
+        return _measure_rar3(src, start)
+    return None
+
+
+def _measure_rar3(src, start):
+    pos = start + len(RAR3_SIGNATURE)
+    for _ in range(200000):
+        head = src.get(pos, 11)
+        if len(head) < 7:
+            return None
+        crc, kind, flags, size = struct.unpack_from('<HBHH', head, 0)
+        if size < 7 or kind < 0x72 or kind > 0x7B:
+            return None
+        header = src.get(pos, size)
+        if len(header) < size or \
+                (zlib.crc32(header[2:]) & 0xFFFF) != crc:
+            return None
+        extra = 0
+        if flags & 0x8000 or kind in (0x74, 0x7A):
+            if size < 11:
+                return None
+            extra = _u32le(header, 7)
+        if kind == 0x7B:                                  # end of archive
+            return pos + size - start, 'rar'
+        pos += size + extra
+    return None
+
+
+def _rar5_vint(data, at):
+    value = shift = 0
+    for i in range(10):
+        if at + i >= len(data):
+            return None
+        byte = data[at + i]
+        value |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            return value, i + 1
+    return None
+
+
+def _measure_rar5(src, start):
+    pos = start + len(RAR5_SIGNATURE)
+    for _ in range(200000):
+        head = src.get(pos, 4 + 3)
+        if len(head) < 5:
+            return None
+        crc = _u32le(head, 0)
+        got = _rar5_vint(src.get(pos + 4, 3), 0)
+        if got is None:
+            return None
+        header_size, width = got
+        if not 0 < header_size <= 2 * 1024 * 1024:
+            return None
+        header = src.get(pos + 4, width + header_size)
+        if len(header) < width + header_size or \
+                (zlib.crc32(header) & 0xFFFFFFFF) != crc:
+            return None
+        body = header[width:]
+        kind, used = _rar5_vint(body, 0) or (None, 0)
+        flags_at = used
+        flags, used = _rar5_vint(body, flags_at) or (None, 0)
+        if kind is None or flags is None:
+            return None
+        at = flags_at + used
+        data_size = 0
+        if flags & 0x01:                                  # extra area size
+            _extra, used = _rar5_vint(body, at) or (0, 1)
+            at += used
+        if flags & 0x02:                                  # data area size
+            data_size, used = _rar5_vint(body, at) or (0, 1)
+        if kind == 4:                                     # encrypted headers
+            return None
+        end = pos + 4 + width + header_size + data_size
+        if kind == 5:                                     # end of archive
+            return end - start, 'rar'
+        pos = end
     return None
 
 

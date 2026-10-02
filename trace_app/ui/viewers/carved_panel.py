@@ -53,10 +53,9 @@ _THUMBS_PER_TICK = 24
 _THUMB = 120
 
 #: Types shown as a rendered picture rather than an icon. Qt draws most;
-#: Pillow what Qt cannot. HEIC needs a decoder TRACE does not ship, so it
-#: keeps its icon.
+#: Pillow what Qt cannot -- AVIF, PSD, and HEIC through pi-heif.
 _PICTURE_TYPES = frozenset({'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp',
-                            'avif', 'psd', 'pdf'})
+                            'avif', 'heic', 'psd', 'pdf'})
 _VIDEO = ('mov', 'mp4', 'm4v', '3gp', 'wmv', 'avi', 'flv', 'mpg', 'mkv', 'webm')
 _AUDIO = ('wav', 'mp3', 'ogg', 'opus', 'm4a')
 _ARCHIVE = ('zip', 'gz', 'bz2', 'xz', 'tar', 'rar', '7z')
@@ -68,7 +67,19 @@ _ICON_FOR_TYPE = {
 }
 
 _COLUMNS = ['Name', 'Evidence', 'Type', 'Size', 'Offset', 'Embedded date',
-            'Date from', 'SHA-256', 'Saved to']
+            'Date from', 'Pieces', 'SHA-256', 'Saved to']
+
+
+def _pieces(row):
+    """(cell text, tooltip) for how a carved file was laid out on disk."""
+    fragments = row.get('fragments')
+    if not fragments:
+        return 'contiguous', "Carved as one run of bytes."
+    lines = [f"  {length:,} bytes at 0x{begin:x}" for begin, length in fragments]
+    return (f"rebuilt from {len(fragments)}",
+            "Reassembled: the file system had split this file, and its own "
+            "structure proved where. Joined from:\n"
+            + "\n".join(lines))
 
 
 def session_folder(label):
@@ -133,8 +144,9 @@ class CarvingWorker(QThread):
                 folder = session_folder(self.label)
                 count = [0]
 
-                def sink(content, file_type, offset):
-                    announce(write_carved(folder, content, file_type, offset))
+                def sink(content, file_type, offset, fragments=None):
+                    announce(write_carved(folder, content, file_type, offset,
+                                          fragments))
                     count[0] += 1
                 try:
                     carve_image(handler, self.file_types, sink,
@@ -387,7 +399,7 @@ class CarvedFilesPanel(QWidget):
             self._add_table_row(row, fit=False)
         self.table.setSortingEnabled(True)
         if rows:
-            fit_columns(self.table, {1: 220, 7: 140, 8: 320})
+            fit_columns(self.table, {1: 220, 8: 140, 9: 320})
             self.table.setColumnWidth(0, max(self.table.columnWidth(0), 160))
         if self.stack.currentIndex() == 1:
             self._rebuild_gallery()
@@ -447,6 +459,7 @@ class CarvedFilesPanel(QWidget):
         size = int(row.get('size') or 0)
         offset = int(row.get('offset') or 0)
         date = row.get('embedded_date') or UNKNOWN_DATE
+        pieces, pieces_tip = _pieces(row)
         values = [
             QTableWidgetItem(row.get('name') or ''),
             QTableWidgetItem(row.get('evidence_label') or ''),
@@ -455,6 +468,7 @@ class CarvedFilesPanel(QWidget):
             _SortItem(f"0x{offset:x}", offset),
             QTableWidgetItem(date),
             QTableWidgetItem(row.get('date_source') or ''),
+            QTableWidgetItem(pieces),
             QTableWidgetItem((row.get('sha256') or '')[:16] + '…'
                              if row.get('sha256') else ''),
             QTableWidgetItem(self._shown_path(row.get('path') or '')),
@@ -471,13 +485,14 @@ class CarvedFilesPanel(QWidget):
                 f"{(row.get('type') or '').upper()} carries no date in its "
                 "own data, and a carved file has no file-system record to "
                 "read one from.")
-        values[7].setToolTip(row.get('sha256') or '')
-        values[8].setToolTip(row.get('path') or '')
+        values[7].setToolTip(pieces_tip)
+        values[8].setToolTip(row.get('sha256') or '')
+        values[9].setToolTip(row.get('path') or '')
         for column, item in enumerate(values):
             self.table.setItem(position, column, item)
         self.table.setSortingEnabled(sorting)
         if fit and position == 0:
-            fit_columns(self.table, {1: 220, 7: 140, 8: 320})
+            fit_columns(self.table, {1: 220, 8: 140, 9: 320})
 
     def _shown_path(self, path):
         """Inside a case, the path from the case folder: it is shorter and

@@ -111,10 +111,9 @@ def is_valid_file(data, file_type):
         if validator is not None:
             return validator(data)
 
-        if kind in ('rar', '7z', 'html'):
-            # Carved by structure rather than parsed: the carver for each of
-            # these establishes its own end, and there is no cheap library
-            # check that adds anything beyond what it already proved.
+        if kind == 'html':
+            # Carved by structure: the carver establishes its own end from
+            # the document's tags, and no library check adds to that.
             return True
 
     except (IOError, OSError, UnidentifiedImageError, ValueError, RuntimeError,
@@ -491,6 +490,16 @@ def _remeasure(measure, data, *args):
     return bool(result) and result[0] == len(data)
 
 
+def _valid_rar(data):
+    from trace_app.core.carving_formats import measure_rar
+    return _remeasure(measure_rar, data)
+
+
+def _valid_7z(data):
+    from trace_app.core.carving_formats import measure_7z
+    return _remeasure(measure_7z, data)
+
+
 def _valid_avi(data):
     if not _valid_riff(data, b'AVI '):
         return False
@@ -689,6 +698,7 @@ _VALIDATORS = {
     'bz2': _valid_bz2, 'xz': _valid_xz, 'rtf': _valid_rtf,
     'elf': _valid_elf, 'macho': _valid_macho, 'psd': _valid_psd,
     'mbox': _valid_mbox, 'eml': _valid_eml,
+    'rar': _valid_rar, '7z': _valid_7z,
 }
 
 

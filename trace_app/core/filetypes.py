@@ -38,12 +38,13 @@ HEAD_BYTES = 8192
 # --- by extension -------------------------------------------------------------
 
 #: Images. Qt decodes most of these itself; Pillow covers the rest (AVIF,
-#: JPEG 2000, PSD, PCX, DDS) -- see the picture viewer.
+#: JPEG 2000, PSD, PCX, DDS, and HEIC through pi-heif) -- see the picture
+#: viewer.
 IMAGE_EXTENSIONS = {
     'jpg', 'jpeg', 'jpe', 'jfif', 'png', 'apng', 'bmp', 'dib', 'gif', 'webp',
     'tif', 'tiff', 'ico', 'cur', 'icns', 'svg', 'svgz', 'tga', 'pbm', 'pgm',
     'ppm', 'pnm', 'xbm', 'xpm', 'avif', 'jp2', 'j2k', 'jpf', 'jpx', 'psd',
-    'pcx', 'dds',
+    'pcx', 'dds', 'heic', 'heif',
 }
 
 #: Paged documents PyMuPDF opens, by extension -> its filetype name.

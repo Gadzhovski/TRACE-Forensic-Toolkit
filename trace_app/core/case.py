@@ -44,7 +44,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -947,11 +947,25 @@ class Case:
         self._db.execute(
             "INSERT INTO carved_files (evidence_id, artifact_ref, name, path, "
             "offset, size, type, sha256, embedded_date, date_source, "
-            "carved_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "carved_utc, fragments) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (evidence_id, make_span_ref(0, offset, offset + size),
              record['name'], path, offset, size, record['type'],
              record.get('sha256'), record.get('embedded_date'),
-             record.get('date_source'), _utc_now()))
+             record.get('date_source'), _utc_now(),
+             json.dumps(record['fragments']) if record.get('fragments')
+             else None))
+
+    def carved_fragments(self, evidence_id, offset):
+        """[(offset, length), ...] of the file carved at `offset` if it was
+        rebuilt from fragments; None if it is one contiguous run."""
+        row = self._db.execute(
+            "SELECT fragments FROM carved_files WHERE evidence_id = ? AND "
+            "offset = ? AND fragments IS NOT NULL LIMIT 1",
+            (evidence_id, offset)).fetchone()
+        try:
+            return json.loads(row[0]) if row else None
+        except ValueError:
+            return None
 
     def carved_files(self, evidence_id=None, file_type=None, limit=20000):
         """Carved files in image order, with an absolute `path`."""
@@ -970,6 +984,10 @@ class Case:
             row = dict(row)
             if not os.path.isabs(row['path']):
                 row['path'] = os.path.join(self.folder, row['path'])
+            try:
+                row['fragments'] = json.loads(row.get('fragments') or 'null')
+            except ValueError:
+                row['fragments'] = None
             rows.append(row)
         return rows
 
@@ -1425,7 +1443,9 @@ class Case:
             -- inode, so it is referenced by the byte span it was found at
             -- (make_span_ref), which is also what names it on disk. The copy
             -- lives under carved/<evidence>/; `path` is relative to the case
-            -- folder, so a case that moves keeps finding it.
+            -- folder, so a case that moves keeps finding it. `fragments` is
+            -- JSON [[offset, length], ...] for a file rebuilt from the pieces
+            -- the file system split it into; NULL if it was contiguous.
             CREATE TABLE IF NOT EXISTS carved_files (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
                 evidence_id    INTEGER NOT NULL
@@ -1439,7 +1459,8 @@ class Case:
                 sha256         TEXT,
                 embedded_date  TEXT,
                 date_source    TEXT,
-                carved_utc     TEXT NOT NULL
+                carved_utc     TEXT NOT NULL,
+                fragments      TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_carved_evidence
                 ON carved_files(evidence_id, offset);
@@ -1481,6 +1502,16 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 8:
+            # A carved file may be reassembled from fragments; where they lie
+            # is recorded with it. Older carves were all contiguous: NULL.
+            try:
+                self._db.execute(
+                    "ALTER TABLE carved_files ADD COLUMN fragments TEXT")
+            except sqlite3.OperationalError:
+                pass        # already present (created above at v8)
+            self._db.commit()
 
         if version < 7:
             # carved_files and carving_state are created unconditionally

@@ -33,6 +33,8 @@ files". `pumpkin.jpg` is an EXIF photo whose embedded thumbnail terminates with
 `surf.mov` begins at a `moov` atom with no `ftyp`. The boot sector is corrupted
 on purpose, so the volume will not mount. `12-carve-ext2.dd` fragments almost
 everything across indirect blocks; only `main_dive.jpg` is contiguous.
+`lin_test.pdf` is in exactly two pieces -- its first twelve blocks, then the
+rest after the indirect block -- the case reassembly rebuilds.
 
 **DFRWS 2006 and 2007** are raw images with no filesystem, built specifically
 to break carvers. 2006 lays out 32 files in 22 named scenarios, several of
@@ -44,9 +46,12 @@ which target carving heuristics directly:
 - **3i** is a 24 MB JPEG, larger than many tools' default maximum
 - **1d**, **3h** intertwine two files of the same type
 
-2007 deepened this: 54 files of types TRACE carves, of which **only 5 are
-contiguous**. It also contains MP3, MPG, EXE, FLV, AVI and mbox data that TRACE
-does not carve and the harness does not score.
+2007 deepened this: of the 54 originally scored files **only 5 are
+contiguous**, and its full key (114 files once MP3, MPG, EXE, ELF, AVI, FLV
+and mail are counted) is what the harness scores. The fragmented ZIPs of 2006
+and the in-order, two-fragment PDFs of 2007 are what reassembly is measured
+against; 4.pdf is two in-order fragments too, but encrypted, so its split
+cannot be proved and it is (correctly) not rebuilt.
 
 ## The rest of the DFTT suite
 
@@ -187,9 +192,9 @@ a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA
 python tools/carve_corpus.py
 ```
 
-It fetches 45 real published files of the formats the DFTT/DFRWS images do
+It fetches 51 real published files of the formats the DFTT/DFRWS images do
 not hold (SQLite, PST, EVTX, registry hives, LNK, Office Open XML, HEIC,
-Opus, Matroska, Mach-O and more) into `carve_samples/`, checks each against
+Opus, Matroska, Mach-O, RAR3/RAR5, 7z, a pre-POSIX V7 tar and more) into `carve_samples/`, checks each against
 its pinned SHA-256, and lays them out with a fixed seed -- so the image, and
 its answer key in `tools/carve_ground_truth.json`, are the same every time.
 

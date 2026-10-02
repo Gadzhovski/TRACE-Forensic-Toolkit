@@ -443,3 +443,76 @@ def test_carving_can_be_cancelled_and_keeps_what_it_found(tmp_path):
     finally:
         handler.close_resources()
         case.close()
+
+
+# --- RAR, listed without unrar ------------------------------------------------------
+
+#: Two archives from rarfile's own test suite (ISC licence): a RAR3 with one
+#: stored member, and a solid RAR5 whose members are compressed.
+RAR3_STORED = (
+    'UmFyIRoHAM+QcwAADQAAAAAAAABJBHQgkC4AAAAAAAAAAAACAAAAAJerqj4dMAkAIAAAAGFm'
+    'aWxlLnR4dADwqzqJxD17AEAHAA==')
+RAR5_SOLID = (
+    'UmFyIRoHAQAJ78hvCwEFBwQGAQGAgIAA3vVwchwCAroABIAQtoMCoua3xYAbAQpzdGVzdDEu'
+    'dHh0waw3REQj+iP2l/1iU1G+TJGBQQKMwQN5XL9Ho6otoDaT3aBYAEACANRQBHb2xH8y6p8y'
+    'pcTM14PfABDoLYkcAgKNAASAELaDAqLmt8XAGwEKc3Rlc3QyLnR4dEUVCmABAAgD37f79vwd'
+    'd1ZRAwUEAA==')
+
+
+def test_rar_is_listed_and_stored_members_read_without_external_tools(
+        monkeypatch):
+    """Names, sizes and dates come from pure Python; a stored member is
+    read; a compressed one is reported -- and no program is ever started,
+    whatever is installed."""
+    import base64
+    import subprocess
+    from trace_app.core import archives
+
+    def no_programs(*args, **kwargs):
+        raise AssertionError(f"started an external program: {args[0]}")
+    monkeypatch.setattr(subprocess, 'Popen', no_programs)
+
+    stored = base64.b64decode(RAR3_STORED)
+    members = archives.list_members(stored)
+    assert [(m['name'], m['size'], m['compressed']) for m in members] == \
+        [('afile.txt', 0, False)]
+    assert members[0]['modified'].startswith('2011-05-10')
+    assert archives.read_member(stored, 'afile.txt') == b''
+
+    solid = base64.b64decode(RAR5_SOLID)
+    members = archives.list_members(solid)
+    assert [(m['name'], m['size']) for m in members] == \
+        [('stest1.txt', 2048), ('stest2.txt', 2048)]
+    with pytest.raises(archives.ArchiveError, match='unrar'):
+        archives.read_member(solid, 'stest1.txt')
+
+
+def test_rar_and_7z_are_sized_from_their_structure():
+    import base64
+    from trace_app.core import carving_formats as formats
+    for blob in (RAR3_STORED, RAR5_SOLID):
+        data = base64.b64decode(blob)
+        padded = data + os.urandom(4096)
+        assert formats.measure_rar(formats.Source(padded, 0), 0) == \
+            (len(data), 'rar')
+    import py7zr
+    buffer = io.BytesIO()
+    with py7zr.SevenZipFile(buffer, 'w') as archive:
+        archive.writestr(b'ledger ' * 2000, 'ledger.txt')
+    data = buffer.getvalue()
+    assert formats.measure_7z(formats.Source(data + os.urandom(4096), 0), 0) \
+        == (len(data), '7z')
+
+
+@pytest.mark.images
+def test_heic_photos_give_up_their_exif():
+    """pi-heif teaches Pillow HEIC, so an iPhone/camera HEIC is a photo like
+    any other -- previewed, and its EXIF read by the photo module."""
+    pytest.importorskip('pi_heif')
+    from trace_app.core.content_checks import photo_metadata
+    path = os.path.join(os.path.dirname(image_path('carve-corpus.dd')),
+                        'carve_samples', 'L_exif_xmp_iptc.heic')
+    with open(path, 'rb') as handle:
+        facts = photo_metadata(handle.read())
+    assert facts['make'] == 'SONY' and facts['model'] == 'ILCE-7SM3'
+    assert facts['taken'] == '2020:09:14 11:09:34'

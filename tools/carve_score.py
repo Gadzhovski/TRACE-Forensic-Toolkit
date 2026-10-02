@@ -37,15 +37,27 @@ TRUTH = os.path.join(HERE, 'carve_ground_truth.json')
 BASELINE = {
     '11-carve-fat.dd': 15,      # every planted file of a supported type
     '12-carve-ext2.dd': 10,     # likewise
-    'dfrws-2006-challenge.raw': 25,  # 27 planted; the 2 misses are frag'd ZIPs
+    # 27 planted. The 2 that were missed are ZIPs in two fragments, now
+    # rebuilt by reassembly (core/reassembly.py) -- byte-exact.
+    'dfrws-2006-challenge.raw': 27,
     # 114 planted of carvable types once MP3/MPG/AVI/FLV/EXE/ELF/mbox were
     # added (30 of the original 54); every miss is fragmented or incomplete.
     # Mail recovered as .eml -- the challenge's ".mbox" files are saved
-    # RFC 5322 messages -- raised this from 63.
-    'dfrws-2007-challenge.img': 75,
+    # RFC 5322 messages -- raised this from 63. Reassembly of the PDFs in
+    # two fragments, in order, raised it to 78.
+    'dfrws-2007-challenge.img': 78,
     # Real published files of 40+ formats (tools/carve_corpus.py): every one,
     # byte-exact, and none of its 21 signature decoys.
-    'carve-corpus.dd': 45,
+    'carve-corpus.dd': 51,
+}
+
+#: Files rebuilt from two fragments, byte-exact against the key. Gated like
+#: the score: a change that loses one is a regression even if a contiguous
+#: carve still "locates" the file.
+REBUILT_BASELINE = {
+    '12-carve-ext2.dd': 1,              # lin_test.pdf: ext2's indirect block
+    'dfrws-2006-challenge.raw': 2,      # 4b.zip, 4c.zip
+    'dfrws-2007-challenge.img': 4,      # 2.pdf, 3.pdf, 13.pdf, 14.pdf
 }
 
 #: How close a recovered offset must be to the documented one to count as the
@@ -64,8 +76,8 @@ def carve_image(path):
     found = []
     with open(path, 'rb') as handle:
         data = handle.read()
-    carver = Carver(lambda content, file_type, offset:
-                    found.append((file_type, offset, content)),
+    carver = Carver(lambda content, file_type, offset, fragments=None:
+                    found.append((file_type, offset, content, fragments)),
                     reader=lambda offset, length: data[offset:offset + length],
                     image_size=len(data))
 
@@ -79,7 +91,10 @@ def carve_image(path):
                 function(carver, chunk, offset)
             except Exception as exc:
                 print(f"    !! {name} raised {type(exc).__name__}: {exc}")
+        carver.note_unfinished(chunk, offset, Carver.REASSEMBLERS,
+                               limit=CHUNK_SIZE)
         offset += CHUNK_SIZE
+    carver.reassemble_fragmented()
     return found
 
 
@@ -91,13 +106,15 @@ def score(image_name, truth, found):
     """Compare one image's results against its key. Returns (hits, total)."""
     expected = [f for f in truth['files']
                 if f.get('recoverable') and f.get('offset')]
-    by_offset = {off: (kind, blob) for kind, off, blob in found}
+    by_offset = {off: (kind, blob, pieces)
+                 for kind, off, blob, pieces in found}
 
     print(f"\n=== {image_name}")
     print(f"    {truth['title']}")
     print(f"    {truth['source']}\n")
 
     hits = 0
+    rebuilt = 0
     exact = 0
     exact_possible = 0
     for item in expected:
@@ -114,6 +131,10 @@ def score(image_name, truth, found):
                     exact += 1
                     exact_possible += 1
                     detail += ", MD5 matches key"
+                    if got[2]:
+                        rebuilt += 1
+                        detail += (f" -- reassembled from {len(got[2])} "
+                                   f"fragments")
                 elif _is_fragmented(item):
                     # Expected: the file's blocks are not adjacent on disk, so
                     # a contiguous carve cannot reproduce it. Locating it is
@@ -139,7 +160,7 @@ def score(image_name, truth, found):
 
     # Anything carved that the key does not account for.
     known = {int(f['offset'], 16) for f in truth['files'] if f.get('offset')}
-    extras = [(k, o, len(b)) for k, o, b in found if o not in known]
+    extras = [(k, o, len(b)) for k, o, b, _ in found if o not in known]
     if extras:
         print(f"\n    {len(extras)} unaccounted carve(s):")
         flagged = {int(f['offset'], 16): f['note']
@@ -150,8 +171,13 @@ def score(image_name, truth, found):
             print(f"      {kind:4} @0x{off:<10x} {size:>12,} bytes{tag}")
 
     if exact_possible:
-        print(f"\n    byte-exact: {exact}/{exact_possible} of the files a "
-              f"contiguous carver can reproduce")
+        print(f"\n    byte-exact: {exact}/{exact_possible} of the files "
+              f"TRACE can reproduce ({rebuilt} reassembled from fragments)")
+    least = REBUILT_BASELINE.get(image_name)
+    if least is not None and rebuilt < least:
+        print(f"    REASSEMBLY REGRESSION: {rebuilt} rebuilt "
+              f"(baseline {least})")
+        hits = -1               # fails the run below, whatever the count
 
     total = len(expected)
     base = BASELINE.get(image_name)
@@ -186,7 +212,7 @@ def main():
             print(f"\n=== {name}\n    not present in test_images/ -- skipped")
             continue
         hits, total, base = score(name, truth[name], carve_image(path))
-        if base is not None and hits < base:
+        if hits < 0 or (base is not None and hits < base):
             regressed = True
 
     print()

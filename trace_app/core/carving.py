@@ -15,9 +15,13 @@ overlapping reads find it. `write_carved` is the usual sink's body: it writes
 the file, named after the absolute offset it was found at, and returns what
 is known about it.
 
-A carver abandons a file that runs off the end of its buffer, so a file
-larger than CARVE_OVERLAP that straddles a chunk boundary is found only if it
-also starts within the next read. Fragmented files are not reassembled.
+Most carvers read past their buffer through the image, so a file's size is
+not limited by the read. A file the file system split in two is rebuilt only
+where its own structure proves the split (ZIP and PDF -- see
+core/reassembly.py): headers that start a sector but carve to nothing
+contiguous are tried once more after the scan, and a rebuilt file reaches the
+sink with `fragments=[(offset, length), ...]`, the physical pieces it was
+joined from.
 """
 
 import bisect
@@ -32,6 +36,7 @@ import zipfile
 import zlib
 
 from trace_app.core import carving_formats as formats
+from trace_app.core import reassembly
 from trace_app.core.carving_signatures import (extract_original_timestamp,
                                               is_valid_file)
 from trace_app.core.image_handler import ImageHandler
@@ -158,6 +163,12 @@ class Carver:
         #: the image keeps other files, so skipping everything inside it
         #: loses them (two real files on DFRWS 2007 when this was global).
         self._spans = {}
+        #: Sector-aligned headers of formats that can be reassembled, by
+        #: family -- tried again after the scan if nothing was carved there.
+        self._unfinished = {}
+        #: Carves that contradict their own structure, held back until
+        #: reassembly has had its chance: offset -> (content, file_type).
+        self._deferred = {}
 
     def inside_carved(self, offset, family=None):
         """Is `offset` inside (not at the start of) a file already carved --
@@ -175,7 +186,7 @@ class Carver:
     def wants(self, file_type):
         return self.wanted is None or file_type in self.wanted
 
-    def save_file(self, file_content, file_type, offset):
+    def save_file(self, file_content, file_type, offset, fragments=None):
         if not self.wants(file_type):
             return
         key = (offset, file_type)
@@ -183,10 +194,113 @@ class Carver:
             return
         self._seen.add(key)
         family = EXTENSION_CARVER.get(file_type, file_type)
-        bisect.insort(self._spans.setdefault(family, []),
-                      (offset, offset + len(file_content)))
+        for begin, length in fragments or [(offset, len(file_content))]:
+            bisect.insort(self._spans.setdefault(family, []),
+                          (begin, begin + length))
         self.found += 1
-        self._sink(file_content, file_type, offset)
+        if fragments:
+            self._sink(file_content, file_type, offset, fragments=fragments)
+        else:
+            self._sink(file_content, file_type, offset)
+
+    # --- two-fragment files ------------------------------------------------
+
+    #: family -> (header, reassembler). Only formats whose structure records
+    #: where their parts lie, with a checksum to confirm the split.
+    REASSEMBLERS = {
+        'zip': (ZIP_LOCAL_HEADER, reassembly.reassemble_zip),
+        'pdf': (PDF_HEADER, reassembly.reassemble_pdf),
+    }
+
+    #: Reassembly attempts per run. Each reads up to the format's cap past
+    #: its header, so an image littered with truncated PDFs is bounded.
+    MAX_REASSEMBLY_ATTEMPTS = 1000
+
+    def note_unfinished(self, chunk, base_offset, families, limit=None):
+        """Remember every sector-aligned header of a reassemblable format in
+        the first `limit` bytes of `chunk` (the part not read again next)."""
+        end = len(chunk) if limit is None else min(limit, len(chunk))
+        for family in families:
+            if family not in self.REASSEMBLERS:
+                continue
+            header = self.REASSEMBLERS[family][0]
+            hit = chunk.find(header, 0, end)
+            while hit != -1:
+                if (base_offset + hit) % SECTOR_SIZE == 0:
+                    self._unfinished.setdefault(family, set()).add(
+                        base_offset + hit)
+                hit = chunk.find(header, hit + 1, end)
+
+    def _save_pdf(self, content, offset):
+        """Keep a contiguous PDF carve -- unless its own cross-reference
+        tables say it was carved across a gap. PyMuPDF opens such a file
+        regardless, so it is held back for reassembly to try first, and kept
+        as carved only if no split can be proved."""
+        if offset in self._deferred:
+            return              # found again by the next, overlapping read
+        if self.wants('pdf') and reassembly.pdf_contradicts_itself(content):
+            self._deferred[offset] = (content, 'pdf')
+            self._unfinished.setdefault('pdf', set()).add(offset)
+        else:
+            self.save_file(content, 'pdf', offset)
+
+    def _carved_at(self, offset, family):
+        """Did a carve of `family` begin at `offset`? (A header inside
+        another carve is still tried: a contiguous carve of a fragmented file
+        runs on into whatever lies in its gap.)"""
+        spans = self._spans.get(family, [])
+        index = bisect.bisect_left(spans, (offset, -1))
+        return index < len(spans) and spans[index][0] == offset
+
+    def reassemble_fragmented(self, allocated=None, should_stop=None):
+        """Try each remembered header nothing was carved from as a file in
+        two fragments. With `allocated`, a rebuild that would take a piece
+        from allocated space is refused: that piece belongs to a live file.
+        Held-back carves are kept as carved where no rebuild is proved --
+        also when the examiner stops the run here."""
+        try:
+            self._reassemble(allocated, should_stop)
+        finally:
+            for offset, (content, file_type) in sorted(self._deferred.items()):
+                self.save_file(content, file_type, offset)
+            self._deferred.clear()
+
+    def _reassemble(self, allocated, should_stop):
+        attempts = 0
+        for family, offsets in self._unfinished.items():
+            header, reassemble = self.REASSEMBLERS[family]
+            cap = CARVE_MAX_SIZE.get(family)
+            for offset in sorted(offsets):
+                if should_stop and should_stop():
+                    raise CarvingCancelled()
+                if self._carved_at(offset, family):
+                    continue
+                attempts += 1
+                if attempts > self.MAX_REASSEMBLY_ATTEMPTS:
+                    logger.info("Reassembly stopped after %d attempts",
+                                self.MAX_REASSEMBLY_ATTEMPTS)
+                    return
+                source = formats.Source(b'', offset, self._reader,
+                                        self._image_size)
+                try:
+                    rebuilt = reassemble(source, offset, cap)
+                except (struct.error, ValueError, IndexError, OverflowError,
+                        zlib.error) as exc:
+                    logger.debug("Reassembly at %d failed: %s", offset, exc)
+                    rebuilt = None
+                if not rebuilt:
+                    continue
+                content, fragments = rebuilt
+                if allocated and any(
+                        self.is_offset_allocated(begin, length, allocated)
+                        for begin, length in fragments):
+                    continue
+                file_type = self._zip_kind(content) if family == 'zip' \
+                    else family
+                if is_valid_file(content, file_type):
+                    self._deferred.pop(offset, None)
+                    self.save_file(content, file_type, offset,
+                                   fragments=fragments)
 
     @staticmethod
     def is_offset_allocated(offset, chunk_size, allocation_map):
@@ -267,7 +381,7 @@ class Carver:
                         file_size = int(chunk[file_size_start:file_size_end].split()[0])
                         pdf_content = chunk[start_index:start_index + file_size]
                         if is_valid_file(pdf_content, 'pdf'):
-                            self.save_file(pdf_content, 'pdf', global_offset + start_index)
+                            self._save_pdf(pdf_content, global_offset + start_index)
                             offset = start_index + file_size
                             continue
                     except ValueError:
@@ -277,7 +391,7 @@ class Carver:
                 end_index += len(pdf_end_signature)
                 pdf_content = chunk[start_index:end_index]
                 if is_valid_file(pdf_content, 'pdf'):
-                    self.save_file(pdf_content, 'pdf', global_offset + start_index)
+                    self._save_pdf(pdf_content, global_offset + start_index)
                 offset = end_index
             else:
                 offset = start_index + 1
@@ -408,33 +522,42 @@ class Carver:
         """
         self._carve_atom_chain(chunk, base_offset)
 
+    #: The atom names a QuickTime/MP4 file can open with, found in one pass.
+    _ATOM_ANCHOR_RE = re.compile(rb'(?=(ftyp|moov|mdat|free|skip|wide|pnot))')
+
     def _carve_atom_chain(self, chunk, base_offset):
+        """Walk every plausible atom chain in the chunk, in order.
+
+        The candidates come from one regex pass over the chunk. Searching for
+        each of the seven names again after every rejected candidate made
+        this quadratic: `free` is an English word, and a chunk of ordinary
+        text -- a GPL notice, a mail spool -- held thousands of candidates,
+        each costing seven scans of the rest of a 36 MB chunk.
+        """
         cap = max(CARVE_MAX_SIZE.get('mov', 0), CARVE_MAX_SIZE.get('mp4', 0))
+        more = (self._image_size is not None and
+                base_offset + len(chunk) < self._image_size)
         cursor = 0
-        while cursor + 8 <= len(chunk):
-            anchor = self._next_atom_start(chunk, cursor)
-            if anchor is None:
-                break
+        for match in self._ATOM_ANCHOR_RE.finditer(chunk, 4):
+            anchor = match.start() - 4
+            if anchor < cursor:
+                continue
+            size = int.from_bytes(chunk[anchor:anchor + 4], 'big')
+            if not (size == 0 or size == 1 or size >= 8):
+                continue
             if self.inside_carved(base_offset + anchor, family='isobmff'):
                 # Atoms nested in a file already carved -- a HEIC's items, a
                 # video's tracks -- are that file, not another one.
-                cursor = anchor + 4
                 continue
 
-            end = self._walk_atoms(chunk, anchor, cap)
+            end = self._walk_atoms(chunk, anchor, cap, more_follows=more)
             if end is None:
-                # Not a real chain; resume just past this candidate rather
-                # than past the span it would have covered.
-                cursor = anchor + 4
                 continue
-
             content = chunk[anchor:end]
             file_type = formats.isobmff_kind(content)
             if self.wants(file_type) and is_valid_file(content, file_type):
                 self.save_file(content, file_type, base_offset + anchor)
                 cursor = end
-            else:
-                cursor = anchor + 4
 
     @staticmethod
     def _next_atom_start(chunk, cursor):
@@ -455,12 +578,20 @@ class Carver:
         return best
 
     @staticmethod
-    def _walk_atoms(chunk, start, cap):
+    def _walk_atoms(chunk, start, cap, more_follows=False):
         """End offset of the atom chain beginning at `start`, or None.
 
         Returns None when the chain is not one: a single atom proves nothing,
         because four printable bytes preceded by a plausible length occur in
         ordinary data.
+
+        `more_follows`: the image continues past this chunk. An atom running
+        off the chunk's end then means the file is not whole in this read,
+        and the walk declines rather than end at the last atom it saw -- a
+        later chunk holds the file whole. Ending there carved a video's
+        header atoms alone as "the file" (3,898 bytes of a 957,162-byte MP4)
+        whenever it began near a chunk's end, and that truncated carve then
+        took the file's offset.
         """
         pos = start
         atoms = 0
@@ -475,8 +606,13 @@ class Carver:
                 break
             if size == 1:
                 if pos + 16 > len(chunk):
+                    if more_follows:
+                        return None
                     break
                 size = int.from_bytes(chunk[pos + 8:pos + 16], 'big')
+            if size >= 8 and pos + size > len(chunk) and more_follows and \
+                    not (cap and (pos + size) - start > cap):
+                return None
             if size < 8 or pos + size > len(chunk):
                 break
             if cap and (pos + size) - start > cap:
@@ -884,9 +1020,20 @@ class Carver:
                 cursor = start_index + len(GZIP_HEADER)
 
     def carve_rar_files(self, chunk, base_offset):
+        """RAR3 and RAR5, sized by walking their CRC-checked blocks."""
+        self._carve_sized(chunk, base_offset, (formats.RAR5_SIGNATURE,
+                                               formats.RAR3_SIGNATURE),
+                          formats.measure_rar)
+
+    def _carve_rar_files_by_marker(self, chunk, base_offset):
         self._carve_by_marker(chunk, base_offset, 'rar', RAR_HEADER)
 
     def carve_7z_files(self, chunk, base_offset):
+        """7z, sized by the end-header pointer in its signature header."""
+        self._carve_sized(chunk, base_offset, (formats.SEVENZIP_SIGNATURE,),
+                          formats.measure_7z)
+
+    def _carve_7z_files_by_marker(self, chunk, base_offset):
         self._carve_by_marker(chunk, base_offset, '7z', SEVENZIP_HEADER)
 
     def _carve_by_marker(self, chunk, base_offset, file_type, header):
@@ -1002,30 +1149,35 @@ class Carver:
                 offset = base_offset + start
                 if aligned and not self._starts_a_file(offset):
                     continue
-                if (offset, None) in self._seen:
-                    continue
-                if self.inside_carved(offset, family=self._family(measure)):
-                    continue
-                try:
-                    measured = measure(source, offset, *args)
-                except (struct.error, ValueError, IndexError, OverflowError,
-                        TypeError):
-                    measured = None
-                if not measured:
-                    continue
-                size, file_type = measured
-                if not self.wants(file_type):
-                    continue
-                cap = CARVE_MAX_SIZE.get(file_type)
-                if size < CARVE_MIN_SIZE or (cap and size > cap):
-                    continue
-                content = source.get(offset, size)
-                if len(content) != size:
-                    continue
-                if is_valid_file(content, file_type):
-                    self.save_file(content, file_type, offset)
-                    # A later signature inside this file is part of it.
-                    self._seen.add((offset, None))
+                self._try_carve(source, offset, measure, args,
+                                self._family(measure))
+
+    def _try_carve(self, source, offset, measure, args, family):
+        """Measure, read, validate and keep one candidate at `offset`."""
+        if (offset, None) in self._seen:
+            return
+        if self.inside_carved(offset, family=family):
+            return
+        try:
+            measured = measure(source, offset, *args)
+        except (struct.error, ValueError, IndexError, OverflowError,
+                TypeError):
+            measured = None
+        if not measured:
+            return
+        size, file_type = measured
+        if not self.wants(file_type):
+            return
+        cap = CARVE_MAX_SIZE.get(file_type)
+        if size < CARVE_MIN_SIZE or (cap and size > cap):
+            return
+        content = source.get(offset, size)
+        if len(content) != size:
+            return
+        if is_valid_file(content, file_type):
+            self.save_file(content, file_type, offset)
+            # A later signature inside this file is part of it.
+            self._seen.add((offset, None))
 
     #: The family each measuring function carves for. MP3 is checked against
     #: every family: its frame sync is weak enough to occur in any audio or
@@ -1089,6 +1241,19 @@ class Carver:
         self._carve_sized(chunk, base_offset, (b'ustar',), formats.measure_tar,
                           True, 257)
 
+    def carve_tar_v7_files(self, chunk, base_offset):
+        """Pre-POSIX tars have no magic to search for: every sector start
+        whose block passes a tar header's own checksum is tried instead."""
+        source = formats.Source(chunk, base_offset, self._reader,
+                                self._image_size)
+        first = -base_offset % formats.SECTOR
+        for rel in range(first, len(chunk) - 511, formats.SECTOR):
+            if chunk[rel + 257:rel + 263] != b'\x00' * 6 or \
+                    not formats._V7_CHECKSUM.fullmatch(chunk[rel + 148:rel + 156]):
+                continue
+            self._try_carve(source, base_offset + rel, formats.measure_tar_v7,
+                            (), 'tar')
+
     def carve_bz2_files(self, chunk, base_offset):
         self._carve_sized(chunk, base_offset, (b'BZh',), formats.measure_bz2,
                           True, 0, CARVE_MAX_SIZE['bz2'])
@@ -1151,6 +1316,7 @@ class Carver:
         'mpg': carve_mpg_files,
         'mkv': carve_mkv_files,
         'tar': carve_tar_files,
+        'tar_v7': carve_tar_v7_files,
         'bz2': carve_bz2_files,
         'xz': carve_xz_files,
         'rtf': carve_rtf_files,
@@ -1169,7 +1335,8 @@ class Carver:
 #: as files of their own. MP3 last -- its frame sync is the weakest signature.
 _CARVE_ORDER = [
     'pst', 'sqlite', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
-    'ogg', 'wmv', 'zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar', 'ole', 'pdf',
+    'ogg', 'wmv', 'zip', 'tar', 'tar_v7', 'gz', 'bz2', 'xz', '7z', 'rar',
+    'ole', 'pdf',
     'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'tiff',
     'png',
     'gif', 'bmp', 'jpg', 'mp3',
@@ -1208,8 +1375,10 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     with everything found so far already handed to the sink.
     """
     wanted = {t.lower() for t in file_types if t.lower() in EXTENSION_CARVER}
-    families = sorted({EXTENSION_CARVER[t] for t in wanted},
-                      key=_CARVE_ORDER.index)
+    families = {EXTENSION_CARVER[t] for t in wanted}
+    if 'tar' in families:
+        families.add('tar_v7')          # the same type, without a magic
+    families = sorted(families, key=_CARVE_ORDER.index)
     if not families:
         return 0
     allocated = allocation_map(image_handler) if unallocated_only else []
@@ -1251,11 +1420,23 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
                 # One malformed span must not end the scan.
                 logger.warning("%s carver failed at offset %d: %s: %s",
                                family, offset, type(exc).__name__, exc)
+        carver.note_unfinished(chunk, offset, families, limit=CHUNK_SIZE)
         offset += CHUNK_SIZE
 
+    carver.reassemble_fragmented(allocated, should_stop)
     if progress:
         progress(size, size, carver.found)
     return carver.found
+
+
+def read_carved(read, offset, size, fragments=None):
+    """A carved file's bytes, read back from the image with `read(offset,
+    length)`: the run at `offset`, or -- for a file rebuilt from fragments --
+    each piece in turn. None if the image no longer gives them all."""
+    pieces = fragments or [(offset, size)]
+    content = b''.join(read(int(begin), int(length))
+                       for begin, length in pieces)
+    return content if len(content) == size else None
 
 
 def carved_name(offset, file_type):
@@ -1263,8 +1444,12 @@ def carved_name(offset, file_type):
     return f"{offset:x}.{file_type}"
 
 
-def write_carved(folder, content, file_type, offset):
+def write_carved(folder, content, file_type, offset, fragments=None):
     """Write one carved file into `folder`; return what is known about it.
+
+    `fragments` -- [(offset, length), ...] -- for a file rebuilt from pieces
+    the file system had split; it stays with the record, since a rebuilt file
+    is a conclusion the examiner may need to show working for.
 
     Only a date the file carries in its own bytes means anything: a carved
     file has no directory entry, so its file-system times are gone, and
@@ -1297,6 +1482,8 @@ def write_carved(folder, content, file_type, offset):
         'sha256': hashlib.sha256(content).hexdigest(),
         'embedded_date': embedded,
         'date_source': source or '',
+        'fragments': [list(piece) for piece in fragments] if fragments
+        else None,
     }
 
 
@@ -1320,8 +1507,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
                            bytes_total=size, found=0)
     found = [0]
 
-    def sink(content, file_type, offset):
-        record = write_carved(folder, content, file_type, offset)
+    def sink(content, file_type, offset, fragments=None):
+        record = write_carved(folder, content, file_type, offset, fragments)
         case.add_carved(evidence_id, record)
         found[0] += 1
         if on_file:

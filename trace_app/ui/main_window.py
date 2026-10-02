@@ -40,6 +40,7 @@ from trace_app.ui.viewers.carved_panel import (CarvedFilesPanel,
                                                CarvingWorker)
 from trace_app.ui.viewers.hex import HexViewer
 from trace_app.core import archives
+from trace_app.core.carving import read_carved
 from trace_app.infra.theme import read_theme, save_theme
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.core.case import (REPORTED_FINDING_GRADES,
@@ -1616,7 +1617,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.refresh_analysis_views()
 
     def _read_carved(self, row):
-        """A carved file's bytes, read back from its image at its offset.
+        """A carved file's bytes, read back from its image at its offset --
+        or from each of its fragments, if it was rebuilt from them.
 
         Not the copy written to disk: what is examined is the evidence, and
         the copy could have been changed since. None if it cannot be read.
@@ -1630,8 +1632,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.image_handler:
             return None
         offset, size = int(row.get('offset') or 0), int(row.get('size') or 0)
+        fragments = row.get('fragments')
+        if fragments is None and self.case is not None and \
+                row.get('evidence_id') is not None:
+            # From a bookmark or a finding: the reference is the span, and
+            # the pieces are recorded with the carve.
+            fragments = self.case.carved_fragments(row['evidence_id'], offset)
         try:
-            content = self.image_handler.read(offset, size)
+            content = read_carved(self.image_handler.read, offset, size,
+                                  fragments)
         except Exception as exc:
             logger.error("Could not read carved data at %d: %s", offset, exc)
             content = None

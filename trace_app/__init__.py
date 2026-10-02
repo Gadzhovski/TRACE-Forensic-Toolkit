@@ -120,6 +120,18 @@ def _unicode_safe_libmagic():
     binding.magic_load = magic_load
 
 
+def _heif_decoder():
+    """Teach Pillow HEIC/HEIF, so iPhone photos preview, thumbnail and give
+    up their EXIF like any other picture. pi-heif is the decode-only build;
+    absent (Windows on ARM has no wheel), HEIC simply keeps its icon."""
+    try:
+        import pi_heif
+        pi_heif.register_heif_opener()
+    except Exception:
+        pass
+
+
 _pin_utc()
 _bundled_libmagic()
 _unicode_safe_libmagic()
+_heif_decoder()

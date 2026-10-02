@@ -115,8 +115,7 @@ def list_members(data, kind=None, password=None):
     if kind == '7z':
         return _list_7z(data, password)
     if kind == 'rar':
-        raise ArchiveError(
-            "RAR archives need the unrar library, which is not bundled.")
+        return _list_rar(data)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 
@@ -146,6 +145,8 @@ def read_member(data, member_name=None, kind=None, password=None,
         return _read_single_stream(data, kind, limit)
     if kind == '7z':
         return _read_7z_member(data, member_name, password, limit)
+    if kind == 'rar':
+        return _read_rar_member(data, member_name, limit)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 
@@ -369,6 +370,107 @@ def _read_7z_member(data, name, password, limit):
         raise EncryptedArchive(f"{name} is encrypted and needs a password.")             from exc
     except Exception as exc:
         raise ArchiveError(f"Could not read {name}: {exc}") from exc
+
+
+# --- RAR ------------------------------------------------------------------
+#
+# rarfile parses RAR3 and RAR5 headers in pure Python: every member's name,
+# size, date and whether it is encrypted, which is what an examiner needs
+# from an archive. Members stored without compression are read the same way.
+# Decompressing anything else needs the unrar program -- not installable
+# without system packages on every platform, and rarfile would hand it a copy
+# of the evidence written to a temporary file -- so TRACE never asks for it:
+# a compressed member is listed, and reported, not read.
+
+#: RAR's "store" method: the member's bytes are in the archive as they are.
+_RAR_STORED = 0x30
+
+
+def _import_rar():
+    try:
+        import rarfile
+    except ImportError as exc:
+        raise ArchiveError("RAR support needs rarfile "
+                           "(pip install -r requirements.txt).") from exc
+    # An old RAR3 archive can carry a compressed comment, which rarfile
+    # decompresses -- through the external tool -- while merely opening the
+    # archive. Listing needs no comment, and no evidence is handed to a
+    # program outside TRACE.
+    parser = getattr(rarfile, 'RAR3Parser', None)
+    if parser is not None and not getattr(parser, '_trace_no_comments', False):
+        parser._read_comment_v3 = lambda self, inf, pwd=None: None
+        parser._trace_no_comments = True
+    return rarfile
+
+
+def _open_rar(data):
+    rarfile = _import_rar()
+    try:
+        archive = rarfile.RarFile(io.BytesIO(data))
+    except rarfile.PasswordRequired as exc:
+        raise EncryptedArchive(
+            "This RAR archive encrypts its file names; it needs a password "
+            "even to list.") from exc
+    except (rarfile.Error, OSError, ValueError) as exc:
+        raise ArchiveError(f"Could not read RAR archive: {exc}") from exc
+    if archive.needs_password() and not archive.infolist():
+        raise EncryptedArchive(
+            "This RAR archive encrypts its file names; it needs a password "
+            "even to list.")
+    return archive
+
+
+def _list_rar(data):
+    archive = _open_rar(data)
+    members = []
+    for info in archive.infolist():
+        modified = ''
+        if info.mtime is not None:
+            modified = info.mtime.strftime('%Y-%m-%d %H:%M:%S')
+        elif info.date_time:
+            modified = '%04d-%02d-%02d %02d:%02d:%02d' % info.date_time
+        members.append({
+            'name': info.filename,
+            'size': info.file_size or 0,
+            'compressed_size': info.compress_size or 0,
+            'is_dir': info.is_dir(),
+            'modified': modified,
+            'encrypted': bool(info.needs_password()) and not info.is_dir(),
+            'crc': f"{info.CRC:08x}" if info.CRC else '',
+            # Readable here only if stored; otherwise listed, not opened.
+            'compressed': info.compress_type != _RAR_STORED,
+        })
+    return members
+
+
+def _read_rar_member(data, name, limit):
+    rarfile = _import_rar()
+    archive = _open_rar(data)
+    try:
+        info = archive.getinfo(name)
+    except (KeyError, rarfile.NoRarEntry) as exc:
+        raise ArchiveError(f"No member named {name}.") from exc
+    if info.is_dir():
+        raise ArchiveError(f"{name} is a folder.")
+    if info.needs_password():
+        raise EncryptedArchive(f"{name} is encrypted and needs a password.")
+    if info.compress_type != _RAR_STORED:
+        raise ArchiveError(
+            f"{name} is compressed with RAR's own method. TRACE lists it -- "
+            f"name, size, date and CRC are above -- but reading its contents "
+            f"needs the unrar program, which TRACE does not use.")
+    if info.file_size > limit:
+        raise ArchiveError(f"{name} is {info.file_size:,} bytes, more than the "
+                           f"{limit:,} TRACE reads from an archive at once.")
+    try:
+        return archive.read(info)
+    except rarfile.NeedFirstVolume as exc:
+        raise ArchiveError(f"{name} begins in an earlier volume of a "
+                           f"multi-part archive.") from exc
+    except (rarfile.Error, OSError, EOFError) as exc:
+        raise ArchiveError(f"Could not read {name}: {exc} -- in a "
+                           f"multi-part archive it may continue in the next "
+                           f"volume.") from exc
 
 
 def _import_7z():

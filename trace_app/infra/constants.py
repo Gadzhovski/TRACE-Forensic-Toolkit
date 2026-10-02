@@ -42,8 +42,9 @@ CARVE_MAX_SIZE = {
     'pdf': 32 * 1024 * 1024,
     'zip': 32 * 1024 * 1024,
     'gz': 32 * 1024 * 1024,
-    'rar': 32 * 1024 * 1024,
-    '7z': 32 * 1024 * 1024,
+    # Sized from their own headers, so read whole like the formats below.
+    'rar': 256 * 1024 * 1024,
+    '7z': 256 * 1024 * 1024,
     'ole': 32 * 1024 * 1024,
     'html': 4 * 1024 * 1024,
     'wav': 32 * 1024 * 1024,

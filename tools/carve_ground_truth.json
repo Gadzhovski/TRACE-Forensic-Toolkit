@@ -1546,336 +1546,372 @@
   "source": "tools/carve_corpus.py (built locally from pinned public samples)",
   "title": "Real published files of every format TRACE carves that the DFTT/DFRWS images do not hold, among random filler and signature decoys",
   "note": "Deterministic: fixed seed, SHA-256-pinned inputs. Sources are listed in carve_corpus.py.",
-  "sha256": "1890d2fb83a3312d23e6530955af2084737ffec43818488ccaf783c2b0f6b104",
+  "sha256": "9386e3d30f3eb46c567213d80e156231f41cec02f9b0e4d9462bb1a1338808f0",
   "files": [
-   {
-    "name": "bbb-360-10s.mkv",
-    "type": "mp4",
-    "offset": "0x1a400",
-    "size": 957162,
-    "md5": "43ec39db67b7ed40c5f8586f6607cc74",
-    "recoverable": true,
-    "note": "contiguous; published as .mkv, but an MP4 (ftyp isom): TRACE names it by its content"
-   },
-   {
-    "name": "sample1.xlsx",
-    "type": "xlsx",
-    "offset": "0x11ae00",
-    "size": 29380,
-    "md5": "c39bdbb3cd1d6368e7d0b40261ee0913",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "junit-4.13.2.jar",
-    "type": "jar",
-    "offset": "0x16d000",
-    "size": 384581,
-    "md5": "d98a9a02a99a9acd22d7653cbcc1f31f",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "patch-2.7.6.tar.bz2",
-    "type": "bz2",
-    "offset": "0x23b400",
-    "size": 922385,
-    "md5": "5ef471eb1bfeec7f0c8afc7da46e3dfb",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "sqlite3.dll",
-    "type": "dll",
-    "offset": "0x340800",
-    "size": 3181056,
-    "md5": "6e98214322d5e29c02059b72bf826fdd",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "microsoft_example.lnk",
-    "type": "lnk",
-    "offset": "0x6bb000",
-    "size": 459,
-    "md5": "48c62308709735e806f2d9d979967e9b",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "BigDataHive",
-    "type": "regf",
-    "offset": "0x6eb600",
-    "size": 147456,
-    "md5": "edaf7986726c1343752763bd1b31ddf2",
-    "recoverable": true,
-    "note": "contiguous; scored on the first 147,456 bytes -- hive slack after the last hbin has no recorded length"
-   },
-   {
-    "name": "sample1.m4a",
-    "type": "m4a",
-    "offset": "0x74ee00",
-    "size": 2034429,
-    "md5": "c7cb4cfbf25ef6b3d3bd9b0d9ef77a7e",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "StringValuesHive",
-    "type": "regf",
-    "offset": "0x966200",
-    "size": 8192,
-    "md5": "06f59b0de4c4d041253f6462a206f9a7",
-    "recoverable": true,
-    "note": "contiguous; scored on the first 8,192 bytes -- hive slack after the last hbin has no recorded length"
-   },
-   {
-    "name": "gallery-1.webp",
-    "type": "webp",
-    "offset": "0xa20c00",
-    "size": 30320,
-    "md5": "0e2687e3a6c95084e6ce912aa45d3803",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "hopper.psd",
-    "type": "psd",
-    "offset": "0xa56e00",
-    "size": 175119,
-    "md5": "40362c8f11df21cb7468d20016d2018d",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "pageant.exe",
-    "type": "exe",
-    "offset": "0xaa3400",
-    "size": 936024,
-    "md5": "068fb7c88673c70903c1dd62fbff3d41",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "TestActivity.apk",
-    "type": "apk",
-    "offset": "0xbf0800",
-    "size": 174896,
-    "md5": "17a387114ad1252303d9917407a69f4a",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "passworded.pst",
-    "type": "pst",
-    "offset": "0xc6d400",
-    "size": 271360,
-    "md5": "7e28999e74ee79808e8802046a5dd16a",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "sample2.lnk",
-    "type": "lnk",
-    "offset": "0xd34800",
-    "size": 1073,
-    "md5": "4fe3b63349381acea9b8767d9557c31a",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "dist-list.pst",
-    "type": "pst",
-    "offset": "0xdbb000",
-    "size": 271360,
-    "md5": "4bf6704a127f31ff24ddf063e5089eaf",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "test.pptx",
-    "type": "pptx",
-    "offset": "0xe8d600",
-    "size": 37859,
-    "md5": "4990e4969c6f534f40c99e3be0b01e7a",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "example-2013.ost",
-    "type": "ost",
-    "offset": "0xeddc00",
-    "size": 16818176,
-    "md5": "cc127bfa9356546000c4b8e89e1d0a85",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "matroska-test1.mkv",
-    "type": "mkv",
-    "offset": "0x1f37e00",
-    "size": 23339337,
-    "md5": "d18d77929f2d73f625311138a39f351b",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "bbb-360-10s.webm",
-    "type": "webm",
-    "offset": "0x35dd200",
-    "size": 1052940,
-    "md5": "3d11b6e495aa7de013b818f8b0d01c61",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "test.docx",
-    "type": "docx",
-    "offset": "0x3712a00",
-    "size": 31773,
-    "md5": "729f446f1f39324e332fab4457c7a8ba",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "sample1.opus",
-    "type": "opus",
-    "offset": "0x3735600",
-    "size": 1776956,
-    "md5": "998561b41a19f0d3aba4da0a64132f49",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "security.evtx",
-    "type": "evtx",
-    "offset": "0x3931600",
-    "size": 1708032,
-    "md5": "f340df1d02b9b31dc3a25bfcde0f61a6",
-    "recoverable": true,
-    "note": "contiguous; scored on the first 1,708,032 bytes -- the zero-filled space preallocated after the last chunk has no recorded length"
-   },
-   {
-    "name": "busybox",
-    "type": "elf",
-    "offset": "0x3b88600",
-    "size": 1131168,
-    "md5": "ebce43017d2cb316ea45e08374de7315",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "sample_640x360.mkv",
-    "type": "mkv",
-    "offset": "0x3cb2a00",
-    "size": 573066,
-    "md5": "d587ddd8d3e907c39743a80caf06774e",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "cpython-msg_01.eml",
-    "type": "eml",
-    "offset": "0x3d49a00",
-    "size": 459,
-    "md5": "0d7379681894151742e00504e7ca8796",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "sample1.ods",
-    "type": "ods",
-    "offset": "0x3d5f800",
-    "size": 19587,
-    "md5": "410a604524ad3dc97d1523f5ed823653",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "accessible_epub_3.epub",
-    "type": "epub",
-    "offset": "0x3dad600",
-    "size": 4051892,
-    "md5": "8465627fabc9ae16c790570de9137523",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "hello-2.12.1.tar.gz",
-    "type": "gz",
-    "offset": "0x41d9600",
-    "size": 1033297,
-    "md5": "5cf598783b9541527e17c9b5e525b7eb",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "example.heic",
-    "type": "heic",
-    "offset": "0x432b600",
-    "size": 718114,
-    "md5": "7cb5091f2d2c64db80fdbbec770da12d",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "Chinook_Sqlite.sqlite",
-    "type": "sqlite",
-    "offset": "0x4415800",
-    "size": 1007616,
-    "md5": "99fe99c99d23033719bf9e277291e351",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "ripgrep-14.1.1-x86_64-apple-darwin.tar",
-    "type": "tar",
-    "offset": "0x451fe00",
-    "size": 5539840,
-    "md5": "2a091f75f7428b9b38a9159d0073dfd9",
-    "recoverable": true,
-    "note": "contiguous; GNU tar format; a V7 tar has no magic to find it by"
-   },
-   {
-    "name": "ripgrep-14.1.1-x86_64-apple-darwin.tar!/rg",
-    "type": "macho",
-    "offset": "0x4520400",
-    "size": 5162504,
-    "md5": "018f62a74880102e792426266d0cff6d",
-    "recoverable": true,
-    "note": "inside the tar, stored whole on a 512-byte boundary"
-   },
-   {
-    "name": "sed-4.9.tar.xz",
-    "type": "xz",
-    "offset": "0x4ae2a00",
-    "size": 1397092,
-    "md5": "6aac9b2dbafcd5b7a67a8a9bcb8036c3",
-    "recoverable": true,
-    "note": "contiguous"
-   },
-   {
-    "name": "sample1.odp",
-    "type": "odp",
-    "offset": "0x4c94c00",
-    "size": 389789,
-    "md5": "1c359ecbae7a451e33a47758cec10e58",
-    "recoverable": true,
-    "note": "contiguous"
-   },
    {
     "name": "cpython-msg_02.eml",
     "type": "eml",
-    "offset": "0x4d50600",
+    "offset": "0x1a400",
     "size": 2812,
     "md5": "fde67c346d38a0f98d83f9c9357df9a6",
     "recoverable": true,
     "note": "contiguous"
    },
    {
+    "name": "L_exif_xmp_iptc.heic",
+    "type": "heic",
+    "offset": "0x3e000",
+    "size": 56925,
+    "md5": "50c677a5f14feda5baf27890b9325dc9",
+    "recoverable": true,
+    "note": "contiguous; HEIC with camera EXIF, read through pi-heif"
+   },
+   {
+    "name": "rg",
+    "type": "macho",
+    "offset": "0xba400",
+    "size": 5162504,
+    "md5": "018f62a74880102e792426266d0cff6d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "pageant.exe",
+    "type": "exe",
+    "offset": "0x624400",
+    "size": 936024,
+    "md5": "068fb7c88673c70903c1dd62fbff3d41",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "StringValuesHive",
+    "type": "regf",
+    "offset": "0x787c00",
+    "size": 8192,
+    "md5": "06f59b0de4c4d041253f6462a206f9a7",
+    "recoverable": true,
+    "note": "contiguous; scored on the first 8,192 bytes -- hive slack after the last hbin has no recorded length"
+   },
+   {
+    "name": "sqlite3.dll",
+    "type": "dll",
+    "offset": "0x7e6400",
+    "size": 3181056,
+    "md5": "6e98214322d5e29c02059b72bf826fdd",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "test.pptx",
+    "type": "pptx",
+    "offset": "0xb4ac00",
+    "size": 37859,
+    "md5": "4990e4969c6f534f40c99e3be0b01e7a",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "dist-list.pst",
+    "type": "pst",
+    "offset": "0xbbe200",
+    "size": 271360,
+    "md5": "4bf6704a127f31ff24ddf063e5089eaf",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "patch-2.7.6.tar.bz2",
+    "type": "bz2",
+    "offset": "0xc44000",
+    "size": 922385,
+    "md5": "5ef471eb1bfeec7f0c8afc7da46e3dfb",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample1.odp",
+    "type": "odp",
+    "offset": "0xda9a00",
+    "size": 389789,
+    "md5": "1c359ecbae7a451e33a47758cec10e58",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "hello-2.12.1.tar.gz",
+    "type": "gz",
+    "offset": "0xe7e600",
+    "size": 1033297,
+    "md5": "5cf598783b9541527e17c9b5e525b7eb",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "hopper.psd",
+    "type": "psd",
+    "offset": "0xf98800",
+    "size": 175119,
+    "md5": "40362c8f11df21cb7468d20016d2018d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "ripgrep-14.1.1-x86_64-apple-darwin.tar",
+    "type": "tar",
+    "offset": "0xfe5800",
+    "size": 5539840,
+    "md5": "2a091f75f7428b9b38a9159d0073dfd9",
+    "recoverable": true,
+    "note": "contiguous; GNU tar format, found by its ustar magic"
+   },
+   {
+    "name": "ripgrep-14.1.1-x86_64-apple-darwin.tar!/rg",
+    "type": "macho",
+    "offset": "0xfe5e00",
+    "size": 5162504,
+    "md5": "018f62a74880102e792426266d0cff6d",
+    "recoverable": true,
+    "note": "inside the tar, stored whole on a 512-byte boundary"
+   },
+   {
+    "name": "hello-2.12.1.tar",
+    "type": "tar",
+    "offset": "0x1564e00",
+    "size": 4945920,
+    "md5": "7b61990d10764aa9d08e5d7c612e3279",
+    "recoverable": true,
+    "note": "contiguous; V7 tar format: no magic, found by its header checksum"
+   },
+   {
+    "name": "sed-4.9.tar.xz",
+    "type": "xz",
+    "offset": "0x1a62400",
+    "size": 1397092,
+    "md5": "6aac9b2dbafcd5b7a67a8a9bcb8036c3",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "test_1.7z",
+    "type": "7z",
+    "offset": "0x1bd1400",
+    "size": 657,
+    "md5": "9336afe1c3be886155657818bc7f1ce6",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample2.lnk",
+    "type": "lnk",
+    "offset": "0x1c02600",
+    "size": 1073,
+    "md5": "4fe3b63349381acea9b8767d9557c31a",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample1.rtf",
+    "type": "rtf",
+    "offset": "0x1c49000",
+    "size": 105344,
+    "md5": "e69a0344620b5040b7d0d1595b9c7726",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "test.docx",
+    "type": "docx",
+    "offset": "0x1cdca00",
+    "size": 31773,
+    "md5": "729f446f1f39324e332fab4457c7a8ba",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "passworded.pst",
+    "type": "pst",
+    "offset": "0x1d53c00",
+    "size": 271360,
+    "md5": "7e28999e74ee79808e8802046a5dd16a",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "matroska-test1.mkv",
+    "type": "mkv",
+    "offset": "0x1de7400",
+    "size": 23339337,
+    "md5": "d18d77929f2d73f625311138a39f351b",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "junit-4.13.2.jar",
+    "type": "jar",
+    "offset": "0x344e200",
+    "size": 384581,
+    "md5": "d98a9a02a99a9acd22d7653cbcc1f31f",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "example.heic",
+    "type": "heic",
+    "offset": "0x34c9a00",
+    "size": 718114,
+    "md5": "7cb5091f2d2c64db80fdbbec770da12d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "TestActivity.apk",
+    "type": "apk",
+    "offset": "0x3595400",
+    "size": 174896,
+    "md5": "17a387114ad1252303d9917407a69f4a",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "security.evtx",
+    "type": "evtx",
+    "offset": "0x35daa00",
+    "size": 1708032,
+    "md5": "f340df1d02b9b31dc3a25bfcde0f61a6",
+    "recoverable": true,
+    "note": "contiguous; scored on the first 1,708,032 bytes -- the zero-filled space preallocated after the last chunk has no recorded length"
+   },
+   {
+    "name": "sample1.opus",
+    "type": "opus",
+    "offset": "0x37f7600",
+    "size": 1776956,
+    "md5": "998561b41a19f0d3aba4da0a64132f49",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample.lnk",
+    "type": "lnk",
+    "offset": "0x39bd400",
+    "size": 1984,
+    "md5": "2c7009d5416d15cc7b1d4a23100499ad",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "system.evtx",
+    "type": "evtx",
+    "offset": "0x39efc00",
+    "size": 593920,
+    "md5": "64b42cdca0f4fb044747f3a72db7496f",
+    "recoverable": true,
+    "note": "contiguous; scored on the first 593,920 bytes -- the zero-filled space preallocated after the last chunk has no recorded length"
+   },
+   {
+    "name": "Example.ogg",
+    "type": "ogg",
+    "offset": "0x3b4a200",
+    "size": 104793,
+    "md5": "311f3539016ba6a9dc4ca7c2144b3d91",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "bbb-360-10s.mkv",
+    "type": "mp4",
+    "offset": "0x3bbbe00",
+    "size": 957162,
+    "md5": "43ec39db67b7ed40c5f8586f6607cc74",
+    "recoverable": true,
+    "note": "contiguous; published as .mkv, but an MP4 (ftyp isom): TRACE names it by its content"
+   },
+   {
+    "name": "example-2013.ost",
+    "type": "ost",
+    "offset": "0x3cf2a00",
+    "size": 16818176,
+    "md5": "cc127bfa9356546000c4b8e89e1d0a85",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "bbb-360-10s.webm",
+    "type": "webm",
+    "offset": "0x4d16e00",
+    "size": 1052940,
+    "md5": "3d11b6e495aa7de013b818f8b0d01c61",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "BigDataHive",
+    "type": "regf",
+    "offset": "0x4e70c00",
+    "size": 147456,
+    "md5": "edaf7986726c1343752763bd1b31ddf2",
+    "recoverable": true,
+    "note": "contiguous; scored on the first 147,456 bytes -- hive slack after the last hbin has no recorded length"
+   },
+   {
+    "name": "gallery-1.webp",
+    "type": "webp",
+    "offset": "0x4ed6a00",
+    "size": 30320,
+    "md5": "0e2687e3a6c95084e6ce912aa45d3803",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample1.odt",
+    "type": "odt",
+    "offset": "0x4f50800",
+    "size": 21423,
+    "md5": "c192a57938cf7d0d32cba73c66471255",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "rar3-comment-plain.rar",
+    "type": "rar",
+    "offset": "0x4f6a000",
+    "size": 300,
+    "md5": "e1c6c5712b5317b27d1a7b751e6f51d6",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "encrypted_1.7z",
+    "type": "7z",
+    "offset": "0x4fe8200",
+    "size": 251,
+    "md5": "0adc5e63598d79aba8739189ec8f6030",
+    "recoverable": true,
+    "note": "contiguous; 7z with encrypted contents"
+   },
+   {
+    "name": "sample1.ods",
+    "type": "ods",
+    "offset": "0x5047400",
+    "size": 19587,
+    "md5": "410a604524ad3dc97d1523f5ed823653",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "cpython-msg_01.eml",
+    "type": "eml",
+    "offset": "0x507ee00",
+    "size": 459,
+    "md5": "0d7379681894151742e00504e7ca8796",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
     "name": "hopper.webp",
     "type": "webp",
-    "offset": "0x4d9b000",
+    "offset": "0x50fba00",
     "size": 3282,
     "md5": "02f7d3c65a771e8f37813eadde660c5c",
     "recoverable": true,
@@ -1884,72 +1920,90 @@
    {
     "name": "hopper.avif",
     "type": "avif",
-    "offset": "0x4dfc400",
+    "offset": "0x517bc00",
     "size": 3077,
     "md5": "2b1efc6fe0f32b008e1ace0b784ff970",
     "recoverable": true,
     "note": "contiguous"
    },
    {
-    "name": "sample.lnk",
+    "name": "microsoft_example.lnk",
     "type": "lnk",
-    "offset": "0x4e4b400",
-    "size": 1984,
-    "md5": "2c7009d5416d15cc7b1d4a23100499ad",
+    "offset": "0x51cfe00",
+    "size": 459,
+    "md5": "48c62308709735e806f2d9d979967e9b",
     "recoverable": true,
     "note": "contiguous"
    },
    {
-    "name": "Example.ogg",
-    "type": "ogg",
-    "offset": "0x4eb4c00",
-    "size": 104793,
-    "md5": "311f3539016ba6a9dc4ca7c2144b3d91",
+    "name": "rar5-psw.rar",
+    "type": "rar",
+    "offset": "0x521d400",
+    "size": 2403,
+    "md5": "beaf4bff69000a3d14a45a2e4f8a37cb",
     "recoverable": true,
-    "note": "contiguous"
+    "note": "contiguous; RAR5 with encrypted members: carved whole, members listed and marked encrypted"
    },
    {
     "name": "sample_640x360.3gp",
     "type": "3gp",
-    "offset": "0x4ed9a00",
+    "offset": "0x5229600",
     "size": 574725,
     "md5": "a26c440343279ba69fcd0c40656dfff1",
     "recoverable": true,
     "note": "contiguous"
    },
    {
-    "name": "system.evtx",
-    "type": "evtx",
-    "offset": "0x4f91800",
-    "size": 593920,
-    "md5": "64b42cdca0f4fb044747f3a72db7496f",
-    "recoverable": true,
-    "note": "contiguous; scored on the first 593,920 bytes -- the zero-filled space preallocated after the last chunk has no recorded length"
-   },
-   {
-    "name": "sample1.rtf",
-    "type": "rtf",
-    "offset": "0x50b8a00",
-    "size": 105344,
-    "md5": "e69a0344620b5040b7d0d1595b9c7726",
+    "name": "Chinook_Sqlite.sqlite",
+    "type": "sqlite",
+    "offset": "0x52fae00",
+    "size": 1007616,
+    "md5": "99fe99c99d23033719bf9e277291e351",
     "recoverable": true,
     "note": "contiguous"
    },
    {
-    "name": "sample1.odt",
-    "type": "odt",
-    "offset": "0x5107c00",
-    "size": 21423,
-    "md5": "c192a57938cf7d0d32cba73c66471255",
+    "name": "accessible_epub_3.epub",
+    "type": "epub",
+    "offset": "0x544ba00",
+    "size": 4051892,
+    "md5": "8465627fabc9ae16c790570de9137523",
     "recoverable": true,
     "note": "contiguous"
    },
    {
-    "name": "rg",
-    "type": "macho",
-    "offset": "0x5164400",
-    "size": 5162504,
-    "md5": "018f62a74880102e792426266d0cff6d",
+    "name": "sample1.m4a",
+    "type": "m4a",
+    "offset": "0x5872a00",
+    "size": 2034429,
+    "md5": "c7cb4cfbf25ef6b3d3bd9b0d9ef77a7e",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample1.xlsx",
+    "type": "xlsx",
+    "offset": "0x5a6ba00",
+    "size": 29380,
+    "md5": "c39bdbb3cd1d6368e7d0b40261ee0913",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "sample_640x360.mkv",
+    "type": "mkv",
+    "offset": "0x5abbe00",
+    "size": 573066,
+    "md5": "d587ddd8d3e907c39743a80caf06774e",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "busybox",
+    "type": "elf",
+    "offset": "0x5bab200",
+    "size": 1131168,
+    "md5": "ebce43017d2cb316ea45e08374de7315",
     "recoverable": true,
     "note": "contiguous"
    }

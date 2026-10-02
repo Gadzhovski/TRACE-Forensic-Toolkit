@@ -52,6 +52,7 @@ CATALOG = [
     ('hopper.webp', 'webp', f'{_GH}/python-pillow/Pillow/main/Tests/images/hopper.webp', '3ad1cd060bff97c8090ca68efe9e25724e830bf5383397ffe7f448d5b825c6ad', None),
     ('gallery-1.webp', 'webp', 'https://www.gstatic.com/webp/gallery/1.webp', '4a5afeaff8483923da964bc7896f02d0283e8bff99b5b8f82a31ae3214dab1d0', None),
     ('hopper.avif', 'avif', f'{_GH}/python-pillow/Pillow/main/Tests/images/avif/hopper.avif', 'd4327b7ab11ed8f11d86978258fc04e5505bcfe511ca2c4efa4838c85d226fd2', None),
+    ('L_exif_xmp_iptc.heic', 'heic', f'{_GH}/bigcat88/pillow_heif/v1.1.0/tests/images/heif_other/L_exif_xmp_iptc.heic', '0083645511ffdee8acf04973237272678d3eb2554d77bde2adeeca102c220d51', None),
     ('example.heic', 'heic', f'{_GH}/strukturag/libheif/master/examples/example.heic', '7f8b363e4936c0666a25f64f3a92fda10bd8e5453be4592530b65a55dd98f3f2', None),
     # Documents
     ('test.docx', 'docx', f'{_GH}/python-openxml/python-docx/master/tests/test_files/test.docx', 'fba1c76b66ff30982e5281941ca1111eaeaeb092abb6dfbe1730bed3774f40b6', None),
@@ -88,6 +89,11 @@ CATALOG = [
     # Archives
     ('hello-2.12.1.tar.gz', 'gz', 'https://ftp.gnu.org/gnu/hello/hello-2.12.1.tar.gz', '8d99142afd92576f30b0cd7cb42a8dc6809998bc5d607d88761f512e26c7db20', None),
     ('ripgrep-14.1.1-x86_64-apple-darwin.tar', 'tar', 'https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-apple-darwin.tar.gz', 'fc87e78f7cb3fea12d69072e7ef3b21509754717b746368fd40d88963630e2b3', ('gunzip',)),
+    ('hello-2.12.1.tar', 'tar', 'https://ftp.gnu.org/gnu/hello/hello-2.12.1.tar.gz', '8d99142afd92576f30b0cd7cb42a8dc6809998bc5d607d88761f512e26c7db20', ('gunzip',)),
+    ('rar5-psw.rar', 'rar', f'{_GH}/markokr/rarfile/v4.2/test/files/rar5-psw.rar', 'b6840e95152a1c3b5acd736dc34f988509866f04158b67da1b5a29e166a31355', None),
+    ('rar3-comment-plain.rar', 'rar', f'{_GH}/markokr/rarfile/v4.2/test/files/rar3-comment-plain.rar', '224a3f0aacab5cbb140b72dde616280a871589f251b9147bdb55b49651661813', None),
+    ('test_1.7z', '7z', f'{_GH}/miurahr/py7zr/v0.22.0/tests/data/test_1.7z', 'ffba5ce6affb27097b887f27ff6d25cc15a4d8eb5a350587dfb635af77258714', None),
+    ('encrypted_1.7z', '7z', f'{_GH}/miurahr/py7zr/v0.22.0/tests/data/encrypted_1.7z', '45573dc73048486f421bfd2e490b8e0bddf501856d142d854064149365446ca7', None),
     ('patch-2.7.6.tar.bz2', 'bz2', 'https://ftp.gnu.org/gnu/patch/patch-2.7.6.tar.bz2', '3d1d001210d76c9f754c12824aa69f25de7cb27bb6765df63455b77601a0dcc9', None),
     ('sed-4.9.tar.xz', 'xz', 'https://ftp.gnu.org/gnu/sed/sed-4.9.tar.xz', '6e226b732e1cd739464ad6862bd1a1aba42d7982922da7a53519631d24975181', None),
     # Audio
@@ -126,8 +132,14 @@ EMBEDDED = {
 NOTES = {
     'bbb-360-10s.mkv': "published as .mkv, but an MP4 (ftyp isom): TRACE "
                        "names it by its content",
-    'ripgrep-14.1.1-x86_64-apple-darwin.tar': "GNU tar format; a V7 tar has "
-                                              "no magic to find it by",
+    'ripgrep-14.1.1-x86_64-apple-darwin.tar': "GNU tar format, found by its "
+                                              "ustar magic",
+    'hello-2.12.1.tar': "V7 tar format: no magic, found by its header "
+                        "checksum",
+    'rar5-psw.rar': "RAR5 with encrypted members: carved whole, members "
+                    "listed and marked encrypted",
+    'encrypted_1.7z': "7z with encrypted contents",
+    'L_exif_xmp_iptc.heic': "HEIC with camera EXIF, read through pi-heif",
 }
 
 #: Each format's signature, planted with junk after it. A carver that takes a

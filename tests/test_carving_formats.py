@@ -61,8 +61,8 @@ def _carve(data, types=None):
     from trace_app.core.carving import CARVABLE_TYPES, carve_image
     found = []
     carve_image(_Image(data), types or CARVABLE_TYPES,
-                lambda content, kind, offset: found.append((kind, offset,
-                                                            content)),
+                lambda content, kind, offset, fragments=None:
+                found.append((kind, offset, content)),
                 unallocated_only=False)
     return found
 
