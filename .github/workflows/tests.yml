@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
       - name: Refuse disk images and case databases
         run: |
-          found=$(git ls-files | grep -iE '\.(e0[0-9]|ex01|l01|s01|ad1|dd|raw|img|dmg|iso|vmdk|vhdx?|aff4?|001)$|(^|/)case\.db$|(^|/)search\.db$' || true)
+          found=$(git ls-files | grep -iE '\.(e0[0-9]|ex01|l01|s01|ad1|dd|raw|img|dmg|iso|vmdk|vhdx?|aff4?|001)$|(^|/)(case|search)\.db(-wal|-shm)?$' || true)
           if [ -n "$found" ]; then
             echo "These must never be committed:"; echo "$found"; exit 1
           fi

@@ -29,10 +29,36 @@ import sqlite3
 
 logger = logging.getLogger('TRACE.Search')
 
+
+def use_wal(connection):
+    """Put a database in write-ahead-log mode, so reading it never waits
+    for a writer.
+
+    Analysis, indexing and carving write while the window reads the same
+    files. In SQLite's default mode a writer whose transaction outgrows its
+    cache takes an exclusive lock until it commits, and every read the
+    window made waited out the 5-second busy timeout and failed: indexing a
+    168 MB image froze the window for 15 s at a time. With a WAL, readers
+    see the last commit and carry on. The mode is stored in the file, so
+    this also converts a case written before. A file system that cannot
+    hold a WAL (some network shares) keeps the old mode, and is logged.
+    """
+    try:
+        mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+    except sqlite3.Error as exc:
+        logger.warning("Could not switch to WAL mode: %s", exc)
+        return
+    if str(mode).lower() != 'wal':
+        logger.warning("Database stays in %s mode; reads may wait for "
+                       "background jobs", mode)
+
 #: Bumped when the index schema changes. The index is a cache -- it can always
 #: be rebuilt from the evidence -- so a version bump discards it rather than
 #: migrating.
-INDEX_VERSION = 3          # 3: phone, card and IBAN indicators
+#: 3: phone, card and IBAN indicators. 4: entities carry their evidence id,
+#: so counting indicators per image needs no join to the items (and their
+#: text): the Indicators tab's refresh took up to 3 s against a growing index.
+INDEX_VERSION = 4
 
 #: Largest amount of text taken from one file. A 20 MB log is worth indexing;
 #: taking all of a 2 GB one costs more than it returns.
@@ -195,6 +221,7 @@ class SearchIndex:
         self.path = os.path.join(folder, 'search.db')
         self._db = sqlite3.connect(self.path)
         self._db.row_factory = sqlite3.Row
+        use_wal(self._db)
         self._create_schema()
 
     def close(self):
@@ -206,6 +233,11 @@ class SearchIndex:
 
     def _create_schema(self):
         version = self._db.execute("PRAGMA user_version").fetchone()[0]
+        if version == INDEX_VERSION:
+            # Already made. Opening must not write: the window opens the
+            # index to read it while a job holds the write lock, and a
+            # CREATE ... IF NOT EXISTS here waited out the busy timeout.
+            return
         if version and version != INDEX_VERSION:
             # The index is derived data. Discarding is honest and cheap;
             # migrating a cache is work that buys nothing.
@@ -254,6 +286,7 @@ class SearchIndex:
 
             CREATE TABLE IF NOT EXISTS entities (
                 item_id       INTEGER NOT NULL,
+                evidence_id   INTEGER,
                 kind          TEXT NOT NULL,
                 value         TEXT NOT NULL
             );
@@ -272,6 +305,8 @@ class SearchIndex:
                 ON entities(kind, value);
             CREATE INDEX IF NOT EXISTS idx_entities_item
                 ON entities(item_id);
+            CREATE INDEX IF NOT EXISTS idx_entities_evidence
+                ON entities(evidence_id, kind, value);
             CREATE INDEX IF NOT EXISTS idx_items_evidence
                 ON indexed_items(evidence_id);
         """)
@@ -314,10 +349,10 @@ class SearchIndex:
             (item_id, name or '', path or '', body or ''))
 
         if body:
-            self._store_entities(item_id, body)
+            self._store_entities(item_id, evidence_id, body)
         return item_id
 
-    def _store_entities(self, item_id, text):
+    def _store_entities(self, item_id, evidence_id, text):
         """Pull emails, URLs, IPs and hashes out of the text."""
         found = set()
         for kind, pattern in _ENTITY_PATTERNS.items():
@@ -337,8 +372,10 @@ class SearchIndex:
 
         if found:
             self._db.executemany(
-                "INSERT INTO entities (item_id, kind, value) VALUES (?, ?, ?)",
-                [(item_id, kind, value) for kind, value in found])
+                "INSERT INTO entities (item_id, evidence_id, kind, value) "
+                "VALUES (?, ?, ?, ?)",
+                [(item_id, evidence_id, kind, value)
+                 for kind, value in found])
 
     def commit(self):
         self._db.commit()
@@ -424,34 +461,32 @@ class SearchIndex:
 
     def indicator_summary(self, evidence_id=None):
         """{kind: distinct values} -- the whole case, or one image."""
-        where, params = self._evidence_clause(evidence_id, 'i.evidence_id')
+        where, params = self._evidence_clause(evidence_id, 'evidence_id')
         rows = self._db.execute(
-            "SELECT e.kind, count(DISTINCT e.value) FROM entities e "
-            "JOIN indexed_items i ON i.id = e.item_id" + where
-            + " GROUP BY e.kind", params).fetchall()
+            "SELECT kind, count(DISTINCT value) FROM entities" + where
+            + " GROUP BY kind", params).fetchall()
         return {row[0]: row[1] for row in rows}
 
     def indicators(self, kind=None, evidence_id=None, contains='',
-                   limit=20000):
+                   limit=5000):
         """One row per distinct value: kind, value, files (how many items
         hold it) and evidence_ids (which images). Most widespread first."""
         clauses, params = [], []
         if kind:
-            clauses.append("e.kind = ?")
+            clauses.append("kind = ?")
             params.append(kind)
         if evidence_id is not None:
-            clauses.append("i.evidence_id = ?")
+            clauses.append("evidence_id = ?")
             params.append(evidence_id)
         if contains:
-            clauses.append("e.value LIKE ?")
+            clauses.append("value LIKE ?")
             params.append(f'%{contains}%')
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
         rows = self._db.execute(
-            "SELECT e.kind, e.value, count(DISTINCT e.item_id) AS files, "
-            "group_concat(DISTINCT i.evidence_id) AS images "
-            "FROM entities e JOIN indexed_items i ON i.id = e.item_id"
-            + where + " GROUP BY e.kind, e.value "
-            "ORDER BY files DESC, e.kind, e.value LIMIT ?",
+            "SELECT kind, value, count(DISTINCT item_id) AS files, "
+            "group_concat(DISTINCT evidence_id) AS images FROM entities"
+            + where + " GROUP BY kind, value "
+            "ORDER BY files DESC, kind, value LIMIT ?",
             params + [limit]).fetchall()
         out = []
         for row in rows:
@@ -461,15 +496,30 @@ class SearchIndex:
             out.append(item)
         return out
 
+    #: indexed_items' columns, without the body -- which can be 8 MB a row.
+    _ITEM_COLUMNS = ('id, evidence_id, artifact_ref, kind, name, path, size, '
+                     'inode, start_offset, created_utc, accessed_utc, '
+                     'mtime_utc, changed_utc, is_deleted, mime, indexed_utc')
+
     def items_with(self, kind, value, evidence_id=None, limit=2000):
         """The indexed items holding one indicator, each with an `excerpt`
-        of the text around it. The same shape as a search result."""
-        params = [kind, value]
-        query = ("SELECT DISTINCT i.* FROM entities e "
-                 "JOIN indexed_items i ON i.id = e.item_id "
-                 "WHERE e.kind = ? AND e.value = ?")
+        of the text around it. The same shape as a search result.
+
+        The excerpt is cut in SQL, so a value found in a thousand files does
+        not read a thousand bodies into memory. Only where the stored value
+        is not in the text as written -- a card's digits were spaced, a
+        domain was capitalised -- is that one body read and searched.
+        """
+        columns = ', '.join(f'i.{c.strip()}'
+                            for c in self._ITEM_COLUMNS.split(','))
+        params = [value, value, value, kind, value]
+        query = (f"SELECT DISTINCT {columns}, instr(i.body, ?) AS at_, "
+                 f"substr(i.body, max(instr(i.body, ?) - 60, 1), "
+                 f"length(?) + 130) AS around_ FROM entities e "
+                 f"JOIN indexed_items i ON i.id = e.item_id "
+                 f"WHERE e.kind = ? AND e.value = ?")
         if evidence_id is not None:
-            query += " AND i.evidence_id = ?"
+            query += " AND e.evidence_id = ?"
             params.append(evidence_id)
         query += " ORDER BY i.evidence_id, i.path LIMIT ?"
         params.append(limit)
@@ -481,24 +531,23 @@ class SearchIndex:
         out = []
         for row in self._db.execute(query, params).fetchall():
             item = dict(row)
-            body = item.pop('body', '') or ''
-            match = loose.search(body)
-            if match:
-                # Up to a few words either side, cut at word boundaries so
-                # the context does not open on half a word.
-                start = max(0, match.start() - 50)
-                end = min(len(body), match.end() + 60)
-                if start:
-                    space = body.find(' ', start, match.start())
-                    start = space + 1 if space != -1 else start
-                if end < len(body):
-                    space = body.rfind(' ', match.end(), end)
-                    end = space if space != -1 else end
-                text = ' '.join(body[start:end].split())
-                item['excerpt'] = (('… ' if start else '') + text
-                                   + (' …' if end < len(body) else ''))
+            at, around = item.pop('at_'), item.pop('around_') or ''
+            if at:
+                text, offset = around, min(at - 1, 60)
             else:
-                item['excerpt'] = value
+                body = self._db.execute(
+                    "SELECT body FROM indexed_items WHERE id = ?",
+                    (item['id'],)).fetchone()[0] or ''
+                match = loose.search(body)
+                if match is None:
+                    item['excerpt'] = value
+                    out.append(item)
+                    continue
+                start = max(0, match.start() - 60)
+                text = body[start:match.end() + 70]
+                offset = match.start() - start
+            item['excerpt'] = _excerpt(text, offset,
+                                       offset + len(value))
             out.append(item)
         return out
 
@@ -591,6 +640,22 @@ class SearchIndex:
             "GROUP BY value ORDER BY hits DESC LIMIT ?",
             (kind, limit)).fetchall()
         return [dict(row) for row in rows]
+
+
+def _excerpt(text, start, end):
+    """`text` around [start, end), cut at word boundaries so the context
+    does not open or close on half a word, and on one line."""
+    begin = 0
+    space = text.find(' ', 0, start)
+    if space != -1 and start > 0:
+        begin = space + 1
+    finish = len(text)
+    space = text.rfind(' ', end)
+    if space != -1 and space >= end:
+        finish = space
+    body = ' '.join(text[begin:finish].split())
+    return (('… ' if begin else '') + body
+            + (' …' if finish < len(text) else ''))
 
 
 class SearchError(Exception):

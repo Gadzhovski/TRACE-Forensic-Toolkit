@@ -11,9 +11,16 @@ module is imported, so its sandbox is in place before anything reads a
 per-user setting.
 """
 
+import multiprocessing
 import sys
 
 if __name__ == '__main__':
+    # Background jobs run in child processes (trace_app/core/background.py).
+    # In a packaged build the child is this executable again, and this call
+    # is what turns it into the job instead of a second copy of the app. A
+    # no-op when running from source.
+    multiprocessing.freeze_support()
+
     if sys.argv[1:2] == ['--self-test']:
         from trace_app.selftest import main as self_test
         sys.exit(self_test(sys.argv[2:]))

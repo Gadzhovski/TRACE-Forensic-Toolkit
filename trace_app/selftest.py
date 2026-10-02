@@ -111,6 +111,32 @@ def _run(report, images, sandbox):
         assert found == want, found
         return f"libmagic {identity[0]} from {identity[1]}"
 
+    @check('background jobs run in a child process')
+    def _():
+        # Analysis, indexing and carving run in a child process; in a frozen
+        # build that child is this executable again, which works only if
+        # main.py calls multiprocessing.freeze_support() first.
+        import queue as queue_module
+        from trace_app.core import background
+        process, channel, _stop = background.start('ping', {'value': 42})
+        seen = {}
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            try:
+                message = channel.get(timeout=1)
+            except queue_module.Empty:
+                assert process.is_alive() or not channel.empty(), \
+                    f"the child exited with code {process.exitcode}"
+                continue
+            seen[message[0]] = message
+            if message[0] == 'done':
+                break
+        process.join(30)
+        assert 'done' in seen, "no answer from the child process"
+        assert seen['done'][2] == '', seen['done'][2]
+        assert seen.get('item', (None, {}))[1].get('pong') == 42, seen
+        return f"started, imported the engines, answered ({process.name})"
+
     @check('bundled resources')
     def _():
         from PySide6.QtGui import QIcon, QPixmap

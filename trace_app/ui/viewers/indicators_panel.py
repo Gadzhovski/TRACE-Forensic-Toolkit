@@ -12,7 +12,7 @@ the same way every other Triage list is worked down.
 
 import logging
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMenu,
@@ -27,6 +27,10 @@ from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 
 logger = logging.getLogger('TRACE.Indicators')
+
+#: Most values listed at once. A table of tens of thousands of rows takes
+#: seconds to fill and nobody reads it; the kind and text filters narrow it.
+SHOWN_LIMIT = 5000
 
 
 def kind_label(kind, plural=False):
@@ -56,7 +60,13 @@ class IndicatorsPanel(QWidget):
         self.evidence_id = None
         self.kind = None
         self.count = 0
+        self._summary = {}
+        self._indexed = 0
         self._names = {}
+        #: Reads of the index in flight, by (what, generation), and the
+        #: latest generation asked for of each.
+        self._queries = {}
+        self._generation = {}
         self.icon_resolver = None
 
         layout = QVBoxLayout(self)
@@ -79,7 +89,7 @@ class IndicatorsPanel(QWidget):
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(250)
-        self._filter_timer.timeout.connect(self._fill_values)
+        self._filter_timer.timeout.connect(self._kind_changed)
         self.filter_input.textChanged.connect(
             lambda _text: self._filter_timer.start())
         bar.addWidget(self.filter_input, 1)
@@ -161,18 +171,79 @@ class IndicatorsPanel(QWidget):
         self.kind_combo.setCurrentIndex(position if position >= 0 else 0)
 
     def summary(self):
-        """{kind: distinct values} for the current image filter."""
-        if self.index is None:
-            return {}
-        try:
-            return self.index.indicator_summary(self.evidence_id)
-        except Exception as exc:
-            logger.error("Could not read indicators: %s", exc)
-            return {}
+        """{kind: distinct values} for the current image filter, as last
+        loaded."""
+        return dict(self._summary)
+
+    @property
+    def loading(self):
+        """Is a read of the index still running?"""
+        return bool(self._queries)
 
     def refresh(self):
-        self._fill_kinds(self.summary())
-        self._fill_values()
+        """Reload the counts and the values, off the UI thread."""
+        if self.case is None:
+            self._summary, self._indexed = {}, 0
+            self._fill_kinds({})
+            self._show_values([])
+            return
+        self._load_values(with_summary=True)
+
+    def _ask(self, what, work):
+        """Run `work(index)` on a thread of its own; its answer arrives at
+        _answered. Only the latest question of each kind is answered: a
+        result overtaken by a newer one is dropped.
+
+        Off the UI thread because the queries aggregate every indicator
+        (105,000 distinct values on a 168 MB Linux image took 0.56 s) and
+        grow with the case; SQLite releases the interpreter lock while it
+        works, so a reader thread costs the window nothing.
+        """
+        self._generation[what] = self._generation.get(what, 0) + 1
+        query = _Query(self.case.folder, what, self._generation[what], work,
+                       self)
+        query.answered.connect(self._answered)
+        query.finished.connect(query.deleteLater)
+        self._queries[(what, self._generation[what])] = query
+        query.start()
+
+    def _answered(self, what, generation, result):
+        self._queries.pop((what, generation), None)
+        if generation != self._generation.get(what) or \
+                isinstance(result, Exception):
+            return
+        if what == 'values':
+            self._values_loaded(*result)
+        elif what == 'files':
+            self._show_files(result)
+
+    def _load_values(self, with_summary=False):
+        kind, evidence_id = self.kind, self.evidence_id
+        contains = self.filter_input.text().strip()
+        self.status_label.setText("Loading…")
+
+        def work(index):
+            summary = indexed = None
+            if with_summary:
+                summary = index.indicator_summary(evidence_id)
+                indexed = 1 if summary else \
+                    index.statistics(evidence_id)['items']
+            rows = index.indicators(kind, evidence_id, contains,
+                                    limit=SHOWN_LIMIT)
+            return summary, indexed, kind, rows
+
+        self._ask('values', work)
+
+    def _values_loaded(self, summary, indexed, kind, rows):
+        if summary is not None:
+            self._summary, self._indexed = summary, indexed
+            self._fill_kinds(summary)
+            # The chosen kind may have gone (a new image filter has none of
+            # it); the filter fell back to every kind, so ask again.
+            if self.kind != kind:
+                self._load_values()
+                return
+        self._show_values(rows)
 
     def _fill_kinds(self, counts):
         """The kind filter, each with its count; kinds with none are left
@@ -191,23 +262,17 @@ class IndicatorsPanel(QWidget):
         self.kind_combo.blockSignals(False)
         self.kind = self.kind_combo.currentData()
 
-    def _kind_changed(self, _position):
+    def _kind_changed(self, _position=None):
         self.kind = self.kind_combo.currentData()
-        self._fill_values()
+        if self.case is not None:
+            self._load_values()
 
-    def _fill_values(self):
+    def _show_values(self, rows):
         table = self.values_table
+        table.setUpdatesEnabled(False)      # one repaint, not one per row
         table.setSortingEnabled(False)
         table.setRowCount(0)
         self.files_table.setRowCount(0)
-        rows = []
-        if self.index is not None:
-            try:
-                rows = self.index.indicators(
-                    self.kind, self.evidence_id,
-                    self.filter_input.text().strip())
-            except Exception as exc:
-                logger.error("Could not list indicators: %s", exc)
         self._set_status(rows)
         table.setRowCount(len(rows))
         for position, row in enumerate(rows):
@@ -225,20 +290,23 @@ class IndicatorsPanel(QWidget):
         table.setSortingEnabled(True)
         if rows:
             fit_columns(table, {0: 520, 3: 260})
+        table.setUpdatesEnabled(True)
         # The tab counts every distinct value for the image filter, not what
         # the kind or text filter happens to leave showing.
-        self.count = sum(self.summary().values())
+        self.count = sum(self._summary.values())
         self.count_changed.emit(self.count)
 
     def _set_status(self, rows):
         if self.case is None:
             text = "Indicators are kept with a case."
-        elif self.index is None or not self.index.statistics(
-                self.evidence_id)['items']:
+        elif not self._summary and not self._indexed:
             text = ("Nothing indexed yet: run Search index and indicators "
                     "from Analysis ▸ Run Analysis Modules.")
         elif not rows:
             text = "No indicators match."
+        elif len(rows) >= SHOWN_LIMIT:
+            text = (f"The {SHOWN_LIMIT:,} most widespread values shown — "
+                    f"choose a kind or filter to narrow")
         else:
             text = f"{len(rows):,} value(s)"
         self.status_label.setText(text)
@@ -250,18 +318,16 @@ class IndicatorsPanel(QWidget):
         return self.values_table.item(items[0].row(), 0).data(Qt.UserRole)
 
     def _fill_files(self):
-        table = self.files_table
-        table.setRowCount(0)
+        self.files_table.setRowCount(0)
         value = self.selected_value()
-        if value is None or self.index is None:
+        if value is None or self.case is None:
             return
-        try:
-            rows = self.index.items_with(value['kind'], value['value'],
-                                         self.evidence_id)
-        except Exception as exc:
-            logger.error("Could not list files for %s: %s",
-                         value['value'], exc)
-            return
+        evidence_id = self.evidence_id
+        self._ask('files', lambda index: index.items_with(
+            value['kind'], value['value'], evidence_id))
+
+    def _show_files(self, rows):
+        table = self.files_table
         table.setRowCount(len(rows))
         for position, row in enumerate(rows):
             row['evidence_name'] = self._names.get(row.get('evidence_id'), '')
@@ -322,9 +388,38 @@ class IndicatorsPanel(QWidget):
             self.file_activated.emit(row)
 
     def shutdown(self):
+        for query in list(self._queries.values()):
+            query.wait(5000)
+        self._queries.clear()
         if self.index is not None:
             self.index.close()
             self.index = None
+
+
+class _Query(QThread):
+    """One read of the case's search index, on its own thread and its own
+    connection (a SQLite connection belongs to the thread that opens it)."""
+
+    #: (what, generation, result or the exception raised)
+    answered = Signal(str, int, object)
+
+    def __init__(self, folder, what, generation, work, parent=None):
+        super().__init__(parent)
+        self.folder, self.what, self.generation = folder, what, generation
+        self.work = work
+
+    def run(self):
+        index = None
+        try:
+            index = SearchIndex(self.folder)
+            result = self.work(index)
+        except Exception as exc:
+            logger.error("Could not read indicators: %s", exc)
+            result = exc
+        finally:
+            if index is not None:
+                index.close()
+        self.answered.emit(self.what, self.generation, result)
 
 
 class _NumberItem(QTableWidgetItem):

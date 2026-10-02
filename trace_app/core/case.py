@@ -30,6 +30,8 @@ import os
 import re
 import sqlite3
 
+from trace_app.core.search_index import use_wal
+
 logger = logging.getLogger('TRACE.Case')
 
 #: Name of the database inside a case folder.
@@ -243,6 +245,7 @@ class Case:
         # Referential integrity is off by default in SQLite; a note whose
         # evidence has been removed is a dangling record.
         connection.execute("PRAGMA foreign_keys = ON")
+        use_wal(connection)
         return connection
 
     # --- paths ------------------------------------------------------------

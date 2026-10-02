@@ -18,20 +18,19 @@ change. A separate tab leaves the listing alone.
 import logging
 import os
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
                                QSizePolicy, QToolBar,
                                QHeaderView, QLabel, QLineEdit,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.image_handler import ImageHandler
-from trace_app.core.indexer import index_evidence
 from trace_app.core.search_index import SearchError, SearchIndex
 from trace_app.infra.constants import (CONTROL_HEIGHT, PANEL_ICON_SIZE,
                                       TABLE_ROW_HEIGHT)
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
+from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.toolbars import prepare_toolbar
@@ -91,54 +90,26 @@ EXAMPLES = [
 ]
 
 
-class IndexWorker(QThread):
-    """Runs the indexer off the UI thread, as a job on the window's queue
+class IndexWorker(ProcessWorker):
+    """Builds one image's search index in a child process
+    (core/background.py), as a job on the window's queue
     (MainWindow.queue_indexing)."""
 
     progressed = Signal(int, int, str)
     finished_indexing = Signal(int, str)
 
+    kind = 'index'
+
     def __init__(self, image_path, case_folder, evidence_id, parent=None):
-        super().__init__(parent)
-        # Paths, not open objects. A SQLite connection belongs to the thread
-        # that created it, and pytsk3's image handle is no better: an
-        # ImageHandler opened by the UI thread reports N/A for every volume
-        # when read from here, so indexing walked nothing and reported
-        # success. The worker opens its own of each.
-        self.image_path = image_path
-        self.case_folder = case_folder
-        self.evidence_id = evidence_id
-        self._stop = False
+        super().__init__({'image_path': image_path,
+                          'case_folder': case_folder,
+                          'evidence_id': evidence_id}, parent)
 
-    def stop(self):
-        self._stop = True
+    def on_progress(self, done, total, path):
+        self.progressed.emit(done, total, path)
 
-    def run(self):
-        index = None
-        handler = None
-        try:
-            index = SearchIndex(self.case_folder)
-            handler = ImageHandler(self.image_path)
-            if not handler.load_image():
-                raise RuntimeError(
-                    f"Could not open {self.image_path} for indexing.")
-            count = index_evidence(
-                handler, index, self.evidence_id,
-                progress=lambda done, total, path:
-                    self.progressed.emit(done, total, path),
-                should_stop=lambda: self._stop)
-            self.finished_indexing.emit(count, '')
-        except Exception as exc:
-            logger.error("Indexing failed: %s", exc)
-            self.finished_indexing.emit(0, str(exc))
-        finally:
-            if index is not None:
-                index.close()
-            if handler is not None:
-                try:
-                    handler.close_resources()
-                except Exception:
-                    pass
+    def on_done(self, count, error):
+        self.finished_indexing.emit(count, error)
 
 
 class SearchPanel(QWidget):

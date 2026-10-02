@@ -431,8 +431,10 @@ four lookups a minute; TRACE queues requests to stay within it. Without a key,
 nothing else is affected.
 
 **Analysis modules** are offered when a case is opened and can be run any time
-from **Run Analysis** in the Triage tab. They run in the background; the status
-bar shows progress and can cancel, and a cancelled run resumes where it stopped.
+from **Run Analysis** in the Triage tab. They run in the background, each in a
+process of its own, so the window stays fully usable while they work — browse,
+preview and search as normal. The status bar shows progress and can cancel;
+a cancelled analysis resumes where it stopped.
 
 Settings and application data live outside the source tree:
 

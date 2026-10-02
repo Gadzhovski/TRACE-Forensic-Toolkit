@@ -639,9 +639,11 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
 
     assert window.queue_indexing(window.case.evidence()) == 2
     assert pump(qapp, 300, lambda: not window.job_bar.busy)
-    pump(qapp, 0.5)
+    panel = window.indicators_panel
+    # The tab reads the index on threads of its own; wait for them.
+    assert pump(qapp, 30, lambda: not panel.loading)
 
-    index = window.indicators_panel.index
+    index = panel.index
     by_image = {r['id']: index.indicator_summary(r['id'])
                 for r in window.case.evidence()}
     assert all(by_image.values()), by_image     # both images have some
@@ -663,8 +665,8 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
                     ['indicator_kind'] == 'url')
     window.tree_viewer.setCurrentItem(url_node)
     window.tree_viewer.itemClicked.emit(url_node, 0)
-    pump(qapp, 0.5)
-    panel = window.indicators_panel
+    pump(qapp, 0.2)
+    assert pump(qapp, 30, lambda: not panel.loading)
     assert window.result_viewer.currentWidget() is window.triage_panel
     assert window.triage_panel.tabs.currentWidget() is panel
     assert panel.kind == 'url'
@@ -676,15 +678,15 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
                   if r['path'].endswith(SECOND))
     panel.set_kind('ip')
     window.triage_panel.set_evidence_filter(second)
-    pump(qapp, 0.3)
+    assert pump(qapp, 30, lambda: not panel.loading)
     shown = {panel.values_table.item(r, 0).text()
              for r in range(panel.values_table.rowCount())}
     assert shown == {r['value'] for r in index.indicators('ip', second)}
 
     # A value's files are that image's, and preview from that image.
     panel.values_table.selectRow(0)
-    pump(qapp, 0.3)
-    assert panel.files_table.rowCount()
+    assert pump(qapp, 30, lambda: not panel.loading
+                and panel.files_table.rowCount())
     position = next(r for r in range(panel.files_table.rowCount())
                     if panel.files_table.item(r, 0).data(Qt.UserRole)
                     ['kind'] == 'file')
@@ -702,4 +704,33 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
     assert window.result_viewer.currentWidget() is window.triage_panel
     window.triage_panel.set_evidence_filter(None)
     panel.set_kind(None)
-    pump(qapp, 0.3)
+    assert pump(qapp, 30, lambda: not panel.loading)
+
+
+def test_the_window_stays_responsive_while_a_job_runs(qapp, window):
+    """Jobs run in a child process: while one works, the window's event
+    loop keeps turning as when idle. Measured before the change, indexing
+    stalled it for 15 s at a time; the threshold here is generous for slow
+    CI runners, and still catches a job back on the UI's interpreter."""
+    import time
+    from PySide6.QtCore import QTimer
+    from trace_app.core.analysis import MODULES
+    gaps, last = [], [time.perf_counter()]
+
+    def tick():
+        now = time.perf_counter()
+        gaps.append(now - last[0])
+        last[0] = now
+
+    timer = QTimer()
+    timer.timeout.connect(tick)
+    timer.start(10)
+    try:
+        rows = window.case.evidence()
+        window.queue_analysis(rows, MODULES)
+        window.queue_indexing(rows)
+        assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    finally:
+        timer.stop()
+    assert len(gaps) > 50
+    assert max(gaps) < 1.5, f"the window stalled for {max(gaps):.2f} s"

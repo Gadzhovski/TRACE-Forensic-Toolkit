@@ -12,21 +12,18 @@ more than once.
 
 import logging
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHeaderView,
                                QLabel, QPushButton, QSizePolicy,
                                QTableWidget, QToolBar,
                                QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
-from trace_app.core.analysis import (MODULE_ENTROPY, MODULE_HASH, MODULE_MAGIC,
-                                     analyse_evidence)
-from trace_app.core.case import (REPORTED_FINDING_GRADES,
-                                 REPORTED_MISMATCHES, Case)
-from trace_app.core.image_handler import ImageHandler
+from trace_app.core.case import REPORTED_FINDING_GRADES, REPORTED_MISMATCHES
 from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
+from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
@@ -44,57 +41,27 @@ _WHY = {
 }
 
 
-class AnalysisWorker(QThread):
-    """Runs the analysis modules off the UI thread."""
+class AnalysisWorker(ProcessWorker):
+    """Runs the analysis modules in a child process (core/background.py),
+    so the window stays responsive however long the run."""
 
     progressed = Signal(int, int, str)
     finished_analysis = Signal(int, str)
 
+    kind = 'analysis'
+
     def __init__(self, image_path, case_folder, evidence_id, modules,
                  parent=None):
-        super().__init__(parent)
-        # Paths, not open objects: a SQLite connection belongs to the thread
-        # that made it, and a pytsk3 handle opened on the UI thread reports
-        # nothing useful when read from here. Both are opened again inside
-        # run().
-        self.image_path = image_path
-        self.case_folder = case_folder
-        self.evidence_id = evidence_id
-        self.modules = list(modules)
-        self._stop = False
+        super().__init__({'image_path': image_path,
+                          'case_folder': case_folder,
+                          'evidence_id': evidence_id,
+                          'modules': list(modules)}, parent)
 
-    def stop(self):
-        self._stop = True
+    def on_progress(self, done, total, path):
+        self.progressed.emit(done, total, path)
 
-    def run(self):
-        case = None
-        handler = None
-        try:
-            case = Case.open(self.case_folder)
-            handler = ImageHandler(self.image_path)
-            if not handler.load_image():
-                raise RuntimeError(
-                    f"Could not open {self.image_path} for analysis.")
-            count = analyse_evidence(
-                handler, case, self.evidence_id, self.modules,
-                progress=lambda done, total, path:
-                    self.progressed.emit(done, total, path),
-                should_stop=lambda: self._stop)
-            self.finished_analysis.emit(count, '')
-        except Exception as exc:
-            logger.error("Analysis failed: %s", exc)
-            self.finished_analysis.emit(0, str(exc))
-        finally:
-            if case is not None:
-                try:
-                    case.close()
-                except Exception:
-                    pass
-            if handler is not None:
-                try:
-                    handler.close_resources()
-                except Exception:
-                    pass
+    def on_done(self, count, error):
+        self.finished_analysis.emit(count, error)
 
 
 class TriagePanel(QWidget):

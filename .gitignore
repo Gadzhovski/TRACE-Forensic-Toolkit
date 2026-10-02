@@ -28,7 +28,11 @@
 # which during testing is often inside the repository; its database and search
 # index are derived data, never source.
 case.db
+case.db-wal
+case.db-shm
 search.db
+search.db-wal
+search.db-shm
 
 # The maintainer's working case and notes, kept beside the source
 /New folder/

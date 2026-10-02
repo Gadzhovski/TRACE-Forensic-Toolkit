@@ -21,7 +21,7 @@ not the copy on disk -- what is examined is the evidence.
 import logging
 import os
 
-from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QImageReader, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
                                QComboBox, QHeaderView, QLabel,
@@ -30,14 +30,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
                                QTableWidgetItem, QToolBar,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.carving import (CARVABLE_TYPES, CARVE_CATEGORIES,
-                                    CarvingCancelled, carve_evidence,
-                                    carve_image, write_carved)
-from trace_app.core.case import Case
-from trace_app.core.image_handler import ImageHandler
+from trace_app.core.carving import CARVABLE_TYPES, CARVE_CATEGORIES
 from trace_app.infra.constants import TABLE_ROW_HEIGHT, UNKNOWN_DATE
 from trace_app.infra.paths import carved_files_dir
 from trace_app.infra.utils import FileSystemUtils
+from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui import icons
 from trace_app.ui.widgets.multi_select import MultiSelectButton
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
@@ -89,83 +86,42 @@ def session_folder(label):
     return os.path.join(carved_files_dir(), safe)
 
 
-class CarvingWorker(QThread):
-    """Carves one image off the UI thread."""
+class CarvingWorker(ProcessWorker):
+    """Carves one image in a child process (core/background.py)."""
 
     #: (megabytes done, megabytes total, files found)
     progressed = Signal(int, int, int)
     file_carved = Signal(dict)
     finished_carving = Signal(int, str)
 
+    kind = 'carve'
+
     def __init__(self, image_path, file_types, unallocated_only,
                  case_folder=None, evidence_id=None, label='', parent=None):
-        super().__init__(parent)
-        # Paths, not open objects: a SQLite connection belongs to the thread
-        # that made it, and a pytsk3 handle is reopened in run() for the same
-        # reason the analysis worker reopens one.
         self.image_path = image_path
-        self.file_types = list(file_types)
-        self.unallocated_only = unallocated_only
-        self.case_folder = case_folder
         self.evidence_id = evidence_id
         self.label = label or os.path.basename(image_path)
-        self._stop = False
+        super().__init__({
+            'image_path': image_path,
+            'file_types': list(file_types),
+            'unallocated_only': unallocated_only,
+            'case_folder': case_folder,
+            'evidence_id': evidence_id,
+            # Decided here: the per-user folder is the window's to choose.
+            'folder': None if case_folder else session_folder(self.label),
+        }, parent)
 
-    def stop(self):
-        self._stop = True
+    def on_progress(self, done, total, found):
+        self.progressed.emit(done, total, found)
 
-    def run(self):
-        handler = case = None
-        found = 0
-        try:
-            handler = ImageHandler(self.image_path)
-            if not handler.load_image():
-                raise RuntimeError(f"Could not open {self.image_path}.")
-            megabyte = 1024 * 1024
+    def on_item(self, record):
+        self.file_carved.emit(dict(record, evidence_id=self.evidence_id,
+                                   evidence_key=self._key(),
+                                   evidence_label=self.label,
+                                   image_path=self.image_path))
 
-            def progress(position, size, count):
-                self.progressed.emit(position // megabyte,
-                                     max(1, size // megabyte), count)
-
-            def announce(record):
-                record = dict(record, evidence_id=self.evidence_id,
-                              evidence_key=self._key(),
-                              evidence_label=self.label,
-                              image_path=self.image_path)
-                self.file_carved.emit(record)
-
-            if self.case_folder:
-                case = Case.open(self.case_folder)
-                found = carve_evidence(
-                    handler, case, self.evidence_id, self.file_types,
-                    self.unallocated_only, progress=progress,
-                    should_stop=lambda: self._stop, on_file=announce)
-            else:
-                folder = session_folder(self.label)
-                count = [0]
-
-                def sink(content, file_type, offset, fragments=None):
-                    announce(write_carved(folder, content, file_type, offset,
-                                          fragments))
-                    count[0] += 1
-                try:
-                    carve_image(handler, self.file_types, sink,
-                                self.unallocated_only, progress=progress,
-                                should_stop=lambda: self._stop)
-                except CarvingCancelled:
-                    pass
-                found = count[0]
-            self.finished_carving.emit(found, '')
-        except Exception as exc:
-            logger.error("Carving %s failed: %s", self.image_path, exc)
-            self.finished_carving.emit(found, str(exc))
-        finally:
-            for thing, close in ((case, 'close'), (handler, 'close_resources')):
-                if thing is not None:
-                    try:
-                        getattr(thing, close)()
-                    except Exception:
-                        pass
+    def on_done(self, count, error):
+        self.finished_carving.emit(count, error)
 
     def _key(self):
         return self.evidence_id if self.evidence_id is not None \
