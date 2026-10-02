@@ -30,8 +30,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
                                QTableWidgetItem, QToolBar,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.carving import (CARVABLE_TYPES, CarvingCancelled,
-                                    carve_evidence, carve_image, write_carved)
+from trace_app.core.carving import (CARVABLE_TYPES, CARVE_CATEGORIES,
+                                    CarvingCancelled, carve_evidence,
+                                    carve_image, write_carved)
 from trace_app.core.case import Case
 from trace_app.core.image_handler import ImageHandler
 from trace_app.infra.constants import TABLE_ROW_HEIGHT, UNKNOWN_DATE
@@ -51,13 +52,19 @@ logger = logging.getLogger('TRACE.Carving')
 _THUMBS_PER_TICK = 24
 _THUMB = 120
 
-#: Types shown as a rendered picture rather than an icon.
-_PICTURE_TYPES = frozenset({'jpg', 'png', 'gif', 'bmp', 'tiff'})
+#: Types shown as a rendered picture rather than an icon. Qt draws most;
+#: Pillow what Qt cannot. HEIC needs a decoder TRACE does not ship, so it
+#: keeps its icon.
+_PICTURE_TYPES = frozenset({'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+                            'avif', 'psd', 'pdf'})
+_VIDEO = ('mov', 'mp4', 'm4v', '3gp', 'wmv', 'avi', 'flv', 'mpg', 'mkv', 'webm')
+_AUDIO = ('wav', 'mp3', 'ogg', 'opus', 'm4a')
+_ARCHIVE = ('zip', 'gz', 'bz2', 'xz', 'tar', 'rar', '7z')
 _ICON_FOR_TYPE = {
-    'mov': icons.FILE_VIDEO, 'mp4': icons.FILE_VIDEO, 'wmv': icons.FILE_VIDEO,
-    'zip': icons.FILE_ARCHIVE, 'gz': icons.FILE_ARCHIVE,
-    'rar': icons.FILE_ARCHIVE, '7z': icons.FILE_ARCHIVE,
-    'wav': icons.FILE_AUDIO, 'ole': icons.FILE_DOC, 'html': icons.FILE_HTML,
+    **{t: icons.FILE_VIDEO for t in _VIDEO},
+    **{t: icons.FILE_AUDIO for t in _AUDIO},
+    **{t: icons.FILE_ARCHIVE for t in _ARCHIVE},
+    'ole': icons.FILE_DOC, 'html': icons.FILE_HTML,
 }
 
 _COLUMNS = ['Name', 'Evidence', 'Type', 'Size', 'Offset', 'Embedded date',
@@ -209,7 +216,8 @@ class CarvedFilesPanel(QWidget):
                                      "image open.")
         bar.addWidget(self.target_combo)
         bar.addWidget(QLabel("for"))
-        self.type_button = MultiSelectButton(CARVABLE_TYPES, self, noun="types")
+        self.type_button = MultiSelectButton(CARVABLE_TYPES, self, noun="types",
+                                             categories=CARVE_CATEGORIES)
         self.type_button.set_selected(CARVABLE_TYPES)
         bar.addWidget(self.type_button)
         self.unallocated_box = QCheckBox("Unallocated space only")
@@ -505,17 +513,18 @@ class CarvedFilesPanel(QWidget):
         item.setToolTip(f"{row.get('evidence_label') or ''}\n"
                         f"{(row.get('type') or '').upper()}, "
                         f"{FileSystemUtils.get_readable_size(row.get('size') or 0)}")
-        glyph = _ICON_FOR_TYPE.get(row.get('type'))
+        kind = row.get('type') or 'unknown'
+        glyph = _ICON_FOR_TYPE.get(kind)
+        fallback = self.icon_resolver(kind) if self.icon_resolver else None
         if glyph is not None:
             item.setIcon(icons.icon(glyph))
         else:
-            # The file type's own icon until -- or instead of, if the data
-            # will not decode -- its picture.
-            fallback = (self.icon_resolver(row.get('type') or 'unknown')
-                        if self.icon_resolver else None)
+            # The file type's own icon -- until, for a picture, its thumbnail
+            # is drawn; or for good, if the data will not decode.
             item.setIcon(fallback or icons.icon(icons.CARVING))
-            self._thumb_queue.append(item)
-            self._thumb_timer.start()
+            if kind in _PICTURE_TYPES:
+                self._thumb_queue.append(item)
+                self._thumb_timer.start()
         self.gallery.addItem(item)
 
     def _draw_some_thumbnails(self):
@@ -548,6 +557,18 @@ class CarvedFilesPanel(QWidget):
                 self.gallery.viewport().mapToGlobal(point))
 
 
+def _pillow_thumbnail(path):
+    """What Qt cannot decode -- AVIF, PSD -- through Pillow."""
+    from PIL import Image
+    from PySide6.QtGui import QImage
+    with Image.open(path) as image:
+        image.thumbnail((_THUMB * 2, _THUMB * 2))
+        image = image.convert('RGBA')
+        data = image.tobytes('raw', 'RGBA')
+        qimage = QImage(data, image.width, image.height, QImage.Format_RGBA8888)
+        return QPixmap.fromImage(qimage.copy())
+
+
 def _thumbnail(path, file_type):
     """A thumbnail of a carved picture or PDF, or a null pixmap.
 
@@ -575,6 +596,8 @@ def _thumbnail(path, file_type):
             image = reader.read()
             if not image.isNull():
                 pixmap = QPixmap.fromImage(image)
+            else:
+                pixmap = _pillow_thumbnail(path)
     except Exception as exc:
         logger.debug("No thumbnail for %s: %s", path, exc)
         return QPixmap()

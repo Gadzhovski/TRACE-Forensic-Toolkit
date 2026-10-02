@@ -98,9 +98,14 @@ class SizeTableWidgetItem(QTableWidgetItem):
 
 
 
-#: Carved types the archive browser can open (RAR is listed by the carver but
-#: needs unrar, which is not bundled; it is reported, not browsed).
-CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', '7z', 'rar'})
+#: Carved types a double-click browses like a folder (RAR is listed by the
+#: carver but needs unrar, which is not bundled; it is reported, not browsed).
+CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
+                                  'jar', 'apk', 'epub'})
+#: ...and those that are archives inside but documents to an examiner: a
+#: double-click shows the document; "Browse Archive" opens its parts.
+CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
+                                        'ods', 'odp', 'odg'})
 
 
 class MainWindow(VolumeInfoMixin, QMainWindow):
@@ -1471,9 +1476,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         open_action.setEnabled(os.path.isfile(path))
         location_action.setEnabled(os.path.isfile(path))
         browse = None
-        if (row.get('type') or '').lower() in CARVED_ARCHIVE_TYPES:
+        kind = (row.get('type') or '').lower()
+        if kind in CARVED_ARCHIVE_TYPES | CARVED_BROWSABLE_DOCUMENTS:
             browse = menu.addAction("Browse Archive")
-            menu.setDefaultAction(browse)
+            if kind in CARVED_ARCHIVE_TYPES:
+                menu.setDefaultAction(browse)
         copy_hash = None
         if row.get('sha256'):
             copy_hash = menu.addAction("Copy SHA-256")
@@ -1636,7 +1643,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def open_carved(self, row):
         """Double-click on a carved file: browse an archive, show the rest."""
-        if not self.browse_carved_archive(row):
+        if (row.get('type') or '').lower() not in CARVED_ARCHIVE_TYPES or \
+                not self.browse_carved_archive(row):
             self.preview_carved(row)
 
     def browse_carved_archive(self, row):
@@ -1648,7 +1656,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         Carved files tab, which is where this archive lives. Returns True
         when it was an archive and was listed.
         """
-        if (row.get('type') or '').lower() not in CARVED_ARCHIVE_TYPES:
+        if (row.get('type') or '').lower() not in (
+                CARVED_ARCHIVE_TYPES | CARVED_BROWSABLE_DOCUMENTS):
             return False
         content = self._read_carved(row)
         if not content or not archives.detect_archive(content):

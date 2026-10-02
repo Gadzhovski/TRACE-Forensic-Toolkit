@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
                                      MODULE_HASH, MODULE_HIDDEN, MODULE_MAGIC,
                                      MODULE_PHOTO, magic_reader)
-from trace_app.core.carving import CARVABLE_TYPES
+from trace_app.core.carving import CARVABLE_TYPES, CARVE_CATEGORIES
 from trace_app.ui import icons
 from trace_app.ui.widgets.multi_select import MultiSelectButton
 
@@ -167,7 +167,8 @@ class AnalysisModulesDialog(QDialog):
         options.setContentsMargins(22, 0, 0, 0)
         options.addWidget(QLabel("Look for"))
         self.carve_types = MultiSelectButton(CARVABLE_TYPES, self,
-                                             noun="types")
+                                             noun="types",
+                                             categories=CARVE_CATEGORIES)
         self.carve_types.set_selected(
             [t.upper() for t in choice.get('carve_types') or ()]
             or CARVABLE_TYPES)

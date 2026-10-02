@@ -24,6 +24,19 @@ FOLDER = 'Icons/places/folder.svg'
 
 #: Extension -> icon. Several extensions deliberately share one icon.
 FILE_ICONS = {
+    # Types file carving recovers that had no icon of their own.
+    'avif': 'Icons/mimetypes/image-x-generic.svg',
+    'odg': 'Icons/mimetypes/image-x-generic.svg',
+    'vsdx': 'Icons/mimetypes/image-x-generic.svg',
+    'epub': 'Icons/mimetypes/text-x-generic.svg',
+    'mbox': 'Icons/mimetypes/text-x-generic.svg',
+    'eml': 'Icons/mimetypes/text-x-generic.svg',
+    'ole': 'Icons/mimetypes/application-vnd.ms-word.svg',
+    'regf': 'Icons/mimetypes/application-x-desktop.svg',
+    'elf': 'Icons/mimetypes/application-x-executable.svg',
+    'macho': 'Icons/mimetypes/application-x-executable.svg',
+    '3gp': 'Icons/mimetypes/video-x-generic.svg',
+    'mpg': 'Icons/mimetypes/video-x-generic.svg',
     '7z': 'Icons/mimetypes/application-7zip.svg',
     'aac': 'Icons/mimetypes/audio-x-generic.svg',
     'm4a': 'Icons/mimetypes/audio-x-generic.svg',
