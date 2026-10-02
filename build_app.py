@@ -179,11 +179,11 @@ def _package_macos(version, arch):
                  os.path.join(staging, 'LICENSE.txt'))
 
     artifact = os.path.join(DIST, f'{APP_NAME}-{version}-macos-{arch}.dmg')
-    if run_quietly("Creating the disk image",
+    if run_hdiutil("Creating the disk image",
                    ['hdiutil', 'create', '-volname', f'{APP_NAME} {version}',
                     '-srcfolder', staging, '-fs', 'HFS+', '-format', 'UDZO',
                     '-imagekey', 'zlib-level=9', '-ov', artifact]) \
-            or run_quietly("Verifying the disk image",
+            or run_hdiutil("Verifying the disk image",
                            ['hdiutil', 'verify', artifact]):
         return None
     return artifact
@@ -218,7 +218,7 @@ def _self_test(artifact, images, arch):
         else:
             mount = os.path.join(scratch, 'volume')
             os.makedirs(mount)
-            if run_quietly("Mounting the disk image read-only",
+            if run_hdiutil("Mounting the disk image read-only",
                            ['hdiutil', 'attach', '-nobrowse', '-readonly',
                             '-mountpoint', mount, artifact]):
                 ui.bad("Could not mount the disk image")
@@ -312,6 +312,23 @@ def run_quietly(label, command, describe=None):
             if text:
                 live.update(text)
         return process.wait()
+
+
+def run_hdiutil(label, command, attempts=3):
+    """hdiutil, retried: on CI's macOS runners create and attach fail now
+    and then with "Resource busy" while the system still holds the staging
+    folder or a previous image. Each failure is in the log."""
+    status = 1
+    for attempt in range(1, attempts + 1):
+        status = run_quietly(label if attempt == 1
+                             else f"{label} (attempt {attempt})", command)
+        if status == 0:
+            return 0
+        _log(f"hdiutil exited with {status} (attempt {attempt} of "
+             f"{attempts})\n")
+        if attempt < attempts:
+            time.sleep(5 * attempt)
+    return status
 
 
 _PYINSTALLER_LINE = re.compile(r'^\d+ (?:INFO|WARNING): (.*)$')
