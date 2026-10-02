@@ -536,3 +536,55 @@ def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs):
         assert (window.current_selected_data or {}).get('is_carved')
     finally:
         window.cleanup_resources()
+
+
+def test_carving_an_image_added_to_a_case_carves_only_that_image(
+        qapp, stubbed_dialogs, tmp_path):
+    """Adding an image to a case, filtering Triage to it and pressing Start
+    Carving carves that image and no other. The new image was missing from
+    Triage's filter, and the Carve selector ignored the filter, so the carve
+    ran on every image in the case."""
+    import trace_app.ui.main_window as main_window
+    from trace_app.core.case import Case
+    from trace_app.ui.main_window import MainWindow
+
+    folder = str(tmp_path / 'Added image')
+    case = Case.create(folder, 'Added image')
+    case.add_evidence(image_path(FIRST))
+    case.add_evidence(image_path(SECOND))
+    case.close()
+
+    window = MainWindow(case=Case.open(folder))
+    try:
+        pump(qapp, 120, lambda: len(window.evidence_files) == 2)
+        new = image_path('11-carve-fat.dd')
+        assert window.open_evidence_image(new)
+        new_id = window.evidence_id_for_path(new)
+
+        window.triage_panel.set_evidence_filter(new_id)
+        assert window.triage_panel.evidence_id == new_id
+        assert window.carved_panel.target_combo.currentData() == new_id
+
+        window.carved_panel._request()
+        assert pump(qapp, 120, lambda: not window.job_bar.busy)
+        pump(qapp, 0.5)
+        assert window.case.carving_state(new_id)['status'] == 'done'
+        others = [r['id'] for r in window.case.evidence() if r['id'] != new_id]
+        assert all(window.case.carving_state(e) is None for e in others)
+        assert {r['evidence_id'] for r in window.case.carved_files()} == {new_id}
+
+        # Run Analysis from Triage starts the dialog on the same image.
+        seen = {}
+
+        def fake_choose(parent, preselected=None, evidence=None):
+            seen['evidence_ids'] = preselected['evidence_ids']
+            return None
+        saved = main_window.choose_modules
+        main_window.choose_modules = fake_choose
+        try:
+            window.triage_panel.run_requested.emit()
+        finally:
+            main_window.choose_modules = saved
+        assert seen['evidence_ids'] == [new_id]
+    finally:
+        window.cleanup_resources()

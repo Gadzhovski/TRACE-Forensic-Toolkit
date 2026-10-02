@@ -304,6 +304,8 @@ class CarvedFilesPanel(QWidget):
         index = self.target_combo.findData(keep)
         self.target_combo.setCurrentIndex(max(index, 0))
         self.target_combo.blockSignals(False)
+        if self.case is not None:
+            self._select_target(self.evidence_filter)
         self.target_combo.setEnabled(bool(targets))
         self.carve_button.setEnabled(bool(targets))
 
@@ -324,8 +326,22 @@ class CarvedFilesPanel(QWidget):
         self.refresh()
 
     def set_evidence_filter(self, evidence_id):
+        """Show one image's carved files, or all; and carve that image.
+
+        The Carve selector follows Triage's filter, so the image being looked
+        at is the image Start Carving searches. It used to stay on "All
+        images", and a carve meant for one image ran on every one.
+        """
         self.evidence_filter = evidence_id
+        self._select_target(evidence_id)
         self.refresh()
+
+    def _select_target(self, evidence_id):
+        if self.case is None:
+            return
+        index = self.target_combo.findData(evidence_id)
+        if index >= 0:
+            self.target_combo.setCurrentIndex(index)
 
     def add_record(self, record):
         """A file just carved: shown at once, before the job finishes."""

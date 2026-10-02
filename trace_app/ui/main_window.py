@@ -982,7 +982,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.triage_panel.finding_activated.connect(self.open_finding)
         self.triage_panel.finding_menu_requested.connect(
             self.open_finding_menu)
-        self.triage_panel.run_requested.connect(self.run_analysis_modules)
+        # From Triage, the dialog starts on the image Triage is showing.
+        self.triage_panel.run_requested.connect(
+            lambda: self.run_analysis_modules(self.triage_panel.evidence_id))
 
         # Carving is a Triage sub-tab: what it recovers is reviewed like any
         # other finding, and with a case it runs as an analysis job.
@@ -2050,8 +2052,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self._ask_and_queue(rows)
 
-    def run_analysis_modules(self):
-        """Ask which modules to run, then queue a run per piece of evidence."""
+    def run_analysis_modules(self, evidence_id=None):
+        """Ask which modules to run, then queue a run per piece of evidence.
+
+        `evidence_id` is the image the dialog starts on; None offers them all.
+        """
         if not self.case:
             message.warning(
                 self, "No case open",
@@ -2067,9 +2072,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 "Add an image to the case first.")
             return
 
-        self._ask_and_queue(rows)
+        self._ask_and_queue(rows, evidence_id)
 
-    def _ask_and_queue(self, rows):
+    def _ask_and_queue(self, rows, evidence_id=None):
         """Ask what to run, and against which evidence; queue the jobs.
 
         Every file module the first time: an examiner opening this dialog
@@ -2079,7 +2084,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         evidence = [(row['id'], row.get('display_name')
                      or os.path.basename(row['path'])) for row in rows]
-        choice = choose_modules(self, preselected=self._last_choice,
+        # The modules are remembered from last time; the evidence is not. Which
+        # images to run on is decided where the dialog was opened -- an image
+        # carried over from the last run is how a run reaches the wrong ones.
+        preselected = dict(self._last_choice,
+                           evidence_ids=None if evidence_id is None
+                           else [evidence_id])
+        choice = choose_modules(self, preselected=preselected,
                                 evidence=evidence)
         if not choice:
             return
@@ -3301,6 +3312,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # A case that cannot record evidence must not stop the examiner
             # looking at it; the panel will show the discrepancy.
             logger.error("Could not record evidence in the case: %s", exc)
+            return
+        # The new image joins Triage's filter and the images carving offers
+        # at once. Without this the filter did not list it until the case was
+        # reopened, so choosing it fell back to "All evidence" -- and a carve
+        # meant for the new image ran on every one.
+        self.triage_panel.set_case(self.case)
+        self._refresh_carving_targets()
 
     def store_verification_in_case(self, image_path, results):
         """Persist computed hashes against the case's evidence row."""
