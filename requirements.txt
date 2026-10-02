@@ -33,16 +33,16 @@ Pillow>=11.3.0           # image decoding and EXIF; 11.3 is the first whose
 chardet>=5.2.0           # text encoding detection
 olefile>=0.46            # legacy Office (.doc/.xls/.ppt): authors and encryption
 py7zr>=1.0.0             # 7z archives: browsing, and spotting encrypted ones.
+                         # Wheels for every platform; resolves to 1.0 on
+                         # Python 3.9 and on Intel macOS. LGPL-2.1+.
 rarfile>=4.2             # RAR archives: members, sizes, dates, encryption, and
                          # stored members -- pure Python. Compressed members
                          # need an external unrar, which TRACE does not use.
 # HEIC/HEIF (iPhone photos): previews, thumbnails and EXIF/GPS through Pillow.
 # The decode-only build: pillow-heif bundles the GPL x265 encoder, pi-heif does
 # not. Wheels for every platform but Windows on ARM, where HEIC keeps its icon
-# rather than pip attempting a compile.
-pi-heif>=1.4.0 ; not (sys_platform == 'win32' and platform_machine == 'ARM64')
-                         # Wheels for every platform; resolves to 1.0 on
-                         # Python 3.9 and on Intel macOS. LGPL-2.1+.
+# rather than pip attempting a compile. (PEP 508 markers have no `not`.)
+pi-heif>=1.4.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 requests>=2.31.0         # VirusTotal API
 
 # --- libmagic (file type from content) ------------------------------------
