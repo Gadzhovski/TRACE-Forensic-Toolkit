@@ -77,8 +77,8 @@ class AboutDialog(QDialog):
 
         This previously asked the icon registry for a 24x24 pixmap and then
         scaled that up to 400x400 -- a 16x enlargement of a thumbnail, which is
-        why it looked blocky. Loading the file directly uses all 1024x1024
-        pixels of the source, and rendering at the device pixel ratio keeps it
+        why it looked blocky. Loading the file directly uses all the
+        pixels of the source (500x500), and rendering at the device pixel ratio keeps it
         sharp on a hi-DPI screen.
         """
         label = QLabel(self)

@@ -25,8 +25,11 @@ from trace_app.infra.paths import resource_path
 logger = logging.getLogger('TRACE.Icons')
 
 # --- Application -----------------------------------------------------------
-LOGO = "Icons/logo.png"
-LOGO_LARGE = "Icons/logo_prev_ui.png"
+#: The logo on a transparent background, for everything drawn in the
+#: application (About, window icons). Icons/logo.png is the white-tiled
+#: original the build turns into the packaged app's file icon (TRACE.spec).
+LOGO = "Icons/logo_prev_ui.png"
+LOGO_LARGE = LOGO
 VIRUSTOTAL_LOGO = "Icons/tabler/virustotal-wordmark.svg"
 HELP = "Icons/tabler/help-circle.svg"
 
