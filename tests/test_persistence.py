@@ -13,7 +13,7 @@ import struct
 
 import pytest
 
-from tests.conftest import ROOT, image_path
+from tests.conftest import ROOT
 
 SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
 
@@ -169,11 +169,15 @@ def test_ifeo_template_and_signed_per_user_updaters_are_routine():
 
 def test_a_real_xp_image_end_to_end_with_a_hash_set(tmp_path):
     """Every autostart of the NPS domexusers machine is routine -- until
-    the hash of the program one starts is put in a known-bad set."""
+    the hash of the program one starts is put in a known-bad set. The image
+    (4.4 GB) is not fetched in CI, so this skips without it even there."""
     from trace_app.core import hashsets, persistence
     from trace_app.core.case import Case
     from trace_app.core.image_handler import ImageHandler
-    path = image_path('nps-2009-domexusers.E01')
+    from tests.conftest import IMAGE_DIR
+    path = os.path.join(IMAGE_DIR, 'nps-2009-domexusers.E01')
+    if not os.path.exists(path):
+        pytest.skip("nps-2009-domexusers.E01 is not in test_images/")
     handler = ImageHandler(path)
     assert handler.load_image()
     case = Case.create(str(tmp_path / 'case'), 'Autoruns')
