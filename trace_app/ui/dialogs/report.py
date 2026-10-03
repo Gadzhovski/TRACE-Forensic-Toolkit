@@ -264,8 +264,9 @@ class ReportDialog(QDialog):
             clear.setToolTip("Forget the events added from the Timeline "
                              "(right-click ▸ Add to Report there)")
             clear.clicked.connect(lambda: self._clear_picked(clear))
+            form.addRow(self.timeline_items_box)
             row = QHBoxLayout()
-            row.addWidget(self.timeline_items_box)
+            row.addSpacing(22)
             row.addWidget(clear)
             row.addStretch(1)
             form.addRow(row)
