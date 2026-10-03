@@ -12,7 +12,8 @@ import logging
 
 import pytsk3
 
-from trace_app.core.archives import (ArchiveError, detect_archive,
+from trace_app.core.archives import (STREAMED_KINDS, ArchiveError,
+                                     detect_archive,
                                      list_members, read_member)
 from trace_app.core.case import make_artifact_ref
 from trace_app.core.search_index import (INDEX_CANCELLED, INDEX_DONE,
@@ -229,12 +230,13 @@ def _index_file(image_handler, index, evidence_id, offset, inode, sequence,
                  changed_utc=times.get('changed', ''),
                  is_deleted=times.get('is_deleted', False))
 
-    if name.lower().endswith(('.pst', '.ost')) and \
+    if (name.lower().endswith(('.pst', '.ost', '.mbox')) or
+            size > MAX_FILE_BYTES) and \
             hasattr(image_handler, 'open_file_object'):
         # A mailbox is read lazily -- it is often far larger than any file
         # held in memory -- and indexed message by message.
         stream = image_handler.open_file_object(inode, offset)
-        if stream is not None and detect_archive(stream) == 'pst':
+        if stream is not None and detect_archive(stream) in STREAMED_KINDS:
             index.add_item(evidence_id, ref, 'file', name, path, '', size,
                            **facts)
             _index_archive(index, evidence_id, ref, stream, path,

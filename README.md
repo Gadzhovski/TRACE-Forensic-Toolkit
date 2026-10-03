@@ -506,6 +506,12 @@ Inside a disk:
   attachments as files, and items no folder points to under *Orphan items*.
   Read lazily from the image, so a 20 GB mailbox is no problem, and indexed
   for search and indicators message by message.
+- **EML and mbox** open the same way, recognised by their content (a
+  Thunderbird mailbox has no extension): each message as the same page,
+  dated as written and in UTC, pictures it shows inline put in the page
+  without anything being fetched, attachments as files, a forwarded message
+  or a digest's messages as messages to step into, and the headers as
+  received. An mbox is read from the image a block at a time.
 
 <br/>
 

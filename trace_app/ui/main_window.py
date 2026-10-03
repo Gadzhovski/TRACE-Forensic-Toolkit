@@ -109,7 +109,8 @@ class SizeTableWidgetItem(QTableWidgetItem):
 #: Carved types a double-click browses like a folder (RAR is listed by the
 #: carver but needs unrar, which is not bundled; it is reported, not browsed).
 CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
-                                  'jar', 'apk', 'epub', 'pst', 'ost'})
+                                  'jar', 'apk', 'epub', 'pst', 'ost', 'eml',
+                                  'mbox'})
 #: ...and those that are archives inside but documents to an examiner: a
 #: double-click shows the document; "Browse Archive" opens its parts.
 CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
@@ -2013,10 +2014,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             size = 0
 
         # A mailbox is browsed from the image as it is read, not from
-        # memory: a PST or OST is routinely far bigger than any archive.
-        if name.lower().endswith(('.pst', '.ost')):
+        # memory: a PST, an OST or an mbox (Thunderbird's have no extension)
+        # is routinely far bigger than any archive.
+        if name.lower().endswith(('.pst', '.ost', '.mbox')) or \
+                (size and size > archives.MAX_MEMBER_BYTES):
             stream = self.image_handler.open_file_object(inode, offset)
-            if stream is not None and archives.detect_archive(stream) == 'pst':
+            if stream is not None and \
+                    archives.detect_archive(stream) in archives.STREAMED_KINDS:
                 self.set_status(f"Opening the mailbox {name}…")
                 self._archive_stack = [(name, stream, dict(data))]
                 return self.show_archive_level()

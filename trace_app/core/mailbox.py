@@ -357,9 +357,6 @@ def render_message(message, kind='PST'):
                 continue
         rows.append(('Attachments', '; '.join(
             f'{name} ({size:,} bytes)' for name, size in names)))
-    table = ''.join(f'<tr><th align="left" valign="top">{e(k)}:&nbsp;</th>'
-                    f'<td>{e(v)}</td></tr>' for k, v in rows if v)
-
     html_body = _safe(message, 'html_body')
     plain = _safe(message, 'plain_text_body')
     rtf = _safe(message, 'rtf_body')
@@ -377,12 +374,27 @@ def render_message(message, kind='PST'):
     else:
         body, note = '<p><i>No body.</i></p>', ''
     headers = _text_of(_safe(message, 'transport_headers'))
-    transport = (f'<hr><p><b>Transport headers</b></p>'
+    return message_page(f'Message from an Outlook {kind} mailbox', subject,
+                        rows, body, note, headers)
+
+
+def message_page(origin, subject, rows, body, note='', headers='',
+                 label='Transport headers'):
+    """One message as a page of HTML -- the page every mail format shares.
+
+    `rows` are (name, value) header pairs, escaped here; `body` is HTML
+    already (a message's own HTML body, or escaped text), shown by the
+    offline viewer, which runs no script and fetches nothing. `headers` is
+    the raw header block, shown as received."""
+    e = html.escape
+    table = ''.join(f'<tr><th align="left" valign="top">{e(k)}:&nbsp;</th>'
+                    f'<td>{e(v)}</td></tr>' for k, v in rows if v)
+    transport = (f'<hr><p><b>{e(label)}</b></p>'
                  f'<pre style="white-space: pre-wrap">{e(headers)}</pre>'
                  if headers else '')
     page = (f'<html><head><meta charset="utf-8"><title>{e(subject)}</title>'
-            f'</head><body><p><small>Message from an Outlook {e(kind)} '
-            f'mailbox</small></p><table cellspacing="0" cellpadding="2">'
+            f'</head><body><p><small>{e(origin)}</small></p>'
+            f'<table cellspacing="0" cellpadding="2">'
             f'{table}</table><hr>{note}{body}{transport}</body></html>')
     return page.encode('utf-8')
 

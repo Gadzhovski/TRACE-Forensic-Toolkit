@@ -96,7 +96,10 @@ def detect_archive(data):
     if len(data) > 262 and data[257:262] == b'ustar':
         return 'tar'
 
-    return None
+    # A saved message or an mbox: text, recognised by its header block
+    # (core/mailfiles.py), and browsed like an archive of its parts.
+    from trace_app.core.mailfiles import mail_kind
+    return mail_kind(data[:4096])
 
 
 def is_archive(data):
@@ -133,8 +136,24 @@ def list_members(data, kind=None, password=None):
         return _list_rar(data)
     if kind == 'pst':
         return _mailbox_call('list_members', data)
+    if kind in MAIL_KINDS:
+        return _mailfile_call('list_members', data, kind)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
+
+
+#: Mail formats that are text: a saved message, and an mbox of them.
+MAIL_KINDS = ('eml', 'mbox')
+#: What is browsed from the image as it is read, never held whole.
+STREAMED_KINDS = ('pst', 'mbox')
+
+
+def _mailfile_call(name, *args):
+    from trace_app.core import mailfiles
+    try:
+        return getattr(mailfiles, name)(*args)
+    except mailfiles.MailFileError as exc:
+        raise ArchiveError(str(exc)) from exc
 
 
 def _mailbox_call(name, *args):
@@ -174,6 +193,8 @@ def read_member(data, member_name=None, kind=None, password=None,
         return _read_rar_member(data, member_name, limit)
     if kind == 'pst':
         return _mailbox_call('read_member', data, member_name, limit)
+    if kind in MAIL_KINDS:
+        return _mailfile_call('read_member', data, member_name, limit, kind)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 
