@@ -42,8 +42,28 @@ def configure_logging():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+#: Windows groups taskbar buttons by this ID, and shows the icon of the
+#: windows that carry it. Without one the process is "python.exe" and the
+#: taskbar shows Python's icon.
+APP_USER_MODEL_ID = 'TRACE.ForensicToolkit'
+
+
+def set_taskbar_identity():
+    """Give the process TRACE's own taskbar identity -- before any window
+    exists, or the first one (the case launcher) is grouped as Python."""
+    if sys.platform != 'win32':
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID)
+    except (AttributeError, OSError) as exc:
+        logging.getLogger('TRACE').debug("No taskbar identity: %s", exc)
+
+
 def main():
     configure_logging()
+    set_taskbar_identity()
     logging.getLogger('TRACE').info("Starting TRACE %s on %s", __version__, sys.platform)
     magic_id = libmagic_identity()
     if magic_id:
@@ -54,6 +74,8 @@ def main():
     app.setApplicationDisplayName("TRACE")
     app.setOrganizationName("TRACE")
     app.setApplicationVersion(__version__)
+    # Every window's icon, the launcher's included, and the taskbar's.
+    app.setWindowIcon(icons.icon(icons.LOGO))
 
     # Report missing system libraries once, by name, instead of letting them
     # surface later as an unhandled exception inside a Qt slot.

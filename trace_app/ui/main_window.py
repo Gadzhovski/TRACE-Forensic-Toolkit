@@ -534,13 +534,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         app_icon = icons.icon(icons.LOGO_LARGE)
         self.setWindowIcon(app_icon)
 
-        # Set taskbar/dock icon for different platforms
-        if os.name == 'nt':  # Windows
-            import ctypes
-            myappid = 'Trace'
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-        else:  # macOS and Linux
-            # For macOS and Linux, setting the app icon at application level
+        # The application icon and the Windows taskbar identity are set in
+        # app.py, before the case launcher opens; here only for a window
+        # built some other way (tests, scripts).
+        if QApplication.instance().windowIcon().isNull():
             QApplication.instance().setWindowIcon(app_icon)
 
         self._place_on_screen()
