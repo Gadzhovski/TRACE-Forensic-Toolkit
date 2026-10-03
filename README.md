@@ -144,7 +144,16 @@ file, so it takes seconds:
   machine and MAC), Jump Lists, RecentDocs, ShellBags (folders on drives and
   shares that are gone)
 - **USB devices** — first and last connected and removed, drive letter, from
-  the registry and setupapi
+  the registry and setupapi; the volumes and shares each user mounted
+  (MountPoints2)
+- **Networks** — every network joined, first and last connected, gateway
+  MAC and DNS suffix, and connection times from SRUM
+- **App and network use (SRUM)** — per application, hour by hour: CPU time,
+  bytes read and written, bytes sent and received, energy, per user
+- **System** — the Windows install, installed programs, the time zone
+- **Windows Timeline** — what was opened, and how long each app was in use;
+  BAM's last run per user; Run dialog commands; paths typed in Explorer and
+  Explorer searches
 - **Recycle Bin** — original path, size and deletion time, Vista+ and XP
 - **Logons and remote access** — logons by type and source address, failures
   with the reason, accounts created or changed, services installed, logs
@@ -249,6 +258,38 @@ algorithms (MD5 / SHA-1 / SHA-256), whether known-good files are hidden from
 the Listing and the Timeline, whether a known-bad match warns, whether
 matching follows hashing. Matches are a Triage tab, Findings groups and the
 Listing's Flag column; imports, option changes and runs are audited.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🧷 Persistence (autoruns)
+
+Everything set to start by itself: Run / RunOnce and the Policies Run keys
+(machine and each user), services and drivers, scheduled tasks, Startup
+folders, Winlogon Shell / Userinit, Image File Execution Options debuggers,
+AppInit_DLLs and WMI event consumers. Each entry is **graded by the file it
+starts, found on the same image** — present or missing, an embedded
+signature or none (seen, never verified), its hash in a known-bad or
+known-good set, a Windows name outside where Windows keeps it, a
+user-writable folder, a script host with an encoded command — and every
+reason is shown. Windows' own services and signed per-user updaters are
+listed but not raised. Triage ▸ Persistence, Findings, and the report.
+
+</td>
+<td width="50%" valign="top">
+
+### 🧬 YARA rules
+
+**Tools ▸ YARA Rules** keeps your rules: a rule file or a whole folder
+(includes kept) is copied into your library with each file's SHA-256 and
+compiled on import — a broken rule is reported with file, line and column.
+Each case chooses its sets; the scan reads every file, deleted ones
+included, and every carved file. A match is a finding with the rule, its
+tags and metadata, and each matched string with its offset and bytes.
+Powered by yara-x (VirusTotal's YARA in Rust). Not available on Windows on
+ARM, which has no build of it — Options ▸ Supported Features says so.
 
 </td>
 </tr>
@@ -441,6 +482,16 @@ and ISO 9660 have been tested here.
 
 Inside a disk:
 
+- **FileVault 2, LUKS** — recognised and shown locked like BitLocker; unlock
+  with the password or recovery key (LUKS: passphrase), and the decrypted
+  HFS+ or ext file system reads like any other.
+- **APFS** — containers and their volumes, encrypted ones unlocked with the
+  password or recovery key, read through libfsapfs (The Sleuth Kit's wheels
+  do not read APFS): browsing, previews, analysis, indexing and activity
+  included.
+- **Linux LVM** — every logical volume of a volume group is a volume of its
+  own, read and analysed like a partition.
+
 - **BitLocker** volumes (including To Go) are recognised and shown locked;
   right-click ▸ **Unlock BitLocker…** with the recovery key, the password or a
   `.BEK` startup key, and the volume's files read like any other — browsing,
@@ -597,6 +648,13 @@ older builds cannot open it afterwards.
 
 Diagnostics are written to `trace.log` in the data directory — include it when
 reporting a bug.
+
+**Options → Supported Features** lists what this installation can do on this
+system: every feature, the library providing it and its version, and — for
+anything unavailable — why and what to do (YARA on Windows on ARM, for
+example, where yara-x has no build). Copy Report puts the whole list on the
+clipboard for a bug report. Unavailable features are greyed out where they
+would be used, with the same reason.
 
 <br/>
 

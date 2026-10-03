@@ -76,7 +76,7 @@ from trace_app.ui.viewers.indicators_panel import IndicatorsPanel, kind_label
 from trace_app.ui.viewers.ntfs_panel import NtfsPanel, NtfsWorker
 from trace_app.ui.viewers.hash_matches_panel import (HashMatchesPanel,
                                                      HashMatchWorker)
-from trace_app.core import hashsets
+from trace_app.core import containers, hashsets
 from trace_app.ui.viewers.timeline_panel import TimelinePanel
 from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
@@ -616,8 +616,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     f"{data.get('shadow_created', '')}   ·   read-only")
         if data.get('is_bitlocker') and self.image_handler and \
                 not self.image_handler.is_unlocked(data.get('start_offset', 0)):
-            return (f"{data.get('volume_label', 'Volume')}   ·   BitLocker, "
-                    f"locked   ·   right-click ▸ Unlock BitLocker…")
+            name = containers.ENCRYPTION_NAMES.get(
+                data.get('encryption') or 'bitlocker', 'BitLocker')
+            return (f"{data.get('volume_label', 'Volume')}   ·   {name}, "
+                    f"locked   ·   right-click ▸ Unlock {name}…")
 
         # Unallocated space: the sector range is the only thing identifying it.
         if data.get('is_unallocated'):
@@ -4917,11 +4919,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Check if the image has partitions or a recognizable file system
         if not partitions:
-            if self.image_handler.is_bitlocker(0):
-                # A volume image of a BitLocker drive: what TSK would list
+            kind = self.image_handler.volume_kind(0)
+            if self.image_handler.encryption(0):
+                # A volume image of an encrypted drive: what TSK would list
                 # is its decoy (To Go's FAT32 discovery volume) or nothing.
                 self._add_bitlocker_node(root_item_tree, 0, "Volume",
                                          self.image_handler.get_size())
+            elif kind == 'lvm':
+                self._add_lvm_nodes(root_item_tree, 0, "Volume")
+            elif kind == 'apfs':
+                self._add_apfs_nodes(root_item_tree, 0, "Volume")
             elif self.image_handler.has_filesystem(0):
                 # The image has a filesystem but no partitions, populate root directory
                 self.populate_contents(root_item_tree, {"start_offset": 0})
@@ -4943,10 +4950,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             size_in_bytes = length * sector_size
             readable_size = self.image_handler.get_readable_size(size_in_bytes)
             desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
-            if self.image_handler.is_bitlocker(start):
+            kind = self.image_handler.volume_kind(start)
+            if self.image_handler.encryption(start):
                 self._add_bitlocker_node(
                     root_item_tree, start, f"vol{addr}", size_in_bytes,
                     f"{desc_str}: {start}-{end}", end)
+                continue
+            if kind in ('lvm', 'apfs'):
+                group = QTreeWidgetItem(root_item_tree)
+                group.setText(0, f"vol{addr} ({desc_str}: {start}-{end}, "
+                                 f"Size: {readable_size}, "
+                                 f"{'LVM volume group' if kind == 'lvm' else 'APFS container'})")
+                group.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                    'device', 'drive-harddisk')))
+                group.setData(0, Qt.UserRole, {
+                    "inode_number": None, "start_offset": start,
+                    "end_offset": end, "is_volume_group": True})
+                (self._add_lvm_nodes if kind == 'lvm' else
+                 self._add_apfs_nodes)(group, start, f"vol{addr}")
+                group.setExpanded(True)
                 continue
             fs_type = self.image_handler.get_fs_type(start)
             item_text = f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
@@ -4982,24 +5004,26 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """A BitLocker volume: locked until a key is given (right-click),
         then its decrypted file system -- and its shadow copies."""
         handler = self.image_handler
+        kind = handler.encryption(start) or handler.unlocked_kind(start) \
+            or 'bitlocker'
+        name = containers.ENCRYPTION_NAMES.get(kind, kind)
         unlocked = handler.is_unlocked(start)
         readable = handler.get_readable_size(size_in_bytes)
-        state = (f"FS: {handler.get_fs_type(start)}, BitLocker unlocked"
-                 if unlocked else "BitLocker, locked -- right-click to unlock")
+        state = (f"FS: {handler.get_fs_type(start)}, {name} unlocked"
+                 if unlocked else f"{name}, locked -- right-click to unlock")
         text = f"{label} ({where + ', ' if where else ''}Size: {readable}, " \
                f"{state})"
         data = {"inode_number": None, "start_offset": start,
                 "end_offset": end, "is_bitlocker": True,
-                "volume_label": label}
+                "encryption": kind, "volume_label": label}
         item = QTreeWidgetItem(parent)
         item.setText(0, text)
         item.setIcon(0, icons.icon(icons.VOLUME_UNLOCKED if unlocked
                                    else icons.VOLUME_LOCKED))
         item.setData(0, Qt.UserRole, data)
-        item.setToolTip(0, "Encrypted with BitLocker. Right-click ▸ Unlock "
-                           "BitLocker… with the recovery key, password or "
-                           "startup key." if not unlocked else
-                        "BitLocker volume, unlocked for this session.")
+        item.setToolTip(0, f"Encrypted with {name}. Right-click ▸ Unlock "
+                           f"{name}… with a key for it." if not unlocked
+                        else f"{name} volume, unlocked for this session.")
         item.setChildIndicatorPolicy(
             QTreeWidgetItem.ShowIndicator if unlocked
             and handler.check_partition_contents(start)
@@ -5034,30 +5058,112 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                f"changed since are here as they were.")
             item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
 
+    def _add_lvm_nodes(self, parent, start, label):
+        """A node per logical volume of the LVM group at `start`."""
+        try:
+            volumes = self.image_handler.logical_volumes(start)
+        except Exception as exc:
+            logger.warning("Could not read LVM at %s: %s", start, exc)
+            return
+        for volume in volumes:
+            fs_type = self.image_handler.get_fs_type(volume['key'])
+            item = QTreeWidgetItem(parent)
+            item.setText(0, f"{volume['group']} / {volume['name']} (Size: "
+                            f"{self.image_handler.get_readable_size(volume['size'])}"
+                            f", FS: {fs_type})")
+            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                'device', 'drive-harddisk')))
+            item.setData(0, Qt.UserRole, {
+                "inode_number": None, "start_offset": volume['key'],
+                "is_logical_volume": True,
+                "volume_label": f"{label} {volume['name']}"})
+            item.setToolTip(0, f"LVM logical volume {volume['name']} of "
+                               f"volume group {volume['group']}")
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ShowIndicator if self.image_handler
+                .check_partition_contents(volume['key'])
+                else QTreeWidgetItem.DontShowIndicator)
+
+    def _add_apfs_nodes(self, parent, start, label):
+        """A node per volume of the APFS container at `start`: locked
+        ones until a key is given, like BitLocker's."""
+        try:
+            volumes = self.image_handler.apfs_volumes(start)
+        except Exception as exc:
+            logger.warning("Could not read APFS at %s: %s", start, exc)
+            return
+        for volume in volumes:
+            self._apfs_volume_node(parent, volume, label)
+
+    def _apfs_volume_node(self, parent, volume, label):
+        name = volume['name'] or f"volume {volume['index'] + 1}"
+        locked = volume['locked'] and not self.image_handler.is_unlocked(
+            volume['key'])
+        item = QTreeWidgetItem(parent)
+        data = {"inode_number": None, "start_offset": volume['key'],
+                "is_apfs_volume": True, "volume_label": f"APFS {name}"}
+        if locked:
+            data.update(is_bitlocker=True, encryption='apfs')
+            item.setText(0, f"APFS {name} (encrypted, locked -- right-click "
+                            f"to unlock)")
+            item.setIcon(0, icons.icon(icons.VOLUME_LOCKED))
+            item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+        else:
+            # Once unlocked, libfsapfs no longer calls it locked; it was.
+            encrypted = volume['locked'] or \
+                self.image_handler.unlocked_kind(volume['key']) == 'apfs'
+            item.setText(0, f"APFS {name} (FS: APFS"
+                            f"{', encrypted, unlocked' if encrypted else ''})")
+            item.setIcon(0, icons.icon(icons.VOLUME_UNLOCKED)
+                         if encrypted else QIcon(
+                self.db_manager.get_icon_path('device', 'drive-harddisk')))
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ShowIndicator if self.image_handler
+                .check_partition_contents(volume['key'])
+                else QTreeWidgetItem.DontShowIndicator)
+        item.setData(0, Qt.UserRole, data)
+        return item
+
     def unlock_bitlocker_item(self, item):
-        """Ask for a key for the BitLocker volume `item` stands for."""
+        """Ask for a key for the encrypted volume `item` stands for:
+        BitLocker, FileVault 2, LUKS or an encrypted APFS volume."""
         from PySide6.QtWidgets import QDialog
-        from trace_app.ui.dialogs.bitlocker import BitLockerDialog
+        from trace_app.ui.dialogs.bitlocker import UnlockVolumeDialog
         if not self.activate_item_image(item):
             return
         data = item.data(0, Qt.UserRole) or {}
         start = data.get('start_offset', 0)
+        kind = data.get('encryption') or 'bitlocker'
+        name = containers.ENCRYPTION_NAMES.get(kind, kind)
         label = data.get('volume_label') or 'This volume'
-        dialog = BitLockerDialog(self.image_handler, start, label, self)
+        dialog = UnlockVolumeDialog(self.image_handler, start, label, self,
+                                    kind)
         if dialog.exec() != QDialog.Accepted or not dialog.secret:
             return
         path = os.path.normpath(self.image_handler.image_path)
-        self._bitlocker_keys.setdefault(path, {})[start] = dialog.secret
+        self._bitlocker_keys.setdefault(path, {})[start] = dict(
+            dialog.secret, _kind=kind)
         if self.case is not None:
             row = self.case.evidence_for_path(path)
             self.case.record_event(
-                "BitLocker volume unlocked",
+                f"{name} volume unlocked",
                 f"evidence id={row['id'] if row else '?'} "
-                f"partition sector={start} with a {dialog.kind} "
+                f"volume={label} key={start} with a {dialog.kind} "
                 f"(the key is not recorded)")
         parent = item.parent() or self.tree_viewer.invisibleRootItem()
         index = parent.indexOfChild(item)
         parent.removeChild(item)
+        if kind == 'apfs':
+            volume = next(v for v in self.image_handler.apfs_volumes(
+                containers.split_apfs_key(start)[0]) if v['key'] == start)
+            fresh = self._apfs_volume_node(parent, volume, label)
+            parent.removeChild(fresh)
+            parent.insertChild(index, fresh)
+            self.tree_viewer.setCurrentItem(fresh)
+            fresh.setExpanded(True)
+            self.set_status(f"{label} unlocked: its files can now be browsed,"
+                            f" and analysis reads them too.")
+            return
         size = self.image_handler.partition_bytes(start)[1]
         fresh = self._add_bitlocker_node(parent, start, label, size,
                                          end=data.get('end_offset'))
@@ -6224,8 +6330,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if data and data.get('is_bitlocker') and \
                     not self.image_handler.is_unlocked(
                         data.get('start_offset', 0)):
-                unlock = menu.addAction(icons.icon(icons.VOLUME_UNLOCKED),
-                                        "Unlock BitLocker…")
+                unlock = menu.addAction(
+                    icons.icon(icons.VOLUME_UNLOCKED),
+                    f"Unlock {containers.ENCRYPTION_NAMES.get(data.get('encryption') or 'bitlocker')}…")
                 unlock.triggered.connect(
                     lambda _=False, it=selected_item:
                     self.unlock_bitlocker_item(it))

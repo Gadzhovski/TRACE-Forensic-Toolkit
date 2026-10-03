@@ -106,7 +106,8 @@ def shadow_key(start_sector, index):
 
 def split_shadow_key(key):
     """(partition start sector, snapshot index), or None for a partition."""
-    if key is None or key < SHADOW_KEY_BASE:
+    # Below the LVM range (2**49): logical and APFS volumes are keyed above.
+    if key is None or not SHADOW_KEY_BASE <= key < 2 ** 49:
         return None
     return divmod(key - SHADOW_KEY_BASE, SHADOWS_PER_VOLUME)
 
@@ -224,6 +225,172 @@ def open_shadow_copies(window):
             logger.warning("Shadow copy %d unreadable: %s", index, exc)
             stores.append(None)
     return volume, stores
+
+
+# --- other encrypted volumes, LVM, APFS ----------------------------------------
+
+#: What an encrypted volume is called, for labels and the audit trail.
+ENCRYPTION_NAMES = {'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
+                    'luks': 'LUKS', 'apfs': 'APFS encryption'}
+
+#: Logical volumes and APFS volumes are keyed like shadow copies, each in a
+#: range of its own above any real sector offset.
+_LVM_BASE = 2 ** 49
+_APFS_BASE = 2 ** 50
+VOLUMES_PER_CONTAINER = 64
+
+
+def lvm_key(start_sector, index):
+    return _LVM_BASE + start_sector * VOLUMES_PER_CONTAINER + index
+
+
+def apfs_key(start_sector, index):
+    return _APFS_BASE + start_sector * VOLUMES_PER_CONTAINER + index
+
+
+def _split(key, base, upper):
+    if not isinstance(key, int) or not base <= key < upper:
+        return None
+    rest = key - base
+    return rest // VOLUMES_PER_CONTAINER, rest % VOLUMES_PER_CONTAINER
+
+
+def split_lvm_key(key):
+    """(partition start, logical volume index) or None."""
+    return _split(key, _LVM_BASE, _APFS_BASE)
+
+
+def split_apfs_key(key):
+    """(partition start, APFS volume index) or None."""
+    return _split(key, _APFS_BASE, 2 ** 51)
+
+
+def volume_kind(window):
+    """What a partition holds that The Sleuth Kit cannot open by itself:
+    'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', or None."""
+    checks = (('bitlocker', 'pybde', 'check_volume_signature_file_object'),
+              ('fvde', 'pyfvde', 'check_volume_signature_file_object'),
+              ('luks', 'pyluksde', 'check_volume_signature_file_object'),
+              ('lvm', 'pyvslvm', 'check_volume_signature_file_object'),
+              ('apfs', 'pyfsapfs', 'check_container_signature_file_object'))
+    for kind, module, check in checks:
+        try:
+            library = __import__(module)
+            window.seek(0)
+            if getattr(library, check)(window):
+                return kind
+        except Exception:
+            continue
+    return None
+
+
+def unlock_fvde(window, password=None, recovery_password=None):
+    """A FileVault 2 (Core Storage) logical volume, unlocked:
+    (logical volume, [objects to keep])."""
+    import pyfvde
+    volume = pyfvde.volume()
+    try:
+        volume.open_file_object(window)
+        volume.open_physical_volume_files_as_file_objects([window])
+        group = volume.get_volume_group()
+        logical = group.get_logical_volume(0)
+        if logical.is_locked():
+            if recovery_password:
+                logical.set_recovery_password(recovery_password)
+            elif password:
+                logical.set_password(password)
+            else:
+                raise ContainerError("A password or recovery key is needed.")
+            logical.unlock()
+    except ContainerError:
+        _close_quietly(volume)
+        raise
+    except (IOError, OSError) as exc:
+        _close_quietly(volume)
+        raise ContainerError(f"The volume did not unlock: {exc}") from exc
+    if logical.is_locked():
+        _close_quietly(volume)
+        raise ContainerError("That key does not unlock this volume.")
+    return logical, [volume, group]
+
+
+def unlock_luks(window, password=None, key=None):
+    """A LUKS volume, unlocked: the decrypting volume."""
+    import pyluksde
+    volume = pyluksde.volume()
+    try:
+        if password:
+            volume.set_password(password)
+        elif key:
+            volume.set_key(key)
+        else:
+            raise ContainerError("A passphrase is needed.")
+        volume.open_file_object(window)
+        if volume.is_locked():
+            volume.unlock()
+    except ContainerError:
+        _close_quietly(volume)
+        raise
+    except (IOError, OSError) as exc:
+        _close_quietly(volume)
+        raise ContainerError(f"The volume did not unlock: {exc}") from exc
+    if volume.is_locked():
+        _close_quietly(volume)
+        raise ContainerError("That passphrase does not unlock this volume.")
+    return volume
+
+
+def open_lvm(window):
+    """(handle, volume group, [logical volume]) of an LVM physical volume;
+    a group spanning disks not in the image reads as far as it can."""
+    import pyvslvm
+    handle = pyvslvm.handle()
+    handle.open_file_object(window)
+    handle.open_physical_volume_files_as_file_objects([window])
+    group = handle.get_volume_group()
+    volumes = []
+    for index in range(min(group.number_of_logical_volumes,
+                           VOLUMES_PER_CONTAINER)):
+        try:
+            volumes.append(group.get_logical_volume(index))
+        except (IOError, OSError) as exc:
+            logger.warning("Logical volume %d unreadable: %s", index, exc)
+            volumes.append(None)
+    return handle, group, volumes
+
+
+def open_apfs(window):
+    """(container, [volume]) of an APFS container."""
+    import pyfsapfs
+    container = pyfsapfs.container()
+    container.open_file_object(window)
+    volumes = []
+    for index in range(min(container.number_of_volumes,
+                           VOLUMES_PER_CONTAINER)):
+        try:
+            volumes.append(container.get_volume(index))
+        except (IOError, OSError) as exc:
+            logger.warning("APFS volume %d unreadable: %s", index, exc)
+            volumes.append(None)
+    return container, volumes
+
+
+def unlock_apfs(volume, password=None, recovery_password=None):
+    if not volume.is_locked():
+        return volume
+    try:
+        if recovery_password:
+            volume.set_recovery_password(recovery_password)
+        elif password:
+            volume.set_password(password)
+        else:
+            raise ContainerError("A password or recovery key is needed.")
+        volume.unlock()
+    except (IOError, OSError) as exc:
+        raise ContainerError(f"The volume did not unlock: {exc}") from exc
+    if volume.is_locked():
+        raise ContainerError("That password does not unlock this volume.")
+    return volume
 
 
 # --- virtual disks --------------------------------------------------------------

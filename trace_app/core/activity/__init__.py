@@ -176,8 +176,8 @@ def collect(image_handler, progress=None, should_stop=None, carved=()):
     `carved` is [(name, bytes, ref)] of SQLite databases the carver
     recovered, read as browser history if they are.
     """
-    partitions = image_handler.get_partitions()
-    offsets = [p[2] for p in partitions] if partitions else [0]
+    from trace_app.core.walk import volume_offsets
+    offsets = volume_offsets(image_handler)
     out = []
     steps = [0]
 

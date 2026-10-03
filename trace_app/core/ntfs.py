@@ -721,8 +721,8 @@ def _tsk_stream_reader(entry, attribute_name):
 def ntfs_volumes(image_handler):
     """[(start sector, FS_Info)] of the NTFS volumes on the image."""
     import pytsk3
-    partitions = image_handler.get_partitions()
-    offsets = [p[2] for p in partitions] if partitions else [0]
+    from trace_app.core.walk import volume_offsets
+    offsets = volume_offsets(image_handler)
     volumes = []
     for offset in dict.fromkeys(offsets):
         fs = image_handler.get_fs_info(offset)

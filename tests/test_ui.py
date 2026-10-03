@@ -888,11 +888,12 @@ def test_bitlocker_and_shadow_copies_in_the_tree(qapp, stubbed_dialogs,
             dialog.password.setText('bde-TEST')
             dialog._try()
             return dialog.result()
-        monkeypatch.setattr(bitlocker.BitLockerDialog, 'exec', fake_exec)
+        monkeypatch.setattr(bitlocker.UnlockVolumeDialog, 'exec', fake_exec)
         window.unlock_bitlocker_item(root.child(0))
         [(text, data)] = _children(root)
         assert 'BitLocker unlocked' in text and 'FAT16' in text
-        assert window._unlocks_for(bde) == {0: {'password': 'bde-TEST'}}
+        assert window._unlocks_for(bde) == {
+            0: {'password': 'bde-TEST', '_kind': 'bitlocker'}}
         node = root.child(0)
         node.setExpanded(True)
         window.on_item_expanded(node)
@@ -1352,3 +1353,62 @@ def test_persistence_is_a_job_and_a_triage_tab(qapp, window):
     panel.table.clicked.emit(panel.proxy.index(0, 0))
     pump(qapp, 10, lambda: bool(shown))
     assert shown
+
+
+def test_luks_lvm_and_apfs_volumes_in_the_tree(qapp, stubbed_dialogs,
+                                               monkeypatch):
+    """A LUKS volume shows locked and unlocks with its passphrase; an LVM
+    group lists its logical volumes; an encrypted APFS volume shows locked
+    in its container and lists its files once unlocked."""
+    from PySide6.QtCore import Qt
+    from trace_app.ui.dialogs import bitlocker
+    from trace_app.ui.main_window import MainWindow
+    passwords = {'luks': 'luksde-TEST', 'apfs': 'apfs-TEST'}
+
+    def fake_exec(dialog):
+        dialog.password.setText(passwords[dialog.encryption])
+        dialog._try()
+        return dialog.result()
+    monkeypatch.setattr(bitlocker.UnlockVolumeDialog, 'exec', fake_exec)
+    window = MainWindow()
+    try:
+        luks = _artifact_sample('luks1.raw')
+        assert window.open_evidence_image(luks)
+        root = _root(window, 'luks1.raw')
+        [(text, data)] = _children(root)
+        assert data.get('encryption') == 'luks' and 'LUKS, locked' in text
+        window.unlock_bitlocker_item(root.child(0))
+        [(text, data)] = _children(root)
+        assert 'LUKS unlocked' in text and 'Ext2' in text
+        assert window._unlocks_for(luks) == {
+            0: {'password': 'luksde-TEST', '_kind': 'luks'}}
+        node = root.child(0)
+        node.setExpanded(True)
+        window.on_item_expanded(node)
+        assert 'passwords.txt' in [t for t, _d in _children(node)]
+
+        assert window.open_evidence_image(_artifact_sample('lvm.raw'))
+        root = _root(window, 'lvm.raw')
+        volumes = [(t, d) for t, d in _children(root)
+                   if d.get('is_logical_volume')]
+        assert [t.split(' (')[0] for t, _d in volumes] == [
+            'test_volume_group / test_logical_volume1',
+            'test_volume_group / test_logical_volume2']
+
+        assert window.open_evidence_image(
+            _artifact_sample('apfs_encrypted.dmg'))
+        root = _root(window, 'apfs_encrypted.dmg')
+        container = next(root.child(i) for i in range(root.childCount())
+                         if (root.child(i).data(0, Qt.UserRole) or {})
+                         .get('is_volume_group'))
+        [(text, data)] = _children(container)
+        assert data.get('encryption') == 'apfs' and 'locked' in text
+        window.unlock_bitlocker_item(container.child(0))
+        [(text, data)] = _children(container)
+        assert data.get('is_apfs_volume') and 'unlocked' in text
+        node = container.child(0)
+        node.setExpanded(True)
+        window.on_item_expanded(node)
+        assert 'passwords.txt' in [t for t, _d in _children(node)]
+    finally:
+        window.cleanup_resources()

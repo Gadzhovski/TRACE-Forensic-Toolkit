@@ -47,6 +47,10 @@ class FileEntry:
 
 
 def volume_offsets(image_handler):
+    """Every file system to read: partitions, and the logical and APFS
+    volumes inside LVM and APFS partitions (ImageHandler.volume_offsets)."""
+    if hasattr(image_handler, 'volume_offsets'):
+        return image_handler.volume_offsets()
     partitions = image_handler.get_partitions()
     return [p[2] for p in partitions] if partitions else [0]
 

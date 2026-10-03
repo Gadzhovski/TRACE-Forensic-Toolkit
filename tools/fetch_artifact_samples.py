@@ -186,6 +186,23 @@ SAMPLES = {
     'SOFTWARE': (
         _PLASO + 'SOFTWARE',
         'c2e1a391d6be9740e79da7944e012ad9ac878902db38ec7fc225a2a68d262a1b'),
+    # Volumes: APFS (plain, and encrypted with password apfs-TEST), FileVault
+    # 2 (fvde-TEST), LUKS 1 (luksde-TEST) and an LVM group -- dfvfs's own.
+    'apfs.raw': (
+        _DFVFS + 'apfs.raw',
+        'e3e3adcbbf189403d892b013d6cba155f2e58e42ff5eb541ec681c37a91a3f29'),
+    'apfs_encrypted.dmg': (
+        _DFVFS + 'apfs_encrypted.dmg',
+        '33fe6f183aeb1a95fec68efdab17d59aedbad3d8ef1a117d411117376d9d8485'),
+    'fvdetest.qcow2': (
+        _DFVFS + 'fvdetest.qcow2',
+        'd69ca8fccf930a0b5a5b32219184b1692d5f6331a72fd88442386dbbb20078af'),
+    'luks1.raw': (
+        _DFVFS + 'luks1.raw',
+        '62d74398519015912e3216766912a2a4d1afc7dc4f7378f676943aaf5e0828f1'),
+    'lvm.raw': (
+        _DFVFS + 'lvm.raw',
+        '565f564cd35e6ee304ea810631d52223e1ee3bb61d92ff1cd035c5a25f59e43e'),
 }
 
 

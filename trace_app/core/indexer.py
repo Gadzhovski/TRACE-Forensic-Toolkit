@@ -48,8 +48,8 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
     index.clear_evidence(evidence_id)
     index.set_state(evidence_id, INDEX_RUNNING, files_done=0)
 
-    partitions = image_handler.get_partitions()
-    offsets = [p[2] for p in partitions] if partitions else [0]
+    from trace_app.core.walk import volume_offsets
+    offsets = volume_offsets(image_handler)
 
     total = 0
     done = 0

@@ -34,6 +34,22 @@ _UFS2_MAGIC_LE = (0x19540119).to_bytes(4, 'little')
 _UFS2_MAGIC_BE = (0x19540119).to_bytes(4, 'big')
 
 
+
+def _safe(thing, attribute, default):
+    """A libyal property that may raise when the format omits it."""
+    try:
+        value = getattr(thing, attribute)
+    except (IOError, OSError):
+        return default
+    return default if value is None else value
+
+
+class _Closed:
+    """Stands in for a container that would not open."""
+
+    def close(self):
+        pass
+
 class EWFImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
         self._ewf_handle = ewf_handle
@@ -101,9 +117,14 @@ class ImageHandler:
         #: unlocked BitLocker volume (keyed by its partition's start sector,
         #: which it replaces) and shadow copies (containers.shadow_key).
         self._volumes = {}
-        self._bitlocker = {}        # start sector -> unlocked pybde volume
+        self._bitlocker = {}        # start sector -> unlocked volume (any)
+        self._unlocked_kind = {}    # start sector -> 'bitlocker'|'fvde'|...
+        self._keep = {}             # start sector -> objects a volume needs
         self._shadows = {}          # start sector -> (pyvshadow volume, stores)
         self._bitlocker_checked = {}
+        self._kinds = {}            # start sector -> containers.volume_kind
+        self._lvm = {}              # start sector -> (handle, group, [lv])
+        self._apfs = {}             # start sector -> (container, [volume])
 
         #: False when the image could not be opened; callers should check
         #: this rather than waiting for a later AttributeError.
@@ -129,10 +150,18 @@ class ImageHandler:
                 volume.close()
             except Exception:
                 pass
+        for holder in ('_lvm', '_apfs'):
+            for first, *_rest in getattr(self, holder, {}).values():
+                try:
+                    first.close()
+                except Exception:
+                    pass
         if hasattr(self, '_volumes'):
             self._volumes.clear()
             self._bitlocker.clear()
             self._shadows.clear()
+            self._lvm.clear()
+            self._apfs.clear()
 
         # Close the image
         if self.img_info:
@@ -816,6 +845,14 @@ class ImageHandler:
             shadow = containers.split_shadow_key(start_offset)
             if shadow is not None and start_offset not in self._volumes:
                 self.shadow_copies(shadow[0])
+            logical = containers.split_lvm_key(start_offset)
+            if logical is not None and start_offset not in self._volumes:
+                self.logical_volumes(logical[0])
+            apfs = containers.split_apfs_key(start_offset)
+            if apfs is not None:
+                return self._apfs_file_system(start_offset, *apfs)
+            if logical is not None and start_offset not in self._volumes:
+                return None
             try:
                 if start_offset in self._volumes:
                     fs_info = pytsk3.FS_Info(self._volumes[start_offset],
@@ -882,6 +919,157 @@ class ImageHandler:
         self.get_fs_type.cache_clear()
         self._directory_cache.clear()
 
+    def volume_kind(self, start_sector):
+        """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
+        partition (or an unpartitioned image at 0)."""
+        if start_sector not in self._kinds:
+            if start_sector >= containers.SHADOW_KEY_BASE:
+                self._kinds[start_sector] = None
+            else:
+                try:
+                    self._kinds[start_sector] = containers.volume_kind(
+                        self._partition_window(start_sector))
+                except Exception:
+                    self._kinds[start_sector] = None
+        return self._kinds[start_sector]
+
+    def encryption(self, start_sector):
+        """The kind of an encrypted volume at a partition, or None."""
+        kind = self.volume_kind(start_sector)
+        return kind if kind in ('bitlocker', 'fvde', 'luks') else None
+
+    def unlocked_kind(self, start_sector):
+        return self._unlocked_kind.get(start_sector)
+
+    def unlock_volume(self, start_sector, kind, **secret):
+        """Unlock a BitLocker, FileVault 2 or LUKS volume at a partition;
+        its decrypted file system then replaces the partition's, at the same
+        key. Raises containers.ContainerError with the reason."""
+        if start_sector in self._bitlocker:
+            return True
+        window = self._partition_window(start_sector)
+        keep = []
+        if kind == 'bitlocker':
+            volume = containers.unlock_bitlocker(
+                window, secret.get('recovery_password'),
+                secret.get('password'), secret.get('startup_key'))
+        elif kind == 'fvde':
+            volume, keep = containers.unlock_fvde(
+                window, secret.get('password'),
+                secret.get('recovery_password'))
+        elif kind == 'luks':
+            volume = containers.unlock_luks(window, secret.get('password'))
+        else:
+            raise containers.ContainerError(f"Cannot unlock {kind} here")
+        self._bitlocker[start_sector] = volume
+        self._unlocked_kind[start_sector] = kind
+        self._keep[start_sector] = keep + [window]
+        self._volumes[start_sector] = containers.LibyalImgInfo(
+            volume, volume.get_size(), keep=[])
+        self._forget_filesystem(start_sector)
+        self._shadows.pop(start_sector, None)       # re-read, decrypted
+        logger.info("%s volume at sector %d unlocked",
+                    containers.ENCRYPTION_NAMES.get(kind, kind), start_sector)
+        return True
+
+    # --- LVM and APFS: several volumes in one partition -------------------
+
+    def logical_volumes(self, start_sector):
+        """An LVM partition's logical volumes: [{'key', 'index', 'name',
+        'size', 'group'}]."""
+        if start_sector not in self._lvm:
+            try:
+                handle, group, volumes = containers.open_lvm(
+                    self._partition_window(start_sector))
+            except Exception as exc:
+                logger.warning("LVM at %s unreadable: %s", start_sector, exc)
+                self._lvm[start_sector] = (_Closed(), None, [])
+                return []
+            self._lvm[start_sector] = (handle, group, volumes)
+            for index, volume in enumerate(volumes):
+                if volume is not None:
+                    self._volumes[containers.lvm_key(start_sector, index)] = \
+                        containers.LibyalImgInfo(volume, volume.size, keep=[])
+        _handle, group, volumes = self._lvm[start_sector]
+        return [{'key': containers.lvm_key(start_sector, index),
+                 'index': index, 'name': volume.name, 'size': volume.size,
+                 'group': group.name if group is not None else ''}
+                for index, volume in enumerate(volumes) if volume is not None]
+
+    def apfs_volumes(self, start_sector):
+        """An APFS container's volumes: [{'key', 'index', 'name', 'size',
+        'locked'}]."""
+        if start_sector not in self._apfs:
+            try:
+                container, volumes = containers.open_apfs(
+                    self._partition_window(start_sector))
+            except Exception as exc:
+                logger.warning("APFS at %s unreadable: %s", start_sector, exc)
+                self._apfs[start_sector] = (_Closed(), [])
+                return []
+            self._apfs[start_sector] = (container, volumes)
+        _container, volumes = self._apfs[start_sector]
+        out = []
+        for index, volume in enumerate(volumes):
+            if volume is None:
+                continue
+            try:
+                locked = bool(volume.is_locked())
+            except (IOError, OSError):
+                locked = True
+            out.append({'key': containers.apfs_key(start_sector, index),
+                        'index': index, 'name': _safe(volume, 'name', ''),
+                        'size': _safe(volume, 'size', 0), 'locked': locked})
+        return out
+
+    def unlock_apfs(self, key, password=None, recovery_password=None):
+        start, index = containers.split_apfs_key(key)
+        self.apfs_volumes(start)
+        volumes = self._apfs[start][1]
+        if index >= len(volumes) or volumes[index] is None:
+            raise containers.ContainerError("No such APFS volume")
+        containers.unlock_apfs(volumes[index], password, recovery_password)
+        self._unlocked_kind[key] = 'apfs'
+        self._forget_filesystem(key)
+        logger.info("APFS volume %d at sector %d unlocked", index, start)
+        return True
+
+    def _apfs_file_system(self, key, start, index):
+        from trace_app.core.apfs import ApfsFileSystem
+        if key in self.fs_info_cache:
+            return self.fs_info_cache[key]
+        self.apfs_volumes(start)
+        container, volumes = self._apfs.get(start, (None, []))
+        if index >= len(volumes) or volumes[index] is None:
+            return None
+        volume = volumes[index]
+        try:
+            if volume.is_locked():
+                return None
+        except (IOError, OSError):
+            return None
+        fs = ApfsFileSystem(volume, container)
+        self.fs_info_cache[key] = fs
+        return fs
+
+    def volume_offsets(self):
+        """Every file system to read: each partition's start -- or, for
+        an LVM partition or APFS container, its volumes' keys (unlocked ones
+        only). What analysis, indexing, activity and NTFS walk."""
+        partitions = self.get_partitions()
+        starts = [p[2] for p in partitions] if partitions else [0]
+        out = []
+        for start in dict.fromkeys(starts):
+            kind = self.volume_kind(start)
+            if kind == 'lvm':
+                out += [v['key'] for v in self.logical_volumes(start)]
+            elif kind == 'apfs':
+                out += [v['key'] for v in self.apfs_volumes(start)
+                        if not v['locked']]
+            else:
+                out.append(start)
+        return out
+
     def is_bitlocker(self, start_sector):
         """Is the partition (or an unpartitioned image) BitLocker?
 
@@ -902,7 +1090,9 @@ class ImageHandler:
         return cached
 
     def is_unlocked(self, start_sector):
-        return start_sector in self._bitlocker
+        return start_sector in self._bitlocker or \
+            self._unlocked_kind.get(start_sector) == 'apfs' or \
+            self._unlocked_kind.get(start_sector) == 'apfs'
 
     def bitlocker_facts(self, start_sector):
         return containers.bitlocker_facts(self._partition_window(start_sector))
@@ -912,25 +1102,22 @@ class ImageHandler:
         """Unlock the BitLocker volume at a partition; from then on, its
         files are read through the decrypting volume at the same key.
         Raises containers.ContainerError with the reason if it will not."""
-        if start_sector in self._bitlocker:
-            return True
-        volume = containers.unlock_bitlocker(
-            self._partition_window(start_sector), recovery_password,
-            password, startup_key)
-        self._bitlocker[start_sector] = volume
-        self._volumes[start_sector] = containers.LibyalImgInfo(
-            volume, volume.get_size())
-        self._forget_filesystem(start_sector)
-        self._shadows.pop(start_sector, None)       # re-read, decrypted
-        logger.info("BitLocker volume at sector %d unlocked", start_sector)
-        return True
+        return self.unlock_volume(start_sector, 'bitlocker',
+                                  recovery_password=recovery_password,
+                                  password=password, startup_key=startup_key)
 
     def apply_unlocks(self, unlocks):
-        """Unlock with keys an examiner already gave: {start: {kind:
-        secret}} -- what a background job is handed, in memory."""
+        """Unlock with keys an examiner already gave: {start or volume
+        key: {'_kind': ..., secret...}} -- what a background job is handed,
+        in memory. A secret without '_kind' is BitLocker's (older form)."""
         for start, secret in (unlocks or {}).items():
+            secret = dict(secret)
+            kind = secret.pop('_kind', 'bitlocker')
             try:
-                self.unlock_bitlocker(int(start), **secret)
+                if kind == 'apfs':
+                    self.unlock_apfs(int(start), **secret)
+                else:
+                    self.unlock_volume(int(start), kind, **secret)
             except Exception as exc:
                 logger.warning("Could not unlock the volume at %s: %s",
                                start, exc)
@@ -985,7 +1172,11 @@ class ImageHandler:
     def get_fs_type(self, start_offset):
         """Retrieve the file system type for a partition."""
         try:
-            fs_type = self.get_fs_info(start_offset).info.ftype
+            fs = self.get_fs_info(start_offset)
+            from trace_app.core.apfs import is_apfs
+            if is_apfs(fs):
+                return "APFS"
+            fs_type = fs.info.ftype
 
             # Map the file system type to its name
             fs_type_map = {
