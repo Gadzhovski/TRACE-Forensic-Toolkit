@@ -198,6 +198,23 @@ Opus, Matroska, Mach-O, RAR3/RAR5, 7z, a pre-POSIX V7 tar and more) into `carve_
 its pinned SHA-256, and lays them out with a fixed seed -- so the image, and
 its answer key in `tools/carve_ground_truth.json`, are the same every time.
 
+## The artifact samples
+
+`test_images/artifact_samples/` holds real Windows and browser artifacts for
+the activity tests -- Prefetch from XP to Windows 11 (five compressed),
+NTUSER / UsrClass / SYSTEM / Amcache hives, Jump Lists, a shortcut, Recycle
+Bin records, event logs (including a damaged one) and Chrome, Firefox and
+Safari databases:
+
+```bash
+python tools/fetch_artifact_samples.py
+```
+
+They come from log2timeline/plaso's test_data (Apache 2.0) and
+omerbenamram/evtx's samples (MIT / Apache 2.0), pinned to a commit and checked
+by SHA-256. `nps-2009-domexusers.E01` (Digital Corpora, 4.4 GB, a multi-user
+Windows XP machine) is used by a local end-to-end test when present.
+
 ## Re-downloading
 
 The public images the tests use are fetched and checksum-verified by

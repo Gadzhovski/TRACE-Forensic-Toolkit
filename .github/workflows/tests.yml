@@ -132,6 +132,20 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           "$PY" tools/carve_corpus.py
 
+      # Real Windows and browser artifacts for the activity tests, pinned by
+      # SHA-256 (tools/fetch_artifact_samples.py).
+      - name: Cache the artifact samples
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/artifact_samples
+          key: artifact-samples-${{ hashFiles('tools/fetch_artifact_samples.py') }}
+
+      - name: Fetch the artifact samples
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/fetch_artifact_samples.py
+
       - name: Tests (image handling, core, UI)
         shell: bash
         run: |

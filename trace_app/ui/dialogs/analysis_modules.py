@@ -21,6 +21,7 @@ import logging
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFrame, QHBoxLayout, QLabel,
+                               QScrollArea,
                                QVBoxLayout, QWidget)
 
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
@@ -39,6 +40,10 @@ MODULE_CARVE = 'carve'
 #: The search index's key: its own walk (core/indexer.py), into search.db
 #: rather than case.db, so it too runs as a job of its own.
 MODULE_INDEX = 'index'
+
+#: Windows activity and browser history (core/activity): reads known
+#: locations rather than every file, so it is its own, short job.
+MODULE_ACTIVITY = 'activity'
 
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
@@ -88,6 +93,16 @@ _INDEXING = (
     "Slower: reads every file in full; replaces a previous index of the "
     "same image.")
 
+_ACTIVITY = (
+    "Windows activity and browser history",
+    "What the users did: programs run (Prefetch, Amcache, Shimcache, "
+    "UserAssist), files and folders opened (shortcuts, Jump Lists, "
+    "RecentDocs, ShellBags), USB devices, the Recycle Bin, logons and remote "
+    "desktop from the event logs, and Chrome, Edge, Firefox and Safari "
+    "history, downloads and searches (Activity tab).",
+    "Fast: reads the places Windows and the browsers keep these, not every "
+    "file.")
+
 _CARVING = (
     "File carving",
     "Recover deleted files whose directory entries are gone, by searching "
@@ -99,8 +114,8 @@ _CARVING = (
 def default_choice(modules=None):
     """What the dialog offers before the examiner has chosen anything."""
     return {'modules': list(modules or ()), 'evidence_ids': None,
-            'index': bool(modules), 'carve_types': [],
-            'unallocated_only': True}
+            'index': bool(modules), 'activity': bool(modules),
+            'carve_types': [], 'unallocated_only': True}
 
 
 class AnalysisModulesDialog(QDialog):
@@ -154,6 +169,16 @@ class AnalysisModulesDialog(QDialog):
         # unavailable.
         magic_available = magic_reader() is not None
 
+        # The modules scroll: there are nine, each with a two-line note, and
+        # on a 768-pixel screen the dialog otherwise squeezed every note to
+        # one clipped line.
+        dialog_layout = layout
+        modules = QWidget()
+        modules.setObjectName("analysisModulesList")
+        layout = QVBoxLayout(modules)
+        layout.setContentsMargins(0, 0, 6, 0)
+        layout.setSpacing(10)
+
         self.boxes = {}
         preselected_modules = set(choice.get('modules') or ())
         for key, (title, description, cost) in _DESCRIPTIONS.items():
@@ -170,6 +195,10 @@ class AnalysisModulesDialog(QDialog):
         self.index_box = self._module(layout, *_INDEXING)
         self.index_box.setChecked(bool(choice.get('index')))
         self.boxes[MODULE_INDEX] = self.index_box
+
+        self.activity_box = self._module(layout, *_ACTIVITY)
+        self.activity_box.setChecked(bool(choice.get('activity')))
+        self.boxes[MODULE_ACTIVITY] = self.activity_box
 
         rule = QFrame()
         rule.setObjectName("analysisModulesRule")
@@ -202,11 +231,33 @@ class AnalysisModulesDialog(QDialog):
         self.carve_box.toggled.connect(self.carve_options.setEnabled)
         self.carve_options.setEnabled(self.carve_box.isChecked())
 
+        layout = dialog_layout
+        scroll = QScrollArea()
+        scroll.setObjectName("analysisModulesScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(modules)
+        # As tall as the list where the screen allows, scrolling where not.
+        screen = self.screen().availableGeometry().height() \
+            if self.screen() is not None else 800
+        modules.setMinimumWidth(520)
+        wanted = modules.sizeHint().height() + 4
+        # What the rest of the dialog needs: the intro, the evidence picker,
+        # the footer (two wrapped lines) and the buttons, with margins.
+        chrome = 260
+        scroll.setMinimumHeight(min(wanted, max(240,
+                                                int(screen * 0.88) - chrome)))
+        layout.addWidget(scroll, 1)
+
         footer = QLabel(
             "You can run these later from Analysis ▸ Run Analysis Modules, "
             "and cancel a run at any time from the status bar.")
         footer.setObjectName("analysisModulesFooter")
         footer.setWordWrap(True)
+        # A wrapped label under-reports its height to a squeezed layout,
+        # which then draws the list over it.
+        footer.setMinimumHeight(footer.heightForWidth(520))
         layout.addWidget(footer)
 
         buttons = QDialogButtonBox()
@@ -247,10 +298,12 @@ class AnalysisModulesDialog(QDialog):
         carving = self.carve_box.isChecked()
         self.choice = {
             'modules': [key for key, box in self.boxes.items()
-                        if key not in (MODULE_CARVE, MODULE_INDEX)
+                        if key not in (MODULE_CARVE, MODULE_INDEX,
+                                       MODULE_ACTIVITY)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
+            'activity': self.activity_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),
@@ -263,7 +316,8 @@ def choose_modules(parent=None, preselected=None, evidence=None):
 
     `evidence` is [(evidence_id, name)]. The choice is a dict: `modules`
     (analysis.MODULES to run), `evidence_ids` (None for every image),
-    `index` (build the search index), `carve_types` (empty: no carving) and
+    `index` (build the search index), `activity` (read Windows activity and
+    browser history), `carve_types` (empty: no carving) and
     `unallocated_only`.
     """
     dialog = AnalysisModulesDialog(parent, preselected, evidence)

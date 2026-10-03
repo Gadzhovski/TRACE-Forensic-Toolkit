@@ -328,7 +328,8 @@ QHeaderView::section:vertical {
 }
 
 /* Highlighting Selected Items */
-QTableWidget::item:selected, QListWidget::item:selected {
+QTableWidget::item:selected, QListWidget::item:selected,
+QTableView#activityTable::item:selected {
     background-color: #505050;
     color: #E0E0E0;
 }
@@ -447,7 +448,7 @@ QMenu::separator {
 
 
 /* General styles for all QTableWidgets in dark theme */
-QTableWidget, QListWidget {
+QTableWidget, QListWidget, QTableView#activityTable {
     gridline-color: #5A5A5A;  /* Gridline color for dark mode */
     font-size: 13px;
     background-color: #2E2E2E;  /* Dark background for tables */
@@ -455,13 +456,15 @@ QTableWidget, QListWidget {
 }
 
 /* Table items */
-QTableWidget::item, QListWidget::item {
+QTableWidget::item, QListWidget::item,
+QTableView#activityTable::item {
     padding: 5px;
     color: #E0E0E0;  /* Light text color */
     background-color: #3C3C3C;  /* Darker background for table rows */
 }
 
-QTableWidget::item:selected, QListWidget::item:selected {
+QTableWidget::item:selected, QListWidget::item:selected,
+QTableView#activityTable::item:selected {
     background-color: #505050;  /* Highlight selected items with a contrasting color */
 }
 
@@ -484,7 +487,7 @@ QHeaderView::section:vertical {
 }
 
 /* Set the alternating row colors for better visibility */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QTreeWidget, QListWidget, QTableView#activityTable {
     alternate-background-color: #383838;  /* Dark gray for alternating rows */
 }
 

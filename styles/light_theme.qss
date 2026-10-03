@@ -379,7 +379,7 @@ QGroupBox {
 
 
 /* General styles for all QTableWidgets, QTreeWidgets, and QListWidgets in light theme */
-QTableWidget, QListWidget {
+QTableWidget, QListWidget, QTableView#activityTable {
     gridline-color: #E5E5E5;  /* Light gridline color */
     font-size: 13px;
     background-color: #FFFFFF;  /* Light background for tables */
@@ -387,13 +387,15 @@ QTableWidget, QListWidget {
 }
 
 /* Table items */
-QTableWidget::item, QListWidget::item {
+QTableWidget::item, QListWidget::item,
+QTableView#activityTable::item {
     padding: 5px;
     color: #000000;  /* Dark text color */
     background-color: #FFFFFF;  /* White background for table rows */
 }
 
-QTableWidget::item:selected, QListWidget::item:selected {
+QTableWidget::item:selected, QListWidget::item:selected,
+QTableView#activityTable::item:selected {
     background-color: #CCE8FF;  /* Light blue highlight for selected items */
 }
 
@@ -423,7 +425,7 @@ QHeaderView::section:vertical {
 }
 
 /* Set the alternating row colors for better visibility */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QTreeWidget, QListWidget, QTableView#activityTable {
     alternate-background-color: #F8F8F8;  /* Very light gray for alternating rows */
 }
 

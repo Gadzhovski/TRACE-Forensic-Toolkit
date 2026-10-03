@@ -150,6 +150,22 @@ def job_analysis(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_activity(params, progress, item, should_stop):
+    """Windows activity records and browser history (core/activity)."""
+    from trace_app.core.activity import run_evidence
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'])
+        return run_evidence(
+            handler, case, params['evidence_id'],
+            progress=lambda done, total, path: progress(done, total, path),
+            should_stop=should_stop)
+    finally:
+        _close(case, handler)
+
+
 def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
@@ -190,7 +206,8 @@ def job_carve(params, progress, item, should_stop):
 def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
-    from trace_app.core import analysis, carving, indexer  # noqa: F401
+    from trace_app.core import (activity, analysis, carving,  # noqa: F401
+                                indexer)
     import pytsk3  # noqa: F401
     progress(1, 1, 'ping', force=True)
     item({'pong': params.get('value')})
@@ -200,6 +217,7 @@ def job_ping(params, progress, item, should_stop):
 JOBS = {
     'index': job_index,
     'analysis': job_analysis,
+    'activity': job_activity,
     'carve': job_carve,
     'ping': job_ping,
 }

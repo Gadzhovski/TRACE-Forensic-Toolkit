@@ -734,3 +734,107 @@ def test_the_window_stays_responsive_while_a_job_runs(qapp, window):
         timer.stop()
     assert len(gaps) > 50
     assert max(gaps) < 1.5, f"the window stalled for {max(gaps):.2f} s"
+
+
+# --- Windows activity --------------------------------------------------------------
+
+def test_activity_is_a_job_a_tab_and_a_tree_node(qapp, window, truth):
+    """Reading activity runs on the shared queue for every image. The two
+    public images hold no Windows install, so it records nothing -- and says
+    so. Records pointing at real files are then listed per category, under
+    Activity in the tree, filtered by image, and a row previews the file it
+    was read from, from that file's own image."""
+    import datetime
+    from PySide6.QtCore import Qt
+    from trace_app.core.activity import record
+    from trace_app.core.case import parse_artifact_ref
+    panel = window.activity_panel
+    rows = window.case.evidence()
+    assert window.queue_activity(rows) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    for row in rows:
+        assert window.case.user_activity_state(row['id'])['status'] == 'done'
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert window.case.user_activity_summary() == {}
+    assert 'Nothing read yet' in panel.status_label.text()
+
+    # A file from each image stands in for the artifact a record came from.
+    sources = {}
+    for name in (FIRST, SECOND):
+        finding = next(f for f in window.case.findings()
+                       if _evidence_path(window, f).endswith(name))
+        sources[name] = finding
+    when = datetime.datetime(2024, 5, 1, 9, 30, tzinfo=datetime.timezone.utc)
+    first = sources[FIRST]
+    second = sources[SECOND]
+    window.case.add_user_activity(first['evidence_id'], [
+        record('programs', 'Prefetch', when, 'Program run',
+               r'\WINDOWS\NOTEPAD.EXE', {'run count': 3},
+               path=first['path'], ref=first['artifact_ref']),
+        record('files', 'Shortcut (Recent)', when, 'File opened (last)',
+               r'C:\Users\ann\secret.docx', user='ann',
+               path=first['path'], ref=first['artifact_ref'])])
+    window.case.add_user_activity(second['evidence_id'], [
+        record('browser', 'Firefox', when + datetime.timedelta(hours=1),
+               'Visited (typed)', 'https://example.org/', user='bob',
+               path=second['path'], ref=second['artifact_ref'])])
+    window.case.commit()
+    window.refresh_analysis_views()
+    assert pump(qapp, 30, lambda: not panel.loading)
+
+    # The tree: Activity, a child per category.
+    tree = window.tree_viewer
+    root = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                if (tree.topLevelItem(i).data(0, Qt.UserRole) or {})
+                .get('is_activity_root'))
+    assert root.text(0) == 'Activity (3)'
+    children = {root.child(i).data(0, Qt.UserRole)['category']:
+                root.child(i).text(0) for i in range(root.childCount())}
+    assert children == {'programs': 'Programs run (1)',
+                        'files': 'Files and folders (1)',
+                        'browser': 'Web history (1)'}
+
+    # A category node opens the tab on it.
+    node = next(root.child(i) for i in range(root.childCount())
+                if root.child(i).data(0, Qt.UserRole)['category'] == 'files')
+    tree.itemClicked.emit(node, 0)
+    assert pump(qapp, 30, lambda: not panel.loading
+                and panel.model.rowCount() == 1)
+    assert window.result_viewer.currentWidget() is panel
+    assert panel.model.rows[0]['subject'] == r'C:\Users\ann\secret.docx'
+
+    # All, newest first; then one image only.
+    panel.show_category(None)
+    assert pump(qapp, 30, lambda: not panel.loading
+                and panel.model.rowCount() == 3)
+    panel.set_evidence_filter(second['evidence_id'])
+    assert pump(qapp, 30, lambda: not panel.loading
+                and panel.model.rowCount() == 1)
+    assert panel.model.rows[0]['user'] == 'bob'
+    panel.set_evidence_filter(None)
+    assert pump(qapp, 30, lambda: not panel.loading
+                and panel.model.rowCount() == 3)
+
+    # A row previews its source file, read from that file's own image.
+    for name in (FIRST, SECOND):
+        source = sources[name]
+        position = next(r for r in range(panel.proxy.rowCount())
+                        if panel.proxy.data(panel.proxy.index(r, 0),
+                                            Qt.UserRole)['evidence_id']
+                        == source['evidence_id'])
+        captured = _capture_viewer(window)
+        window.current_selected_data = None
+        panel.table.clearSelection()
+        panel.table.selectRow(position)
+        assert pump(qapp, 10, lambda: bool(captured))
+        ref = parse_artifact_ref(source['artifact_ref'])
+        expected, _ = truth[name].get_file_content(ref['inode'],
+                                                   ref['start_offset'])
+        assert captured[-1] == expected, name
+    assert window.result_viewer.currentWidget() is panel
+
+    # Clean up for the tests after this one.
+    for row in rows:
+        window.case.clear_user_activity(row['id'])
+    window.refresh_analysis_views()
+    assert pump(qapp, 30, lambda: not panel.loading)

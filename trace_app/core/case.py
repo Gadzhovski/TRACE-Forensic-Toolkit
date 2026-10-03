@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -906,6 +906,56 @@ class Case:
             (evidence_id,)).fetchone()
         return dict(row) if row else None
 
+    # --- what the users did (core/activity) --------------------------
+
+    def clear_user_activity(self, evidence_id):
+        self._db.execute("DELETE FROM user_activity WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.commit()
+
+    def add_user_activity(self, evidence_id, records):
+        """Store records made by core.activity.record()."""
+        self._db.executemany(
+            "INSERT INTO user_activity (evidence_id, category, what, "
+            "time_utc, time_local, subject, user, detail, source, "
+            "source_path, source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [(evidence_id, r['category'], r['what'], r['time'],
+              1 if r.get('local') else 0, r['subject'], r.get('user', ''),
+              json.dumps(r.get('detail') or {}, default=str), r['source'],
+              r.get('path', ''), r.get('ref', '')) for r in records])
+
+    def user_activity(self, evidence_id=None, category=None, limit=None):
+        """Activity rows, newest first, `detail` parsed."""
+        return query_user_activity(self._db, evidence_id, category,
+                                   limit=limit)
+
+    def user_activity_summary(self, evidence_id=None):
+        """{category: rows} for the tree and the tab labels."""
+        where = " WHERE evidence_id = ?" if evidence_id is not None else ""
+        params = [evidence_id] if evidence_id is not None else []
+        return {row[0]: row[1] for row in self._db.execute(
+            f"SELECT category, COUNT(*) FROM user_activity{where} "
+            "GROUP BY category", params)}
+
+    def set_user_activity_state(self, evidence_id, status, records=0,
+                                last_error=None):
+        self._db.execute(
+            "INSERT OR REPLACE INTO user_activity_state (evidence_id, status, "
+            "records, last_error, updated_utc) VALUES (?,?,?,?,?)",
+            (evidence_id, status, records, last_error, _utc_now()))
+        self._db.commit()
+        if status in ('done', 'cancelled', 'failed'):
+            self._record_activity(
+                f"user activity {status}",
+                f"evidence id={evidence_id} records={records}"
+                + (f" error={last_error}" if last_error else ''))
+
+    def user_activity_state(self, evidence_id):
+        row = self._db.execute(
+            "SELECT * FROM user_activity_state WHERE evidence_id = ?",
+            (evidence_id,)).fetchone()
+        return dict(row) if row else None
+
     # --- carving -----------------------------------------------------
 
     def carved_dir_for(self, evidence_id):
@@ -1481,6 +1531,39 @@ class Case:
                 last_error       TEXT,
                 updated_utc      TEXT NOT NULL
             );
+
+            -- What the people using a device did (core/activity): programs
+            -- run, files opened, USB devices, deletions, logons, browsing.
+            -- One row per event. `time_utc` is NULL where the source keeps
+            -- no time; `time_local` is 1 where the source kept local
+            -- wall-clock time with no zone (setupapi, DOS dates). `source_ref`
+            -- is the artifact_ref of the file the event was read from.
+            CREATE TABLE IF NOT EXISTS user_activity (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                category      TEXT NOT NULL,
+                what          TEXT NOT NULL,
+                time_utc      TEXT,
+                time_local    INTEGER NOT NULL DEFAULT 0,
+                subject       TEXT,
+                user          TEXT,
+                detail        TEXT,
+                source        TEXT,
+                source_path   TEXT,
+                source_ref    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_user_activity
+                ON user_activity(evidence_id, category, time_utc);
+
+            CREATE TABLE IF NOT EXISTS user_activity_state (
+                evidence_id   INTEGER PRIMARY KEY
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                status        TEXT NOT NULL,
+                records       INTEGER NOT NULL DEFAULT 0,
+                last_error    TEXT,
+                updated_utc   TEXT NOT NULL
+            );
         """)
         self._db.commit()
         self._set('schema_version', SCHEMA_VERSION)
@@ -1505,6 +1588,11 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 9:
+            # user_activity and its state are created unconditionally above;
+            # a case from before simply has no activity until it is read.
+            self._db.commit()
 
         if version < 8:
             # A carved file may be reassembled from fragments; where they lie
@@ -1571,6 +1659,43 @@ class Case:
             self._set('schema_version', SCHEMA_VERSION)
 
 # --- module helpers -------------------------------------------------------
+
+def query_user_activity(connection, evidence_id=None, category=None,
+                        text='', limit=None):
+    """Activity rows from a case database connection, newest first.
+
+    Shared by Case and by the Activity tab's reader thread, which uses a
+    read-only connection of its own. Rows without a time sort last.
+    """
+    clauses, params = [], []
+    if evidence_id is not None:
+        clauses.append("evidence_id = ?")
+        params.append(evidence_id)
+    if category:
+        clauses.append("category = ?")
+        params.append(category)
+    if text:
+        clauses.append("(subject LIKE ? OR what LIKE ? OR user LIKE ? "
+                       "OR detail LIKE ? OR source_path LIKE ?)")
+        params.extend([f'%{text}%'] * 5)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+    query = ("SELECT * FROM user_activity" + where
+             + " ORDER BY time_utc IS NULL, time_utc DESC, id")
+    if limit:
+        query += f" LIMIT {int(limit)}"
+    cursor = connection.execute(query, params)
+    names = [d[0] for d in cursor.description]
+    out = []
+    for values in cursor:
+        row = dict(zip(names, values))
+        try:
+            row['detail'] = json.loads(row.get('detail') or '{}')
+        except ValueError:
+            row['detail'] = {}
+        row['artifact_ref'] = row.get('source_ref')
+        out.append(row)
+    return out
+
 
 def _decode_vt(row):
     """A vt_results row as a dict, its stored report parsed back out."""

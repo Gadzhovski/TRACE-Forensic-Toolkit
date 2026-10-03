@@ -71,6 +71,7 @@ from trace_app.ui.dialogs import message
 from trace_app.ui.viewers.bookmarks_panel import BookmarksPanel
 from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
+from trace_app.ui.viewers.activity_panel import ActivityPanel, ActivityWorker
 from trace_app.ui.viewers.indicators_panel import IndicatorsPanel, kind_label
 from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
@@ -1020,6 +1021,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.indicators_panel.search_requested.connect(self.search_for)
         self.triage_panel.add_indicators_tab(self.indicators_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
+
+        # What the users did. A tab of its own rather than a Triage sub-tab:
+        # it is a record of events across the case, not a list of flagged
+        # files, and it is what a timeline grows from.
+        self.activity_panel = ActivityPanel()
+        self.activity_panel.row_selected.connect(self.preview_activity_source)
+        self.activity_panel.row_activated.connect(self.open_activity_source)
+        self.activity_panel.run_requested.connect(
+            lambda: self.run_analysis_modules(self.activity_panel.evidence_id))
+        self.activity_panel.set_case(self.case)
+        self.result_viewer.addTab(self.activity_panel, 'Activity')
 
     def _build_viewer_dock(self):
         """Bottom "Utils" dock holding the viewer tabs."""
@@ -2193,6 +2205,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_analysis(chosen, choice['modules'])
         if choice.get('index'):
             self.queue_indexing(chosen)
+        if choice.get('activity'):
+            self.queue_activity(chosen)
         if choice['carve_types']:
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
@@ -2299,6 +2313,80 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.search_panel.reload_index()
         self.refresh_analysis_views()
 
+    def queue_activity(self, rows):
+        """One job per image: Windows activity and browser history."""
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                logger.warning("Skipping activity of missing %s", row['path'])
+                continue
+            if self._queue_activity_job(row):
+                queued += 1
+        if queued:
+            self.set_status(f"Reading activity on {queued} image(s) in the "
+                            f"background")
+        return queued
+
+    def _queue_activity_job(self, row):
+        evidence_id = row['id']
+        name = row.get('display_name') or os.path.basename(row['path'])
+
+        def start(job):
+            worker = ActivityWorker(row['path'], self.case.folder,
+                                    evidence_id, self)
+            worker.progressed.connect(
+                lambda done, total, path: self.job_bar.report(
+                    done, total, os.path.basename(path)))
+            worker.finished_activity.connect(
+                lambda count, error: self._activity_finished(name, count,
+                                                             error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"activity:{evidence_id}",
+            title=f"Reading activity on {name}",
+            start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _activity_finished(self, name, count, error):
+        if error:
+            self.set_status(f"Reading activity on {name} failed: {error}")
+            logger.error("Activity on %s failed: %s", name, error)
+        else:
+            self.set_status(f"Read {count:,} activity record(s) from {name}")
+        self.job_bar.job_finished()
+        self.refresh_analysis_views()
+
+    def show_activity(self, category=None, evidence_id=None):
+        """Bring the Activity tab forward on a category."""
+        self.result_viewer.setCurrentWidget(self.activity_panel)
+        if evidence_id is not None:
+            self.activity_panel.set_evidence_filter(evidence_id)
+        self.activity_panel.show_category(category)
+
+    @staticmethod
+    def _activity_source(row):
+        """An activity row as the artifact its source file is."""
+        path = row.get('source_path') or ''
+        return {'artifact_ref': row.get('source_ref'),
+                'evidence_id': row.get('evidence_id'),
+                'name': path.replace('\\', '/').rsplit('/', 1)[-1],
+                'path': path, 'label': row.get('what') or 'Activity',
+                'artifact_name': path.replace('\\', '/').rsplit('/', 1)[-1],
+                'artifact_path': path}
+
+    def preview_activity_source(self, row):
+        """A click on an activity row: show the file it was read from."""
+        if row.get('source_ref'):
+            self.preview_artifact(self._activity_source(row))
+
+    def open_activity_source(self, row):
+        """Double-click: go to the file it was read from."""
+        if row.get('source_ref'):
+            self.go_to_bookmark(self._activity_source(row))
+
     def search_for(self, query):
         """Bring the Search tab forward and run `query` there."""
         self.result_viewer.setCurrentWidget(self.search_panel)
@@ -2316,8 +2404,51 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # showing only the image loaded last hid every other image's
             # findings. Triage's own filter narrows it when asked.
             self.triage_panel.set_case(self.case)
+        if getattr(self, 'activity_panel', None) is not None:
+            self.activity_panel.set_case(self.case)
         self.refresh_analysis_tree()
+        self.refresh_activity_tree()
         self.mark_analysis_rows()
+
+    # --- activity in the tree ---------------------------------------
+
+    def refresh_activity_tree(self):
+        """The Activity node: one child per category, with its count.
+
+        Absent until there is something in it, like Findings and Bookmarks.
+        A category opens the Activity tab on it.
+        """
+        from trace_app.core.activity import CATEGORIES
+        for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
+            data = self.tree_viewer.topLevelItem(index).data(
+                0, Qt.UserRole) or {}
+            if data.get('is_activity_root'):
+                self.tree_viewer.takeTopLevelItem(index)
+        if not self.case:
+            return
+        summary = self.case.user_activity_summary()
+        if not summary:
+            return
+        root = QTreeWidgetItem()
+        root.setText(0, f"Activity ({sum(summary.values()):,})")
+        root.setIcon(0, icons.icon(icons.ACTIVITY))
+        root.setData(0, Qt.UserRole, {'is_activity_root': True})
+        position = 0
+        for index in range(self.tree_viewer.topLevelItemCount()):
+            data = self.tree_viewer.topLevelItem(index).data(
+                0, Qt.UserRole) or {}
+            if data.get('is_bookmarks_root') or data.get('is_analysis_root'):
+                position = index + 1
+        self.tree_viewer.insertTopLevelItem(position, root)
+        for key, label in CATEGORIES:
+            if not summary.get(key):
+                continue
+            node = QTreeWidgetItem(root)
+            node.setText(0, f"{label} ({summary[key]:,})")
+            node.setIcon(0, icons.icon(icons.ACTIVITY))
+            node.setData(0, Qt.UserRole, {'is_activity_group': True,
+                                          'category': key})
+        root.setExpanded(True)
 
     # --- findings in the tree ---------------------------------------
 
@@ -3754,7 +3885,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # The search index holds a connection and may have a worker walking
         # the image; both have to stop before the handler closes under them.
-        for panel in ('search_panel', 'indicators_panel'):
+        for panel in ('search_panel', 'indicators_panel', 'activity_panel'):
             if getattr(self, panel, None) is not None:
                 try:
                     getattr(self, panel).shutdown()
@@ -4245,6 +4376,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
         if data.get('is_analysis_root'):
             self.show_triage()
+            return
+        if data.get('is_activity_root') or data.get('is_activity_group'):
+            self.show_activity(data.get('category'))
             return
         if data.get('is_analysis_group'):
             self.show_triage(data.get('group'), data.get('evidence_id'))
@@ -5233,6 +5367,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.tree_viewer.viewport().mapToGlobal(position))
                 return
             if data and (data.get('is_bookmarks_root')
+                         or data.get('is_activity_root')
+                         or data.get('is_activity_group')
                          or data.get('is_analysis_root')
                          or data.get('is_analysis_group')):
                 return

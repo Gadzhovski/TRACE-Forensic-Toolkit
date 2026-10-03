@@ -98,6 +98,7 @@ One pass over every file, whichever modules are chosen:
 - **Document authors** — author, last saved by, company, application, dates
 - **Search index and indicators** — every file's text indexed for search,
   and the indicators in it listed (right)
+- **Windows activity and browser history** — what the users did (below)
 - **File carving** — deleted files recovered from the raw image (below)
 
 Run against every image in the case or one. Findings are graded (suspicious /
@@ -122,6 +123,48 @@ and IBANs their country's length and mod-97 check digits, so a run of digits
 is not reported as one. Triage ▸ Indicators lists every distinct value — by
 kind, per image — and the files holding each, with the text around it;
 Findings ▸ Indicators in the tree counts them by kind.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🕵 What the users did
+
+The **Activity** tab, read from where Windows keeps it — not by walking every
+file, so it takes seconds:
+
+- **Programs run** — Prefetch (XP to Windows 11, including Windows 10's
+  compressed files), Amcache with SHA-1, Shimcache, UserAssist
+- **Files and folders opened** — Recent shortcuts (target times, volume,
+  machine and MAC), Jump Lists, RecentDocs, ShellBags (folders on drives and
+  shares that are gone)
+- **USB devices** — first and last connected and removed, drive letter, from
+  the registry and setupapi
+- **Recycle Bin** — original path, size and deletion time, Vista+ and XP
+- **Logons and remote access** — logons by type and source address, failures
+  with the reason, accounts created or changed, services installed, logs
+  cleared, remote desktop connections (Security, System, TerminalServices and
+  RdpCoreTS logs; XP .evt too)
+
+Each record says what its time means — a Shimcache time is the file's, not a
+run's — and opens the file it was read from. Event logs are read by TRACE's own
+EVTX reader, checked record by record against python-evtx and 30–40× faster.
+
+</td>
+<td width="50%" valign="top">
+
+### 🌐 Browser history
+
+Visits, downloads and searches from **Chrome, Edge, Brave, Opera, Vivaldi,
+Firefox and Safari**, on Windows, macOS and Linux profiles. Firefox's pending
+write-ahead log is applied (checksummed, up to its last commit), so the newest
+visits are not missed. Searches come from Chromium's own record and from the
+result-page URLs of Google, Bing, DuckDuckGo and a dozen more. A history
+database the **carver** recovered is read the same way, marked as carved.
+
+Activity sits in its own tab with a sub-tab per category and an **All** view
+in time order, filtered by image or text, and under **Activity** in the tree.
 
 </td>
 </tr>
