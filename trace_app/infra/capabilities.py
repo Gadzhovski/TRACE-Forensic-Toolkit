@@ -125,7 +125,20 @@ def _platform_hint(capability):
 
 #: Groups in display order.
 GROUPS = ('Evidence images', 'Volumes and encryption', 'File analysis',
-          'Windows and browser evidence', 'Viewing')
+          'Windows and browser evidence',
+          'Linux, macOS, chat and cloud evidence', 'Viewing')
+
+
+def _zstd():
+    from compression import zstd  # noqa: F401  (Python 3.14 and later)
+    return 'Python ' + platform.python_version()
+
+
+def _built_in(module):
+    def probe():
+        importlib.import_module(module)
+        return 'built in'
+    return probe
 
 CAPABILITIES = (
     Capability('tsk', 'Evidence images', "File systems (NTFS, FAT, exFAT, "
@@ -176,6 +189,26 @@ CAPABILITIES = (
                'python-registry',
                lambda: _dist_version('python-registry')
                or __import__('Registry') and ''),
+    Capability('thumbsdb', 'Windows and browser evidence', "Thumbs.db "
+               "thumbnail caches (OLE)", 'olefile',
+               lambda: importlib.import_module('olefile').__version__),
+    Capability('journal', 'Linux, macOS, chat and cloud evidence',
+               "systemd journal (plain, XZ and LZ4 fields), wtmp, shell "
+               "histories, auth logs", 'TRACE',
+               _built_in('trace_app.core.activity.linux')),
+    Capability('zstd', 'Linux, macOS, chat and cloud evidence',
+               "systemd journal fields compressed with zstd (systemd 246+)",
+               'Python 3.14+ (compression.zstd)', _zstd,
+               missing_hint="Python 3.14 and later read zstd from their "
+                            "standard library; on this Python those fields "
+                            "are listed as not decoded, never dropped."),
+    Capability('macos', 'Linux, macOS, chat and cloud evidence',
+               "KnowledgeC, quarantine events, recent items (bookmarks), "
+               "install history, utmpx", 'TRACE',
+               _built_in('trace_app.core.activity.macos')),
+    Capability('chat', 'Linux, macOS, chat and cloud evidence',
+               "Skype, iMessage, Android SMS, Dropbox, Google Drive, "
+               "OneDrive", 'TRACE', _built_in('trace_app.core.activity.chat')),
     Capability('heic', 'Viewing', "HEIC / HEIF photos (iPhone)", 'pi-heif',
                _heif),
     Capability('multimedia', 'Viewing', "Audio and video playback",

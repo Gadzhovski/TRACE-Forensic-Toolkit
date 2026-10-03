@@ -158,11 +158,12 @@ class ThumbnailsPanel(QWidget):
         self.cache_combo.setFixedHeight(CONTROL_HEIGHT)
         self.cache_combo.setSizeAdjustPolicy(
             QComboBox.AdjustToMinimumContentsLengthWithIcon)
-        self.cache_combo.setMinimumContentsLength(24)
+        self.cache_combo.setMinimumContentsLength(14)
         self.cache_combo.currentIndexChanged.connect(lambda _i: self.refresh())
         bar.addWidget(self.cache_combo)
-        self.gone_box = QCheckBox("Only pictures of files that are gone")
-        self.gone_box.setToolTip("Thumbs.db names the file each picture is "
+        self.gone_box = QCheckBox("Files gone only")
+        self.gone_box.setToolTip("Only pictures of files that are gone. "
+                                 "Thumbs.db names the file each picture is "
                                  "of; these are no longer in the folder, or "
                                  "are there only as deleted entries.")
         self.gone_box.toggled.connect(lambda _on: self.refresh())

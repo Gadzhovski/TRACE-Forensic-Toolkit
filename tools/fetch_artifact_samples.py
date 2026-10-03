@@ -326,6 +326,17 @@ SAMPLES = {
     'vista-w3c-Thumbs.db': (
         'https://raw.githubusercontent.com/w3c/sdw/349b5848108fe7bc9dfc1e489cecbbf5671c8559/UseCases/materials/3DGraphicsOnTheWeb/img/Thumbs.db',
         '3d75c8e9d7eb7a716758b59a0e5be76392b8450422ad2ea824ba766618ac24cf'),
+    # macOS shared file lists (wader/fq, MIT) and a GTK recently-used.xbel
+    # (fox-it dissect.target, Git LFS).
+    'recentdocs.sfl2': (
+        'https://raw.githubusercontent.com/wader/fq/0004670ad40500c350e44692dd1e84dc69d67f04/format/apple/bplist/testdata/recentdocs.sfl2',
+        'd3c46380342848df768b5ee213ee3a24222424a339b040c9a2bac77fe90f9194'),
+    'recentapps.sfl2': (
+        'https://raw.githubusercontent.com/wader/fq/0004670ad40500c350e44692dd1e84dc69d67f04/format/apple/bplist/testdata/recentapps.sfl2',
+        'fce7972989877f6f32d17bbaa883059240a1423a1bb4a64685c3bd20e118e660'),
+    'recently-used.xbel': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/unix/linux/recently-used.xbel',
+        'ca8ca76b9382797ec3563db71d79c9967bf6a0f4f1c8f9a751295c61058a211c'),
 }
 
 

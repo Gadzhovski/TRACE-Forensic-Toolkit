@@ -160,6 +160,27 @@ file, so it takes seconds:
   cleared, remote desktop connections (Security, System, TerminalServices and
   RdpCoreTS logs; XP .evt too)
 
+**Linux:** commands typed (bash — timed when HISTTIMEFORMAT was set, in
+order when not — zsh and fish), logons, logoffs, boots and failed logons
+(wtmp, btmp), the **systemd journal** read by TRACE itself (plain, XZ and
+LZ4; zstd on Python 3.14+) and auth.log/secure — SSH logons and failures,
+sudo and pkexec commands, su, accounts created, USB devices, boots — and
+the files GNOME remembers opening (recently-used.xbel).
+
+**macOS:** application use and Safari pages from KnowledgeC, every
+quarantined download with what fetched it and from where, recent
+documents, applications, servers and volumes from the shared file lists
+(their bookmarks decoded to paths and volumes), system installs and
+updates, and utmpx logons.
+
+**Messages and cloud sync:** Skype (messages, calls, file transfers, SMS),
+iMessage, Android SMS, Dropbox's sync history, Google Drive's sync log
+(the account, files added, changed and deleted) and OneDrive (SkyDrive)
+client runs. Telegram, WhatsApp, Signal and Teams keep their messages
+encrypted: TRACE lists that they were there, for whom and when their data
+last changed, and reads nothing it would need a key for. A carved SQLite
+database is read the same way, marked carved.
+
 Each record says what its time means — a Shimcache time is the file's, not a
 run's — and opens the file it was read from. Event logs are read by TRACE's own
 EVTX reader, checked record by record against python-evtx and 30–40× faster.

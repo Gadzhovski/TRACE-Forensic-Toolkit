@@ -103,6 +103,8 @@ ACTIVITY_CATEGORIES = {
     'network': "Icons/tabler/trace/activity-network.svg",
     'usage': "Icons/tabler/trace/activity-usage.svg",
     'system': "Icons/tabler/settings.svg",
+    'communication': "Icons/tabler/trace/activity-messages.svg",
+    'cloud': "Icons/tabler/trace/activity-cloud.svg",
 }
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the

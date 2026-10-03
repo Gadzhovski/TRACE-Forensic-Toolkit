@@ -41,6 +41,8 @@ CATEGORIES = (
     ('network', 'Networks and Wi-Fi'),
     ('usage', 'App and network usage (SRUM)'),
     ('system', 'System and installed programs'),
+    ('communication', 'Messages and calls'),
+    ('cloud', 'Cloud sync'),
 )
 
 #: Larger than this is not read (a 2 GB Security.evtx is real but rare).
@@ -195,17 +197,36 @@ def collect(image_handler, progress=None, should_stop=None, carved=()):
             continue
         if volume.fs is None:
             continue
-        try:
-            out.extend(_windows(volume, step))
-            out.extend(_browsers(volume, step))
-        except ActivityCancelled:
-            raise
-        except Exception as exc:
-            logger.warning("Activity on the volume at %s stopped early: %s",
-                           offset, exc)
+        for reader in (_windows, _browsers, _other_systems):
+            try:
+                out.extend(reader(volume, step))
+            except ActivityCancelled:
+                raise
+            except Exception as exc:
+                logger.warning("Activity (%s) on the volume at %s stopped "
+                               "early: %s", reader.__name__.strip('_'),
+                               offset, exc)
     for name, data, ref in carved:
         step(name)
-        out.extend(_history(data, None, '', name, ref, '', carved=True))
+        found = _history(data, None, '', name, ref, '', carved=True)
+        if not found:
+            from trace_app.core.activity import chat
+            found = chat.read_database(data, None, '', name, ref,
+                                       carved=True)
+        out.extend(found)
+    return out
+
+
+def _other_systems(volume, step):
+    """Linux and macOS, and chat and cloud-sync data on any system."""
+    from trace_app.core.activity import chat, linux, macos
+    homes = _homes(volume)
+    out = []
+    if linux.is_linux(volume):
+        out += linux.collect(volume, step, homes)
+    if macos.is_macos(volume):
+        out += macos.collect(volume, step, homes)
+    out += chat.collect(volume, step, homes)
     return out
 
 
