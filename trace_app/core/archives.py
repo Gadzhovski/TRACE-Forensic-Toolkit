@@ -86,6 +86,14 @@ def detect_archive(data):
     if is_mailbox(data[:16]):
         return 'pst'
 
+    # A thumbnail cache: a folder of pictures (core/thumbnails.py).
+    from trace_app.core import thumbnails
+    if thumbnails.is_thumbcache(data[:8]):
+        return 'thumbcache'
+    if isinstance(data, (bytes, bytearray)) and len(data) >= 1536 and \
+            thumbnails.is_thumbs_db(data):
+        return 'thumbsdb'
+
     for magic, kind in _SIGNATURES:
         if kind == 'tar':
             continue
@@ -138,6 +146,8 @@ def list_members(data, kind=None, password=None):
         return _mailbox_call('list_members', data)
     if kind in MAIL_KINDS:
         return _mailfile_call('list_members', data, kind)
+    if kind in THUMBNAIL_KINDS:
+        return _thumbnail_call('list_members', data, kind)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 
@@ -146,6 +156,18 @@ def list_members(data, kind=None, password=None):
 MAIL_KINDS = ('eml', 'mbox')
 #: What is browsed from the image as it is read, never held whole.
 STREAMED_KINDS = ('pst', 'mbox')
+
+
+#: Thumbnail caches, browsed as the pictures they hold.
+THUMBNAIL_KINDS = ('thumbcache', 'thumbsdb')
+
+
+def _thumbnail_call(name, *args):
+    from trace_app.core import thumbnails
+    try:
+        return getattr(thumbnails, name)(*args)
+    except thumbnails.ThumbnailError as exc:
+        raise ArchiveError(str(exc)) from exc
 
 
 def _mailfile_call(name, *args):
@@ -195,6 +217,8 @@ def read_member(data, member_name=None, kind=None, password=None,
         return _mailbox_call('read_member', data, member_name, limit)
     if kind in MAIL_KINDS:
         return _mailfile_call('read_member', data, member_name, limit, kind)
+    if kind in THUMBNAIL_KINDS:
+        return _thumbnail_call('read_member', data, member_name, kind, limit)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 

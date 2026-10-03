@@ -312,6 +312,18 @@ keyword-search test image and its published answer key.
 </td>
 <td width="50%" valign="top">
 
+### 🖼 Thumbnail caches
+
+Windows keeps small pictures of the files it has shown — often after the
+files are gone. TRACE reads every **Thumbs.db** (Windows XP, and network
+shares since) and **thumbcache_*.db** (Vista to 11, each user's) on the
+image, damaged entries stepped over, and shows the pictures in a grid
+(Triage ▸ Thumbnails) read from the cache on the image as you scroll —
+nothing is extracted. A Thumbs.db names the file each picture is of and
+its modification time; one no longer in its folder, or there only as a
+deleted entry, is a finding and in the report. A cache also browses like a
+folder of pictures from the listing.
+
 </td>
 </tr>
 <tr>

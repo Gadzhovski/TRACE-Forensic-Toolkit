@@ -266,6 +266,18 @@ class TriagePanel(QWidget):
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
 
+    def add_thumbnails_tab(self, panel):
+        """Pictures in thumbnail caches (ui/viewers/thumbnails_panel.py),
+        following the same image filter."""
+        self._thumbnails_panel = panel
+        self._tab_for['thumbnails'] = self.tabs.addTab(
+            panel, icons.icon(icons.THUMBNAILS), "Thumbnails")
+        panel.count_changed.connect(
+            lambda count: self.tabs.setTabText(
+                self._tab_for['thumbnails'], f"Thumbnails ({count:,})"))
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
     def add_keywords_tab(self, panel):
         """Keyword-list hits (ui/viewers/keywords_panel.py), following the
         same image filter."""
@@ -404,7 +416,8 @@ class TriagePanel(QWidget):
         return (getattr(self, '_ntfs_panel', None),
                 getattr(self, '_hash_panel', None),
                 getattr(self, '_persistence_panel', None),
-                getattr(self, '_keywords_panel', None))
+                getattr(self, '_keywords_panel', None),
+                getattr(self, '_thumbnails_panel', None))
 
     def refresh(self):
         """Redraw from what the case holds now."""

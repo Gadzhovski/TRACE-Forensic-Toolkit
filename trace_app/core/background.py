@@ -281,6 +281,26 @@ def job_keywords(params, progress, item, should_stop):
         _close(case)
 
 
+def job_thumbnails(params, progress, item, should_stop):
+    """Every thumbnail cache on one image (core/thumbnails)."""
+    from trace_app.core import thumbnails, walk
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        try:
+            return thumbnails.analyse_evidence(
+                handler, case, params['evidence_id'],
+                progress=lambda done, total, path: progress(done, total,
+                                                            path),
+                should_stop=should_stop)
+        except walk.WalkCancelled:
+            return 0
+    finally:
+        _close(case, handler)
+
+
 def job_persistence(params, progress, item, should_stop):
     """Autostarts on one image, graded (core/persistence)."""
     from trace_app.core import hashsets, persistence
@@ -341,8 +361,8 @@ def job_ping(params, progress, item, should_stop):
     self-test's proof that a child process starts in a frozen build."""
     from trace_app.core import (activity, analysis, carving,  # noqa: F401
                                 hashsets, indexer, keywords, mailfiles,
-                                ntfs, persistence, report, timeline,
-                                yara_rules)
+                                ntfs, persistence, report, thumbnails,
+                                timeline, yara_rules)
     import pytsk3  # noqa: F401
     progress(1, 1, 'ping', force=True)
     item({'pong': params.get('value')})
@@ -358,6 +378,7 @@ JOBS = {
     'report': job_report,
     'yara': job_yara,
     'keywords': job_keywords,
+    'thumbnails': job_thumbnails,
     'persistence': job_persistence,
     'carve': job_carve,
     'ping': job_ping,

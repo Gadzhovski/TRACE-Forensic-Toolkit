@@ -65,6 +65,10 @@ MODULE_PERSISTENCE = 'persistence'
 #: queued after indexing.
 MODULE_KEYWORDS = 'keywords'
 
+#: Thumbnail caches (core/thumbnails): finds Thumbs.db and thumbcache_*.db
+#: by name, then reads only those.
+MODULE_THUMBNAILS = 'thumbnails'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -157,6 +161,14 @@ _YARA = (
     "strings it matched.",
     "Slower: reads every file, up to the size set for the case.")
 
+_THUMBNAILS = (
+    "Thumbnail caches",
+    "The pictures Windows kept in Thumbs.db (XP, network shares) and "
+    "thumbcache_*.db (Vista to 11) — often of pictures and documents since "
+    "deleted. A Thumbs.db names each file; those no longer in their folder "
+    "are findings (Triage ▸ Thumbnails).",
+    "Fast: lists the file systems, then reads only the caches.")
+
 _KEYWORDS = (
     "Keyword lists",
     "Search the whole case for the terms in the keyword lists this case "
@@ -178,7 +190,7 @@ def default_choice(modules=None):
     return {'modules': list(modules or ()), 'evidence_ids': None,
             'index': bool(modules), 'activity': bool(modules),
             'ntfs': bool(modules), 'hashsets': False,
-            'persistence': bool(modules),
+            'persistence': bool(modules), 'thumbnails': bool(modules),
             'carve_types': [], 'unallocated_only': True}
 
 
@@ -282,6 +294,10 @@ class AnalysisModulesDialog(QDialog):
         self.persistence_box = self._module(layout, *_PERSISTENCE)
         self.persistence_box.setChecked(bool(choice.get('persistence')))
         self.boxes[MODULE_PERSISTENCE] = self.persistence_box
+
+        self.thumbnails_box = self._module(layout, *_THUMBNAILS)
+        self.thumbnails_box.setChecked(bool(choice.get('thumbnails')))
+        self.boxes[MODULE_THUMBNAILS] = self.thumbnails_box
 
         self.yara_box = self._module(layout, *_YARA)
         yara_ok = choice.get('yara_available', True)
@@ -405,7 +421,8 @@ class AnalysisModulesDialog(QDialog):
                         if key not in (MODULE_CARVE, MODULE_INDEX,
                                        MODULE_ACTIVITY, MODULE_NTFS,
                                        MODULE_HASHSETS, MODULE_YARA,
-                                       MODULE_PERSISTENCE, MODULE_KEYWORDS)
+                                       MODULE_PERSISTENCE, MODULE_KEYWORDS,
+                                       MODULE_THUMBNAILS)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
@@ -415,6 +432,7 @@ class AnalysisModulesDialog(QDialog):
             'yara': self.yara_box.isChecked(),
             'persistence': self.persistence_box.isChecked(),
             'keywords': self.keywords_box.isChecked(),
+            'thumbnails': self.thumbnails_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),

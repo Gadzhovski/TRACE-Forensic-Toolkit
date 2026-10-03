@@ -331,12 +331,8 @@ def _fts_query(term):
     return phrase + '*' if term['kind'] == 'prefix' else phrase
 
 
-def _haystack(row):
-    return f"{row['name'] or ''}\n{row['path'] or ''}\n{row['body'] or ''}"
-
-
-def _measure(pattern, text, folded):
-    """(occurrences up to MAX_COUNT, excerpt around the first) or (0, '')."""
+def _occurrences(pattern, text, folded):
+    """(how many times, the first match) in `text`."""
     haystack = _fold(text) if folded else text
     count, first = 0, None
     for match in pattern.finditer(haystack):
@@ -345,15 +341,29 @@ def _measure(pattern, text, folded):
         count += 1
         if count >= MAX_COUNT:
             break
-    if not count:
-        return 0, ''
-    start, end = first.span()
-    # Folding can change lengths (ß, ligatures); the excerpt is cut from
-    # the text as written, around the same position.
-    begin = max(0, start - CONTEXT)
-    excerpt = ' '.join(text[begin:end + CONTEXT].split())
-    return count, ('… ' if begin else '') + excerpt + (
-        ' …' if end + CONTEXT < len(text) else '')
+    return count, first
+
+
+def _measure(pattern, row, folded):
+    """(occurrences up to MAX_COUNT, the first in context) or (0, '').
+
+    The content is what is counted; a term only in the file's name is one
+    hit, said to be in the name. The folders on the path are not searched:
+    a term naming a folder would otherwise hit every file under it."""
+    body = row['body'] or ''
+    count, first = _occurrences(pattern, body, folded)
+    if count:
+        start, end = first.span()
+        # Folding can change lengths (ß, ligatures); the excerpt is cut
+        # from the text as written, around the same position.
+        begin = max(0, start - CONTEXT)
+        excerpt = ' '.join(body[begin:end + CONTEXT].split())
+        return count, ('… ' if begin else '') + excerpt + (
+            ' …' if end + CONTEXT < len(body) else '')
+    name = row['name'] or ''
+    if _occurrences(pattern, name, folded)[0]:
+        return 1, f"(in the name) {name}"
+    return 0, ''
 
 
 def _evidence_clause(evidence_ids, column='evidence_id'):
@@ -378,6 +388,9 @@ def search_lists(index_db, entries, evidence_ids, progress=None,
             raise SearchCancelled()
         key = (entry['id'], position)
         query = _fts_query(term) if term['kind'] != 'regex' else None
+        if query is not None:
+            # Name and content; the path's folders are not searched.
+            query = f'{{name body}} : {query}'
         if term['kind'] == 'regex' or query is None:
             regexes.append((key, term))
             continue
@@ -394,7 +407,7 @@ def search_lists(index_db, entries, evidence_ids, progress=None,
                 f"WHERE search_fts MATCH ? AND {where}",
                 [query] + params)
             for row in rows:
-                count, excerpt = _measure(pattern, _haystack(row), True)
+                count, excerpt = _measure(pattern, row, True)
                 if count:
                     hits.append(_hit(row, count, excerpt))
                     if len(hits) >= MAX_FILES_PER_TERM:
@@ -420,11 +433,10 @@ def search_lists(index_db, entries, evidence_ids, progress=None,
         for number, row in enumerate(rows):
             if number % 200 == 0 and should_stop and should_stop():
                 raise SearchCancelled()
-            text = _haystack(row)
             for key, pattern, folded in compiled:
                 if len(out[key]) >= MAX_FILES_PER_TERM:
                     continue
-                count, excerpt = _measure(pattern, text, folded)
+                count, excerpt = _measure(pattern, row, folded)
                 if count:
                     out[key].append(_hit(row, count, excerpt))
     if progress:

@@ -47,8 +47,8 @@ SECTIONS = (
      "What the examiner marked, with notes and a picture of each "
      "bookmarked image."),
     ('findings', 'Findings',
-     "Type mismatches, high entropy, hidden data, located photos and "
-     "document authors."),
+     "Type mismatches, high entropy, hidden data, located photos, "
+     "document authors, YARA matches and thumbnails of files gone."),
     ('hashes', 'Hash set matches',
      "Files matching known-bad and notable hash sets."),
     ('ntfs', 'NTFS: timestomping, downloads and streams',
@@ -496,6 +496,17 @@ class _Builder:
                              for s in ((r.get('detail') or {}).get('strings')
                                        or [])[:5])),
                          _mono(r.get('path'))] for r in yara]))
+        gone = self.scope(self.case.findings(None, 'thumbnails',
+                                             limit=limit + 1))
+        groups.append(('findings-thumbnails',
+                       'Thumbnails of files no longer in their folder',
+                       ['File pictured', 'Evidence', 'Modified (catalog)',
+                        'Finding', 'Thumbs.db'],
+                       [[e(r.get('name')),
+                         e(self.evidence_name(r.get('evidence_id'))),
+                         e((r.get('detail') or {}).get('modified')),
+                         e(r.get('summary')), _mono(r.get('path'))]
+                        for r in gone]))
         for anchor, title, headers, rows in groups:
             self.check()
             out.append(self.heading(2, anchor, f"{title} ({len(rows):,})"))

@@ -76,7 +76,7 @@ from trace_app.ui.viewers.indicators_panel import IndicatorsPanel, kind_label
 from trace_app.ui.viewers.ntfs_panel import NtfsPanel, NtfsWorker
 from trace_app.ui.viewers.hash_matches_panel import (HashMatchesPanel,
                                                      HashMatchWorker)
-from trace_app.core import containers, hashsets
+from trace_app.core import containers, hashsets, thumbnails
 from trace_app.ui.viewers.timeline_panel import TimelinePanel
 from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
@@ -1221,6 +1221,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.keywords_panel.search_requested.connect(
             lambda: self.queue_keywords())
         self.triage_panel.add_keywords_tab(self.keywords_panel)
+
+        # Pictures Windows kept in its thumbnail caches.
+        from trace_app.ui.viewers.thumbnails_panel import ThumbnailsPanel
+        self.thumbnails_panel = ThumbnailsPanel()
+        self.thumbnails_panel.set_reader(self._thumbnail_bytes)
+        self.thumbnails_panel.picture_selected.connect(self.preview_thumbnail)
+        self.thumbnails_panel.picture_activated.connect(
+            self.open_thumbnail_cache)
+        self.thumbnails_panel.picture_menu_requested.connect(
+            lambda row, position: self.open_finding_menu(
+                self._thumbnail_cache_row(row), position))
+        self.triage_panel.add_thumbnails_tab(self.thumbnails_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
@@ -2057,7 +2069,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         except Exception:
             header = None
 
-        if header is not None and not archives.detect_archive(header):
+        # A Thumbs.db is an OLE file like a Word document; its streams, not
+        # its first bytes, say what it is -- so its name earns it a read.
+        if header is not None and not archives.detect_archive(header) and \
+                not thumbnails.is_cache_name(name):
             return False
 
         self.set_status(f"Opening {name}…")
@@ -2476,6 +2491,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if choice.get('persistence'):
             # After hash matching, so the hash-set facts are current.
             self.queue_persistence(chosen)
+        if choice.get('thumbnails'):
+            self.queue_thumbnails(chosen)
         if choice.get('yara'):
             self.queue_yara(chosen)
         if choice.get('keywords'):
@@ -2967,6 +2984,138 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"YARA: {count:,} file(s) in {name} matched")
         self.refresh_analysis_views()
 
+    # --- thumbnail caches ------------------------------------------------
+
+    def queue_thumbnails(self, rows):
+        from trace_app.ui.viewers.thumbnails_panel import ThumbnailsWorker
+        if not self.case:
+            return 0
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                continue
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+
+            def start(job, row=row, evidence_id=evidence_id, name=name):
+                worker = ThumbnailsWorker(row['path'], self.case.folder,
+                                          evidence_id, self)
+                worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.progressed.connect(
+                    lambda done, total, path: self.job_bar.report(
+                        done, total, os.path.basename(path)))
+                worker.finished_thumbnails.connect(
+                    lambda count, error: self._thumbnails_finished(
+                        name, count, error))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            if self.job_bar.submit(Job(
+                    key=f"thumbnails:{evidence_id}",
+                    title=f"Reading thumbnail caches on {name}", start=start,
+                    stop=lambda worker: worker.stop())):
+                queued += 1
+        return queued
+
+    def _thumbnails_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Reading thumbnail caches on {name} failed: "
+                            f"{error}")
+            logger.error("Thumbnails on %s failed: %s", name, error)
+        else:
+            self.set_status(f"{count:,} thumbnail(s) read from {name}")
+        self._thumbnail_cache_bytes = None
+        self.refresh_analysis_views()
+
+    def _thumbnail_bytes(self, row):
+        """A thumbnail's picture, read from its cache file on its own
+        image -- without changing which image is active."""
+        from trace_app.core.case import parse_artifact_ref
+        evidence = next((r for r in self.case.evidence()
+                         if r['id'] == row['evidence_id']), None) \
+            if self.case else None
+        handler = self.handler_for(evidence['path']) if evidence else None
+        if handler is None:
+            return None
+        parsed = parse_artifact_ref(row['cache_ref'])
+        if row['cache_kind'] == 'thumbcache':
+            stream = handler.open_file_object(parsed['inode'],
+                                              parsed['start_offset'])
+            if stream is None:
+                return None
+            stream.seek(int(row['location']))
+            return stream.read(int(row['size'] or 0))
+        key = (row['evidence_id'], row['cache_ref'])
+        cached = getattr(self, '_thumbnail_cache_bytes', None)
+        if not cached or cached[0] != key:
+            content, _ = handler.get_file_content(parsed['inode'],
+                                                  parsed['start_offset'])
+            cached = self._thumbnail_cache_bytes = (key, content or b'')
+        return thumbnails.picture_bytes(cached[1], row)
+
+    def _thumbnail_cache_row(self, row):
+        """A thumbnail as the finding-shaped row of its cache file."""
+        return {'evidence_id': row['evidence_id'],
+                'artifact_ref': row['cache_ref'],
+                'name': row['cache_path'].rsplit('/', 1)[-1],
+                'path': row['cache_path']}
+
+    def preview_thumbnail(self, row):
+        key = f"thumbnail:{row['evidence_id']}:{row['id']}"
+        if (self.current_selected_data or {}).get('_preview_ref') == key:
+            return
+        if not row.get('format'):
+            self.set_status(f"Only the name of {row.get('name')} is left in "
+                            f"{row['cache_path']}; its picture is gone.",
+                            6000)
+            return
+        try:
+            content = self._thumbnail_bytes(row)
+        except Exception as exc:
+            logger.error("Could not read thumbnail %s: %s", key, exc)
+            content = None
+        if not content:
+            self.set_status("The picture could not be read from its cache.",
+                            5000)
+            return
+        label = row.get('name') or row.get('key') or 'thumbnail'
+        data = {'name': f"{label} (thumbnail).{row['format']}",
+                'size': len(content), 'type': row['format'],
+                'path': f"{row['cache_path']}!/{row['location']}",
+                'file_content': content, 'source': 'thumbnail',
+                '_preview_ref': key}
+        self.clear_viewers()
+        self.current_selected_data = data
+        if self.active_viewer_adapter() is None:
+            self.viewer_tab.setCurrentWidget(self.viewer_adapters[0].widget)
+        self.update_viewer_with_file_content(content, data)
+        self.viewer_dock.show()
+        self.set_status(f"{label}: from {row['cache_path']}")
+
+    def open_thumbnail_cache(self, row):
+        self.open_finding(self._thumbnail_cache_row(row))
+
+    def preview_finding(self, finding):
+        """A finding under Findings in the tree, previewed the way its
+        own Triage list previews it."""
+        module = finding.get('module')
+        if module == 'keywords':
+            self.preview_keyword_hit(finding)
+            return
+        if module == 'thumbnails':
+            stream = (finding.get('detail') or {}).get('stream')
+            panel = self.thumbnails_panel
+            row = next((r for r in self.case.thumbnails(
+                finding.get('evidence_id'), finding.get('artifact_ref'))
+                if r['location'] == stream), None) if self.case else None
+            if row is not None:
+                self.preview_thumbnail(row)
+                panel.select_row(lambda r: r['id'] == row['id'])
+                return
+        self.preview_artifact(finding)
+
     # --- keyword lists ---------------------------------------------------
 
     def keyword_library(self):
@@ -3259,6 +3408,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 and not self.case.findings(evidence_id, 'persistence',
                                            limit=1) \
                 and not self.case.findings(evidence_id, 'keywords',
+                                           limit=1) \
+                and not self.case.findings(evidence_id, 'thumbnails',
                                            limit=1):
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
@@ -3316,6 +3467,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                      limit=100000)}),
              lambda: self._one_per_file(self.case.findings(
                  evidence_id, 'persistence', limit=100000))),
+            # A Thumbs.db names each picture's file; the ones no longer
+            # in their folder. One row per picture, not per Thumbs.db.
+            ('thumbnails', 'Thumbnails of files gone', icons.THUMBNAILS,
+             len(self.case.findings(evidence_id, 'thumbnails',
+                                    limit=100000)),
+             lambda: self.case.findings(evidence_id, 'thumbnails',
+                                        limit=100000)),
             ('yara', 'YARA matches', icons.FINDING_YARA,
              len({(f['evidence_id'], f['artifact_ref']) for f in
                   self.case.findings(evidence_id, 'yara', limit=100000)}),
@@ -5502,7 +5660,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.preview_artifact(data['bookmark'])
             return
         if data.get('is_finding'):
-            self.preview_artifact(data['finding'])
+            self.preview_finding(data['finding'])
             return
         # A group node opens its list in Triage, where each has a sub-tab.
         if data.get('is_bookmarks_root'):

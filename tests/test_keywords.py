@@ -210,7 +210,8 @@ def test_words_are_confirmed_in_the_text(tmp_path):
     library = keywords.Library(str(tmp_path / 'library'))
     library.create('W', [keywords.make_term('evil.exe'),
                          keywords.make_term('cafe'),
-                         keywords.make_term('exfil', 'prefix')])
+                         keywords.make_term('exfil', 'prefix'),
+                         keywords.make_term('mail.pst')])
     try:
         keywords.run_case(case, library)
         by_term = {}
@@ -218,8 +219,11 @@ def test_words_are_confirmed_in_the_text(tmp_path):
             by_term.setdefault(f['detail']['term'], {})[f['name']] = \
                 f['detail']['hits']
         assert by_term['evil.exe'] == {'b.txt': 3}
+        assert 'mail.pst' not in by_term          # only on the path
         assert by_term['cafe'] == {'a.txt': 1, 'b.txt': 1}   # café too
         assert by_term['exfil*'] == {'c.html': 1}
+        # A folder on the path is not a hit for every file under it.
+        assert 'Plans' not in str(by_term)
         member = case.findings(evidence_id, 'keywords', kind='keyword')
         assert any(f['path'].startswith('/mail.pst!/') for f in member)
     finally:

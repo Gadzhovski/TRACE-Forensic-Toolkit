@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -91,7 +91,8 @@ REPORTED_MISMATCHES = ('suspicious', 'notable')
 REPORTED_FINDING_GRADES = ('suspicious', 'notable')
 
 #: Finding modules written by jobs of their own, not the file analysis.
-OWN_JOB_MODULES = ('ntfs', 'yara', 'persistence', 'keywords')
+OWN_JOB_MODULES = ('ntfs', 'yara', 'persistence', 'keywords',
+                   'thumbnails')
 
 
 def make_artifact_ref(start_offset, inode, sequence=None):
@@ -1173,6 +1174,65 @@ class Case:
              for e in entries])
         self._db.commit()
 
+    # --- thumbnail caches ------------------------------------------------
+
+    _THUMBNAIL_COLUMNS = (
+        'cache_ref', 'cache_path', 'cache_kind', 'cache_size',
+        'cache_deleted', 'system', 'user', 'key', 'location', 'name',
+        'original_state', 'original_ref', 'modified_utc', 'width', 'height',
+        'format', 'size', 'sha256')
+
+    def replace_thumbnails(self, evidence_id, rows):
+        """Store core.thumbnails rows for one image, replacing any."""
+        columns = self._THUMBNAIL_COLUMNS
+        self._db.execute("DELETE FROM thumbnails WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.executemany(
+            f"INSERT INTO thumbnails (evidence_id, {', '.join(columns)}, "
+            f"detail) VALUES ({','.join('?' * (len(columns) + 2))})",
+            [(evidence_id, *(row.get(c) for c in columns),
+              json.dumps(row.get('detail') or {}, default=str))
+             for row in rows])
+        self._db.commit()
+
+    def thumbnails(self, evidence_id=None, cache_ref=None, gone_only=False,
+                   limit=200000):
+        """Thumbnail rows: Thumbs.db pictures of files that are gone first,
+        then by cache and position."""
+        query, params = "SELECT * FROM thumbnails WHERE 1 = 1", []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        if cache_ref is not None:
+            query += " AND cache_ref = ?"
+            params.append(cache_ref)
+        if gone_only:
+            query += " AND original_state IN ('absent', 'deleted')"
+        query += (" ORDER BY CASE original_state WHEN 'absent' THEN 0 "
+                  "WHEN 'deleted' THEN 1 ELSE 2 END, cache_path, id LIMIT ?")
+        params.append(limit)
+        rows = []
+        for row in self._db.execute(query, params):
+            row = dict(row)
+            try:
+                row['detail'] = json.loads(row.get('detail') or '{}')
+            except ValueError:
+                row['detail'] = {}
+            rows.append(row)
+        return rows
+
+    def thumbnail_counts(self, evidence_id=None):
+        """{'pictures': n, 'caches': n, 'gone': n}."""
+        where, params = '', []
+        if evidence_id is not None:
+            where, params = " WHERE evidence_id = ?", [evidence_id]
+        row = self._db.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT evidence_id || ':' || "
+            "cache_ref), SUM(original_state IN ('absent', 'deleted')) "
+            "FROM thumbnails" + where, params).fetchone()
+        return {'pictures': row[0] or 0, 'caches': row[1] or 0,
+                'gone': row[2] or 0}
+
     def persistence(self, evidence_id=None, include_benign=True, text=''):
         return query_persistence(self._db, evidence_id, include_benign, text)
 
@@ -1954,6 +2014,35 @@ class Case:
             CREATE INDEX IF NOT EXISTS idx_persistence
                 ON persistence(evidence_id, grade);
 
+            -- Pictures in thumbnail caches (core/thumbnails.py): where
+            -- each lies in its cache file, never a copy of it.
+            CREATE TABLE IF NOT EXISTS thumbnails (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                cache_ref     TEXT NOT NULL,
+                cache_path    TEXT NOT NULL,
+                cache_kind    TEXT NOT NULL,
+                cache_size    TEXT,
+                cache_deleted INTEGER DEFAULT 0,
+                system        TEXT,
+                user          TEXT,
+                key           TEXT,
+                location      TEXT NOT NULL,
+                name          TEXT,
+                original_state TEXT,
+                original_ref  TEXT,
+                modified_utc  TEXT,
+                width         INTEGER,
+                height        INTEGER,
+                format        TEXT,
+                size          INTEGER,
+                sha256        TEXT,
+                detail        TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_thumbnails
+                ON thumbnails(evidence_id, cache_ref);
+
             CREATE TABLE IF NOT EXISTS report_items (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind          TEXT NOT NULL,
@@ -1989,6 +2078,10 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 12:
+            # thumbnails is created unconditionally above.
+            self._db.commit()
 
         if version < 11:
             # persistence is created unconditionally above.

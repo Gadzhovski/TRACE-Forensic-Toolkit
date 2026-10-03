@@ -1475,3 +1475,40 @@ def test_keyword_lists_are_a_job_a_triage_tab_and_findings(qapp, window,
     dialog = AnalysisModulesDialog(None, {'modules': [],
                                           'keywords_available': False})
     assert not dialog.keywords_box.isEnabled()
+
+
+def test_thumbnails_are_a_job_and_a_grid_read_from_the_image(qapp, window,
+                                                             truth):
+    """Neither image holds a thumbnail cache, so the job finds none; a
+    picture recorded against a JPEG on the second image is then drawn in
+    the grid from the image and previewed from it."""
+    from PySide6.QtCore import Qt
+    from trace_app.core.case import make_artifact_ref
+    panel = window.thumbnails_panel
+    assert window.queue_thumbnails(window.case.evidence()) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    assert panel.count == 0 and 'No thumbnail caches' in \
+        panel.status_label.text()
+    second = next(r['id'] for r in window.case.evidence()
+                  if r['path'].endswith(SECOND))
+    ref = make_artifact_ref(0, 29, 1)                 # /alloc/file1.jpg
+    content, _ = truth[SECOND].get_file_content(29, 0)
+    window.case.replace_thumbnails(second, [{
+        'cache_ref': ref, 'cache_path': '/alloc/file1.jpg',
+        'cache_kind': 'thumbcache', 'cache_size': '256',
+        'system': 'Windows 10/11', 'user': 'bob', 'key': '79b0d2fffa22677a',
+        'location': '0', 'format': 'jpg', 'size': len(content)}])
+    window.refresh_analysis_views()
+    assert panel.count == 1
+    triage = window.triage_panel
+    assert triage.tabs.tabText(triage._tab_for['thumbnails']) == \
+        'Thumbnails (1)'
+    icon = panel.model.data(panel.model.index(0), Qt.DecorationRole)
+    assert icon is not None and icon.availableSizes()
+    captured = _capture_viewer(window)
+    window.current_selected_data = None
+    panel.view.clicked.emit(panel.model.index(0))
+    pump(qapp, 10, lambda: bool(captured))
+    assert captured and captured[-1] == content
+    window.case.replace_thumbnails(second, [])
+    window.refresh_analysis_views()
