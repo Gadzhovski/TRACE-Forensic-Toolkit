@@ -70,6 +70,18 @@ FINDING_AUTHOR = "Icons/tabler/trace/document-author.svg"
 FINDING_CARVED = "Icons/tabler/file-search.svg"
 FINDING_INDICATORS = "Icons/tabler/trace/indicators.svg"
 ACTIVITY = "Icons/tabler/trace/activity.svg"
+#: One per core.activity category, in the tree and on the Activity tab.
+ACTIVITY_CATEGORIES = {
+    None: ACTIVITY,
+    'programs': "Icons/tabler/trace/activity-programs.svg",
+    'files': "Icons/tabler/file-text.svg",
+    'usb': "Icons/tabler/trace/activity-usb.svg",
+    'recycle': "Icons/tabler/trash.svg",
+    'logons': "Icons/tabler/trace/activity-logons.svg",
+    'browser': "Icons/tabler/trace/activity-web.svg",
+    'downloads': "Icons/tabler/download.svg",
+    'searches': "Icons/tabler/search.svg",
+}
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the
 #: tab bars match Listing, Registry and Deleted Files.

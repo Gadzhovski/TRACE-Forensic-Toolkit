@@ -227,8 +227,9 @@ class ActivityPanel(QWidget):
         self.tabs.setExpanding(False)
         self._keys = [None] + [key for key, _label in CATEGORIES]
         self._labels = ['All'] + [label for _key, label in CATEGORIES]
-        for label in self._labels:
-            self.tabs.addTab(label)
+        for key, label in zip(self._keys, self._labels):
+            self.tabs.addTab(icons.icon(icons.ACTIVITY_CATEGORIES[key]),
+                             label)
         self.tabs.currentChanged.connect(self._tab_changed)
         row.addWidget(self.tabs, 1)
         self.filter_input = QLineEdit()

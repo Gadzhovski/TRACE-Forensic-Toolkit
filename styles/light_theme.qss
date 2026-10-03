@@ -282,6 +282,48 @@ QTabBar::tab:!selected {
     margin-top: 2px; /* Unselected tabs are slightly raised */
 }
 
+
+/* The arrows a tab bar shows when its tabs do not fit (Triage has eleven
+   sub-tabs). Qt draws a pair of grey bevelled buttons; these match the tabs. */
+QTabBar::scroller {
+    width: 48px;
+}
+QTabBar QToolButton {
+    background: #FFFFFF;
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+    margin: 3px 1px 1px 1px;
+    padding: 0;
+}
+QTabBar QToolButton:hover {
+    background: #F5F5F5;
+    border-color: #C2C7CB;
+}
+QTabBar QToolButton:disabled {
+    border-color: #EEEEEE;
+}
+QTabBar QToolButton::left-arrow {
+    image: url('Icons/tabler/themed/chevron-left-light.svg');
+    width: 14px;
+    height: 14px;
+}
+QTabBar QToolButton::left-arrow:disabled {
+    image: url('Icons/tabler/themed/chevron-left-dim-light.svg');
+}
+QTabBar QToolButton::right-arrow {
+    image: url('Icons/tabler/themed/chevron-right-light.svg');
+    width: 14px;
+    height: 14px;
+}
+QTabBar QToolButton::right-arrow:disabled {
+    image: url('Icons/tabler/themed/chevron-right-dim-light.svg');
+}
+/* The tear Qt draws where a tab is cut off is a smudge, not a cue. */
+QTabBar::tear {
+    width: 0;
+    border: none;
+}
+
 /* ToolBar Styles */
 QToolBar {
     background-color: #FFFFFF;

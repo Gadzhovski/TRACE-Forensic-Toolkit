@@ -2445,7 +2445,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 continue
             node = QTreeWidgetItem(root)
             node.setText(0, f"{label} ({summary[key]:,})")
-            node.setIcon(0, icons.icon(icons.ACTIVITY))
+            node.setIcon(0, icons.icon(icons.ACTIVITY_CATEGORIES[key]))
             node.setData(0, Qt.UserRole, {'is_activity_group': True,
                                           'category': key})
         root.setExpanded(True)
