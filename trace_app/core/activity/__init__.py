@@ -24,6 +24,7 @@ import pytsk3
 from trace_app.core.activity import (browsers, eventlogs, jumplists, lnk,
                                      prefetch, recyclebin, registry, setupapi,
                                      times)
+from trace_app.infra import capabilities
 
 logger = logging.getLogger('TRACE.Activity')
 
@@ -37,6 +38,9 @@ CATEGORIES = (
     ('browser', 'Web history'),
     ('downloads', 'Downloads'),
     ('searches', 'Web searches'),
+    ('network', 'Networks and Wi-Fi'),
+    ('usage', 'App and network usage (SRUM)'),
+    ('system', 'System and installed programs'),
 )
 
 #: Larger than this is not read (a 2 GB Security.evtx is real but rare).
@@ -209,17 +213,21 @@ def _windows(volume, step):
     windows = volume.find('Windows') or volume.find('WINNT')
     out = []
     users = _profiles(volume)
+    sids = _sid_names(volume, windows) if windows is not None else {}
     if windows is not None:
         out += _prefetch(volume, windows, step)
-        out += _system_hive(volume, windows, step)
+        out += _system_hive(volume, windows, step, sids)
+        out += _software_hive(volume, windows, step)
         out += _amcache(volume, windows, step)
         out += _setupapi(volume, windows, step)
         out += _event_logs(volume, windows, step)
-    sids = _sid_names(volume, windows) if windows is not None else {}
+        out += _srum(volume, windows, step, sids)
     out += _recycle_bin(volume, sids, step)
     for user, home in users:
         out += _user_registry(volume, user, home, step)
         out += _user_shortcuts(volume, user, home, step)
+        out += _ie_history(volume, user, home, step)
+        out += _windows_timeline(volume, user, home, step)
     return out
 
 
@@ -295,7 +303,7 @@ def _hive(volume, entry):
         return None
 
 
-def _system_hive(volume, windows, step):
+def _system_hive(volume, windows, step, sids=None):
     entry = volume.find(windows.name, 'System32', 'config', 'SYSTEM')
     if entry is None:
         return []
@@ -305,6 +313,29 @@ def _system_hive(volume, windows, step):
         return []
     common = dict(path=entry.path, ref=volume.ref(entry))
     out = []
+    for item in registry.bam(hive):
+        out.append(record(
+            'programs', f"Registry ({item['source']})", item['last_run'],
+            'Program last run', item['path'],
+            {'user SID': item['sid'],
+             'basis': 'the Background Activity Moderator keeps the last '
+                      'run of each program, per user'},
+            user=(sids or {}).get(item['sid'].upper(), item['sid']),
+            **common))
+    zone = registry.time_zone(hive)
+    if zone:
+        offset = zone['bias_minutes']
+        out.append(record(
+            'system', 'Registry (TimeZoneInformation)', zone['changed'],
+            'Time zone configured', zone['name'],
+            {'UTC offset': f"UTC{-offset / 60:+g}h" if offset is not None
+             else None,
+             'offset in effect': f"UTC{-zone['active_bias'] / 60:+g}h"
+             if zone['active_bias'] is not None else None,
+             'standard name': zone['standard_name'],
+             'daylight name': zone['daylight_name'],
+             'basis': "the key's last write, not necessarily when the "
+                      "zone was chosen"}, **common))
     for item in registry.shimcache(hive):
         detail = {'position': item['position'],
                   'executed': {True: 'yes', False: 'not recorded'}.get(
@@ -339,6 +370,250 @@ def _system_hive(volume, windows, step):
                               device['key_updated'], 'USB device seen',
                               subject, dict(detail, basis='key last written'),
                               **common))
+    return out
+
+
+def _software_hive(volume, windows, step):
+    entry = volume.find(windows.name, 'System32', 'config', 'SOFTWARE')
+    if entry is None:
+        return []
+    step(entry.path)
+    hive = _hive(volume, entry)
+    if hive is None:
+        return []
+    common = dict(path=entry.path, ref=volume.ref(entry))
+    out = []
+    install = registry.windows_install(hive)
+    if install and install['installed']:
+        out.append(record(
+            'system', 'Registry (CurrentVersion)', install['installed'],
+            'Windows installed', install['product'],
+            {'build': install['build'], 'registered owner': install['owner'],
+             'organisation': install['organisation']}, **common))
+    for network in registry.network_profiles(hive):
+        detail = {'type': network['type'],
+                  'description': network['description'],
+                  'gateway MAC': network['gateway_mac'],
+                  'DNS suffix': network['dns_suffix'],
+                  'profile': network['guid']}
+        for field, what in (('created', 'Network first connected'),
+                            ('last_connected', 'Network last connected')):
+            if network[field]:
+                out.append(record('network', 'Registry (NetworkList)',
+                                  network[field], what, network['name'],
+                                  detail, local=True, **common))
+    for program in registry.installed_programs(hive):
+        out.append(record(
+            'system', 'Registry (Uninstall)', program['key_written'],
+            'Program installed', program['name'],
+            {'version': program['version'], 'publisher': program['publisher'],
+             'install date': program['install_date'],
+             'location': program['location'],
+             'basis': "the uninstall key's last write; the install date, "
+                      "when Windows kept one, is a day only"}, **common))
+    return out
+
+
+def _srum(volume, windows, step, sids):
+    entry = volume.find(windows.name, 'System32', 'sru', 'SRUDB.dat')
+    if entry is None:
+        return []
+    if not capabilities.available('esedb'):
+        logger.warning("SRUM not read: %s", capabilities.reason('esedb'))
+        return []
+    step(entry.path)
+    from trace_app.core.activity import ese
+    try:
+        entries = ese.srum(volume.read(entry))
+    except Exception as exc:
+        logger.warning("Could not read SRUM %s: %s", entry.path, exc)
+        return []
+    common = dict(path=entry.path, ref=volume.ref(entry))
+    basis = 'SRUM summarises each hour; the time is when it recorded it'
+    out = []
+    for item in entries:
+        user = item['user']
+        user = sids.get(str(user).upper(), user) if isinstance(user, str)             else str(user or '')
+        subject = str(item['application'] or '')
+        if item['table'] == 'network':
+            out.append(record(
+                'usage', 'SRUM (network use)', item['recorded'],
+                'Network data used', subject,
+                {'bytes sent': item['bytes_sent'],
+                 'bytes received': item['bytes_received'],
+                 'interface': item['interface'], 'profile': item['profile'],
+                 'basis': basis}, user=user, **common))
+        elif item['table'] == 'application':
+            out.append(record(
+                'usage', 'SRUM (application use)', item['recorded'],
+                'Application resource use', subject,
+                {'foreground CPU cycles': item['foreground_cycles'],
+                 'background CPU cycles': item['background_cycles'],
+                 'bytes read': (item['foreground_read'] or 0)
+                 + (item['background_read'] or 0),
+                 'bytes written': (item['foreground_written'] or 0)
+                 + (item['background_written'] or 0),
+                 'basis': basis}, user=user, **common))
+        elif item['table'] == 'connectivity':
+            out.append(record(
+                'network', 'SRUM (connectivity)',
+                item['connected_since'] or item['recorded'],
+                'Connected to a network', subject,
+                {'connected for (s)': item['connected_seconds'],
+                 'interface': item['interface'], 'profile': item['profile'],
+                 'recorded': item['recorded']}, user=user, **common))
+        else:
+            out.append(record(
+                'usage', 'SRUM (energy use)', item['recorded'],
+                'Energy use recorded', subject,
+                {'on AC (s)': item['active_ac'],
+                 'on battery (s)': item['active_dc'],
+                 'energy': item['energy'], 'basis': basis},
+                user=user, **common))
+    return out
+
+
+_IE_HISTORY_HOMES = (
+    ('AppData', 'Local', 'Microsoft', 'Windows', 'History', 'History.IE5'),
+    ('AppData', 'Local', 'Microsoft', 'Windows', 'History', 'Low',
+     'History.IE5'),
+    ('Local Settings', 'History', 'History.IE5'),
+)
+_IE_CACHE_HOMES = (
+    ('AppData', 'Local', 'Microsoft', 'Windows', 'Temporary Internet Files',
+     'Content.IE5'),
+    ('AppData', 'Local', 'Microsoft', 'Windows', 'Temporary Internet Files',
+     'Low', 'Content.IE5'),
+    ('Local Settings', 'Temporary Internet Files', 'Content.IE5'),
+)
+
+
+def _ie_history(volume, user, home, step):
+    """Internet Explorer and legacy Edge: WebCacheV01.dat (IE 10+) and
+    the older index.dat files."""
+    out = []
+    base = _split(home.path)
+    webcache = volume.find(*base, 'AppData', 'Local', 'Microsoft', 'Windows',
+                           'WebCache', 'WebCacheV01.dat')
+    if webcache is not None and capabilities.available('esedb'):
+        step(webcache.path)
+        from trace_app.core.activity import ese
+        try:
+            entries = ese.webcache(volume.read(webcache))
+        except Exception as exc:
+            logger.warning("Could not read %s: %s", webcache.path, exc)
+            entries = []
+        common = dict(path=webcache.path, ref=volume.ref(webcache))
+        for item in entries:
+            detail = {'visits': item['hits'], 'cached file': item['filename'],
+                      'size': item['size'] or None,
+                      'expires': item['expires'],
+                      'container': item['directory']}
+            if item['kind'] == 'visit':
+                out.append(record('browser', 'Internet Explorer / Edge',
+                                  item['accessed'] or item['modified'],
+                                  'Page visited', item['url'], detail,
+                                  user=item['user'] or user, **common))
+            elif item['kind'] == 'download':
+                out.append(record('downloads', 'Internet Explorer / Edge',
+                                  item['accessed'] or item['created'],
+                                  'File downloaded', item['url'], detail,
+                                  user=user, **common))
+            else:
+                out.append(record('browser', 'Internet Explorer / Edge',
+                                  item['accessed'] or item['created'],
+                                  'Cached from the web', item['url'],
+                                  dict(detail, modified=item['modified']),
+                                  user=user, **common))
+    elif webcache is not None:
+        logger.warning("WebCache not read: %s", capabilities.reason('esedb'))
+    if not capabilities.available('msiecf'):
+        return out
+    from trace_app.core.activity import wintimeline
+    found = []
+    for parts in _IE_HISTORY_HOMES:
+        folder = volume.find(*base, *parts)
+        if folder is None:
+            continue
+        index = volume.find(*_split(folder.path), 'index.dat')
+        if index is not None:
+            found.append((index, 'history'))
+        for daily in volume.children(folder, dirs=True):
+            if daily.name.upper().startswith('MSHIST'):
+                index = volume.find(*_split(daily.path), 'index.dat')
+                if index is not None:
+                    found.append((index, 'daily'))
+    for parts in _IE_CACHE_HOMES:
+        folder = volume.find(*base, *parts)
+        index = volume.find(*_split(folder.path), 'index.dat') \
+            if folder is not None else None
+        if index is not None:
+            found.append((index, 'cache'))
+    for entry, kind in found:
+        step(entry.path)
+        try:
+            items = wintimeline.index_dat(volume.read(entry), kind)
+        except Exception as exc:
+            logger.debug("Could not read %s: %s", entry.path, exc)
+            continue
+        common = dict(path=entry.path, ref=volume.ref(entry))
+        for item in items:
+            if kind == 'cache':
+                out.append(record(
+                    'browser', 'Internet Explorer (index.dat)', item['when'],
+                    'Cached from the web', item['url'],
+                    {'cached file': item['filename'],
+                     'size': item['size'] or None, 'visits': item['hits'],
+                     'modified': item['second']}, user=user, **common))
+            else:
+                out.append(record(
+                    'browser', 'Internet Explorer (index.dat)', item['when'],
+                    'Page visited', item['url'],
+                    {'visits': item['hits'],
+                     'basis': 'daily history: the visit time is the '
+                              'UTC one Windows keeps beside the local one'
+                     if kind == 'daily' else None},
+                    user=item['user'] or user, **common))
+    return out
+
+
+def _windows_timeline(volume, user, home, step):
+    """ActivitiesCache.db in each ConnectedDevicesPlatform account folder."""
+    out = []
+    platform = volume.find(*_split(home.path), 'AppData', 'Local',
+                           'ConnectedDevicesPlatform')
+    from trace_app.core.activity import wintimeline
+    for account in volume.children(platform, dirs=True):
+        entry = volume.find(*_split(account.path), 'ActivitiesCache.db')
+        if entry is None:
+            continue
+        step(entry.path)
+        wal = volume.find(*_split(account.path), 'ActivitiesCache.db-wal')
+        try:
+            items = wintimeline.activities(volume.read(entry),
+                                           volume.read(wal) if wal else None)
+        except Exception as exc:
+            logger.warning("Could not read %s: %s", entry.path, exc)
+            continue
+        common = dict(user=user, path=entry.path, ref=volume.ref(entry))
+        for item in items:
+            subject = item['description'] or item['application']
+            detail = {'application': item['application'],
+                      'app name': item['display'],
+                      'content': item['content'] if item['content'] !=
+                      'ms-shellactivity:' else None,
+                      'active (s)': item['active_seconds'],
+                      'ended': item['ended'],
+                      'user time zone': item['time_zone'],
+                      'clipboard': 'yes' if item['clipboard'] else None}
+            what = {'opened': 'Opened (Windows Timeline)',
+                    'in use': 'In use (Windows Timeline)'}.get(
+                item['kind'], f"{item['kind'].capitalize()} "
+                              f"(Windows Timeline)")
+            out.append(record('files' if item['kind'] == 'opened'
+                              else 'programs', 'Windows Timeline',
+                              item['started'] or item['modified'], what,
+                              subject, detail, **common))
     return out
 
 
@@ -516,6 +791,33 @@ def _user_registry(volume, user, home, step):
                      'basis': 'time known for the most recent item only'
                      if not item['opened'] else None}, **common))
             out += _bags(registry.shellbags(hive), common)
+            for item in registry.run_mru(hive):
+                out.append(record(
+                    'programs', 'RunMRU', item['typed'],
+                    'Command typed in Run', item['command'],
+                    {'list position': item['position'],
+                     'basis': 'time known for the most recent command only'
+                     if not item['typed'] else None}, **common))
+            for item in registry.typed_paths(hive):
+                out.append(record(
+                    'files', 'TypedPaths', item['typed'],
+                    'Path typed in Explorer', item['path'],
+                    {'list position': item['position']}, **common))
+            for item in registry.word_wheel_query(hive):
+                out.append(record(
+                    'searches', 'WordWheelQuery', item['searched'],
+                    'Searched in Explorer', item['query'],
+                    {'list position': item['position']}, **common))
+            for item in registry.mount_points(hive):
+                out.append(record(
+                    'usb', 'MountPoints2', item['mounted'],
+                    'Share mounted by user' if item['kind'] ==
+                    'Network share' else 'Volume mounted by user',
+                    item['label'],
+                    {'kind': item['kind'], 'label': item['volume_label'],
+                     'basis': 'when this user last mounted it (key last '
+                              'written); a volume GUID matches the USB '
+                              'device that carried it'}, **common))
     if usrclass is not None:
         step(usrclass.path)
         hive = _hive(volume, usrclass)

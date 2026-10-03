@@ -97,6 +97,9 @@ ACTIVITY_CATEGORIES = {
     'browser': "Icons/tabler/trace/activity-web.svg",
     'downloads': "Icons/tabler/download.svg",
     'searches': "Icons/tabler/search.svg",
+    'network': "Icons/tabler/trace/activity-network.svg",
+    'usage': "Icons/tabler/trace/activity-usage.svg",
+    'system': "Icons/tabler/settings.svg",
 }
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the

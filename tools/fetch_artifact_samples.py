@@ -163,6 +163,29 @@ SAMPLES = {
     'usnjrnl.qcow2': (
         _PLASO + 'usnjrnl.qcow2',
         '1746df3a672924fac8e7456e9e005afe9e55d02eb0383929430a49637584a13d'),
+    # Windows evidence in ESE databases, IE caches, Windows Timeline, and
+    # a Windows 7 SOFTWARE hive (networks, programs, autoruns).
+    'SRUDB.dat': (
+        _PLASO + 'SRUDB.dat',
+        '6536ae6bb5b91f6f8f37a4af26f6cfaecc8a1f745370bfba83af7ebae6694e3e'),
+    'WebCacheV01.dat': (
+        _PLASO + 'WebCacheV01.dat',
+        '2713e7ff413c69659442c5dcb0f23f41230fa76bf760b8aeac0ffd430d10c83e'),
+    'PartitionsEx-WebCacheV01.dat': (
+        _PLASO + 'PartitionsEx-WebCacheV01.dat',
+        '3b2958f0283d20d38de63e110da59e03f58c927f4360e8fe5161fdb1a99c3330'),
+    'msiecf-Content.IE5-index.dat': (
+        _PLASO + 'msiecf/Content.IE5/index.dat',
+        'd6f7d3c4cd1b05b637dca8d41fcb652cc3809a0650181e447bf609bbc81d7db9'),
+    'msiecf-History.IE5-index.dat': (
+        _PLASO + 'msiecf/History.IE5/index.dat',
+        'd54847adc8be889cb687bd7c60af50153d310eb3fc32a79d20c93eecb655bfc1'),
+    'windows-ActivitiesCache.db': (
+        _PLASO + 'windows/ActivitiesCache.db',
+        '95811eebd1ea3ec0244bda5c5200266861cfcf405eed687dce96af8589836888'),
+    'SOFTWARE': (
+        _PLASO + 'SOFTWARE',
+        'c2e1a391d6be9740e79da7944e012ad9ac878902db38ec7fc225a2a68d262a1b'),
 }
 
 

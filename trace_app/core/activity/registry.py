@@ -516,3 +516,250 @@ def amcache(hive):
                     if isinstance(modified, int) else None,
                 })
     return [entry for entry in out if entry['path']]
+
+
+# --- more of NTUSER.DAT: Run dialog, Explorer's typed paths and searches,
+#     volumes and shares the user mounted ------------------------------------
+
+_EXPLORER = 'Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\'
+
+
+def run_mru(hive):
+    """Commands typed in Start > Run, newest first: [{'command',
+    'position', 'typed'}]. The key's last-write time dates the newest."""
+    key = _key(hive, _EXPLORER + 'RunMRU')
+    if key is None:
+        return []
+    order = str(_value(key, 'MRUList', '') or '')
+    out = []
+    for position, letter in enumerate(order):
+        command = _value(key, letter)
+        if not command:
+            continue
+        command = str(command)
+        if command.endswith('\\1'):           # Windows' end-of-command mark
+            command = command[:-2]
+        out.append({'command': command, 'position': position,
+                    'typed': _utc(key.timestamp()) if position == 0
+                    else None})
+    return out
+
+
+def typed_paths(hive):
+    """Paths typed into Explorer's address bar, newest (url1) first."""
+    key = _key(hive, _EXPLORER + 'TypedPaths')
+    if key is None:
+        return []
+
+    def number(name):
+        digits = name[3:]
+        return int(digits) if digits.isdigit() else 0
+    values = sorted(((v.name(), v.value()) for v in key.values()
+                     if v.name().lower().startswith('url')),
+                    key=lambda pair: number(pair[0]))
+    return [{'path': str(value), 'position': position,
+             'typed': _utc(key.timestamp()) if position == 0 else None}
+            for position, (_name, value) in enumerate(values) if value]
+
+
+def word_wheel_query(hive):
+    """Searches typed into Explorer's search box (Windows 7+), newest
+    first."""
+    key = _key(hive, _EXPLORER + 'WordWheelQuery')
+    if key is None:
+        return []
+    out = []
+    for position, index in enumerate(_mru_order(key)):
+        text = _mru_name(key, index)
+        if text:
+            out.append({'query': text, 'position': position,
+                        'searched': _utc(key.timestamp()) if position == 0
+                        else None})
+    return out
+
+
+def mount_points(hive):
+    """Volumes and network shares this user had mounted (MountPoints2): a
+    volume GUID ties a USB device to the user; '##server#share' is a share.
+    Each subkey's last-write time is when it was last mounted."""
+    key = _key(hive, _EXPLORER + 'MountPoints2')
+    if key is None:
+        return []
+    out = []
+    for sub in key.subkeys():
+        name = sub.name()
+        if name.upper() == 'CPC':
+            continue                      # a container, not a mount point
+        if name.startswith('##'):
+            kind = 'Network share'
+            label = '\\\\' + '\\'.join(name[2:].split('#'))
+        elif name.startswith('{'):
+            kind, label = 'Volume', name
+        else:
+            kind, label = 'Drive letter', f'{name}:'
+        out.append({'name': name, 'kind': kind, 'label': label,
+                    'volume_label': str(_value(sub, '_LabelFromReg', '')
+                                        or ''),
+                    'mounted': _utc(sub.timestamp())})
+    return out
+
+
+# --- SYSTEM: Background Activity Moderator, time zone ------------------------
+
+def parse_bam_value(data):
+    """The last-run FILETIME at the start of a BAM/DAM value."""
+    if not data or len(data) < 8:
+        return None
+    return times.filetime(struct.unpack_from('<Q', data, 0)[0])
+
+
+def bam(hive):
+    """Programs each user last ran (Windows 10 1709+): [{'sid', 'path',
+    'last_run', 'source'}] from BAM and DAM."""
+    out = []
+    control = current_control_set(hive)
+    for service in ('bam', 'dam'):
+        for middle in ('State\\UserSettings', 'UserSettings'):
+            key = _key(hive, f'{control}\\Services\\{service}\\{middle}')
+            if key is None:
+                continue
+            for user in key.subkeys():
+                for value in user.values():
+                    if value.name() in ('Version', 'SequenceNumber'):
+                        continue
+                    try:
+                        when = parse_bam_value(value.raw_data())
+                    except Exception:
+                        continue
+                    if when:
+                        out.append({'sid': user.name(), 'path': value.name(),
+                                    'last_run': when,
+                                    'source': service.upper()})
+            break
+    return out
+
+
+def time_zone(hive):
+    """The configured time zone: {'name', 'bias_minutes', 'active_bias',
+    'standard_name', 'daylight_name', 'changed'} or None."""
+    key = _key(hive, current_control_set(hive) +
+               '\\Control\\TimeZoneInformation')
+    if key is None:
+        return None
+
+    def signed(name):
+        value = _value(key, name)
+        if value is None:
+            return None
+        value = int(value)
+        return value - 2 ** 32 if value >= 2 ** 31 else value
+    name = _value(key, 'TimeZoneKeyName') or _value(key, 'StandardName', '')
+    return {'name': str(name or '').strip('\x00'),
+            'bias_minutes': signed('Bias'),
+            'active_bias': signed('ActiveTimeBias'),
+            'standard_name': str(_value(key, 'StandardName', '') or ''),
+            'daylight_name': str(_value(key, 'DaylightName', '') or ''),
+            'changed': _utc(key.timestamp())}
+
+
+# --- SOFTWARE: networks, installed programs, the Windows install -------------
+
+_NAME_TYPES = {6: 'Wired', 23: 'VPN / broadband', 71: 'Wireless',
+               243: 'Mobile broadband'}
+
+
+def _systemtime(data):
+    """A 16-byte SYSTEMTIME (local wall-clock) as a naive datetime."""
+    import datetime
+    if not data or len(data) < 16:
+        return None
+    year, month, _dow, day, hour, minute, second, ms = struct.unpack_from(
+        '<8H', data, 0)
+    try:
+        return datetime.datetime(year, month, day, hour, minute, second,
+                                 ms * 1000)
+    except ValueError:
+        return None
+
+
+def network_profiles(hive):
+    """Networks the machine joined: [{'guid', 'name', 'description',
+    'type', 'created', 'last_connected', 'gateway_mac', 'dns_suffix'}].
+    Created and last-connected are local wall-clock times (SYSTEMTIME)."""
+    base = 'Microsoft\\Windows NT\\CurrentVersion\\NetworkList\\'
+    profiles = _key(hive, base + 'Profiles')
+    if profiles is None:
+        return []
+    signatures = {}
+    for kind in ('Managed', 'Unmanaged'):
+        key = _key(hive, base + 'Signatures\\' + kind)
+        for sub in key.subkeys() if key is not None else ():
+            guid = str(_value(sub, 'ProfileGuid', '') or '').upper()
+            mac = _value(sub, 'DefaultGatewayMac')
+            signatures[guid] = {
+                'gateway_mac': ':'.join(f'{b:02x}' for b in mac)
+                if isinstance(mac, (bytes, bytearray)) and mac else '',
+                'dns_suffix': str(_value(sub, 'DnsSuffix', '') or '')}
+    out = []
+    for sub in profiles.subkeys():
+        created = _value(sub, 'DateCreated')
+        last = _value(sub, 'DateLastConnected')
+        entry = {
+            'guid': sub.name(),
+            'name': str(_value(sub, 'ProfileName', '') or ''),
+            'description': str(_value(sub, 'Description', '') or ''),
+            'type': _NAME_TYPES.get(_value(sub, 'NameType'),
+                                    str(_value(sub, 'NameType', '') or '')),
+            'created': _systemtime(created)
+            if isinstance(created, (bytes, bytearray)) else None,
+            'last_connected': _systemtime(last)
+            if isinstance(last, (bytes, bytearray)) else None,
+            'gateway_mac': '', 'dns_suffix': ''}
+        entry.update(signatures.get(sub.name().upper(), {}))
+        out.append(entry)
+    return out
+
+
+def installed_programs(hive):
+    """Programs Windows lists as installed: [{'name', 'version',
+    'publisher', 'install_date', 'location', 'key_written'}]. InstallDate
+    is a date only (YYYYMMDD); the key's last write is the nearest time."""
+    out = []
+    seen = set()
+    for path in ('Microsoft\\Windows\\CurrentVersion\\Uninstall',
+                 'Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'):
+        key = _key(hive, path)
+        for sub in key.subkeys() if key is not None else ():
+            name = str(_value(sub, 'DisplayName', '') or '').strip()
+            if not name or _value(sub, 'SystemComponent') == 1:
+                continue
+            version = str(_value(sub, 'DisplayVersion', '') or '')
+            if (name, version) in seen:
+                continue
+            seen.add((name, version))
+            raw = str(_value(sub, 'InstallDate', '') or '')
+            date = f'{raw[:4]}-{raw[4:6]}-{raw[6:8]}' if \
+                re.fullmatch(r'\d{8}', raw) else ''
+            out.append({'name': name, 'version': version,
+                        'publisher': str(_value(sub, 'Publisher', '') or ''),
+                        'install_date': date,
+                        'location': str(_value(sub, 'InstallLocation', '')
+                                        or ''),
+                        'key_written': _utc(sub.timestamp())})
+    return out
+
+
+def windows_install(hive):
+    """{'product', 'build', 'owner', 'organisation', 'installed'} from
+    SOFTWARE's CurrentVersion, or None."""
+    key = _key(hive, 'Microsoft\\Windows NT\\CurrentVersion')
+    if key is None:
+        return None
+    stamp = _value(key, 'InstallDate')
+    return {'product': str(_value(key, 'ProductName', '') or ''),
+            'build': str(_value(key, 'CurrentBuild', '') or
+                         _value(key, 'CurrentBuildNumber', '') or ''),
+            'owner': str(_value(key, 'RegisteredOwner', '') or ''),
+            'organisation': str(_value(key, 'RegisteredOrganization', '')
+                                or ''),
+            'installed': times.unix(int(stamp)) if stamp else None}

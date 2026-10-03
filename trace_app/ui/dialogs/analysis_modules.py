@@ -109,10 +109,12 @@ _INDEXING = (
 _ACTIVITY = (
     "Windows activity and browser history",
     "What the users did: programs run (Prefetch, Amcache, Shimcache, "
-    "UserAssist), files and folders opened (shortcuts, Jump Lists, "
-    "RecentDocs, ShellBags), USB devices, the Recycle Bin, logons and remote "
-    "desktop from the event logs, and Chrome, Edge, Firefox and Safari "
-    "history, downloads and searches (Activity tab).",
+    "UserAssist, BAM, Run dialog), files and folders opened (shortcuts, "
+    "Jump Lists, RecentDocs, ShellBags, Windows Timeline), USB devices and "
+    "the shares each user mounted, the Recycle Bin, logons and remote "
+    "desktop, networks joined, app and network use (SRUM), installed "
+    "programs and the time zone, and Chrome, Edge, Internet Explorer, "
+    "Firefox and Safari history, downloads and searches (Activity tab).",
     "Fast: reads the places Windows and the browsers keep these, not every "
     "file.")
 
