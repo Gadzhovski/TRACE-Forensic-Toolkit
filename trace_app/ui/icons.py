@@ -70,6 +70,9 @@ FINDING_AUTHOR = "Icons/tabler/trace/document-author.svg"
 FINDING_CARVED = "Icons/tabler/file-search.svg"
 FINDING_INDICATORS = "Icons/tabler/trace/indicators.svg"
 ACTIVITY = "Icons/tabler/trace/activity.svg"
+VOLUME_LOCKED = "Icons/tabler/lock.svg"
+VOLUME_UNLOCKED = "Icons/tabler/lock-open.svg"
+SHADOW_COPY = "Icons/tabler/clock.svg"
 #: One per core.activity category, in the tree and on the Activity tab.
 ACTIVITY_CATEGORIES = {
     None: ACTIVITY,

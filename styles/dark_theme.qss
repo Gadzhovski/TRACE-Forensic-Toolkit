@@ -1581,3 +1581,8 @@ QLabel#carvedStatus {
     color: #B0B0B0;
     padding: 2px 6px;
 }
+
+/* Why a BitLocker key was refused. */
+QLabel#bitlockerError {
+    color: #F47067;
+}

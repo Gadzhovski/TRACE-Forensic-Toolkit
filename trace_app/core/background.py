@@ -100,12 +100,16 @@ class _LogChannel:
         self.queue.put(('log', record))
 
 
-def _open_image(path):
+def _open_image(path, unlock=None):
+    """The image, with any BitLocker volume the examiner unlocked unlocked
+    here too. `unlock` is {start sector: {kind: secret}}; it reaches this
+    process in memory, over the job's pipe, and is never written down."""
     from trace_app.core.image_handler import ImageHandler
     handler = ImageHandler(path)
     if not handler.load_image():
         handler.close_resources()
         raise RuntimeError(f"Could not open {path}.")
+    handler.apply_unlocks(unlock)
     return handler
 
 
@@ -126,7 +130,7 @@ def job_index(params, progress, item, should_stop):
     index = handler = None
     try:
         index = SearchIndex(params['case_folder'])
-        handler = _open_image(params['image_path'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
         return index_evidence(
             handler, index, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
@@ -141,7 +145,7 @@ def job_analysis(params, progress, item, should_stop):
     case = handler = None
     try:
         case = Case.open(params['case_folder'])
-        handler = _open_image(params['image_path'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
         return analyse_evidence(
             handler, case, params['evidence_id'], params['modules'],
             progress=lambda done, total, path: progress(done, total, path),
@@ -157,7 +161,7 @@ def job_activity(params, progress, item, should_stop):
     case = handler = None
     try:
         case = Case.open(params['case_folder'])
-        handler = _open_image(params['image_path'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
         return run_evidence(
             handler, case, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
@@ -179,7 +183,7 @@ def job_carve(params, progress, item, should_stop):
         progress(position // megabyte, max(1, size // megabyte), found)
 
     try:
-        handler = _open_image(params['image_path'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
         if params.get('case_folder'):
             case = Case.open(params['case_folder'])
             return carve_evidence(

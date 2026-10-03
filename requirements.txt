@@ -22,6 +22,13 @@ PySide6>=6.5.2
 # built into the wheels, so no system packages are needed either.
 pytsk3>=20260520
 libewf-python>=20260924
+# The same family (libyal), wheels for the same platforms and Pythons, each
+# the first release to ship them everywhere. LGPL-3.0+, like libewf.
+libvmdk-python>=20260714    # VMware VMDK virtual disks
+libvhdi-python>=20260901    # Hyper-V / Virtual PC VHD and VHDX
+libbde-python>=20260916     # BitLocker volumes, unlocked with a key given
+libvshadow-python>=20260714 # Volume Shadow Copies (snapshots of NTFS)
+libpff-python>=20260926     # Outlook PST / OST mailboxes
 
 # --- Evidence parsing ------------------------------------------------------
 python-registry>=1.3.1   # Windows registry hives

@@ -7,6 +7,10 @@ SHA-256 before it is kept:
 
 * log2timeline/plaso (Apache 2.0) test_data/
 * omerbenamram/evtx (MIT / Apache 2.0) samples/
+* log2timeline/dfvfs (Apache 2.0) test_data/ -- the containers: VHD, VHDX
+  (a differencing disk and its parent), VMDK, a BitLocker To Go volume
+  (password "bde-TEST", from dfvfs's own tests) and an NTFS volume with two
+  Volume Shadow Copies
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -29,6 +33,8 @@ _PLASO = ('https://raw.githubusercontent.com/log2timeline/plaso/'
           'ac6460d7350c9160bdf69161726ee0e8d4545874/test_data/')
 _EVTX = ('https://raw.githubusercontent.com/omerbenamram/evtx/'
          '47d63022caa8336ecdd0c42d335e2bb03381b00d/samples/')
+_DFVFS = ('https://raw.githubusercontent.com/log2timeline/dfvfs/'
+          '917cefc9426d6ded2687d2b55164ded25b44fcb7/test_data/')
 
 #: local name -> (URL, SHA-256)
 SAMPLES = {
@@ -126,6 +132,24 @@ SAMPLES = {
     'History.db': (
         _PLASO + 'safari/History.db',
         '2e87d99d0bc7765e523ee1250828e82fb350780c0c28020db6bb0b0ce8d3f351'),
+    'ntfs-dynamic.vhd': (
+        _DFVFS + 'ntfs-dynamic.vhd',
+        'de48673c33e024a6af635cea56c51f47769cb59ea6264d8d6b32c757dc663051'),
+    'ntfs-differential.vhdx': (
+        _DFVFS + 'ntfs-differential.vhdx',
+        '65bd9e21c9f14d476df67b8fd104a61234ef693e70330c0e6b9878b10aff92ac'),
+    'ntfs-parent.vhdx': (
+        _DFVFS + 'ntfs-parent.vhdx',
+        '4495375f1e92bb6ef1937f7cb4ccf56ca1c1c491c0df56280a8c1905a3d58d44'),
+    'ext2.vmdk': (
+        _DFVFS + 'ext2.vmdk',
+        '578b5f75af790030113a92c4227c6e53dad53a17e65cb491781dc75b3cef31f8'),
+    'bdetogo.raw': (
+        _DFVFS + 'bdetogo.raw',
+        'ed7982a1f9263e4e54889fea1fa74112d12fea0a0aa7cd8f84fc6f03198ae71b'),
+    'vss.raw': (
+        _DFVFS + 'vss.raw',
+        'e633f0be5fb9ee9a07d44ba5223b786012ce89e9f0024f93d743568e6d052f16'),
 }
 
 

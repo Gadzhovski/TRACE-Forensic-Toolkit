@@ -798,6 +798,10 @@ class Case:
             (limit,)).fetchall()
         return [dict(row) for row in rows]
 
+    def record_event(self, action, detail=''):
+        """Write a line to the audit trail (see _record_activity)."""
+        self._record_activity(action, detail)
+
     def _record_activity(self, action, detail=''):
         """Append to the audit trail.
 

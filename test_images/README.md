@@ -212,7 +212,10 @@ python tools/fetch_artifact_samples.py
 
 They come from log2timeline/plaso's test_data (Apache 2.0) and
 omerbenamram/evtx's samples (MIT / Apache 2.0), pinned to a commit and checked
-by SHA-256. `nps-2009-domexusers.E01` (Digital Corpora, 4.4 GB, a multi-user
+by SHA-256. The same tool fetches dfvfs's container images (Apache 2.0): a
+dynamic VHD, a differencing VHDX with its parent, a VMDK, a BitLocker To Go
+volume (password `bde-TEST`, as in dfvfs's own tests) and an NTFS volume with
+two Volume Shadow Copies. `nps-2009-domexusers.E01` (Digital Corpora, 4.4 GB, a multi-user
 Windows XP machine) is used by a local end-to-end test when present.
 
 ## Re-downloading

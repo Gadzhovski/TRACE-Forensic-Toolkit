@@ -229,6 +229,18 @@ def _index_file(image_handler, index, evidence_id, offset, inode, sequence,
                  changed_utc=times.get('changed', ''),
                  is_deleted=times.get('is_deleted', False))
 
+    if name.lower().endswith(('.pst', '.ost')) and \
+            hasattr(image_handler, 'open_file_object'):
+        # A mailbox is read lazily -- it is often far larger than any file
+        # held in memory -- and indexed message by message.
+        stream = image_handler.open_file_object(inode, offset)
+        if stream is not None and detect_archive(stream) == 'pst':
+            index.add_item(evidence_id, ref, 'file', name, path, '', size,
+                           **facts)
+            _index_archive(index, evidence_id, ref, stream, path,
+                           ARCHIVE_DEPTH)
+            return
+
     if size > MAX_FILE_BYTES:
         # Too large to read; still worth finding by name.
         index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)

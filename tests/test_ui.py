@@ -838,3 +838,127 @@ def test_activity_is_a_job_a_tab_and_a_tree_node(qapp, window, truth):
         window.case.clear_user_activity(row['id'])
     window.refresh_analysis_views()
     assert pump(qapp, 30, lambda: not panel.loading)
+
+
+# --- volumes inside volumes ----------------------------------------------------------
+
+def _artifact_sample(name):
+    from tests.conftest import ROOT
+    path = os.path.join(ROOT, 'test_images', 'artifact_samples', name)
+    if not os.path.exists(path):
+        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
+            pytest.fail(f"{name} missing: run tools/fetch_artifact_samples.py")
+        pytest.skip(f"{name} missing")
+    return path
+
+
+def _children(item):
+    from PySide6.QtCore import Qt
+    return [(item.child(i).text(0), item.child(i).data(0, Qt.UserRole) or {})
+            for i in range(item.childCount())]
+
+
+def test_bitlocker_and_shadow_copies_in_the_tree(qapp, stubbed_dialogs,
+                                                 monkeypatch):
+    """A BitLocker volume shows locked, unlocks through the dialog with its
+    password and then lists its files; a volume's shadow copies are nodes
+    whose files preview from that snapshot."""
+    from PySide6.QtCore import Qt
+    from trace_app.core.containers import shadow_key
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.dialogs import bitlocker
+    from trace_app.ui.main_window import MainWindow
+    window = MainWindow()
+    try:
+        bde = _artifact_sample('bdetogo.raw')
+        assert window.open_evidence_image(bde)
+        root = _root(window, 'bdetogo.raw')
+        [(text, data)] = _children(root)
+        assert data.get('is_bitlocker') and 'locked' in text
+        assert window.describe_selection(data).endswith(
+            'right-click ▸ Unlock BitLocker…')
+
+        # The dialog, driven as an examiner would: wrong key, then right.
+        def fake_exec(dialog):
+            dialog.tabs.setCurrentIndex(1)
+            dialog.password.setText('wrong')
+            dialog._try()
+            assert not dialog.error.isHidden()
+            assert 'does not unlock' in dialog.error.text()
+            dialog.password.setText('bde-TEST')
+            dialog._try()
+            return dialog.result()
+        monkeypatch.setattr(bitlocker.BitLockerDialog, 'exec', fake_exec)
+        window.unlock_bitlocker_item(root.child(0))
+        [(text, data)] = _children(root)
+        assert 'BitLocker unlocked' in text and 'FAT16' in text
+        assert window._unlocks_for(bde) == {0: {'password': 'bde-TEST'}}
+        node = root.child(0)
+        node.setExpanded(True)
+        window.on_item_expanded(node)
+        assert 'passwords.txt' in [t for t, _d in _children(node)]
+
+        vss = _artifact_sample('vss.raw')
+        assert window.open_evidence_image(vss)
+        root = _root(window, 'vss.raw')
+        shadows = [(t, d) for t, d in _children(root) if d.get('is_shadow_copy')]
+        assert [d['start_offset'] for _t, d in shadows] == [
+            shadow_key(0, 0), shadow_key(0, 1)]
+        assert '2021-05-01 17:41:28 UTC' in shadows[1][0]
+        node = next(root.child(i) for i in range(root.childCount())
+                    if (root.child(i).data(0, Qt.UserRole) or {})
+                    .get('start_offset') == shadow_key(0, 1))
+        window.on_item_expanded(node)
+        names = {t: d for t, d in _children(node)}
+        assert 'vss1' in names and 'vss2' not in names
+        # A file from the snapshot previews with the snapshot's bytes.
+        captured = _capture_viewer(window)
+        window.current_selected_data = None
+        file_data = dict(names['vss1'])
+        truth = ImageHandler(vss)
+        try:
+            expected, _ = truth.get_file_content(file_data['inode_number'],
+                                                 shadow_key(0, 1))
+        finally:
+            truth.close_resources()
+        window.preview_artifact({
+            'artifact_ref': f"p{shadow_key(0, 1)}:i{file_data['inode_number']}",
+            'evidence_id': None, 'name': 'vss1',
+            'image_path': vss})
+        pump(qapp, 5, lambda: bool(captured))
+        assert captured and captured[-1] == expected
+    finally:
+        window.cleanup_resources()
+
+
+def test_a_mailbox_browses_like_an_archive(qapp, window):
+    """A PST/OST opens in the Listing: folders, messages as pages, and a
+    message shows its headers in the viewer -- read lazily, as from the
+    image, never extracted."""
+    from PySide6.QtCore import Qt
+    from tests.conftest import ROOT
+    from trace_app.core.containers import ByteWindow
+    path = os.path.join(ROOT, 'test_images', 'carve_samples',
+                        'example-2013.ost')
+    if not os.path.exists(path):
+        pytest.skip("example-2013.ost missing: run tools/carve_corpus.py")
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    stream = ByteWindow(lambda o, n: data[o:o + n], 0, len(data))
+    window._archive_stack = [('mail.ost', stream, {'name': 'mail.ost',
+                                                   'path': '/mail.ost',
+                                                   'start_offset': 0})]
+    try:
+        assert window.show_archive_level()
+        rows = {window.listing_table.item(r, 0).text():
+                window.listing_table.item(r, 0).data(Qt.UserRole)
+                for r in range(window.listing_table.rowCount())
+                if window.listing_table.item(r, 0)}
+        name = 'Root - Mailbox/IPM_SUBTREE/Sent Items/0001 Test 2.html'
+        assert name in rows
+        captured = _capture_viewer(window)
+        window.open_archive_member_row(rows[name])
+        pump(qapp, 5, lambda: bool(captured))
+        assert b'bernard.chung@apogeephysicians.com' in captured[-1]
+    finally:
+        window._archive_stack = []

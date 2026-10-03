@@ -346,11 +346,30 @@ does not match.
 <tr><td>ISO</td><td><code>.iso</code></td><td></td></tr>
 <tr><td>Apple Disk Image</td><td><code>.dmg</code> <code>.sparse</code> <code>.sparseimage</code></td><td>Read as raw</td></tr>
 <tr><td>AccessData</td><td><code>.ad1</code></td><td>Read as raw</td></tr>
+<tr><td>VMware virtual disk</td><td><code>.vmdk</code></td><td>Flat and sparse extents; a snapshot reads through its parents</td></tr>
+<tr><td>Hyper-V / Virtual PC</td><td><code>.vhdx</code> <code>.vhd</code></td><td>Fixed, dynamic and differencing (parents chained from the same folder)</td></tr>
 </table>
 
 File system support comes from The Sleuth Kit — NTFS, FAT12/16/32, exFAT,
 Ext2/3/4, HFS+, APFS, UFS, ISO 9660 and YAFFS2. NTFS, FAT, exFAT, Ext2/3/4, HFS+
 and ISO 9660 have been tested here.
+
+Inside a disk:
+
+- **BitLocker** volumes (including To Go) are recognised and shown locked;
+  right-click ▸ **Unlock BitLocker…** with the recovery key, the password or a
+  `.BEK` startup key, and the volume's files read like any other — browsing,
+  analysis, indexing and activity included. The key is kept in memory for
+  the session only; the audit trail records the unlock, never the key.
+- **Volume Shadow Copies** appear under the volume as one node per snapshot,
+  dated: the volume as it was then, with files since deleted or changed.
+  Browse, preview, export and bookmark them (analysis modules read the live
+  volume).
+- **Outlook PST / OST** mailboxes open like an archive: folders, each message
+  as a page with its headers (escaped) and body (offline HTML viewer),
+  attachments as files, and items no folder points to under *Orphan items*.
+  Read lazily from the image, so a 20 GB mailbox is no problem, and indexed
+  for search and indicators message by message.
 
 <br/>
 

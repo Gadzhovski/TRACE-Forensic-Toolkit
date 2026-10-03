@@ -104,7 +104,7 @@ class SizeTableWidgetItem(QTableWidgetItem):
 #: Carved types a double-click browses like a folder (RAR is listed by the
 #: carver but needs unrar, which is not bundled; it is reported, not browsed).
 CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
-                                  'jar', 'apk', 'epub'})
+                                  'jar', 'apk', 'epub', 'pst', 'ost'})
 #: ...and those that are archives inside but documents to an examiner: a
 #: double-click shows the document; "Browse Archive" opens its parts.
 CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
@@ -452,6 +452,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: nothing. Every file module, until something is chosen; carving is
         #: the slowest pass and is only run when asked for.
         self._last_choice = default_choice(MODULES)
+        #: BitLocker keys that worked this session: {image path: {start
+        #: sector: {kind: secret}}}. In memory only -- never in the case --
+        #: and handed to background jobs so they read the volume too.
+        self._bitlocker_keys = {}
         self._build_status_bar()
 
     def _build_status_bar(self):
@@ -512,6 +516,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         name = data.get('name') or ''
         kind = data.get('type') or ''
+
+        if data.get('is_shadow_copy'):
+            return (f"{data.get('volume_label', 'Volume')}   ·   shadow copy "
+                    f"{data.get('shadow_index', 0) + 1}, taken "
+                    f"{data.get('shadow_created', '')}   ·   read-only")
+        if data.get('is_bitlocker') and self.image_handler and \
+                not self.image_handler.is_unlocked(data.get('start_offset', 0)):
+            return (f"{data.get('volume_label', 'Volume')}   ·   BitLocker, "
+                    f"locked   ·   right-click ▸ Unlock BitLocker…")
 
         # Unallocated space: the sector range is the only thing identifying it.
         if data.get('is_unallocated'):
@@ -1812,6 +1825,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if isinstance(size, str):
             size = 0
 
+        # A mailbox is browsed from the image as it is read, not from
+        # memory: a PST or OST is routinely far bigger than any archive.
+        if name.lower().endswith(('.pst', '.ost')):
+            stream = self.image_handler.open_file_object(inode, offset)
+            if stream is not None and archives.detect_archive(stream) == 'pst':
+                self.set_status(f"Opening the mailbox {name}…")
+                self._archive_stack = [(name, stream, dict(data))]
+                return self.show_archive_level()
+
         # Reading a large file to find out it is not an archive is wasted
         # work; the extension and a header read settle it far more cheaply.
         if size and size > archives.MAX_MEMBER_BYTES:
@@ -2236,6 +2258,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         def start(job):
             worker = AnalysisWorker(row['path'], self.case.folder,
                                     evidence_id, modules, self)
+            worker.params['unlock'] = self._unlocks_for(row['path'])
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
                     done, total, os.path.basename(path)))
@@ -2286,6 +2309,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         def start(job):
             worker = IndexWorker(row['path'], self.case.folder, evidence_id,
                                  self)
+            worker.params['unlock'] = self._unlocks_for(row['path'])
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
                     done, total, os.path.basename(path)))
@@ -2334,6 +2358,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         def start(job):
             worker = ActivityWorker(row['path'], self.case.folder,
                                     evidence_id, self)
+            worker.params['unlock'] = self._unlocks_for(row['path'])
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
                     done, total, os.path.basename(path)))
@@ -3937,7 +3962,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                       "*.img", "*.IMG", "*.dd", "*.DD",
                                       "*.iso", "*.ISO", "*.ad1", "*.AD1",
                                       "*.001", "*.s01", "*.ex01", "*.dmg",
-                                      "*.sparse", "*.sparseimage"]
+                                      "*.sparse", "*.sparseimage",
+                                      "*.vmdk", "*.VMDK", "*.vhd", "*.VHD",
+                                      "*.vhdx", "*.VHDX"]
 
         # Construct the file filter string with both uppercase and lowercase extensions
         file_filter = "Supported Image Files ({})".format(" ".join(supported_image_extensions))
@@ -4176,13 +4203,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                 "image_path": image_path})
         root_item_tree.setToolTip(0, image_path)
 
+        if self.image_handler.container_note:
+            root_item_tree.setToolTip(
+                0, f"{image_path}\n{self.image_handler.container_note}")
+
         partitions = self.image_handler.get_partitions()
 
         # Check if the image has partitions or a recognizable file system
         if not partitions:
-            if self.image_handler.has_filesystem(0):
+            if self.image_handler.is_bitlocker(0):
+                # A volume image of a BitLocker drive: what TSK would list
+                # is its decoy (To Go's FAT32 discovery volume) or nothing.
+                self._add_bitlocker_node(root_item_tree, 0, "Volume",
+                                         self.image_handler.get_size())
+            elif self.image_handler.has_filesystem(0):
                 # The image has a filesystem but no partitions, populate root directory
                 self.populate_contents(root_item_tree, {"start_offset": 0})
+                self._add_shadow_copy_nodes(root_item_tree, 0, "Volume")
             else:
                 # Entire image is considered as unallocated space
                 size_in_bytes = self.image_handler.get_size()
@@ -4199,8 +4236,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             end = start + length - 1
             size_in_bytes = length * sector_size
             readable_size = self.image_handler.get_readable_size(size_in_bytes)
-            fs_type = self.image_handler.get_fs_type(start)
             desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+            if self.image_handler.is_bitlocker(start):
+                self._add_bitlocker_node(
+                    root_item_tree, start, f"vol{addr}", size_in_bytes,
+                    f"{desc_str}: {start}-{end}", end)
+                continue
+            fs_type = self.image_handler.get_fs_type(start)
             item_text = f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
             icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
             data = {"inode_number": None, "start_offset": start, "end_offset": end}
@@ -4224,6 +4266,106 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
                 else:
                     item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
+                self._add_shadow_copy_nodes(root_item_tree, start,
+                                            f"vol{addr}")
+
+    # --- volumes inside partitions ---------------------------------------
+
+    def _add_bitlocker_node(self, parent, start, label, size_in_bytes,
+                            where='', end=None):
+        """A BitLocker volume: locked until a key is given (right-click),
+        then its decrypted file system -- and its shadow copies."""
+        handler = self.image_handler
+        unlocked = handler.is_unlocked(start)
+        readable = handler.get_readable_size(size_in_bytes)
+        state = (f"FS: {handler.get_fs_type(start)}, BitLocker unlocked"
+                 if unlocked else "BitLocker, locked -- right-click to unlock")
+        text = f"{label} ({where + ', ' if where else ''}Size: {readable}, " \
+               f"{state})"
+        data = {"inode_number": None, "start_offset": start,
+                "end_offset": end, "is_bitlocker": True,
+                "volume_label": label}
+        item = QTreeWidgetItem(parent)
+        item.setText(0, text)
+        item.setIcon(0, icons.icon(icons.VOLUME_UNLOCKED if unlocked
+                                   else icons.VOLUME_LOCKED))
+        item.setData(0, Qt.UserRole, data)
+        item.setToolTip(0, "Encrypted with BitLocker. Right-click ▸ Unlock "
+                           "BitLocker… with the recovery key, password or "
+                           "startup key." if not unlocked else
+                        "BitLocker volume, unlocked for this session.")
+        item.setChildIndicatorPolicy(
+            QTreeWidgetItem.ShowIndicator if unlocked
+            and handler.check_partition_contents(start)
+            else QTreeWidgetItem.DontShowIndicator)
+        if unlocked:
+            self._add_shadow_copy_nodes(parent, start, label)
+        return item
+
+    def _add_shadow_copy_nodes(self, parent, start, label):
+        """A node per Volume Shadow Copy of the volume at `start`, after
+        it: the volume as it was when the snapshot was taken."""
+        try:
+            shadows = self.image_handler.shadow_copies(start)
+        except Exception as exc:
+            logger.warning("Could not read shadow copies at %s: %s", start,
+                           exc)
+            return
+        for shadow in shadows:
+            created = shadow['created'].strftime('%Y-%m-%d %H:%M:%S UTC') \
+                if shadow['created'] else 'time unknown'
+            item = QTreeWidgetItem(parent)
+            item.setText(0, f"{label} — shadow copy {shadow['index'] + 1} "
+                            f"({created})")
+            item.setIcon(0, icons.icon(icons.SHADOW_COPY))
+            item.setData(0, Qt.UserRole, {
+                "inode_number": None, "start_offset": shadow['key'],
+                "is_shadow_copy": True, "shadow_index": shadow['index'],
+                "shadow_created": created, "volume_label": label})
+            item.setToolTip(0, f"Volume Shadow Copy {shadow['index'] + 1} of "
+                               f"{label}, taken {created}: the volume as it "
+                               f"was then, read-only. Files deleted or "
+                               f"changed since are here as they were.")
+            item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+
+    def unlock_bitlocker_item(self, item):
+        """Ask for a key for the BitLocker volume `item` stands for."""
+        from PySide6.QtWidgets import QDialog
+        from trace_app.ui.dialogs.bitlocker import BitLockerDialog
+        if not self.activate_item_image(item):
+            return
+        data = item.data(0, Qt.UserRole) or {}
+        start = data.get('start_offset', 0)
+        label = data.get('volume_label') or 'This volume'
+        dialog = BitLockerDialog(self.image_handler, start, label, self)
+        if dialog.exec() != QDialog.Accepted or not dialog.secret:
+            return
+        path = os.path.normpath(self.image_handler.image_path)
+        self._bitlocker_keys.setdefault(path, {})[start] = dialog.secret
+        if self.case is not None:
+            row = self.case.evidence_for_path(path)
+            self.case.record_event(
+                "BitLocker volume unlocked",
+                f"evidence id={row['id'] if row else '?'} "
+                f"partition sector={start} with a {dialog.kind} "
+                f"(the key is not recorded)")
+        parent = item.parent() or self.tree_viewer.invisibleRootItem()
+        index = parent.indexOfChild(item)
+        parent.removeChild(item)
+        size = self.image_handler.partition_bytes(start)[1]
+        fresh = self._add_bitlocker_node(parent, start, label, size,
+                                         end=data.get('end_offset'))
+        # Back where the locked node was, its shadow copies after it.
+        parent.removeChild(fresh)
+        parent.insertChild(index, fresh)
+        self.tree_viewer.setCurrentItem(fresh)
+        fresh.setExpanded(True)
+        self.set_status(f"{label} unlocked: its files can now be browsed, "
+                        f"and analysis reads them too.")
+
+    def _unlocks_for(self, path):
+        """The keys this session holds for an image, for a background job."""
+        return dict(self._bitlocker_keys.get(os.path.normpath(path), {}))
 
     def populate_contents(self, item: QTreeWidgetItem, data: Dict[str, Any], inode: Optional[int] = None) -> None:
         """Populate tree widget item with directory contents."""
@@ -5371,6 +5513,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                          or data.get('is_activity_group')
                          or data.get('is_analysis_root')
                          or data.get('is_analysis_group')):
+                return
+
+            if data and data.get('is_bitlocker') and \
+                    not self.image_handler.is_unlocked(
+                        data.get('start_offset', 0)):
+                unlock = menu.addAction(icons.icon(icons.VOLUME_UNLOCKED),
+                                        "Unlock BitLocker…")
+                unlock.triggered.connect(
+                    lambda _=False, it=selected_item:
+                    self.unlock_bitlocker_item(it))
+                menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
                 return
 
             # Check if the selected item is a root item (disk image)

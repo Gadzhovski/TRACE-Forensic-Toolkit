@@ -18,6 +18,7 @@ import pyewf
 import pytsk3
 from Registry import Registry
 
+from trace_app.core import containers
 from trace_app.infra.constants import (CHUNK_SIZE, MAX_DIRECTORY_DEPTH,
                                        SECTOR_SIZE)
 from trace_app.infra.utils import FileSystemUtils, safe_datetime
@@ -91,6 +92,18 @@ class ImageHandler:
         self._partition_cache = None  # Cache for partitions
         self._sector_size = None  # Read from the image on first use
         self._os_info_cache = {}  # Registry-derived OS details, per partition
+        #: What kind of container the evidence is, for display: "VHDX",
+        #: "VMDK snapshot (1 parent)"... None for raw and E01.
+        self.container_note = None
+        #: Why the image would not open, for the examiner (load_image False).
+        self.load_error = None
+        #: File systems that are not at a byte offset of the image: an
+        #: unlocked BitLocker volume (keyed by its partition's start sector,
+        #: which it replaces) and shadow copies (containers.shadow_key).
+        self._volumes = {}
+        self._bitlocker = {}        # start sector -> unlocked pybde volume
+        self._shadows = {}          # start sector -> (pyvshadow volume, stores)
+        self._bitlocker_checked = {}
 
         #: False when the image could not be opened; callers should check
         #: this rather than waiting for a later AttributeError.
@@ -109,6 +122,17 @@ class ImageHandler:
                     fs_info.close()
                 except Exception as e:
                     logger.debug("Error closing filesystem handle: %s", e)
+        for volume in list(getattr(self, '_bitlocker', {}).values()) + \
+                [shadow for shadow, _stores in
+                 getattr(self, '_shadows', {}).values() if shadow]:
+            try:
+                volume.close()
+            except Exception:
+                pass
+        if hasattr(self, '_volumes'):
+            self._volumes.clear()
+            self._bitlocker.clear()
+            self._shadows.clear()
 
         # Close the image
         if self.img_info:
@@ -360,6 +384,8 @@ class ImageHandler:
             return "ewf"
         elif extension in raw:
             return "raw"
+        elif extension in containers.VIRTUAL_DISK_EXTENSIONS:
+            return "virtual"
         else:
             raise ValueError(f"Unsupported image type: {extension}")
 
@@ -498,6 +524,29 @@ class ImageHandler:
                 finally:
                     ewf_handle.close()
 
+            elif image_type == "virtual":
+                # The disk, not its container files: a split VMDK is many
+                # files, a VHDX's layout changes as it is compacted, and a
+                # differencing disk is meaningless without its parents. What
+                # the guest saw is what is evidence.
+                total_size = self.img_info.get_size()
+                hash_sha256 = hashlib.sha256()
+                position = 0
+                while position < total_size:
+                    chunk = self.img_info.read(
+                        position, min(CHUNK_SIZE, total_size - position))
+                    if not chunk:
+                        break
+                    for hasher in (hash_md5, hash_sha1, hash_sha256):
+                        hasher.update(chunk)
+                    position += len(chunk)
+                    size = position
+                    if progress_callback and total_size > 0:
+                        try:
+                            progress_callback(size, total_size)
+                        except Exception as e:
+                            logger.error(f"Progress callback error: {e}")
+
             elif image_type == "raw":
                 try:
                     total_size = os.path.getsize(self.image_path)
@@ -564,6 +613,9 @@ class ImageHandler:
                 self.img_info = EWFImgInfo(ewf_handle)
             elif image_type == "raw":
                 self.img_info = pytsk3.Img_Info(self.image_path)
+            elif image_type == "virtual":
+                self.img_info, self.container_note = \
+                    containers.open_virtual_disk(self.image_path)
             else:
                 raise ValueError(f"Unsupported image type: {image_type}")
 
@@ -581,6 +633,7 @@ class ImageHandler:
             return True
         except Exception as e:
             logger.error("Could not load image %s: %s", self.image_path, e)
+            self.load_error = str(e)
             self.img_info = None
             self.volume_info = None
             self.fs_info = None
@@ -631,6 +684,8 @@ class ImageHandler:
         this reports what is on the media.
         """
         found = []
+        if start_offset in self._volumes:
+            return found         # not at a byte offset of the image
         try:
             base = start_offset * self.sector_size
             # One read covering every signature offset above.
@@ -750,15 +805,181 @@ class ImageHandler:
 
     @lru_cache(maxsize=32)
     def get_fs_info(self, start_offset):
-        """Retrieve the FS_Info for a partition, initializing it if necessary."""
+        """Retrieve the FS_Info for a partition, initializing it if necessary.
+
+        `start_offset` may also name a volume inside a partition: the
+        unlocked BitLocker volume at that partition, or a shadow copy's key
+        (containers.shadow_key) -- opened on first use, so a bookmark into a
+        snapshot resolves after the case is reopened.
+        """
         if start_offset not in self.fs_info_cache:
+            shadow = containers.split_shadow_key(start_offset)
+            if shadow is not None and start_offset not in self._volumes:
+                self.shadow_copies(shadow[0])
             try:
-                fs_info = pytsk3.FS_Info(self.img_info,
-                                         offset=start_offset * self.sector_size)
+                if start_offset in self._volumes:
+                    fs_info = pytsk3.FS_Info(self._volumes[start_offset],
+                                             offset=0)
+                elif shadow is not None:
+                    return None
+                else:
+                    fs_info = pytsk3.FS_Info(
+                        self.img_info, offset=start_offset * self.sector_size)
                 self.fs_info_cache[start_offset] = fs_info
             except Exception as e:
                 return None
         return self.fs_info_cache[start_offset]
+
+    # --- one file, read lazily --------------------------------------------------
+
+    def open_file_object(self, inode_number, start_offset):
+        """A Python file object over a file on the image, read on demand --
+        for what is too big to hold in memory (a 20 GB mailbox).
+        None if the file cannot be opened."""
+        fs = self.get_fs_info(start_offset)
+        if fs is None:
+            return None
+        try:
+            entry = fs.open_meta(inode=inode_number)
+            size = int(entry.info.meta.size)
+        except Exception as exc:
+            logger.debug("Could not open inode %s: %s", inode_number, exc)
+            return None
+        return containers.ByteWindow(
+            lambda offset, length: entry.read_random(offset, length),
+            0, size)
+
+    def read_file_bytes(self, inode_number, start_offset, length):
+        """The first `length` bytes of a file -- enough to recognise it."""
+        stream = self.open_file_object(inode_number, start_offset)
+        return stream.read(length) if stream is not None else None
+
+    # --- volumes inside partitions: BitLocker, shadow copies -----------------
+
+    def partition_bytes(self, start_sector):
+        """(byte offset, byte length) of the partition at `start_sector`;
+        the whole image for an unpartitioned one at 0."""
+        for _addr, _desc, start, length in self.get_partitions():
+            if start == start_sector:
+                return start * self.sector_size, length * self.sector_size
+        if start_sector == 0:
+            return 0, self.get_size()
+        raise KeyError(start_sector)
+
+    def _partition_window(self, start_sector):
+        offset, length = self.partition_bytes(start_sector)
+        return containers.ByteWindow(self.read, offset, length)
+
+    def _forget_filesystem(self, key):
+        """Drop what was cached about the file system at `key`."""
+        stale = self.fs_info_cache.pop(key, None)
+        if stale is not None and hasattr(stale, 'close'):
+            try:
+                stale.close()
+            except Exception:
+                pass
+        self.get_fs_info.cache_clear()
+        self.get_fs_type.cache_clear()
+        self._directory_cache.clear()
+
+    def is_bitlocker(self, start_sector):
+        """Is the partition (or an unpartitioned image) BitLocker?
+
+        Asked of libbde rather than read from byte 3: a BitLocker To Go
+        volume begins with an ordinary FAT32 boot sector -- the "discovery
+        volume" holding the reader program -- and only its metadata says
+        what it is. TSK opens that decoy and lists it as FAT32.
+        """
+        cached = self._bitlocker_checked.get(start_sector)
+        if cached is None:
+            try:
+                import pybde
+                cached = bool(pybde.check_volume_signature_file_object(
+                    self._partition_window(start_sector)))
+            except Exception:
+                cached = False
+            self._bitlocker_checked[start_sector] = cached
+        return cached
+
+    def is_unlocked(self, start_sector):
+        return start_sector in self._bitlocker
+
+    def bitlocker_facts(self, start_sector):
+        return containers.bitlocker_facts(self._partition_window(start_sector))
+
+    def unlock_bitlocker(self, start_sector, recovery_password=None,
+                         password=None, startup_key=None):
+        """Unlock the BitLocker volume at a partition; from then on, its
+        files are read through the decrypting volume at the same key.
+        Raises containers.ContainerError with the reason if it will not."""
+        if start_sector in self._bitlocker:
+            return True
+        volume = containers.unlock_bitlocker(
+            self._partition_window(start_sector), recovery_password,
+            password, startup_key)
+        self._bitlocker[start_sector] = volume
+        self._volumes[start_sector] = containers.LibyalImgInfo(
+            volume, volume.get_size())
+        self._forget_filesystem(start_sector)
+        self._shadows.pop(start_sector, None)       # re-read, decrypted
+        logger.info("BitLocker volume at sector %d unlocked", start_sector)
+        return True
+
+    def apply_unlocks(self, unlocks):
+        """Unlock with keys an examiner already gave: {start: {kind:
+        secret}} -- what a background job is handed, in memory."""
+        for start, secret in (unlocks or {}).items():
+            try:
+                self.unlock_bitlocker(int(start), **secret)
+            except Exception as exc:
+                logger.warning("Could not unlock the volume at %s: %s",
+                               start, exc)
+
+    def _volume_stream(self, start_sector):
+        """A partition's volume as a file object -- decrypted if it is an
+        unlocked BitLocker volume."""
+        if start_sector in self._bitlocker:
+            volume = self._bitlocker[start_sector]
+            return containers.ByteWindow(
+                lambda offset, length: volume.read_buffer_at_offset(length,
+                                                                    offset),
+                0, volume.get_size())
+        return self._partition_window(start_sector)
+
+    def shadow_copies(self, start_sector):
+        """The partition's Volume Shadow Copies, oldest first:
+        [{'key', 'index', 'created', 'size', 'identifier'}]."""
+        if start_sector not in self._shadows:
+            try:
+                stream = self._volume_stream(start_sector)
+            except KeyError:
+                return []
+            shadow, stores = containers.open_shadow_copies(stream)
+            self._shadows[start_sector] = (shadow, stores)
+            for index, store in enumerate(stores):
+                if store is None:
+                    continue
+                key = containers.shadow_key(start_sector, index)
+                self._volumes[key] = containers.LibyalImgInfo(
+                    store, store.get_volume_size(), keep=[])
+        shadow, stores = self._shadows[start_sector]
+        out = []
+        for index, store in enumerate(stores):
+            if store is None:
+                continue
+            created = None
+            try:
+                created = store.get_creation_time()
+            except (IOError, OSError, AttributeError):
+                pass
+            if created is not None and created.tzinfo is None:
+                import datetime
+                created = created.replace(tzinfo=datetime.timezone.utc)
+            out.append({'key': containers.shadow_key(start_sector, index),
+                        'index': index, 'created': created,
+                        'size': store.get_volume_size(),
+                        'identifier': str(getattr(store, 'identifier', ''))})
+        return out
 
     @lru_cache(maxsize=32)
     def get_fs_type(self, start_offset):

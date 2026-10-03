@@ -68,8 +68,23 @@ def detect_archive(data):
     Reads only the header, so it is cheap enough to call on every file in a
     listing.
     """
+    if hasattr(data, 'read'):
+        # A file object (a large mailbox read lazily from the image): its
+        # header, and back to the start for whoever reads it next.
+        try:
+            data.seek(0)
+            header = data.read(600)
+            data.seek(0)
+        except (IOError, OSError):
+            return None
+        data = header
     if not data or len(data) < 4:
         return None
+
+    # An Outlook mailbox: browsed like an archive (core/mailbox.py).
+    from trace_app.core.mailbox import is_mailbox
+    if is_mailbox(data[:16]):
+        return 'pst'
 
     for magic, kind in _SIGNATURES:
         if kind == 'tar':
@@ -116,8 +131,18 @@ def list_members(data, kind=None, password=None):
         return _list_7z(data, password)
     if kind == 'rar':
         return _list_rar(data)
+    if kind == 'pst':
+        return _mailbox_call('list_members', data)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
+
+
+def _mailbox_call(name, *args):
+    from trace_app.core import mailbox
+    try:
+        return getattr(mailbox, name)(*args)
+    except mailbox.MailboxError as exc:
+        raise ArchiveError(str(exc)) from exc
 
 
 def read_member(data, member_name=None, kind=None, password=None,
@@ -147,6 +172,8 @@ def read_member(data, member_name=None, kind=None, password=None,
         return _read_7z_member(data, member_name, password, limit)
     if kind == 'rar':
         return _read_rar_member(data, member_name, limit)
+    if kind == 'pst':
+        return _mailbox_call('read_member', data, member_name, limit)
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 
