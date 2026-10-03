@@ -1289,3 +1289,35 @@ def test_window_layout_is_remembered(window):
     assert geometry and state
     forget_window_state()
     assert read_window_state() == (None, None)
+
+
+def test_yara_is_a_job_a_triage_tab_and_findings(qapp, window, tmp_path):
+    """Rules imported into the library and switched on: the scan runs on
+    the queue per image, its matches fill Triage > YARA and Findings, and
+    where yara-x is missing the option is greyed out with the reason."""
+    pytest.importorskip('yara_x')
+    from trace_app.core import yara_rules
+    from trace_app.ui.dialogs.analysis_modules import AnalysisModulesDialog
+    rules = tmp_path / 'rules'
+    rules.mkdir()
+    (rules / 'jpeg.yar').write_text(
+        'rule JPEG_JFIF { strings: $j = "JFIF" condition: '
+        'uint16(0) == 0xD8FF and $j }')
+    window.yara_library().import_rules(str(rules), 'Pictures', 'notable')
+    window.case.set_setting('yara', dict(yara_rules.default_options(),
+                                         enabled=True))
+    assert window.queue_yara(window.case.evidence()) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    found = window.case.findings(None, 'yara', limit=1000)
+    assert found and {f['detail']['rule'] for f in found} == {'JPEG_JFIF'}
+    triage = window.triage_panel
+    assert triage.yara_table.rowCount() == len(found)
+    assert triage.tabs.tabText(triage._tab_for['yara']).startswith('YARA (')
+    group = _findings_group(window, 'YARA matches')
+    assert group is not None and _leaves(group)
+
+    dialog = AnalysisModulesDialog(None, {
+        'modules': [], 'yara_available': False,
+        'yara_reason': 'yara-x is not installed (Windows on ARM)'})
+    assert not dialog.yara_box.isEnabled()
+    assert 'Windows on ARM' in dialog.yara_box.toolTip()

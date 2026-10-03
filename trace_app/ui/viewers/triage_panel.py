@@ -174,6 +174,11 @@ class TriagePanel(QWidget):
         self.tabs.addTab(self.author_table, icons.icon(icons.FINDING_AUTHOR),
                          "Authors")
 
+        self.yara_table = self._make_table(
+            ['Name', 'Rule', 'Rule set', 'Severity', 'Matched', 'Path'])
+        self.tabs.addTab(self.yara_table, icons.icon(icons.FINDING_YARA),
+                         "YARA")
+
         #: Widest each free-text column may grow; the full text is in the
         #: cell's tooltip. Uncapped, one long finding or an eight-author paper
         #: pushed every column after it off the screen.
@@ -181,12 +186,13 @@ class TriagePanel(QWidget):
             id(self.hidden_table): {3: 520},
             id(self.photo_table): {3: 220, 5: 200},
             id(self.author_table): {2: 260, 3: 180, 4: 180, 5: 220},
+            id(self.yara_table): {2: 220, 5: 420},
         }
 
         #: Sub-tab index by the name the tree uses for it. The bookmarks tab
         #: is added by the host (add_bookmarks_tab), since its panel is shared.
         self._tab_for = {'mismatch': 0, 'entropy': 1, 'duplicates': 2,
-                         'hidden': 3, 'photos': 4, 'authors': 5}
+                         'hidden': 3, 'photos': 4, 'authors': 5, 'yara': 6}
 
         self.refresh()
 
@@ -410,11 +416,13 @@ class TriagePanel(QWidget):
         self._fill_hidden()
         self._fill_photos()
         self._fill_authors()
+        self._fill_yara()
         self._set_counts(summary)
 
     def _finding_tables(self):
         return (self.mismatch_table, self.entropy_table, self.duplicate_table,
-                self.hidden_table, self.photo_table, self.author_table)
+                self.hidden_table, self.photo_table, self.author_table,
+                self.yara_table)
 
     def _fill_hidden(self):
         rows = self.case.findings(self.evidence_id, 'hidden',
@@ -482,6 +490,35 @@ class TriagePanel(QWidget):
             ]
             self._fill_row(table, position, values, row)
 
+    def _fill_yara(self):
+        rows = self.case.findings(self.evidence_id, 'yara', limit=20000)
+        self._yara_count = len({(r['evidence_id'], r['artifact_ref'])
+                                for r in rows})
+        table = self.yara_table
+        table.setRowCount(len(rows))
+        for position, row in enumerate(rows):
+            facts = row.get('detail') or {}
+            strings = facts.get('strings') or []
+            matched = ', '.join(dict.fromkeys(
+                f"{s['identifier']} \u201c{s['data'][:40]}\u201d"
+                for s in strings[:4]))
+            values = [row.get('name') or '', facts.get('rule') or row['kind'],
+                      facts.get('set') or '',
+                      (row.get('grade') or '').capitalize(), matched,
+                      row.get('path') or '']
+            self._fill_row(table, position, values, row)
+            tone = 'malicious' if row.get('grade') == 'suspicious' \
+                else 'suspicious'
+            table.item(position, 4).setForeground(verdict_brush(tone))
+            tip = [f"Rule {facts.get('rule')} ({facts.get('set')})"]
+            if facts.get('tags'):
+                tip.append("Tags: " + ', '.join(facts['tags']))
+            tip += [f"{k}: {v}" for k, v in (facts.get('meta') or {}).items()]
+            tip += [f"{s['identifier']} at {s['offset']:,}: {s['data']}"
+                    for s in strings[:20]]
+            for column in range(table.columnCount()):
+                table.item(position, column).setToolTip('\n'.join(tip))
+
     def _set_counts(self, summary):
         # The count belongs on the tab, so it is readable whichever tab is
         # open -- an examiner should be able to see there are findings without
@@ -495,6 +532,8 @@ class TriagePanel(QWidget):
         for key, label, field in labels:
             self.tabs.setTabText(self._tab_for[key],
                                  f"{label} ({summary.get(field, 0)})")
+        self.tabs.setTabText(self._tab_for['yara'],
+                             f"YARA ({getattr(self, '_yara_count', 0)})")
 
     def _icon_for(self, name):
         if not self.icon_resolver:

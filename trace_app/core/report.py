@@ -475,6 +475,21 @@ class _Builder:
                          e((r.get('detail') or {}).get('created')),
                          e((r.get('detail') or {}).get('modified'))]
                         for r in authors]))
+        yara = self.scope(self.case.findings(None, 'yara', grades=grades,
+                                             limit=limit + 1))
+        groups.append(('findings-yara', 'YARA matches',
+                       ['File', 'Evidence', 'Grade', 'Rule', 'Rule set',
+                        'Matched', 'Path'],
+                       [[e(r.get('name')),
+                         e(self.evidence_name(r.get('evidence_id'))),
+                         _badge(r.get('grade')),
+                         e((r.get('detail') or {}).get('rule')),
+                         e((r.get('detail') or {}).get('set')),
+                         _mono('; '.join(
+                             f"{s['identifier']}@{s['offset']}: {s['data']}"
+                             for s in ((r.get('detail') or {}).get('strings')
+                                       or [])[:5])),
+                         _mono(r.get('path'))] for r in yara]))
         for anchor, title, headers, rows in groups:
             self.check()
             out.append(self.heading(2, anchor, f"{title} ({len(rows):,})"))

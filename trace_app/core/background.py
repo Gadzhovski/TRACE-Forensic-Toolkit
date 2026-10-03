@@ -236,6 +236,28 @@ def job_report(params, progress, item, should_stop):
         _close(case, *images.values())
 
 
+def job_yara(params, progress, item, should_stop):
+    """YARA rules over every file and carved file of one image."""
+    from trace_app.core import yara_rules
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        library = yara_rules.Library(params['library'])
+        try:
+            return yara_rules.scan_evidence(
+                handler, case, params['evidence_id'], library,
+                params.get('options'),
+                progress=lambda done, total, path: progress(done, total,
+                                                            path),
+                should_stop=should_stop)
+        except yara_rules.ScanCancelled:
+            return 0
+    finally:
+        _close(case, handler)
+
+
 def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
@@ -292,6 +314,7 @@ JOBS = {
     'ntfs': job_ntfs,
     'hashsets': job_hashsets,
     'report': job_report,
+    'yara': job_yara,
     'carve': job_carve,
     'ping': job_ping,
 }

@@ -90,6 +90,9 @@ REPORTED_MISMATCHES = ('suspicious', 'notable')
 #: clip, an owner-password PDF) are recorded but not put in front of anyone.
 REPORTED_FINDING_GRADES = ('suspicious', 'notable')
 
+#: Finding modules written by jobs of their own, not the file analysis.
+OWN_JOB_MODULES = ('ntfs', 'yara', 'persistence')
+
 
 def make_artifact_ref(start_offset, inode, sequence=None):
     """A durable reference to a file within a piece of evidence.
@@ -889,8 +892,31 @@ class Case:
         """Drop a previous run's findings for one piece of evidence."""
         self._db.execute("DELETE FROM file_analysis WHERE evidence_id = ?",
                          (evidence_id,))
+        # Modules with jobs of their own keep their findings: re-running
+        # the file analysis must not erase a YARA scan or the NTFS read.
+        marks = ','.join('?' * len(OWN_JOB_MODULES))
         self._db.execute("DELETE FROM file_findings WHERE evidence_id = ? "
-                         "AND module != 'ntfs'", (evidence_id,))
+                         f"AND module NOT IN ({marks})",
+                         (evidence_id, *OWN_JOB_MODULES))
+        self._db.commit()
+
+    def clear_findings(self, evidence_id, module):
+        """Drop one module's findings for one piece of evidence."""
+        self._db.execute("DELETE FROM file_findings WHERE evidence_id = ? "
+                         "AND module = ?", (evidence_id, module))
+        self._db.commit()
+
+    def add_module_findings(self, evidence_id, module, rows):
+        """rows: (ref, name, path, size, kind, grade, summary, detail)."""
+        if not rows:
+            return
+        now = _utc_now()
+        self._db.executemany(
+            "INSERT INTO file_findings (evidence_id, artifact_ref, name, "
+            "path, size, module, kind, grade, summary, detail, "
+            "analysed_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [(evidence_id, *row[:4], module, *row[4:], now)
+             for row in rows])
         self._db.commit()
 
     def commit(self):

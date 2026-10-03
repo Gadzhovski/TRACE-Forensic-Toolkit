@@ -761,10 +761,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.match_hash_sets_action.triggered.connect(
             lambda: self.queue_hash_matching())
         analysis_menu.addAction(self.match_hash_sets_action)
+        self.scan_yara_action = QAction("Scan with YARA", self)
+        self.scan_yara_action.triggered.connect(
+            lambda: self.queue_yara(self.case.evidence() if self.case
+                                    else []))
+        analysis_menu.addAction(self.scan_yara_action)
 
         for action in (self.run_analysis_action, self.cancel_analysis_action,
                        self.find_by_hash_action,
-                       self.match_hash_sets_action):
+                       self.match_hash_sets_action, self.scan_yara_action):
             action.setEnabled(self.case is not None)
         if self.case is None:
             analysis_menu.setToolTipsVisible(True)
@@ -844,6 +849,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                    self)
         hash_sets_action.triggered.connect(self.show_hash_sets)
         tools_menu.addAction(hash_sets_action)
+        yara_action = QAction(icons.icon(icons.FINDING_YARA),
+                              "YARA Rules...", self)
+        yara_action.triggered.connect(self.show_yara_rules)
+        tools_menu.addAction(yara_action)
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
@@ -2389,6 +2398,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             hashsets.set_enabled_in(options, entry)
             for entry in self.hash_library().sets())
         preselected['hashsets_available'] = bool(usable)
+        from trace_app.core import yara_rules
+        if not yara_rules.available():
+            preselected['yara_available'] = False
+            preselected['yara_reason'] = yara_rules.unavailable_reason()
+        else:
+            yara_options = yara_rules.case_options(self.case,
+                                                   self.yara_library())
+            in_use = yara_options.get('enabled') and any(
+                yara_rules.set_enabled_in(yara_options, entry)
+                for entry in self.yara_library().sets())
+            preselected['yara_available'] = bool(in_use)
+            preselected['yara'] = bool(in_use)
         preselected['hashsets'] = bool(usable and options.get('auto_match'))
         choice = choose_modules(self, preselected=preselected,
                                 evidence=evidence)
@@ -2408,6 +2429,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if choice.get('hashsets'):
             # Queued after the analysis jobs, so it reads their hashes.
             self.queue_hash_matching([row['id'] for row in chosen])
+        if choice.get('yara'):
+            self.queue_yara(chosen)
         if choice['carve_types']:
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
@@ -2771,6 +2794,85 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'timeline exported',
             f"rows={rows} path={path} sha256={digest.hexdigest()}")
 
+    # --- YARA -------------------------------------------------------------
+
+    def yara_library(self):
+        from trace_app.core import yara_rules
+        library = getattr(self, '_yara_library', None)
+        if library is None:
+            library = self._yara_library = yara_rules.Library()
+        return library
+
+    def show_yara_rules(self):
+        """Tools > YARA Rules: the library, and this case's options."""
+        from trace_app.ui.dialogs.yara_rules import YaraRulesDialog
+        dialog = YaraRulesDialog(self.case, self.yara_library(), self)
+        wanted = []
+        dialog.scan_requested.connect(lambda: wanted.append(True))
+        dialog.exec()
+        if wanted and self.case:
+            self.queue_yara(self.case.evidence())
+
+    def queue_yara(self, rows):
+        """One YARA job per image, on the shared queue."""
+        from trace_app.core import yara_rules
+        if not self.case:
+            return 0
+        if not yara_rules.available():
+            message.information(self, "YARA is unavailable",
+                                "YARA scanning does not work on this system.",
+                                yara_rules.unavailable_reason())
+            return 0
+        options = yara_rules.case_options(self.case, self.yara_library())
+        if not options.get('enabled') or not any(
+                yara_rules.set_enabled_in(options, entry)
+                for entry in self.yara_library().sets()):
+            message.information(self, "No YARA rules in use",
+                                "This case uses no YARA rules.",
+                                "Tools \u25b8 YARA Rules imports them and "
+                                "chooses which this case uses.")
+            return 0
+        queued = 0
+        for row in rows:
+            if os.path.exists(row['path']) and \
+                    self._queue_yara_job(row, options):
+                queued += 1
+        if queued:
+            self.set_status(f"Scanning {queued} image(s) with YARA in the "
+                            f"background")
+        return queued
+
+    def _queue_yara_job(self, row, options):
+        from trace_app.ui.dialogs.yara_rules import YaraWorker
+        evidence_id = row['id']
+        name = row.get('display_name') or os.path.basename(row['path'])
+
+        def start(job):
+            worker = YaraWorker(row['path'], self.case.folder, evidence_id,
+                                self.yara_library().folder, options, self)
+            worker.params['unlock'] = self._unlocks_for(row['path'])
+            worker.progressed.connect(
+                lambda done, total, path: self.job_bar.report(
+                    done, total, os.path.basename(path)))
+            worker.finished_scan.connect(
+                lambda count, error: self._yara_finished(name, count, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"yara:{evidence_id}", title=f"YARA scan of {name}",
+            start=start, stop=lambda worker: worker.stop()))
+
+    def _yara_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"YARA scan of {name} failed: {error}")
+            logger.error("YARA on %s failed: %s", name, error)
+        else:
+            self.set_status(f"YARA: {count:,} file(s) in {name} matched")
+        self.refresh_analysis_views()
+
     # --- hash sets ------------------------------------------------------
 
     def hash_library(self):
@@ -2969,7 +3071,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 and not indicators and not ntfs['timestomp'] \
                 and not ntfs['streams'] \
                 and not hashed.get(hashsets.KNOWN_BAD) \
-                and not hashed.get(hashsets.NOTABLE):
+                and not hashed.get(hashsets.NOTABLE) \
+                and not self.case.findings(evidence_id, 'yara', limit=1):
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
                  for r in self.case.evidence()}
@@ -3020,6 +3123,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
              lambda: self.case.ntfs_rows('streams', evidence_id)),
             # Hash sets: known bad first. Known good is the opposite of a
             # finding and stays in the Hash sets tab.
+            ('yara', 'YARA matches', icons.FINDING_YARA,
+             len({(f['evidence_id'], f['artifact_ref']) for f in
+                  self.case.findings(evidence_id, 'yara', limit=100000)}),
+             lambda: self._one_per_file(self.case.findings(
+                 evidence_id, 'yara', limit=100000))),
             ('hash:known-bad', 'Known bad (hash sets)', icons.HASH_SETS,
              hashed.get(hashsets.KNOWN_BAD, 0),
              lambda: self._one_per_file(self.case.hash_matches(
@@ -3615,6 +3723,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         found = self.case.analysis_map(evidence_id, refs.keys())
         hidden = self.case.findings_map(evidence_id, refs.keys(), 'hidden',
                                         REPORTED_FINDING_GRADES)
+        yara_hits = self.case.findings_map(evidence_id, refs.keys(), 'yara')
         options = hashsets.case_options(self.case)
         matched = self.case.hash_match_map(evidence_id, refs.keys()) \
             if options.get('enabled') else {}
@@ -3657,6 +3766,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             elif entropy is not None and is_high_entropy(
                     entropy, facts.get('entropy_peak') or 0, mime):
                 flag, severity = 'High entropy', 'notable'
+            yara_hit = (yara_hits.get(ref) or [None])[0]
+            if yara_hit is not None and (severity != 'suspicious'
+                                         or yara_hit['grade'] ==
+                                         'suspicious'):
+                flag = f"YARA: {(yara_hit.get('detail') or {}).get('rule')}"
+                severity = yara_hit['grade']
+                tip = yara_hit.get('summary') or ''
             # A known-bad match outranks every guess above: it is a
             # statement that this exact file is bad.
             if match is not None and match['category'] == hashsets.KNOWN_BAD:

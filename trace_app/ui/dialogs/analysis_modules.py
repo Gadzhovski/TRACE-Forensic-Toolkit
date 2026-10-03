@@ -53,6 +53,10 @@ MODULE_NTFS = 'ntfs'
 #: digests the hash module stores, so it is queued after the analysis.
 MODULE_HASHSETS = 'hashsets'
 
+#: YARA rules over every file and carved file (core/yara_rules): its own
+#: job, after the analysis.
+MODULE_YARA = 'yara'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -127,6 +131,13 @@ _HASHSETS = (
     "known-good files (NSRL), flag known-bad and notable ones (Tools ▸ Hash "
     "Sets chooses which).",
     "Fast: a lookup per digest, after the hashes are taken.")
+
+_YARA = (
+    "YARA rules",
+    "Scan every file and carved file with the YARA rules this case uses "
+    "(Tools ▸ YARA Rules); a match is a finding with the rule and the "
+    "strings it matched.",
+    "Slower: reads every file, up to the size set for the case.")
 
 _CARVING = (
     "File carving",
@@ -241,6 +252,16 @@ class AnalysisModulesDialog(QDialog):
                 "imports them and switches them on.")
         self.boxes[MODULE_HASHSETS] = self.hash_sets_box
 
+        self.yara_box = self._module(layout, *_YARA)
+        yara_ok = choice.get('yara_available', True)
+        self.yara_box.setChecked(bool(choice.get('yara')) and yara_ok)
+        if not yara_ok:
+            self.yara_box.setEnabled(False)
+            self.yara_box.setToolTip(choice.get('yara_reason') or
+                                     "No YARA rules are in use for this "
+                                     "case (Tools ▸ YARA Rules).")
+        self.boxes[MODULE_YARA] = self.yara_box
+
         rule = QFrame()
         rule.setObjectName("analysisModulesRule")
         rule.setFrameShape(QFrame.HLine)
@@ -341,13 +362,14 @@ class AnalysisModulesDialog(QDialog):
             'modules': [key for key, box in self.boxes.items()
                         if key not in (MODULE_CARVE, MODULE_INDEX,
                                        MODULE_ACTIVITY, MODULE_NTFS,
-                                       MODULE_HASHSETS)
+                                       MODULE_HASHSETS, MODULE_YARA)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
             'activity': self.activity_box.isChecked(),
             'ntfs': self.ntfs_box.isChecked(),
             'hashsets': self.hash_sets_box.isChecked(),
+            'yara': self.yara_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),
