@@ -79,3 +79,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Screenshots pasted into an assistant session land here
+/image.png
