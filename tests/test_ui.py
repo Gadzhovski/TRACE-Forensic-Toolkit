@@ -1412,3 +1412,66 @@ def test_luks_lvm_and_apfs_volumes_in_the_tree(qapp, stubbed_dialogs,
         assert 'passwords.txt' in [t for t, _d in _children(node)]
     finally:
         window.cleanup_resources()
+
+
+def test_keyword_lists_are_a_job_a_triage_tab_and_findings(qapp, window,
+                                                           truth):
+    """A list in the library, switched on for the case: the search runs on
+    the queue over the index built above, its hits fill Triage > Keywords
+    and Findings > Keyword hits, and a hit previews from its own image."""
+    from PySide6.QtCore import Qt
+    from trace_app.core import keywords
+    from trace_app.core.case import parse_artifact_ref
+    from trace_app.ui.dialogs.analysis_modules import AnalysisModulesDialog
+    if not window.indicators_panel.index or not \
+            window.indicators_panel.index.statistics()['items']:
+        window.queue_indexing(window.case.evidence())
+        assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    library = window.keyword_library()
+    library.create('Pictures', [keywords.make_term('jpg'),
+                                keywords.make_term('nothing-like-this-xyz')])
+    window.case.set_setting('keywords', dict(keywords.default_options(),
+                                             enabled=True))
+    assert window.queue_keywords()
+    assert pump(qapp, 120, lambda: not window.job_bar.busy)
+    found = window.case.findings(None, 'keywords', limit=10000)
+    assert found and {f['detail']['term'] for f in found} == {'jpg'}
+    panel = window.keywords_panel
+    triage = window.triage_panel
+    assert triage.tabs.tabText(triage._tab_for['keywords']) == \
+        'Keywords (1)'
+    assert panel.terms_table.rowCount() == 1
+    assert panel.files_table.rowCount() == len(found)
+
+    group = _findings_group(window, 'Keyword hits')
+    assert group is not None and group.childCount() == 1
+    node = group.child(0)
+    assert node.text(0).startswith('jpg (')
+    window.tree_viewer.setCurrentItem(node)
+    window.tree_viewer.itemClicked.emit(node, 0)
+    pump(qapp, 0.2)
+    assert window.result_viewer.currentWidget() is triage
+    assert triage.tabs.currentWidget() is panel
+
+    second = next(r['id'] for r in window.case.evidence()
+                  if r['path'].endswith(SECOND))
+    position = next(r for r in range(panel.files_table.rowCount())
+                    if panel.files_table.item(r, 0).data(Qt.UserRole)
+                    ['evidence_id'] == second and panel.files_table.item(
+                        r, 0).data(Qt.UserRole)['detail']['item_kind']
+                    == 'file')
+    row = panel.files_table.item(position, 0).data(Qt.UserRole)
+    captured = _capture_viewer(window)
+    window.current_selected_data = None
+    panel.files_table.clearSelection()
+    panel.files_table.selectRow(position)
+    pump(qapp, 10, lambda: bool(captured))
+    ref = parse_artifact_ref(row['artifact_ref'])
+    expected, _ = truth[SECOND].get_file_content(ref['inode'],
+                                                 ref['start_offset'])
+    assert captured and captured[-1] == expected
+    assert window.result_viewer.currentWidget() is triage
+
+    dialog = AnalysisModulesDialog(None, {'modules': [],
+                                          'keywords_available': False})
+    assert not dialog.keywords_box.isEnabled()

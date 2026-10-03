@@ -91,7 +91,7 @@ REPORTED_MISMATCHES = ('suspicious', 'notable')
 REPORTED_FINDING_GRADES = ('suspicious', 'notable')
 
 #: Finding modules written by jobs of their own, not the file analysis.
-OWN_JOB_MODULES = ('ntfs', 'yara', 'persistence')
+OWN_JOB_MODULES = ('ntfs', 'yara', 'persistence', 'keywords')
 
 
 def make_artifact_ref(start_offset, inode, sequence=None):

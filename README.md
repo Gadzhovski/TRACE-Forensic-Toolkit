@@ -296,6 +296,27 @@ ARM, which has no build of it — Options ▸ Supported Features says so.
 <tr>
 <td width="50%" valign="top">
 
+### 🔤 Keyword lists
+
+**Tools ▸ Keyword Lists** keeps your term lists — imported from a text file
+(one term a line) or a CSV, or typed in: words and phrases, prefixes
+(`transfer*`) and regular expressions (`/pattern/`, grep's `[[:alpha:]]`
+classes included). A list with a bad line is refused with the line number.
+Each case chooses its lists, and a search runs them all over the case's
+search index — every file, deleted ones included, every archive member,
+mailbox message and attachment — in seconds. Each term's hits are a finding
+(Triage ▸ Keywords, Findings ▸ Keyword hits) with the count and the first
+hit in context, and a section of the report. Checked against DFTT's
+keyword-search test image and its published answer key.
+
+</td>
+<td width="50%" valign="top">
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
 ### 🔖 Bookmarks and notes
 
 Bookmark any file, byte range or registry key and come back to it after

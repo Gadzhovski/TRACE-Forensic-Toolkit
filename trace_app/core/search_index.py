@@ -71,6 +71,9 @@ MAX_FILE_BYTES = 256 * 1024 * 1024
 INDEX_PENDING = 'pending'
 INDEX_RUNNING = 'running'
 INDEX_DONE = 'done'
+
+#: The index's file in a case folder.
+SEARCH_DB_NAME = 'search.db'
 INDEX_CANCELLED = 'cancelled'
 INDEX_FAILED = 'failed'
 
@@ -218,7 +221,7 @@ class SearchIndex:
 
     def __init__(self, folder):
         self.folder = folder
-        self.path = os.path.join(folder, 'search.db')
+        self.path = os.path.join(folder, SEARCH_DB_NAME)
         self._db = sqlite3.connect(self.path)
         self._db.row_factory = sqlite3.Row
         use_wal(self._db)

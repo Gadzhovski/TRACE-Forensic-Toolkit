@@ -56,6 +56,9 @@ SECTIONS = (
     ('persistence', 'Persistence (autoruns)',
      "Everything set to start by itself, the suspicious and notable first, "
      "with the reasons."),
+    ('keywords', 'Keyword hits',
+     "Each keyword list's terms, how many files hold each, and the files "
+     "with the first hit in context."),
     ('activity', 'User activity',
      "Programs run, files opened, USB devices, logons, web history -- the "
      "newest of each kind."),
@@ -592,6 +595,45 @@ class _Builder:
             out.append(f"<p class='caption'>{routine:,} routine autostart(s) "
                        f"-- Windows' own services and drivers, signed "
                        f"updaters -- are not listed.</p>")
+        return ''.join(out)
+
+    def section_keywords(self):
+        from trace_app.core.keywords import KIND_LABELS, term_summary
+        out = [self.heading(1, 'keywords', SECTION_TITLES['keywords'])]
+        findings = self.scope(self.case.findings(None, 'keywords',
+                                                 limit=500000))
+        if not findings:
+            out.append("<p class='none'>No keyword list found anything, or "
+                       "none was searched for.</p>")
+            return ''.join(out)
+        limit = int(self.options.get('findings_limit') or 200)
+        terms = term_summary(findings)
+        out.append(_table(
+            ['Term', 'List', 'Type', 'Grade', 'Files', 'Hits', 'Note'],
+            [[_mono(t['term']), e(t['list']),
+              e(KIND_LABELS.get(t['term_kind'], t['term_kind'])),
+              _badge(t['grade']),
+              f"{t['files']:,}{'+' if t['truncated'] else ''}",
+              f"{t['hits']:,}", e(t['note'])] for t in terms], css='small'))
+        for number, term in enumerate(terms, 1):
+            self.check()
+            rows = sorted(
+                (f for f in findings
+                 if (f.get('detail') or {}).get('list_id') == term['list_id']
+                 and (f.get('detail') or {}).get('term') == term['term']),
+                key=lambda f: -int((f.get('detail') or {}).get('hits') or 0))
+            out.append(self.heading(
+                2, f"keywords-{number}",
+                f"\u201c{term['term']}\u201d \u2014 {term['list']} "
+                f"({len(rows):,} file(s))"))
+            out.append(_limited(_table(
+                ['File', 'Evidence', 'Hits', 'Context', 'Path'],
+                [[e(r.get('name')),
+                  e(self.evidence_name(r.get('evidence_id'))),
+                  f"{int((r.get('detail') or {}).get('hits') or 0):,}",
+                  e((r.get('detail') or {}).get('excerpt')),
+                  _mono(r.get('path'))] for r in rows[:limit]],
+                css='small'), len(rows), limit))
         return ''.join(out)
 
     def section_activity(self):

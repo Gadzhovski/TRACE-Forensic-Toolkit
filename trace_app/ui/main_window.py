@@ -769,10 +769,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             lambda: self.queue_yara(self.case.evidence() if self.case
                                     else []))
         analysis_menu.addAction(self.scan_yara_action)
+        self.search_keywords_action = QAction("Search Keyword Lists", self)
+        self.search_keywords_action.triggered.connect(
+            lambda: self.queue_keywords())
+        analysis_menu.addAction(self.search_keywords_action)
 
         for action in (self.run_analysis_action, self.cancel_analysis_action,
                        self.find_by_hash_action,
-                       self.match_hash_sets_action, self.scan_yara_action):
+                       self.match_hash_sets_action, self.scan_yara_action,
+                       self.search_keywords_action):
             action.setEnabled(self.case is not None)
         if self.case is None:
             analysis_menu.setToolTipsVisible(True)
@@ -856,6 +861,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                               "YARA Rules...", self)
         yara_action.triggered.connect(self.show_yara_rules)
         tools_menu.addAction(yara_action)
+        keywords_action = QAction(icons.icon(icons.KEYWORDS),
+                                  "Keyword Lists...", self)
+        keywords_action.triggered.connect(self.show_keyword_lists)
+        tools_menu.addAction(keywords_action)
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
@@ -1200,6 +1209,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.persistence_panel.file_menu_requested.connect(
             self.open_finding_menu)
         self.triage_panel.add_persistence_tab(self.persistence_panel)
+
+        # The examiner's keyword lists, searched across the case.
+        from trace_app.ui.viewers.keywords_panel import KeywordsPanel
+        self.keywords_panel = KeywordsPanel()
+        self.keywords_panel.file_selected.connect(self.preview_keyword_hit)
+        self.keywords_panel.file_activated.connect(self.open_keyword_hit)
+        self.keywords_panel.file_menu_requested.connect(
+            self.open_finding_menu)
+        self.keywords_panel.manage_requested.connect(self.show_keyword_lists)
+        self.keywords_panel.search_requested.connect(
+            lambda: self.queue_keywords())
+        self.triage_panel.add_keywords_tab(self.keywords_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
@@ -2426,6 +2447,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             preselected['yara_available'] = bool(in_use)
             preselected['yara'] = bool(in_use)
         preselected['hashsets'] = bool(usable and options.get('auto_match'))
+        from trace_app.core import keywords
+        keyword_options = keywords.case_options(self.case,
+                                                self.keyword_library())
+        lists_in_use = keyword_options.get('enabled') and any(
+            keywords.list_enabled_in(keyword_options, entry)
+            for entry in self.keyword_library().lists())
+        preselected['keywords_available'] = bool(lists_in_use)
+        preselected['keywords'] = bool(lists_in_use)
         choice = choose_modules(self, preselected=preselected,
                                 evidence=evidence)
         if not choice:
@@ -2449,6 +2478,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_persistence(chosen)
         if choice.get('yara'):
             self.queue_yara(chosen)
+        if choice.get('keywords'):
+            # After indexing, which it reads.
+            self.queue_keywords([row['id'] for row in chosen])
         if choice['carve_types']:
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
@@ -2935,6 +2967,95 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"YARA: {count:,} file(s) in {name} matched")
         self.refresh_analysis_views()
 
+    # --- keyword lists ---------------------------------------------------
+
+    def keyword_library(self):
+        from trace_app.core import keywords
+        library = getattr(self, '_keyword_library', None)
+        if library is None:
+            library = self._keyword_library = keywords.Library()
+        return library
+
+    def show_keyword_lists(self):
+        """Tools > Keyword Lists: the library, and this case's options."""
+        from trace_app.ui.dialogs.keyword_lists import KeywordListsDialog
+        dialog = KeywordListsDialog(self.case, self.keyword_library(), self)
+        wanted = []
+        dialog.search_requested.connect(lambda: wanted.append(True))
+        dialog.exec()
+        if wanted:
+            self.queue_keywords()
+
+    def queue_keywords(self, evidence_ids=None):
+        """Search the case's index with its keyword lists, as a job on the
+        shared queue -- after any indexing already queued, which it reads."""
+        from trace_app.core import keywords
+        from trace_app.ui.dialogs.keyword_lists import KeywordWorker
+        if not self.case:
+            return False
+        options = keywords.case_options(self.case, self.keyword_library())
+        if not options.get('enabled') or not any(
+                keywords.list_enabled_in(options, entry)
+                for entry in self.keyword_library().lists()):
+            message.information(
+                self, "Keyword lists",
+                "No keyword lists are in use for this case.",
+                "Tools ▸ Keyword Lists imports or types a list and chooses "
+                "which this case uses.")
+            return False
+        ids = [row['id'] for row in self.case.evidence()] \
+            if evidence_ids is None else list(evidence_ids)
+
+        def start(job):
+            worker = KeywordWorker(self.case.folder,
+                                   self.keyword_library().folder, options,
+                                   ids, self)
+            worker.progressed.connect(
+                lambda done, total, term: self.job_bar.report(done, total,
+                                                              term))
+            worker.finished_search.connect(
+                lambda count, error, w=worker: self._keywords_finished(
+                    w, count, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"keywords:{','.join(map(str, ids))}",
+            title="Searching keyword lists", start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _keywords_finished(self, worker, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Keyword search failed: {error}")
+            logger.error("Keyword search failed: %s", error)
+            return
+        result = worker.result or {}
+        missing = result.get('not_indexed') or []
+        text = (f"Keywords: {result.get('terms_hit', 0):,} term(s) found "
+                f"in {count:,} file(s)")
+        if missing:
+            names = {r['id']: r.get('display_name')
+                     or os.path.basename(r['path'])
+                     for r in self.case.evidence()}
+            text += (" — not searched, not indexed yet: "
+                     + ', '.join(names.get(e, f'#{e}') for e in missing))
+        self.set_status(text)
+        self.refresh_analysis_views()
+
+    def preview_keyword_hit(self, finding):
+        """A keyword hit: the file, or the member of an archive or
+        mailbox the hit is in."""
+        if (finding.get('detail') or {}).get('item_kind') == \
+                'archive-member' and '!/' in (finding.get('path') or ''):
+            self.preview_archive_member(finding)
+            return
+        self.preview_artifact(finding)
+
+    def open_keyword_hit(self, finding):
+        self.open_finding(finding)
+
     # --- hash sets ------------------------------------------------------
 
     def hash_library(self):
@@ -3136,6 +3257,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 and not hashed.get(hashsets.NOTABLE) \
                 and not self.case.findings(evidence_id, 'yara', limit=1) \
                 and not self.case.findings(evidence_id, 'persistence',
+                                           limit=1) \
+                and not self.case.findings(evidence_id, 'keywords',
                                            limit=1):
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
@@ -3207,12 +3330,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
              lambda: self._one_per_file(self.case.hash_matches(
                  evidence_id, [hashsets.NOTABLE]))),
         ]
-        if not any(count for _, _, _, count, _ in groups) and not indicators:
+        from trace_app.core.keywords import term_summary
+        keyword_terms = term_summary(self.case.findings(
+            evidence_id, 'keywords', limit=500000))
+        if not any(count for _, _, _, count, _ in groups) and not indicators \
+                and not keyword_terms:
             return          # analysed, and nothing stood out: say nothing
 
         root = QTreeWidgetItem(self.tree_viewer)
         total = sum(count for _, _, _, count, _ in groups) \
-            + sum(indicators.values())
+            + sum(indicators.values()) + len(keyword_terms)
         root.setText(0, f"Findings ({total})")
         root.setIcon(0, icons.icon(icons.FINDINGS))
         root.setData(0, Qt.UserRole, {'is_analysis_root': True})
@@ -3288,6 +3415,38 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     f"Evidence: {image}" if image else '') if p))
                 child.setData(0, Qt.UserRole, {'is_finding': True,
                                                'finding': finding})
+
+        # Keyword hits by list and term, like indicators by kind: the term
+        # is the finding, its files are a click away in Triage.
+        if keyword_terms:
+            group = QTreeWidgetItem(root)
+            group.setText(0, f"Keyword hits ({len(keyword_terms):,})")
+            group.setIcon(0, icons.icon(icons.KEYWORDS))
+            group.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                           'group': 'keywords'})
+            lists = {}
+            for term in keyword_terms:
+                lists.setdefault((term['list_id'], term['list']),
+                                 []).append(term)
+            for (list_id, list_name), terms in lists.items():
+                parent = group
+                if len(lists) > 1:
+                    parent = QTreeWidgetItem(group)
+                    parent.setText(0, f"{list_name} ({len(terms):,})")
+                    parent.setIcon(0, icons.icon(icons.KEYWORDS))
+                    parent.setData(0, Qt.UserRole, {
+                        'is_analysis_group': True, 'group': 'keywords'})
+                for term in terms:
+                    node = QTreeWidgetItem(parent)
+                    node.setText(0, f"{term['term']} ({term['files']:,}"
+                                    f"{'+' if term['truncated'] else ''} "
+                                    f"file{'s' if term['files'] != 1 else ''})")
+                    node.setIcon(0, icons.icon(icons.KEYWORDS))
+                    node.setToolTip(0, f"{term['hits']:,} hit(s) in "
+                                       f"{list_name}")
+                    node.setData(0, Qt.UserRole, {
+                        'is_analysis_group': True, 'group': 'keywords',
+                        'list_id': list_id, 'term': term['term']})
 
         # Indicators by kind, not by file: "40 URLs" is the finding, and the
         # files holding each one are a click away in Triage.
@@ -4168,8 +4327,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if (self.current_selected_data or {}).get('_preview_ref') == key:
             return
         try:
-            content, _ = self.image_handler.get_file_content(
-                parsed['inode'], parsed['start_offset'])
+            content = self._archive_source(row.get('evidence_id'), parsed)
             for member in chain[1:]:
                 content = archives.read_member(content or b'', member)
         except archives.EncryptedArchive:
@@ -4188,6 +4346,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.open_archive_member(name, content)
         self.current_selected_data['_preview_ref'] = key
         self.viewer_dock.show()
+
+    def _archive_source(self, evidence_id, parsed):
+        """The outermost archive of a member's chain: a mailbox as a
+        stream from the image (kept for the next member, so it is parsed
+        once), anything else read whole."""
+        key = (evidence_id, parsed['start_offset'], parsed['inode'])
+        cached = getattr(self, '_streamed_archive', None)
+        if cached and cached[0] == key:
+            return cached[1]
+        stream = self.image_handler.open_file_object(parsed['inode'],
+                                                     parsed['start_offset'])
+        if stream is not None and \
+                archives.detect_archive(stream) in archives.STREAMED_KINDS:
+            self._streamed_archive = (key, stream)
+            return stream
+        content, _ = self.image_handler.get_file_content(
+            parsed['inode'], parsed['start_offset'])
+        return content
 
     def show_triage(self, group=None, evidence_id=None):
         """Bring the Triage tab forward, on `group`'s sub-tab if given, and
@@ -5342,6 +5518,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.show_triage(data.get('group'), data.get('evidence_id'))
             if data.get('group') == 'indicators':
                 self.indicators_panel.set_kind(data.get('indicator_kind'))
+            if data.get('group') == 'keywords' and data.get('term'):
+                self.keywords_panel.select_term(data.get('list_id'),
+                                                data.get('term'))
             return
 
         # Everything below reads the image this node belongs to.

@@ -61,6 +61,10 @@ MODULE_YARA = 'yara'
 #: folders, then the files they start.
 MODULE_PERSISTENCE = 'persistence'
 
+#: Keyword lists (core/keywords): searches the case's index, so it is
+#: queued after indexing.
+MODULE_KEYWORDS = 'keywords'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -152,6 +156,14 @@ _YARA = (
     "(Tools ▸ YARA Rules); a match is a finding with the rule and the "
     "strings it matched.",
     "Slower: reads every file, up to the size set for the case.")
+
+_KEYWORDS = (
+    "Keyword lists",
+    "Search the whole case for the terms in the keyword lists this case "
+    "uses (Tools ▸ Keyword Lists) — words, prefixes and regular "
+    "expressions — in every file, archive member, message and attachment; "
+    "each term's hits are findings (Triage ▸ Keywords).",
+    "Fast: reads the search index, not the evidence; needs it built.")
 
 _CARVING = (
     "File carving",
@@ -281,6 +293,17 @@ class AnalysisModulesDialog(QDialog):
                                      "case (Tools ▸ YARA Rules).")
         self.boxes[MODULE_YARA] = self.yara_box
 
+        self.keywords_box = self._module(layout, *_KEYWORDS)
+        keywords_ok = choice.get('keywords_available', True)
+        self.keywords_box.setChecked(bool(choice.get('keywords'))
+                                     and keywords_ok)
+        if not keywords_ok:
+            self.keywords_box.setEnabled(False)
+            self.keywords_box.setToolTip(
+                "No keyword lists are in use for this case. Tools ▸ "
+                "Keyword Lists imports or types them.")
+        self.boxes[MODULE_KEYWORDS] = self.keywords_box
+
         rule = QFrame()
         rule.setObjectName("analysisModulesRule")
         rule.setFrameShape(QFrame.HLine)
@@ -382,7 +405,7 @@ class AnalysisModulesDialog(QDialog):
                         if key not in (MODULE_CARVE, MODULE_INDEX,
                                        MODULE_ACTIVITY, MODULE_NTFS,
                                        MODULE_HASHSETS, MODULE_YARA,
-                                       MODULE_PERSISTENCE)
+                                       MODULE_PERSISTENCE, MODULE_KEYWORDS)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
@@ -391,6 +414,7 @@ class AnalysisModulesDialog(QDialog):
             'hashsets': self.hash_sets_box.isChecked(),
             'yara': self.yara_box.isChecked(),
             'persistence': self.persistence_box.isChecked(),
+            'keywords': self.keywords_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),

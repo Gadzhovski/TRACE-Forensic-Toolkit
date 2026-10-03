@@ -266,6 +266,18 @@ class TriagePanel(QWidget):
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
 
+    def add_keywords_tab(self, panel):
+        """Keyword-list hits (ui/viewers/keywords_panel.py), following the
+        same image filter."""
+        self._keywords_panel = panel
+        self._tab_for['keywords'] = self.tabs.addTab(
+            panel, icons.icon(icons.KEYWORDS), "Keywords")
+        panel.count_changed.connect(
+            lambda count: self.tabs.setTabText(
+                self._tab_for['keywords'], f"Keywords ({count:,})"))
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
     def add_hash_tab(self, panel):
         """Hash-set matches (ui/viewers/hash_matches_panel.py), following
         the same image filter."""
@@ -350,9 +362,7 @@ class TriagePanel(QWidget):
         if indicators is not None:
             indicators.evidence_id = self.evidence_id
             indicators.set_case(case)
-        for extra in (getattr(self, '_ntfs_panel', None),
-                      getattr(self, '_hash_panel', None),
-                      getattr(self, '_persistence_panel', None)):
+        for extra in self._extra_panels():
             if extra is not None:
                 extra.evidence_id = self.evidence_id
                 extra.set_case(case)
@@ -386,11 +396,15 @@ class TriagePanel(QWidget):
         indicators = getattr(self, '_indicators_panel', None)
         if indicators is not None:
             indicators.set_evidence_filter(self.evidence_id)
-        for extra in (getattr(self, '_ntfs_panel', None),
-                      getattr(self, '_hash_panel', None),
-                      getattr(self, '_persistence_panel', None)):
+        for extra in self._extra_panels():
             if extra is not None:
                 extra.set_evidence_filter(self.evidence_id)
+
+    def _extra_panels(self):
+        return (getattr(self, '_ntfs_panel', None),
+                getattr(self, '_hash_panel', None),
+                getattr(self, '_persistence_panel', None),
+                getattr(self, '_keywords_panel', None))
 
     def refresh(self):
         """Redraw from what the case holds now."""

@@ -258,6 +258,29 @@ def job_yara(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_keywords(params, progress, item, should_stop):
+    """The case's keyword lists over its search index (core/keywords)."""
+    from trace_app.core import keywords
+    from trace_app.core.case import Case
+    case = None
+    try:
+        case = Case.open(params['case_folder'])
+        library = keywords.Library(params['library'])
+        try:
+            result = keywords.run_case(
+                case, library, params.get('options'),
+                params.get('evidence_ids'),
+                progress=lambda done, total, term: progress(done, total,
+                                                            term),
+                should_stop=should_stop)
+        except keywords.SearchCancelled:
+            return 0
+        item(result)
+        return result['files']
+    finally:
+        _close(case)
+
+
 def job_persistence(params, progress, item, should_stop):
     """Autostarts on one image, graded (core/persistence)."""
     from trace_app.core import hashsets, persistence
@@ -317,8 +340,9 @@ def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
     from trace_app.core import (activity, analysis, carving,  # noqa: F401
-                                hashsets, indexer, ntfs, persistence,
-                                report, timeline, yara_rules)
+                                hashsets, indexer, keywords, mailfiles,
+                                ntfs, persistence, report, timeline,
+                                yara_rules)
     import pytsk3  # noqa: F401
     progress(1, 1, 'ping', force=True)
     item({'pong': params.get('value')})
@@ -333,6 +357,7 @@ JOBS = {
     'hashsets': job_hashsets,
     'report': job_report,
     'yara': job_yara,
+    'keywords': job_keywords,
     'persistence': job_persistence,
     'carve': job_carve,
     'ping': job_ping,
