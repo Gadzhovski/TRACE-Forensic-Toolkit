@@ -13,6 +13,13 @@ SHA-256 before it is kept:
   Volume Shadow Copies
 * plaso's NTFS samples: a raw $MFT, a $UsnJrnl:$J excerpt and a QCOW2 disk
   with a change journal
+* plaso's Linux, macOS, chat and cloud-sync samples: shell histories,
+  utmp/wtmp, systemd journals, KnowledgeC, quarantine events, Skype,
+  iMessage, Android SMS, Dropbox, Google Drive and SkyDrive logs
+* python/cpython (PSF) Lib/test/test_email/data/ -- real messages
+* fox-it/dissect.thumbcache (AGPL test data) -- thumbcache_*.db from Windows
+  Vista to 11; and Thumbs.db files from Windows XP and Vista that were
+  committed by accident to ISET/isetcam, TabularEditor (MIT) and w3c/sdw
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -37,6 +44,11 @@ _EVTX = ('https://raw.githubusercontent.com/omerbenamram/evtx/'
          '47d63022caa8336ecdd0c42d335e2bb03381b00d/samples/')
 _DFVFS = ('https://raw.githubusercontent.com/log2timeline/dfvfs/'
           '917cefc9426d6ded2687d2b55164ded25b44fcb7/test_data/')
+_CPYTHON = ('https://raw.githubusercontent.com/python/cpython/'
+            'v3.12.0/Lib/test/test_email/data/')
+_DISSECT = ('https://media.githubusercontent.com/media/fox-it/'
+            'dissect.thumbcache/c73ae487161720794542c13b1170186a9a64d156/'
+            'tests/data/')
 
 #: local name -> (URL, SHA-256)
 SAMPLES = {
@@ -203,6 +215,117 @@ SAMPLES = {
     'lvm.raw': (
         _DFVFS + 'lvm.raw',
         '565f564cd35e6ee304ea810631d52223e1ee3bb61d92ff1cd035c5a25f59e43e'),
+    # Linux, macOS, chat and cloud sync: plaso's, with its expected values.
+    'bash_history': (
+        _PLASO + 'bash_history',
+        'ebba51b0ae5bc730c2623366b9de875dfc69a9c679dca00fe6b85695440a6586'),
+    'bash_history_desync': (
+        _PLASO + 'bash_history_desync',
+        '12489b934feff3b09475bbee10739ea08ad4b69b4f11142cdad62f96a910c7bf'),
+    'fish_history': (
+        _PLASO + 'fish_history',
+        '20be8371385152342d97033b2e9dac50e043291a3556f56902bc2ad92a394a79'),
+    'zsh_extended_history.txt': (
+        _PLASO + 'zsh_extended_history.txt',
+        '264daefbd5c1cdfc7bb443ab4c01be24c01021c7fcb789fd8d019065b6828ebf'),
+    'wtmp.1': (
+        _PLASO + 'utmp/wtmp.1',
+        '29e7489c71c8df699f9b34a70f7ee1e649cea2df00598f78793fcdf0fc3bb6be'),
+    'utmp_x86_64': (
+        _PLASO + 'utmp/utmp_x86_64',
+        'f847dcb2c03f3964867ac66266024d12af04af9fa2a995ddb273a48b3f04e244'),
+    'utmpx_mac': (
+        _PLASO + 'utmpx_mac',
+        'e70031efe246afed3c2e1d7b8a5cc57aa2574f2547e5977e63bf7b274437e780'),
+    'system.journal': (
+        _PLASO + 'systemd/journal/system.journal',
+        '067a624d7d46c6c1786f4244a6913147ac21d0fb0d51c9be6be004fff0629b8e'),
+    'system.journal.lz4': (
+        _PLASO + 'systemd/journal/system.journal.lz4',
+        'cac5b1a792a8bedf27aa63fb3efa5a9b00cfe729a2e85f52bc576463641c4f68'),
+    'user-1000.journal': (
+        _PLASO + 'systemd/journal/user-1000.journal',
+        '6f075962738e7886ce0e38f2aff49ec967113cc2f2cfec6d9d7fa41340d56050'),
+    'knowledgec-10.13.db': (
+        _PLASO + 'macos/knowledgec-10.13.db',
+        '03571fcce0b84296adc9f325cfc6eb4320e54cda2c325b9adc05e18c83389bb0'),
+    'knowledgec-10.14.db': (
+        _PLASO + 'macos/knowledgec-10.14.db',
+        '01fc9d0ef0b10edc557c996665b74cbfe84d3d0539faad248909dd53ec022ab5'),
+    'InstallHistory.plist': (
+        _PLASO + 'plist/InstallHistory.plist',
+        '234bd265af67660520d6083768a3ae3c92dd102a0c7214a628c8b25518b49317'),
+    'quarantine.db': (
+        _PLASO + 'sqlite/quarantine.db',
+        '88d5f209cfef106d8e532c00e1aff96275509f4e76d77372d946489d22e93ca4'),
+    'skype_main.db': (
+        _PLASO + 'sqlite/skype_main.db',
+        'fb52eae51d359b2ed060416dcf9725442fa0b495db32972529e9e75b34c533bb'),
+    'imessage_chat.db': (
+        _PLASO + 'sqlite/imessage_chat.db',
+        '2931db3b556e33728867726f5bfd56464c4c2955cbe2e795660bda2ad631127d'),
+    'mmssms.db': (
+        _PLASO + 'android/mmssms.db',
+        '0e2cadfa9d68fb1769c01ceb5d75e4dfc4872dfdde7c6db37b75e896e31e283f'),
+    'dropbox_sync_history.db': (
+        _PLASO + 'sqlite/dropbox_sync_history.db',
+        '70a8bb01fa84e07220cc1f422af5cbbc1d147ffd5d68c24aac1feddef91aa769'),
+    'gdrive_sync_log.log': (
+        _PLASO + 'gdrive_synclog/sync_log.log',
+        'a4cae0b93c699fdbab7f85b10cd1959bc4dd2f9bc744fca012513807691cb771'),
+    'skydrive.log': (
+        _PLASO + 'skydrive.log',
+        '4d8bd880453c1c9d6d4b4e9de57934db8944c33df9c14d7cf4be494b64228012'),
+    'skydrive_v1.log': (
+        _PLASO + 'skydrive_v1.log',
+        '644e15270bbeef6c05ca9790d0254e3044a1adde6dab5736194c3b7057372ef7'),
+    # Mail: CPython's email test messages (PSF licence).
+    'cpython-msg_02.eml': (
+        _CPYTHON + 'msg_02.txt',
+        '05d5e533f5e590d9ee2c7692d26dc87ccbf381f4831cca3362baf596691a55bb'),
+    'cpython-msg_07.eml': (
+        _CPYTHON + 'msg_07.txt',
+        '8358092b45c8631df6466a2e4dc23278263b2dd2ba5765e99caba47c304dd3b5'),
+    'cpython-msg_22.eml': (
+        _CPYTHON + 'msg_22.txt',
+        '4367f6ef8398e92de819ccd8e4938c819c2b24aa08f06cdcc0266bb0ec37eb08'),
+    'cpython-msg_46.eml': (
+        _CPYTHON + 'msg_46.txt',
+        'd92e941be30507b7dd5976f4223f9d01998f1e73262e900e0ed002b0f53dc4b7'),
+    'cpython-msg_47.eml': (
+        _CPYTHON + 'msg_47.txt',
+        'f43de32a9f3ec07815d8459ad8919b9a770d34122836da36401bbafbbd4acf8e'),
+    # Windows thumbnail caches: fox-it dissect.thumbcache's test data
+    # (Git LFS, so served from media.githubusercontent.com).
+    'win7-thumbcache_256.db': (
+        _DISSECT + 'windows_7/thumbcache_256.db',
+        '6de5a185d522cc5a6ebc60d5717688cfbf551ead273f7ce0a1d16d7eceff097a'),
+    'win7-thumbcache_idx.db': (
+        _DISSECT + 'windows_7/thumbcache_idx.db',
+        'dcab8d3967f8bb9bb91aa1358ba7518f427d3e60b3879a476144846c180cc01f'),
+    'vista-thumbcache_32.db': (
+        _DISSECT + 'windows_vista/thumbcache_32.db',
+        '8b07ca4e60e4493af02375fa057158dc75436422790f703e0a9f1c4acc14f22e'),
+    'win81-thumbcache_32.db': (
+        _DISSECT + 'windows_81/thumbcache_32.db',
+        '79b5642a25884d96a9dfbbbe50b521456103d74913d08bc802f5549fd3b5d3c0'),
+    'win10-thumbcache_32.db': (
+        _DISSECT + 'windows_10/thumbcache_32.db',
+        'a3db73a04399dbca54f740fd1d0720154cf86b928f76985fd6bf447d9f6e297b'),
+    'win11-thumbcache_32.db': (
+        _DISSECT + 'windows_11/thumbcache_32.db',
+        'e1f6238e5680ed3a71f66fe56b8748666ff6e31f04db3e87ef545613f42226e4'),
+    # Thumbs.db as Windows XP and Vista left them in shared folders,
+    # committed by accident to open-source projects (MIT, W3C).
+    'xp-isetcam-Thumbs.db': (
+        'https://raw.githubusercontent.com/ISET/isetcam/1199d298068facf8b18b63a416af5848dc6709a7/utility/external/fstack/books_05/Thumbs.db',
+        '73020ccee39c3fb602c3f8cafe6522e36bd9041fb69b585809b758e92c9bbdb7'),
+    'xp-tabulareditor-Thumbs.db': (
+        'https://raw.githubusercontent.com/TabularEditor/TabularEditor/0e6b40eda539ec1edbbca32311a8691dbb5c4096/TabularEditor/Resources/Thumbs.db',
+        '0a523533e683405d5f6bd5923042759d056a9d2d78d96d08c496bbb5c2d9863e'),
+    'vista-w3c-Thumbs.db': (
+        'https://raw.githubusercontent.com/w3c/sdw/349b5848108fe7bc9dfc1e489cecbbf5671c8559/UseCases/materials/3DGraphicsOnTheWeb/img/Thumbs.db',
+        '3d75c8e9d7eb7a716758b59a0e5be76392b8450422ad2ea824ba766618ac24cf'),
 }
 
 
