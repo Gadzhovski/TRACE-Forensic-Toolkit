@@ -1189,3 +1189,73 @@ def test_report_is_a_job_and_lands_in_exports(qapp, window):
     with open(written['html']['path'], encoding='utf-8') as handle:
         page = handle.read()
     assert FIRST in page and SECOND in page
+
+
+def test_timeline_histogram_controls(qapp, window):
+    """Real wheel, click and double-click events on the histogram: many
+    wheel notches out stay inside the case (once an OverflowError) and run
+    one query; a click goes to that moment without zooming; a double-click
+    zooms into the bar; Whole case comes back."""
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent, QWheelEvent
+    from trace_app.core import timeline
+    panel = window.timeline_panel
+    if not window.case._db.execute("SELECT 1 FROM fs_events").fetchone():
+        window.queue_ntfs(window.case.evidence())
+        assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    window.result_viewer.setCurrentWidget(panel)
+    panel.reset_range()
+    assert pump(qapp, 60, lambda: not panel.loading)
+    bar = panel.histogram
+    bar.resize(900, 110)
+    pump(qapp, 0.2)
+    whole = (panel.filters['start'], panel.filters['end'])
+    point = QPointF(450, 50)
+
+    def wheel(notches):
+        event = QWheelEvent(point, bar.mapToGlobal(point), QPoint(0, 0),
+                            QPoint(0, 120 * notches), Qt.NoButton,
+                            Qt.NoModifier, Qt.ScrollUpdate, False)
+        qapp.sendEvent(bar, event)
+
+    def mouse(kind, x):
+        spot = QPointF(x, 50)
+        qapp.sendEvent(bar, QMouseEvent(kind, spot, bar.mapToGlobal(spot),
+                                        Qt.LeftButton, Qt.LeftButton,
+                                        Qt.NoModifier))
+
+    generation = panel._generation
+    for _ in range(4):
+        wheel(1)                                  # in
+    assert pump(qapp, 30, lambda: panel._generation > generation
+                and not panel.loading)
+    assert panel._generation == generation + 1    # one query, not four
+    narrower = timeline.parse(panel.filters['end']) - timeline.parse(
+        panel.filters['start'])
+    assert narrower < timeline.parse(whole[1]) - timeline.parse(whole[0])
+
+    for _ in range(60):
+        wheel(-1)                                 # far out
+    assert pump(qapp, 30, lambda: not panel._wheel_timer.isActive()
+                and not panel.loading)
+    first, last = (timeline.parse(t) for t in panel.case_span())
+    assert timeline.parse(panel.filters['start']) >= first - (last - first)
+    assert timeline.parse(panel.filters['end']) <= last + (last - first)
+
+    panel.reset_range()
+    assert pump(qapp, 30, lambda: not panel.loading)
+    bar.grab()                  # paints it, laying out the bars (offscreen)
+    assert bar._bars
+    rect, bucket, _counts = bar._bars[len(bar._bars) // 2]
+    before = (panel.filters['start'], panel.filters['end'])
+    mouse(QEvent.MouseButtonPress, rect.center().x())
+    mouse(QEvent.MouseButtonRelease, rect.center().x())
+    pump(qapp, 0.3)
+    assert (panel.filters['start'], panel.filters['end']) == before
+    row = panel.current_row()
+    assert row and row['time'] >= timeline.text(timeline.bucket_start(
+        bucket))
+    mouse(QEvent.MouseButtonDblClick, rect.center().x())
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert panel.filters['start'] == timeline.text(
+        timeline.bucket_start(bucket))

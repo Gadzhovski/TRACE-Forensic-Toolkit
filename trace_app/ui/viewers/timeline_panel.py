@@ -152,11 +152,15 @@ class TimelineModel(QAbstractTableModel):
 # --- the histogram ------------------------------------------------------------------
 
 class TimelineHistogram(QWidget):
-    """Events per bucket, stacked by source; drag or click to zoom."""
+    """Events per bucket, stacked by source.
+
+    Drag across it to zoom to that span; double-click a bar to zoom into
+    it; click a bar to jump the table there without zooming; the wheel
+    zooms around the pointer."""
 
     range_selected = Signal(str, str)
-    zoom_requested = Signal(float, float)       # centre fraction, factor
-    reset_requested = Signal()
+    zoom_requested = Signal(float, float)       # pointer fraction, factor
+    time_clicked = Signal(str, str)             # a bar's start and end
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -171,7 +175,10 @@ class TimelineHistogram(QWidget):
         self.marker = None
         self._drag_from = None
         self._drag_to = None
+        self._hover = None
         self._bars = []             # (QRectF, bucket text, counts)
+        self.setCursor(Qt.CrossCursor)
+        self.setToolTip('')
 
     def set_data(self, buckets, unit, start, end):
         self.buckets, self.unit = buckets or {}, unit
@@ -270,9 +277,28 @@ class TimelineHistogram(QWidget):
             left, right = sorted((self._drag_from, self._drag_to))
             painter.fillRect(QRectF(left, plot.top(), right - left,
                                     plot.height()), band)
+            if right - left >= 4:
+                # The span the drag will zoom to, written at its ends.
+                painter.setPen(text)
+                for x, moment in ((left, self._moment(left, plot)),
+                                  (right, self._moment(right, plot))):
+                    label = self._label(moment, fine=True)
+                    w = painter.fontMetrics().horizontalAdvance(label)
+                    x = min(max(plot.left(), x - w / 2), plot.right() - w)
+                    painter.drawText(QPointF(x, plot.top() + 10), label)
+        elif self._hover is not None and plot.left() <= self._hover \
+                <= plot.right():
+            guide = QColor(text)
+            guide.setAlpha(110)
+            painter.setPen(guide)
+            painter.drawLine(QPointF(self._hover, plot.top()),
+                             QPointF(self._hover, plot.bottom()))
 
-    def _label(self, moment):
+    def _label(self, moment, fine=False):
         span = (self.end - self.start).total_seconds()
+        if fine:
+            return moment.strftime('%Y-%m-%d %H:%M:%S' if span < 2 * 86400
+                                   else '%Y-%m-%d %H:%M')
         if span > 3 * 365 * 86400:
             return moment.strftime('%Y')
         if span > 90 * 86400:
@@ -283,25 +309,47 @@ class TimelineHistogram(QWidget):
             return moment.strftime('%m-%d %H:%M')
         return moment.strftime('%H:%M:%S')
 
+    def _bar_at(self, x):
+        for rect, bucket, counts in self._bars:
+            if rect.left() - 1 <= x <= rect.right() + 1:
+                return bucket, counts
+        return None, None
+
+    def _bucket_span(self, bucket):
+        first = timeline.bucket_start(bucket)
+        return timeline.text(first), timeline.text(timeline.step(first,
+                                                                 self.unit))
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.start:
             self._drag_from = self._drag_to = event.position().x()
 
     def mouseMoveEvent(self, event):
         x = event.position().x()
+        self._hover = x
         if self._drag_from is not None:
             self._drag_to = x
             self.update()
             return
-        for rect, bucket, counts in self._bars:
-            if rect.left() <= x <= rect.right():
-                lines = [bucket] + [
-                    f"{timeline.SOURCE_LABELS[s]}: {counts[s]:,}"
-                    for s, _l, _c in timeline.SOURCES if counts.get(s)]
-                QToolTip.showText(event.globalPosition().toPoint(),
-                                  '\n'.join(lines), self)
-                return
-        QToolTip.hideText()
+        self.update()
+        if not self.start:
+            return
+        moment = self._moment(x, self._plot())
+        lines = [self._label(moment, fine=True)]
+        bucket, counts = self._bar_at(x)
+        if bucket:
+            lines = [f"{bucket}  ({sum(counts.values()):,} events)"] + [
+                f"{timeline.SOURCE_LABELS[s]}: {counts[s]:,}"
+                for s, _l, _c in timeline.SOURCES if counts.get(s)]
+            lines.append("Click: go there · double-click: zoom in")
+        lines.append("Drag: zoom to a span · wheel: zoom")
+        QToolTip.showText(event.globalPosition().toPoint(), '\n'.join(lines),
+                          self)
+
+    def leaveEvent(self, event):
+        self._hover = None
+        self.update()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if self._drag_from is None:
@@ -315,26 +363,29 @@ class TimelineHistogram(QWidget):
             self.range_selected.emit(timeline.text(first),
                                      timeline.text(last))
             return
-        for rect, bucket, _counts in self._bars:
-            if rect.left() <= left <= rect.right():
-                first = timeline.bucket_start(bucket)
-                last = timeline.step(first, self.unit)
-                self.range_selected.emit(timeline.text(first),
-                                         timeline.text(last))
-                return
+        # A click is not a zoom: it goes to that moment in the table.
+        bucket, _counts = self._bar_at(left)
+        if bucket:
+            self.time_clicked.emit(*self._bucket_span(bucket))
 
-    def mouseDoubleClickEvent(self, _event):
+    def mouseDoubleClickEvent(self, event):
         self._drag_from = self._drag_to = None
-        self.reset_requested.emit()
+        bucket, _counts = self._bar_at(event.position().x())
+        if bucket:
+            self.range_selected.emit(*self._bucket_span(bucket))
 
     def wheelEvent(self, event):
         if not self.start:
             return
+        steps = event.angleDelta().y() / 120.0
+        if not steps:
+            return
         plot = self._plot()
         fraction = min(1, max(0, (event.position().x() - plot.left())
                               / plot.width()))
-        factor = 0.5 if event.angleDelta().y() > 0 else 2.0
-        self.zoom_requested.emit(fraction, factor)
+        # 1.5x a notch; a touchpad's small steps zoom by as much less.
+        self.zoom_requested.emit(fraction, 1.5 ** (-steps))
+        event.accept()
 
 
 # --- loading -----------------------------------------------------------------------
@@ -499,6 +550,21 @@ class TimelinePanel(QWidget):
         self.back_button.setToolTip("Back to the previous range")
         self.back_button.clicked.connect(self.back)
         row.addWidget(self.back_button)
+        for glyph, tip, factor in ((icons.ZOOM_IN, "Zoom in", 0.5),
+                                   (icons.ZOOM_OUT, "Zoom out", 2.0)):
+            button = QToolButton()
+            button.setObjectName("timelineZoom")
+            button.setIcon(icons.icon(glyph))
+            button.setToolTip(f"{tip} (or the wheel over the histogram)")
+            button.clicked.connect(
+                lambda _c=False, f=factor: self._zoom(0.5, f))
+            row.addWidget(button)
+        whole = QToolButton()
+        whole.setObjectName("timelineWhole")
+        whole.setIcon(icons.icon(icons.ZOOM_ACTUAL))
+        whole.setToolTip("Whole case")
+        whole.clicked.connect(self.reset_range)
+        row.addWidget(whole)
         row.addWidget(QLabel("From"))
         self.from_edit = self._time_edit()
         row.addWidget(self.from_edit)
@@ -596,8 +662,15 @@ class TimelinePanel(QWidget):
 
         self.histogram = TimelineHistogram()
         self.histogram.range_selected.connect(self.set_range)
-        self.histogram.zoom_requested.connect(self._zoom)
-        self.histogram.reset_requested.connect(self.reset_range)
+        self.histogram.zoom_requested.connect(self._wheel_zoom)
+        self.histogram.time_clicked.connect(self.go_to_time)
+        # Wheel notches gather here and one query runs when they stop.
+        self._pending_range = None
+        self._wheel_timer = QTimer(self)
+        self._wheel_timer.setSingleShot(True)
+        self._wheel_timer.setInterval(350)
+        self._wheel_timer.timeout.connect(self._apply_pending_zoom)
+        self._case_bounds = None
         body.addWidget(self.histogram)
 
         self.model = TimelineModel(self)
@@ -730,8 +803,10 @@ class TimelinePanel(QWidget):
         self.refresh()
 
     def set_range(self, start, end, remember=True):
-        if not start or not end or start >= end:
+        safe = timeline.clamp_range(start, end)
+        if safe is None:
             return
+        start, end = safe
         if remember:
             self._history.append((self.filters.get('start'),
                                   self.filters.get('end')))
@@ -749,17 +824,53 @@ class TimelinePanel(QWidget):
         self.refresh(find_bounds=start is None)
 
     def _zoom(self, fraction, factor):
-        first = timeline.parse(self.filters.get('start'))
-        last = timeline.parse(self.filters.get('end'))
-        if not first or not last:
+        """Zoom now (the buttons)."""
+        start, end = self._pending_range or (self.filters.get('start'),
+                                             self.filters.get('end'))
+        zoomed = timeline.zoom_range(start, end, fraction, factor,
+                                     self._case_bounds)
+        if zoomed and zoomed != (self.filters.get('start'),
+                                 self.filters.get('end')):
+            self._wheel_timer.stop()
+            self._pending_range = None
+            self.set_range(*zoomed)
+
+    def _wheel_zoom(self, fraction, factor):
+        """Zoom when the wheel stops: the range moves at once in From /
+        To, the query runs once."""
+        start, end = self._pending_range or (self.filters.get('start'),
+                                             self.filters.get('end'))
+        zoomed = timeline.zoom_range(start, end, fraction, factor,
+                                     self._case_bounds)
+        if not zoomed:
             return
-        import datetime
-        span = (last - first).total_seconds()
-        centre = first + datetime.timedelta(seconds=span * fraction)
-        half = max(1, span * factor / 2)
-        start = centre - datetime.timedelta(seconds=half * fraction * 2)
-        end = start + datetime.timedelta(seconds=half * 2)
-        self.set_range(timeline.text(start), timeline.text(end))
+        self._pending_range = zoomed
+        self._show_range(*zoomed)
+        self._wheel_timer.start()
+
+    def _apply_pending_zoom(self):
+        pending, self._pending_range = self._pending_range, None
+        if pending and pending != (self.filters.get('start'),
+                                   self.filters.get('end')):
+            self.set_range(*pending)
+
+    def case_span(self):
+        """(first, last) event time of the case under these filters."""
+        return self._case_bounds or (None, None)
+
+    def go_to_time(self, start, end):
+        """Select the first listed event at or after `start`; zoom into
+        [start, end) when it is not among the rows listed."""
+        import bisect
+        times = [row['time'] for row in self.model.rows]
+        index = bisect.bisect_left(times, start)
+        if index < len(times) and times[index] < end:
+            self.table.selectRow(index)
+            self.table.scrollTo(self.model.index(index, 0),
+                                QAbstractItemView.PositionAtTop)
+            self.table.setFocus()
+            return
+        self.set_range(start, end)
 
     def _range_typed(self):
         start = self.from_edit.dateTime().toUTC().toString(
@@ -842,6 +953,8 @@ class TimelinePanel(QWidget):
         if filters.get('start') and not self.filters.get('start'):
             self.filters['start'], self.filters['end'] = \
                 filters['start'], filters['end']
+        if result.get('bounds') and result['bounds'][0]:
+            self._case_bounds = result['bounds']
         self.counts = result['counts']
         self.total = result['total']
         self.model.set_rows(result['rows'], self._names)
@@ -879,9 +992,10 @@ class TimelinePanel(QWidget):
                      f"outside the view (type a range to see them)")
         return text
 
-    def _show_range(self):
-        for edit, value in ((self.from_edit, self.filters.get('start')),
-                            (self.to_edit, self.filters.get('end'))):
+    def _show_range(self, start=None, end=None):
+        start = start or self.filters.get('start')
+        end = end or self.filters.get('end')
+        for edit, value in ((self.from_edit, start), (self.to_edit, end)):
             if value:
                 moment = QDateTime.fromString(value[:19],
                                               "yyyy-MM-dd HH:mm:ss")

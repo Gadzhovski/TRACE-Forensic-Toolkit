@@ -473,6 +473,71 @@ def text(moment):
     return moment.strftime('%Y-%m-%d %H:%M:%S') if moment else None
 
 
+#: The narrowest span a zoom goes to.
+MIN_SPAN_SECONDS = 10
+
+
+def zoom_range(start, end, fraction, factor, bounds=None,
+               minimum=MIN_SPAN_SECONDS):
+    """(start, end) texts after zooming [start, end) by `factor` (<1 in,
+    >1 out) around the point `fraction` of the way across, which stays
+    where it is. Never wider than `bounds` (the case's own first and last
+    event) and never narrower than `minimum` seconds; never outside what a
+    datetime holds. None if the range cannot be read."""
+    first, last = parse(start), parse(end)
+    if first is None or last is None or last <= first:
+        return None
+    fraction = min(1.0, max(0.0, fraction))
+    span = (last - first).total_seconds()
+    wanted = max(float(minimum), span * factor)
+    low, high = _limits(bounds)
+    if wanted >= (high - low).total_seconds():
+        return text(low), text(high)
+    pivot = first + datetime.timedelta(seconds=span * fraction)
+    new_first = pivot - datetime.timedelta(seconds=wanted * fraction)
+    new_first = max(low, min(new_first, high - datetime.timedelta(
+        seconds=wanted)))
+    return text(new_first), text(new_first + datetime.timedelta(
+        seconds=wanted))
+
+
+def clamp_range(start, end, bounds=None, minimum=MIN_SPAN_SECONDS):
+    """A typed or dragged range made safe: inside what a datetime holds,
+    at least `minimum` seconds. (Typed ranges may go outside the case's
+    bounds on purpose -- that is how a 1601 time is looked at.)"""
+    first, last = parse(start), parse(end)
+    if first is None or last is None:
+        return None
+    if last < first:
+        first, last = last, first
+    if (last - first).total_seconds() < minimum:
+        middle = first + (last - first) / 2
+        first = middle - datetime.timedelta(seconds=minimum / 2)
+        last = first + datetime.timedelta(seconds=minimum)
+    return text(first), text(last)
+
+
+def _limits(bounds):
+    """The widest a zoom may go: the case's span with a margin, or the
+    plausible years."""
+    floor_ = datetime.datetime(1601, 1, 2)
+    ceiling = datetime.datetime(9999, 12, 30)
+    first = parse(bounds[0]) if bounds and bounds[0] else None
+    last = parse(bounds[1]) if bounds and bounds[1] else None
+    if first is None or last is None:
+        first, last = parse(PLAUSIBLE_FROM), parse(plausible_until())
+    margin = max(datetime.timedelta(seconds=60), (last - first) / 50)
+    try:
+        low = max(floor_, first - margin)
+    except OverflowError:
+        low = floor_
+    try:
+        high = min(ceiling, last + margin)
+    except OverflowError:
+        high = ceiling
+    return low, high
+
+
 def around(time_text, seconds):
     """(start, end) of a window of +/- `seconds` around a time."""
     moment = parse(time_text)

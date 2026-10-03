@@ -231,3 +231,42 @@ def test_report_items_are_kept_once(built):
     assert stored['detail'] == {'source': 'usn'}
     case.remove_report_items([stored['id']])
     assert case.report_items('timeline') == []
+
+
+def test_zoom_never_overflows_and_stays_in_the_case():
+    """Zooming out again and again once ran the range past year 9999
+    (OverflowError). It stops at the case's own span, with a margin."""
+    from trace_app.core import timeline
+    bounds = ('2008-10-01 00:00:00', '2008-10-31 00:00:00')
+    start, end = '2008-10-21 00:00:00', '2008-10-22 00:00:00'
+    for _ in range(200):
+        start, end = timeline.zoom_range(start, end, 0.9, 2.0, bounds)
+    first, last = timeline.parse(start), timeline.parse(end)
+    assert first >= timeline.parse(bounds[0]) - (
+        timeline.parse(bounds[1]) - timeline.parse(bounds[0])) / 40
+    assert last <= timeline.parse(bounds[1]) + (
+        timeline.parse(bounds[1]) - timeline.parse(bounds[0])) / 40
+    # No bounds known yet, and a 1601 timestomp: still no overflow.
+    start, end = '1601-01-02 00:00:00', '1601-01-03 00:00:00'
+    for _ in range(200):
+        assert timeline.zoom_range(start, end, 0.0, 3.0) is not None
+        start, end = timeline.zoom_range(start, end, 0.0, 3.0)
+
+
+def test_zoom_in_keeps_the_pointer_and_a_minimum_span():
+    from trace_app.core import timeline
+    start, end = '2008-10-21 00:00:00', '2008-10-22 00:00:00'
+    # The point under the pointer (a quarter of the way) stays put.
+    zoomed = timeline.zoom_range(start, end, 0.25, 0.5)
+    assert zoomed == ('2008-10-21 03:00:00', '2008-10-21 15:00:00')
+    for _ in range(100):
+        zoomed = timeline.zoom_range(*zoomed, 0.5, 0.1)
+    span = timeline.parse(zoomed[1]) - timeline.parse(zoomed[0])
+    assert span.total_seconds() == timeline.MIN_SPAN_SECONDS
+    # A typed range backwards or of no width is made usable, not refused.
+    assert timeline.clamp_range('2008-10-22 00:00:00',
+                                '2008-10-21 00:00:00') == \
+        ('2008-10-21 00:00:00', '2008-10-22 00:00:00')
+    assert timeline.clamp_range('2008-10-21 00:00:00',
+                                '2008-10-21 00:00:00') == \
+        ('2008-10-20 23:59:55', '2008-10-21 00:00:05')
