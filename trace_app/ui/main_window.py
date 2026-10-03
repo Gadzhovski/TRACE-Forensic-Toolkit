@@ -655,7 +655,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # things done to the evidence, and there will be more of them.
         analysis_menu = QMenu('Analysis', self)
         self.run_analysis_action = QAction("Run Analysis Modules...", self)
-        self.run_analysis_action.triggered.connect(self.run_analysis_modules)
+        self.run_analysis_action.triggered.connect(
+            lambda: self.run_analysis_modules())
         analysis_menu.addAction(self.run_analysis_action)
 
         self.cancel_analysis_action = QAction("Cancel Running Analysis", self)

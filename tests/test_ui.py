@@ -1162,8 +1162,16 @@ def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
     panel.report_requested.emit([row])
     assert len(window.case.report_items('timeline')) == before + 1
 
+    # Through the button, as an examiner does it (the save dialog answered).
+    from trace_app.ui.viewers import timeline_panel as module
     out = str(tmp_path / 'timeline.csv')
-    panel.export_csv(out)
+    original = module.QFileDialog.getSaveFileName
+    module.QFileDialog.getSaveFileName = staticmethod(
+        lambda *a, **k: (out, 'CSV (*.csv)'))
+    try:
+        panel.export_button.click()
+    finally:
+        module.QFileDialog.getSaveFileName = original
     assert pump(qapp, 60, lambda: panel._export is None)
     with open(out, encoding='utf-8-sig', newline='') as handle:
         rows = list(csv.reader(handle))

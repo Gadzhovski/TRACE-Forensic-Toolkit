@@ -532,7 +532,7 @@ class TimelinePanel(QWidget):
         self.export_button.setObjectName("triageRunButton")
         self.export_button.setToolTip("Every event the filters select -- "
                                       "not only the rows shown")
-        self.export_button.clicked.connect(self.export_csv)
+        self.export_button.clicked.connect(lambda: self.export_csv())
         self.toolbar.addWidget(self.export_button)
         outer.addWidget(self.toolbar)
 
@@ -1157,7 +1157,9 @@ class TimelinePanel(QWidget):
     def export_csv(self, path=None):
         if self.case is None:
             return
-        if path is None:
+        # Only a real path: a button's `checked` flag once arrived here as
+        # False, and open(False) is the console.
+        if not isinstance(path, str) or not path:
             default = os.path.join(self.case.folder, 'exports',
                                    'timeline.csv')
             os.makedirs(os.path.dirname(default), exist_ok=True)
