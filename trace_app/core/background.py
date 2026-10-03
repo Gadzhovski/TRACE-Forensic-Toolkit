@@ -170,6 +170,43 @@ def job_activity(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_ntfs(params, progress, item, should_stop):
+    """$MFT times, alternate streams and the change journal (core/ntfs)."""
+    from trace_app.core import ntfs
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        return ntfs.analyse_evidence(
+            handler, case, params['evidence_id'],
+            progress=lambda done, total, path: progress(done, total, path),
+            should_stop=should_stop)
+    finally:
+        _close(case, handler)
+
+
+def job_hashsets(params, progress, item, should_stop):
+    """Match the case's digests against the examiner's hash sets
+    (core/hashsets). Reads the case and the library, never the image."""
+    from trace_app.core import hashsets
+    from trace_app.core.case import Case
+    case = None
+    try:
+        case = Case.open(params['case_folder'])
+        library = hashsets.Library(params['library'])
+        summary = hashsets.match_case(
+            case, library, params.get('options'),
+            evidence_ids=params.get('evidence_ids'),
+            progress=lambda done, total, name: progress(done, total, name),
+            should_stop=should_stop)
+        return summary['matched']
+    except hashsets.ImportCancelled:
+        return 0
+    finally:
+        _close(case)
+
+
 def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
@@ -211,7 +248,7 @@ def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
     from trace_app.core import (activity, analysis, carving,  # noqa: F401
-                                indexer)
+                                hashsets, indexer, ntfs)
     import pytsk3  # noqa: F401
     progress(1, 1, 'ping', force=True)
     item({'pong': params.get('value')})
@@ -222,6 +259,8 @@ JOBS = {
     'index': job_index,
     'analysis': job_analysis,
     'activity': job_activity,
+    'ntfs': job_ntfs,
+    'hashsets': job_hashsets,
     'carve': job_carve,
     'ping': job_ping,
 }

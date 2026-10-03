@@ -237,6 +237,36 @@ class TriagePanel(QWidget):
         panel.set_case(self.case)
         panel.set_evidence_filter(self.evidence_id)
 
+    def add_ntfs_tab(self, panel):
+        """NTFS internals (ui/viewers/ntfs_panel.py): timestomping, streams
+        and downloads, the change journal -- same image filter."""
+        self._ntfs_panel = panel
+        self._tab_for['ntfs'] = self.tabs.addTab(
+            panel, icons.icon(icons.NTFS), "NTFS")
+        panel.count_changed.connect(self._set_ntfs_count)
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
+    def add_hash_tab(self, panel):
+        """Hash-set matches (ui/viewers/hash_matches_panel.py), following
+        the same image filter."""
+        self._hash_panel = panel
+        self._tab_for['hashes'] = self.tabs.addTab(
+            panel, icons.icon(icons.HASH_SETS), "Hash sets")
+        panel.count_changed.connect(self._set_hash_count)
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
+    def _set_hash_count(self, count):
+        index = self._tab_for.get('hashes')
+        if index is not None:
+            self.tabs.setTabText(index, f"Hash sets ({count:,})")
+
+    def _set_ntfs_count(self, count):
+        index = self._tab_for.get('ntfs')
+        if index is not None:
+            self.tabs.setTabText(index, f"NTFS ({count:,})")
+
     def _set_indicator_count(self, count):
         index = self._tab_for.get('indicators')
         if index is not None:
@@ -268,7 +298,15 @@ class TriagePanel(QWidget):
     def show_group(self, name):
         """Bring a sub-tab forward by name: 'mismatch', 'entropy',
         'duplicates', 'hidden', 'photos', 'authors', 'carved', 'indicators'
-        or 'bookmarks'. Unknown names leave the current one."""
+        or 'bookmarks'; 'ntfs:timestomp', 'ntfs:streams' or 'ntfs:journal'
+        for a section of the NTFS tab. Unknown names leave the current one."""
+        if name and name.startswith('hash'):
+            name = 'hashes'
+        if name and name.startswith('ntfs'):
+            panel = getattr(self, '_ntfs_panel', None)
+            if panel is not None and ':' in name:
+                panel.show_section(name.split(':', 1)[1])
+            name = 'ntfs'
         index = self._tab_for.get(name)
         if index is not None:
             self.tabs.setCurrentIndex(index)
@@ -293,6 +331,11 @@ class TriagePanel(QWidget):
         if indicators is not None:
             indicators.evidence_id = self.evidence_id
             indicators.set_case(case)
+        for extra in (getattr(self, '_ntfs_panel', None),
+                      getattr(self, '_hash_panel', None)):
+            if extra is not None:
+                extra.evidence_id = self.evidence_id
+                extra.set_case(case)
 
     def set_evidence_filter(self, evidence_id):
         """Narrow to one image, or None for the whole case."""
@@ -323,6 +366,10 @@ class TriagePanel(QWidget):
         indicators = getattr(self, '_indicators_panel', None)
         if indicators is not None:
             indicators.set_evidence_filter(self.evidence_id)
+        for extra in (getattr(self, '_ntfs_panel', None),
+                      getattr(self, '_hash_panel', None)):
+            if extra is not None:
+                extra.set_evidence_filter(self.evidence_id)
 
     def refresh(self):
         """Redraw from what the case holds now."""

@@ -962,3 +962,156 @@ def test_a_mailbox_browses_like_an_archive(qapp, window):
         assert b'bernard.chung@apogeephysicians.com' in captured[-1]
     finally:
         window._archive_stack = []
+
+
+def test_ntfs_is_a_job_a_triage_tab_and_findings(qapp, window, truth):
+    """The NTFS module runs on the queue for every image (both are NTFS,
+    neither keeps a change journal); each file's $STANDARD_INFORMATION times
+    are The Sleuth Kit's; a finding is a Triage row and a tree leaf that
+    preview the file from its own image."""
+    import datetime
+    import json
+    from PySide6.QtCore import Qt
+    from trace_app.core.case import parse_artifact_ref
+    panel = window.ntfs_panel
+    rows = window.case.evidence()
+    ids = {name: next(r['id'] for r in rows if r['path'].endswith(name))
+           for name in (FIRST, SECOND)}
+    assert window.queue_ntfs(rows) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    first = window.case.ntfs_state(ids[FIRST])
+    assert first['status'] == 'done' and first['volumes'] == 1
+    assert first['entries'] > 30
+    second = window.case.ntfs_state(ids[SECOND])
+    assert second['status'] == 'done' and second['volumes'] == 1
+    assert first['journal'] == second['journal'] == 0
+
+    # A file's SI modified time, against an independent read.
+    finding = next(f for f in window.case.findings()
+                   if f['evidence_id'] == ids[FIRST])
+    ref = parse_artifact_ref(finding['artifact_ref'])
+    meta = truth[FIRST].get_fs_info(ref['start_offset']).open_meta(
+        inode=ref['inode']).info.meta
+    expected = datetime.datetime.fromtimestamp(
+        meta.mtime, datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    events = window.case.fs_events_for(ids[FIRST], finding['artifact_ref'])
+    modified = [e for e in events if e['source'] == 'SI'
+                and e['macb'][0] == 'M']
+    assert modified and modified[0]['time_utc'].startswith(expected)
+
+    # A suspicious finding on that file: Triage row, tree leaf, preview.
+    window.case.add_ntfs_findings(ids[FIRST], [(
+        finding['artifact_ref'], finding['name'], finding['path'],
+        finding.get('size'), 'timestomp', 'suspicious',
+        'Times set by hand', json.dumps({'standard_information': {
+            'created': '2019-01-01 00:00:00.0000000'},
+            'file_name': {'created': '2024-05-01 10:00:00.5550000'}}))])
+    window.case.commit()
+    window.refresh_analysis_views()
+    group = _findings_group(window, 'Timestomping')
+    assert group is not None and group.text(0) == 'Timestomping (1)'
+    (leaf,) = _leaves(group)
+    shown = _capture_viewer(window)
+    window.tree_viewer.itemClicked.emit(leaf, 0)
+    pump(qapp, 10, lambda: bool(shown))
+    assert shown and shown[-1] == truth[FIRST].get_fs_info(
+        ref['start_offset']).open_meta(inode=ref['inode']).read_random(
+            0, meta.size)
+
+    window.tree_viewer.itemClicked.emit(group, 0)
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert window.result_viewer.currentWidget() is window.triage_panel
+    assert window.triage_panel.tabs.currentWidget() is panel
+    assert panel.section == 'timestomp' and panel.model.rowCount() == 1
+    index = panel.proxy.index(0, 5)
+    assert panel.proxy.data(index) == '2024-05-01 10:00:00.5550000'
+    del shown[:]
+    window.current_selected_data = None
+    panel.table.clicked.emit(index)
+    pump(qapp, 10, lambda: bool(shown))
+    assert shown
+    assert window.result_viewer.currentWidget() is window.triage_panel
+
+    panel.show_section('journal')
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert panel.model.rowCount() == 0
+
+
+def test_hash_sets_hide_known_good_flag_known_bad(qapp, window,
+                                                  stubbed_dialogs):
+    """A known-bad list and a linked NSRL database: matching is a job; the
+    known-bad file is a finding (Triage, tree, a red Listing flag) and the
+    known-good ones vanish from the Listing until the option is turned off.
+    The manager dialog saves the case's options and audits the change."""
+    import sqlite3
+    from PySide6.QtCore import Qt
+    from trace_app.core import hashsets
+    from trace_app.ui.dialogs.hash_sets import HashSetsDialog
+    first_id = next(r['id'] for r in window.case.evidence()
+                    if r['path'].endswith(FIRST))
+    files = {r['name']: r for r in window.case.hashed_files(first_id)}
+    library = window.hash_library()
+    folder = os.path.dirname(library.folder)
+    bad_list = os.path.join(folder, 'bad.txt')
+    with open(bad_list, 'w') as handle:
+        handle.write(files['$Bitmap']['md5'] + '\n')
+    library.import_list(bad_list, 'Lab malware', hashsets.KNOWN_BAD)
+    database = os.path.join(folder, 'RDS.db')
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        "CREATE TABLE FILE (sha256 TEXT, sha1 TEXT, md5 TEXT, crc32 TEXT, "
+        "file_name TEXT, file_size INTEGER, package_id INTEGER);"
+        "CREATE INDEX FILE_SHA256 ON FILE(sha256);")
+    for name in ('$AttrDef', '$Boot'):
+        connection.execute("INSERT INTO FILE VALUES (?,?,?,?,?,?,?)", (
+            files[name]['sha256'].upper(), '', '', '', name, 1, 1))
+    connection.commit()
+    connection.close()
+    library.link_nsrl(database)
+
+    dialog = HashSetsDialog(window.case, library, window)
+    assert dialog.table.rowCount() == 2 and dialog.use_box.isChecked()
+    dialog.hide_box.setChecked(True)
+    dialog.save()
+    assert window.case.setting('hashsets')['hide_known_good'] is True
+    assert window.case.activity()[0]['action'] == 'hash set options changed'
+
+    assert window.queue_hash_matching()
+    assert pump(qapp, 120, lambda: not window.job_bar.busy)
+    counts = window.case.hash_match_counts(first_id)
+    assert counts == {'known-bad': 1, 'known-good': 2}
+
+    group = _findings_group(window, 'Known bad (hash sets)')
+    assert group is not None
+    assert [leaf.text(0) for leaf in _leaves(group)] == ['$Bitmap']
+    panel = window.hash_panel
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert panel.model.rowCount() == 1        # known good not listed
+    panel.known_good_box.setChecked(True)
+    assert pump(qapp, 30, lambda: not panel.loading)
+    # The whole case: the other NTFS image has the same $AttrDef and $Boot.
+    assert panel.model.rowCount() == len(window.case.hash_matches()) >= 3
+    panel.known_good_box.setChecked(False)
+
+    window.on_item_clicked(_first_volume(_root(window, FIRST)), 0)
+    pump(qapp, 0.5)
+    rows = {window.listing_table.item(r, 0).text(): r
+            for r in range(window.listing_table.rowCount())
+            if window.listing_table.item(r, 0)}
+    assert window.listing_table.isRowHidden(rows['$AttrDef'])
+    assert window.listing_table.isRowHidden(rows['$Boot'])
+    assert not window.listing_table.isRowHidden(rows['$Bitmap'])
+    assert window.listing_table.item(rows['$Bitmap'], 14).text() == \
+        'Known bad: Lab malware'
+
+    options = window.case.setting('hashsets')
+    window.case.set_setting('hashsets', dict(options, hide_known_good=False))
+    window.mark_analysis_rows()
+    assert not window.listing_table.isRowHidden(rows['$AttrDef'])
+    assert window.listing_table.item(rows['$AttrDef'], 14).text() \
+        .startswith('Known good')
+    window.case.set_setting('hashsets', dict(options, enabled=False))
+    hashsets.match_case(window.case, library,
+                        hashsets.case_options(window.case, library))
+    window.refresh_analysis_views()
+    assert _findings_group(window, 'Known bad (hash sets)') is None

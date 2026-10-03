@@ -1551,7 +1551,8 @@ QLabel#analysisModulesFooter {
 
 /* --- Triage panel ----------------------------------------------------- */
 
-QLabel#triageStatus {
+QLabel#triageStatus,
+QLabel#ntfsStatus {
     color: #B0B0B0;
 }
 

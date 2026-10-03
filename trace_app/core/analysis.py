@@ -356,6 +356,7 @@ def analyse_bytes(name, data, modules, magic=None, size=None):
 
     if MODULE_HASH in modules and data:
         result['md5'] = hashlib.md5(data).hexdigest()
+        result['sha1'] = hashlib.sha1(data).hexdigest()
         result['sha256'] = hashlib.sha256(data).hexdigest()
 
     _add_findings(result, name, data, modules,
@@ -427,6 +428,7 @@ def _analyse_stream(file_object, size, name, modules, magic):
 
     meter = Entropy() if wants_entropy else None
     md5 = hashlib.md5() if wants_hash else None
+    sha1 = hashlib.sha1() if wants_hash else None
     sha256 = hashlib.sha256() if wants_hash else None
     kept = [] if wants_content else None
 
@@ -440,6 +442,7 @@ def _analyse_stream(file_object, size, name, modules, magic):
             meter.feed(block)
         if md5 is not None:
             md5.update(block)
+            sha1.update(block)
             sha256.update(block)
         if kept is not None:
             kept.append(block)
@@ -454,6 +457,7 @@ def _analyse_stream(file_object, size, name, modules, magic):
                                                    result['entropy'])
     if md5 is not None:
         result['md5'] = md5.hexdigest()
+        result['sha1'] = sha1.hexdigest()
         result['sha256'] = sha256.hexdigest()
     _add_findings(result, name, b''.join(kept) if kept is not None else None,
                   modules, size)

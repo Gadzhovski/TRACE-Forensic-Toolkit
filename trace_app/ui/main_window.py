@@ -73,6 +73,10 @@ from trace_app.ui.viewers.case_panel import CasePanel
 from trace_app.ui.viewers.notes_panel import NotesPanel
 from trace_app.ui.viewers.activity_panel import ActivityPanel, ActivityWorker
 from trace_app.ui.viewers.indicators_panel import IndicatorsPanel, kind_label
+from trace_app.ui.viewers.ntfs_panel import NtfsPanel, NtfsWorker
+from trace_app.ui.viewers.hash_matches_panel import (HashMatchesPanel,
+                                                     HashMatchWorker)
+from trace_app.core import hashsets
 from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
 from trace_app.ui.widgets.job_bar import Job, JobBar
@@ -657,8 +661,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.find_by_hash_action.triggered.connect(self.find_by_hash)
         analysis_menu.addAction(self.find_by_hash_action)
 
+        self.match_hash_sets_action = QAction("Match Hash Sets", self)
+        self.match_hash_sets_action.triggered.connect(
+            lambda: self.queue_hash_matching())
+        analysis_menu.addAction(self.match_hash_sets_action)
+
         for action in (self.run_analysis_action, self.cancel_analysis_action,
-                       self.find_by_hash_action):
+                       self.find_by_hash_action,
+                       self.match_hash_sets_action):
             action.setEnabled(self.case is not None)
         if self.case is None:
             analysis_menu.setToolTipsVisible(True)
@@ -726,6 +736,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         verify_image_action = QAction("Verify Image", self)
         verify_image_action.triggered.connect(self.show_verify_menu)
         tools_menu.addAction(verify_image_action)
+
+        tools_menu.addSeparator()
+        hash_sets_action = QAction(icons.icon(icons.HASH_SETS), "Hash Sets...",
+                                   self)
+        hash_sets_action.triggered.connect(self.show_hash_sets)
+        tools_menu.addAction(hash_sets_action)
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
@@ -1033,6 +1049,26 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.open_search_result_menu)
         self.indicators_panel.search_requested.connect(self.search_for)
         self.triage_panel.add_indicators_tab(self.indicators_panel)
+
+        # What each NTFS volume's own records say: timestomping, streams and
+        # downloads, the change journal. Its rows are findings (or carry an
+        # artifact_ref), so they preview, open and get the menu as findings do.
+        self.ntfs_panel = NtfsPanel()
+        self.ntfs_panel.file_selected.connect(self.preview_artifact)
+        self.ntfs_panel.file_activated.connect(self.open_finding)
+        self.ntfs_panel.file_menu_requested.connect(self.open_finding_menu)
+        self.triage_panel.add_ntfs_tab(self.ntfs_panel)
+
+        # Files matching the examiner's hash sets: known bad and notable as
+        # findings, known good on request.
+        self.hash_panel = HashMatchesPanel()
+        self.hash_panel.file_selected.connect(self.preview_artifact)
+        self.hash_panel.file_activated.connect(self.open_finding)
+        self.hash_panel.file_menu_requested.connect(self.open_finding_menu)
+        self.hash_panel.manage_requested.connect(self.show_hash_sets)
+        self.hash_panel.match_requested.connect(
+            lambda: self.queue_hash_matching())
+        self.triage_panel.add_hash_tab(self.hash_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
@@ -2216,6 +2252,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         preselected = dict(self._last_choice,
                            evidence_ids=None if evidence_id is None
                            else [evidence_id])
+        # Hash sets follow the case's own options, not the last run.
+        options = hashsets.case_options(self.case, self.hash_library())
+        usable = options.get('enabled') and any(
+            hashsets.set_enabled_in(options, entry)
+            for entry in self.hash_library().sets())
+        preselected['hashsets_available'] = bool(usable)
+        preselected['hashsets'] = bool(usable and options.get('auto_match'))
         choice = choose_modules(self, preselected=preselected,
                                 evidence=evidence)
         if not choice:
@@ -2229,6 +2272,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_indexing(chosen)
         if choice.get('activity'):
             self.queue_activity(chosen)
+        if choice.get('ntfs'):
+            self.queue_ntfs(chosen)
+        if choice.get('hashsets'):
+            # Queued after the analysis jobs, so it reads their hashes.
+            self.queue_hash_matching([row['id'] for row in chosen])
         if choice['carve_types']:
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
@@ -2384,6 +2432,129 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished()
         self.refresh_analysis_views()
 
+    def queue_ntfs(self, rows):
+        """One job per image: $MFT times, streams and the change journal."""
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                logger.warning("Skipping NTFS of missing %s", row['path'])
+                continue
+            if self._queue_ntfs_job(row):
+                queued += 1
+        if queued:
+            self.set_status(f"Reading NTFS records on {queued} image(s) in "
+                            f"the background")
+        return queued
+
+    def _queue_ntfs_job(self, row):
+        evidence_id = row['id']
+        name = row.get('display_name') or os.path.basename(row['path'])
+
+        def start(job):
+            worker = NtfsWorker(row['path'], self.case.folder, evidence_id,
+                                self)
+            worker.params['unlock'] = self._unlocks_for(row['path'])
+            worker.progressed.connect(
+                lambda done, total, what: self.job_bar.report(
+                    done, total, what))
+            worker.finished_ntfs.connect(
+                lambda count, error: self._ntfs_finished(name, count, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"ntfs:{evidence_id}",
+            title=f"Reading NTFS records on {name}",
+            start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _ntfs_finished(self, name, count, error):
+        if error:
+            self.set_status(f"Reading NTFS records on {name} failed: {error}")
+            logger.error("NTFS on %s failed: %s", name, error)
+        elif count:
+            self.set_status(f"Read {count:,} MFT entries from {name}")
+        else:
+            self.set_status(f"{name} has no NTFS volume to read")
+        self.job_bar.job_finished()
+        self.refresh_analysis_views()
+
+    # --- hash sets ------------------------------------------------------
+
+    def hash_library(self):
+        library = getattr(self, '_hash_library', None)
+        if library is None:
+            library = self._hash_library = hashsets.Library()
+        return library
+
+    def show_hash_sets(self):
+        """Tools > Hash Sets: the library, and this case's options."""
+        from trace_app.ui.dialogs.hash_sets import HashSetsDialog
+        dialog = HashSetsDialog(self.case, self.hash_library(), self)
+        wanted = []
+        dialog.match_requested.connect(lambda: wanted.append(True))
+        dialog.exec()
+        if wanted:
+            self.queue_hash_matching()
+        self.refresh_analysis_views()
+
+    def queue_hash_matching(self, evidence_ids=None):
+        """Match the case (or some of its images) against its hash sets,
+        as a job on the shared queue."""
+        if not self.case:
+            return False
+        options = hashsets.case_options(self.case, self.hash_library())
+        if not options.get('enabled'):
+            message.information(
+                self, "Hash sets are off",
+                "This case does not use hash sets.",
+                "Tools \u25b8 Hash Sets imports them and switches them on.")
+            return False
+
+        def start(job):
+            worker = HashMatchWorker(self.case.folder,
+                                     self.hash_library().folder, options,
+                                     evidence_ids, self)
+            worker.progressed.connect(
+                lambda done, total, name: self.job_bar.report(
+                    done, total, name))
+            worker.finished_matching.connect(
+                lambda count, error: self._hash_matching_finished(
+                    count, error, options))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        key = 'all' if evidence_ids is None else ','.join(
+            str(e) for e in evidence_ids)
+        return self.job_bar.submit(Job(
+            key=f"hashsets:{key}", title="Matching hash sets", start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _hash_matching_finished(self, count, error, options):
+        self.job_bar.job_finished()
+        self.refresh_analysis_views()
+        if self.listing_table.rowCount():
+            self.mark_analysis_rows()
+        if error:
+            self.set_status(f"Hash set matching failed: {error}")
+            logger.error("Hash set matching failed: %s", error)
+            return
+        counts = self.case.hash_match_counts()
+        bad = counts.get(hashsets.KNOWN_BAD, 0)
+        self.set_status(
+            f"Hash sets: {bad:,} known bad, "
+            f"{counts.get(hashsets.NOTABLE, 0):,} notable, "
+            f"{counts.get(hashsets.KNOWN_GOOD, 0):,} known good file(s)")
+        if bad and options.get('alert_known_bad'):
+            message.warning(
+                self, "Known-bad files found",
+                f"{bad:,} file(s) match a known-bad hash set.",
+                "They are listed in Triage \u25b8 Hash sets and under "
+                "Findings in the tree.")
+            self.show_triage('hashes')
+
     def show_activity(self, category=None, evidence_id=None):
         """Bring the Activity tab forward on a category."""
         self.result_viewer.setCurrentWidget(self.activity_panel)
@@ -2499,8 +2670,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         evidence_id = None
         summary = self.case.analysis_summary(evidence_id)
         indicators = self._case_indicator_summary()
+        ntfs = self.case.ntfs_counts(evidence_id)
+        hashed = self.case.hash_match_counts(evidence_id)
         if not summary['analysed'] and not summary['carved'] \
-                and not indicators:
+                and not indicators and not ntfs['timestomp'] \
+                and not ntfs['streams'] \
+                and not hashed.get(hashsets.KNOWN_BAD) \
+                and not hashed.get(hashsets.NOTABLE):
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
                  for r in self.case.evidence()}
@@ -2541,6 +2717,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     if row.get('embedded_date')
                     and row['embedded_date'] != UNKNOWN_DATE else '')))
                  for row in self.case.carved_files(evidence_id)]),
+            # NTFS: times set by hand, and hidden streams and downloads.
+            # Routine rows stay in the NTFS tab.
+            ('ntfs:timestomp', 'Timestomping', icons.FINDING_TIMESTOMP,
+             ntfs['timestomp'],
+             lambda: self.case.ntfs_rows('timestomp', evidence_id)),
+            ('ntfs:streams', 'Streams and downloads', icons.FINDING_STREAM,
+             ntfs['streams'],
+             lambda: self.case.ntfs_rows('streams', evidence_id)),
+            # Hash sets: known bad first. Known good is the opposite of a
+            # finding and stays in the Hash sets tab.
+            ('hash:known-bad', 'Known bad (hash sets)', icons.HASH_SETS,
+             hashed.get(hashsets.KNOWN_BAD, 0),
+             lambda: self._one_per_file(self.case.hash_matches(
+                 evidence_id, [hashsets.KNOWN_BAD]))),
+            ('hash:notable', 'Notable (hash sets)', icons.HASH_SETS,
+             hashed.get(hashsets.NOTABLE, 0),
+             lambda: self._one_per_file(self.case.hash_matches(
+                 evidence_id, [hashsets.NOTABLE]))),
         ]
         if not any(count for _, _, _, count, _ in groups) and not indicators:
             return          # analysed, and nothing stood out: say nothing
@@ -3123,7 +3317,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         found = self.case.analysis_map(evidence_id, refs.keys())
         hidden = self.case.findings_map(evidence_id, refs.keys(), 'hidden',
                                         REPORTED_FINDING_GRADES)
+        options = hashsets.case_options(self.case)
+        matched = self.case.hash_match_map(evidence_id, refs.keys()) \
+            if options.get('enabled') else {}
+        hide_known = bool(options.get('hide_known_good'))
+        concealed_rows = 0
         for ref, row in refs.items():
+            match = (matched.get(ref) or [None])[0]
+            known_good = match is not None and \
+                match['category'] == hashsets.KNOWN_GOOD
+            self.listing_table.setRowHidden(row, known_good and hide_known)
+            concealed_rows += 1 if known_good and hide_known else 0
             facts = found.get(ref)
             if not facts:
                 continue
@@ -3155,12 +3359,27 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             elif entropy is not None and is_high_entropy(
                     entropy, facts.get('entropy_peak') or 0, mime):
                 flag, severity = 'High entropy', 'notable'
+            # A known-bad match outranks every guess above: it is a
+            # statement that this exact file is bad.
+            if match is not None and match['category'] == hashsets.KNOWN_BAD:
+                flag, severity = f"Known bad: {match['set_name']}", \
+                    'suspicious'
+                tip = (f"{match['algorithm'].upper()} {match['digest']} is "
+                       f"in {match['set_name']}")
+            elif match is not None and match['category'] == hashsets.NOTABLE \
+                    and severity != 'suspicious':
+                flag, severity = f"Hash set: {match['set_name']}", 'notable'
+                tip = (f"{match['algorithm'].upper()} {match['digest']} is "
+                       f"in {match['set_name']}")
+            elif known_good and not flag:
+                flag, severity = f"Known good: {match['set_name']}", ''
+                tip = 'In a known-good hash set'
 
             for column, value in ((12, mime),
                                   (13, f"{entropy:.2f}" if entropy else ''),
                                   (14, flag)):
                 cell = QTableWidgetItem(str(value))
-                if column == 14 and flag:
+                if column == 14 and flag and severity:
                     # The flag is the one thing here worth colouring: it is a
                     # claim that something is wrong, and it should not read
                     # like another metadata column. Theme-aware, so it stays
@@ -3179,7 +3398,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     elif not tip:
                         tip = f"Entropy {entropy:.2f} of a possible 8.00"
                     cell.setToolTip(tip)
+                elif column == 14 and flag:
+                    cell.setToolTip(tip)
                 self.listing_table.setItem(row, column, cell)
+        if concealed_rows:
+            self.set_status(f"{concealed_rows:,} known-good file(s) hidden "
+                            f"here (Tools ▸ Hash Sets)")
 
     def mark_bookmarked_rows(self):
         """Put the bookmark mark on rows that have one, in place.
@@ -3910,7 +4134,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # The search index holds a connection and may have a worker walking
         # the image; both have to stop before the handler closes under them.
-        for panel in ('search_panel', 'indicators_panel', 'activity_panel'):
+        for panel in ('search_panel', 'indicators_panel', 'activity_panel',
+                      'ntfs_panel', 'hash_panel'):
             if getattr(self, panel, None) is not None:
                 try:
                     getattr(self, panel).shutdown()
@@ -3964,7 +4189,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                       "*.001", "*.s01", "*.ex01", "*.dmg",
                                       "*.sparse", "*.sparseimage",
                                       "*.vmdk", "*.VMDK", "*.vhd", "*.VHD",
-                                      "*.vhdx", "*.VHDX"]
+                                      "*.vhdx", "*.VHDX", "*.qcow2",
+                                      "*.QCOW2", "*.qcow"]
 
         # Construct the file filter string with both uppercase and lowercase extensions
         file_filter = "Supported Image Files ({})".format(" ".join(supported_image_extensions))

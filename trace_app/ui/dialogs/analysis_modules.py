@@ -45,6 +45,14 @@ MODULE_INDEX = 'index'
 #: locations rather than every file, so it is its own, short job.
 MODULE_ACTIVITY = 'activity'
 
+#: NTFS internals (core/ntfs): reads each NTFS volume's $MFT and change
+#: journal directly, so it is a job of its own too.
+MODULE_NTFS = 'ntfs'
+
+#: Matching against the examiner's hash sets (core/hashsets): reads the
+#: digests the hash module stores, so it is queued after the analysis.
+MODULE_HASHSETS = 'hashsets'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -62,8 +70,9 @@ _DESCRIPTIONS = {
         "Slower: reads every file in full."),
     MODULE_HASH: (
         "File hashes and duplicates",
-        "MD5 and SHA-256 for every file, so the case can be searched by hash "
-        "and identical copies grouped together.",
+        "MD5, SHA-1 and SHA-256 for every file, so the case can be searched "
+        "by hash, identical copies grouped together and files matched "
+        "against hash sets.",
         "Slower: reads every file in full."),
     MODULE_HIDDEN: (
         "Hidden data",
@@ -103,6 +112,22 @@ _ACTIVITY = (
     "Fast: reads the places Windows and the browsers keep these, not every "
     "file.")
 
+_NTFS = (
+    "NTFS: $MFT times, change journal and streams",
+    "Both sets of NTFS times for every file — including deleted ones still "
+    "in the $MFT — to spot timestamps set by hand (timestomping); the "
+    "$UsnJrnl change journal, with every create, rename and delete it "
+    "recorded; alternate data streams, and where downloaded files came from "
+    "(Mark of the Web). All of it feeds the Timeline.",
+    "Fast: reads the $MFT and the journal, not every file.")
+
+_HASHSETS = (
+    "Hash sets",
+    "Match every hashed file against the hash sets this case uses — hide "
+    "known-good files (NSRL), flag known-bad and notable ones (Tools ▸ Hash "
+    "Sets chooses which).",
+    "Fast: a lookup per digest, after the hashes are taken.")
+
 _CARVING = (
     "File carving",
     "Recover deleted files whose directory entries are gone, by searching "
@@ -115,6 +140,7 @@ def default_choice(modules=None):
     """What the dialog offers before the examiner has chosen anything."""
     return {'modules': list(modules or ()), 'evidence_ids': None,
             'index': bool(modules), 'activity': bool(modules),
+            'ntfs': bool(modules), 'hashsets': False,
             'carve_types': [], 'unallocated_only': True}
 
 
@@ -199,6 +225,21 @@ class AnalysisModulesDialog(QDialog):
         self.activity_box = self._module(layout, *_ACTIVITY)
         self.activity_box.setChecked(bool(choice.get('activity')))
         self.boxes[MODULE_ACTIVITY] = self.activity_box
+
+        self.ntfs_box = self._module(layout, *_NTFS)
+        self.ntfs_box.setChecked(bool(choice.get('ntfs')))
+        self.boxes[MODULE_NTFS] = self.ntfs_box
+
+        self.hash_sets_box = self._module(layout, *_HASHSETS)
+        available = choice.get('hashsets_available', True)
+        self.hash_sets_box.setChecked(bool(choice.get('hashsets'))
+                                      and available)
+        if not available:
+            self.hash_sets_box.setEnabled(False)
+            self.hash_sets_box.setToolTip(
+                "No hash sets are in use for this case. Tools ▸ Hash Sets "
+                "imports them and switches them on.")
+        self.boxes[MODULE_HASHSETS] = self.hash_sets_box
 
         rule = QFrame()
         rule.setObjectName("analysisModulesRule")
@@ -299,11 +340,14 @@ class AnalysisModulesDialog(QDialog):
         self.choice = {
             'modules': [key for key, box in self.boxes.items()
                         if key not in (MODULE_CARVE, MODULE_INDEX,
-                                       MODULE_ACTIVITY)
+                                       MODULE_ACTIVITY, MODULE_NTFS,
+                                       MODULE_HASHSETS)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
             'activity': self.activity_box.isChecked(),
+            'ntfs': self.ntfs_box.isChecked(),
+            'hashsets': self.hash_sets_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),
@@ -317,7 +361,7 @@ def choose_modules(parent=None, preselected=None, evidence=None):
     `evidence` is [(evidence_id, name)]. The choice is a dict: `modules`
     (analysis.MODULES to run), `evidence_ids` (None for every image),
     `index` (build the search index), `activity` (read Windows activity and
-    browser history), `carve_types` (empty: no carving) and
+    browser history), `ntfs` ($MFT, change journal, streams), `carve_types` (empty: no carving) and
     `unallocated_only`.
     """
     dialog = AnalysisModulesDialog(parent, preselected, evidence)

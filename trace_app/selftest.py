@@ -98,15 +98,17 @@ def _run(report, images, sandbox):
         import pytsk3
         return f"Sleuth Kit {pytsk3.TSK_VERSION_STR}, libewf {pyewf.get_version()}"
 
-    @check('containers: VMDK, VHD/VHDX, BitLocker, shadow copies, PST')
+    @check('containers: VMDK, VHD/VHDX, QCOW, BitLocker, shadow copies, PST')
     def _():
         import pybde
         import pypff
+        import pyqcow
         import pyvhdi
         import pyvmdk
         import pyvshadow
         return ', '.join(f"{m.__name__} {m.get_version()}" for m in
-                         (pyvmdk, pyvhdi, pybde, pyvshadow, pypff))
+                         (pyvmdk, pyvhdi, pyqcow, pybde, pyvshadow,
+                          pypff))
 
     @check('libmagic identifies content')
     def _():

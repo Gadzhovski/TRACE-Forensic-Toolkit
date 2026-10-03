@@ -228,7 +228,8 @@ def open_shadow_copies(window):
 
 # --- virtual disks --------------------------------------------------------------
 
-VIRTUAL_DISK_EXTENSIONS = {'.vmdk': 'vmdk', '.vhd': 'vhdi', '.vhdx': 'vhdi'}
+VIRTUAL_DISK_EXTENSIONS = {'.vmdk': 'vmdk', '.vhd': 'vhdi', '.vhdx': 'vhdi',
+                           '.qcow2': 'qcow', '.qcow': 'qcow'}
 
 #: Deepest chain of differencing disks followed (snapshots of snapshots).
 MAX_PARENTS = 32
@@ -264,6 +265,8 @@ def open_virtual_disk(path):
         return _open_vmdk(path)
     if kind == 'vhdi':
         return _open_vhdi(path)
+    if kind == 'qcow':
+        return _open_qcow(path)
     raise ContainerError(f"{os.path.basename(path)} is not a virtual disk")
 
 
@@ -308,8 +311,50 @@ def _open_vhdi(path):
     return LibyalImgInfo(top, size, chain[1:]), note
 
 
+def _open_qcow(path):
+    import pyqcow
+    chain = []
+    current_path = path
+    try:
+        disk = pyqcow.file()
+        disk.open(current_path)
+        chain.append(disk)
+        child = disk
+        while len(chain) <= MAX_PARENTS:
+            parent_name = _parent_name(child)
+            if not parent_name:
+                break
+            parent_path = _sibling(current_path, parent_name)
+            if parent_path is None:
+                raise ContainerError(
+                    f"{os.path.basename(current_path)} is an overlay; its "
+                    f"backing file {parent_name} must be in the same folder")
+            parent = pyqcow.file()
+            parent.open(parent_path)
+            child.set_parent(parent)
+            chain.append(parent)
+            child, current_path = parent, parent_path
+    except ContainerError:
+        for disk in chain:
+            disk.close()
+        raise
+    except (IOError, OSError) as exc:
+        for disk in chain:
+            disk.close()
+        raise ContainerError(f"Could not open {os.path.basename(path)}: "
+                             f"{exc}") from exc
+    top = chain[0]
+    if top.is_locked():
+        for disk in chain:
+            disk.close()
+        raise ContainerError(f"{os.path.basename(path)} is encrypted")
+    note = 'QCOW' if len(chain) == 1 else         f'QCOW overlay ({len(chain) - 1} backing file'         f'{"s" if len(chain) > 2 else ""})'
+    return LibyalImgInfo(top, top.get_media_size(), chain[1:]), note
+
+
 def _parent_name(disk):
-    for getter in ('get_parent_filename', 'get_parent_file_name'):
+    for getter in ('get_parent_filename', 'get_parent_file_name',
+                   'get_backing_filename'):
         try:
             name = getattr(disk, getter)()
         except (AttributeError, IOError, OSError):

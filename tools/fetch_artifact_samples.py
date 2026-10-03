@@ -11,6 +11,8 @@ SHA-256 before it is kept:
   (a differencing disk and its parent), VMDK, a BitLocker To Go volume
   (password "bde-TEST", from dfvfs's own tests) and an NTFS volume with two
   Volume Shadow Copies
+* plaso's NTFS samples: a raw $MFT, a $UsnJrnl:$J excerpt and a QCOW2 disk
+  with a change journal
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -150,6 +152,17 @@ SAMPLES = {
     'vss.raw': (
         _DFVFS + 'vss.raw',
         'e633f0be5fb9ee9a07d44ba5223b786012ce89e9f0024f93d743568e6d052f16'),
+    # NTFS internals: a raw $MFT (Windows XP), a $UsnJrnl:$J excerpt, and a
+    # QCOW2 disk holding an NTFS volume with a change journal.
+    'MFT': (
+        _PLASO + 'MFT',
+        'c78f4968345b70783fbf6573d86c4bf300295ae26ddde4033dd1037b802e13c1'),
+    'UsnJrnl.raw': (
+        _PLASO + 'UsnJrnl.raw',
+        'a7a4d536b6a5e2008b070cfea1832f57ff3c99de04380285651e00f420853b6f'),
+    'usnjrnl.qcow2': (
+        _PLASO + 'usnjrnl.qcow2',
+        '1746df3a672924fac8e7456e9e005afe9e55d02eb0383929430a49637584a13d'),
 }
 
 

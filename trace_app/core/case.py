@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -295,6 +295,19 @@ class Case:
             raise ValueError(f"Not case metadata: {', '.join(sorted(unknown))}")
         self._set_many(fields)
         self._record_activity('metadata edited', ', '.join(sorted(fields)))
+
+    def setting(self, key, default=None):
+        """A case option (JSON), or `default` when it was never set."""
+        raw = self._get(f'setting:{key}')
+        if raw is None or raw == '':
+            return default
+        try:
+            return json.loads(raw)
+        except ValueError:
+            return default
+
+    def set_setting(self, key, value):
+        self._set(f'setting:{key}', json.dumps(value))
 
     def _get(self, key, default=None):
         row = self._db.execute(
@@ -843,14 +856,14 @@ class Case:
                 facts.get('mismatch'), facts.get('entropy'),
                 facts.get('entropy_peak'), facts.get('entropy_peak_offset'),
                 facts.get('md5'), facts.get('sha256'), facts.get('note'),
-                now))
+                now, facts.get('sha1')))
 
         self._db.executemany(
             "INSERT OR REPLACE INTO file_analysis "
             "(evidence_id, artifact_ref, name, path, size, is_deleted, "
             " mime, extension, mismatch, entropy, entropy_peak, "
-            " entropy_peak_offset, md5, sha256, note, analysed_utc) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", payload)
+            " entropy_peak_offset, md5, sha256, note, analysed_utc, sha1) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", payload)
 
         # Findings ride the same batch and the same commit, so a file's row
         # and what was found in it are never written apart.
@@ -872,8 +885,8 @@ class Case:
         """Drop a previous run's findings for one piece of evidence."""
         self._db.execute("DELETE FROM file_analysis WHERE evidence_id = ?",
                          (evidence_id,))
-        self._db.execute("DELETE FROM file_findings WHERE evidence_id = ?",
-                         (evidence_id,))
+        self._db.execute("DELETE FROM file_findings WHERE evidence_id = ? "
+                         "AND module != 'ntfs'", (evidence_id,))
         self._db.commit()
 
     def commit(self):
@@ -959,6 +972,158 @@ class Case:
             "SELECT * FROM user_activity_state WHERE evidence_id = ?",
             (evidence_id,)).fetchone()
         return dict(row) if row else None
+
+    # --- NTFS internals ------------------------------------------------
+
+    def clear_ntfs(self, evidence_id):
+        for table in ('fs_events', 'usn_journal'):
+            self._db.execute(f"DELETE FROM {table} WHERE evidence_id = ?",
+                             (evidence_id,))
+        self._db.execute("DELETE FROM file_findings WHERE evidence_id = ? "
+                         "AND module = 'ntfs'", (evidence_id,))
+        self._db.commit()
+
+    def add_fs_events(self, evidence_id, rows):
+        """rows: (ref, path, time, macb, source 'SI'|'FN', deleted)."""
+        self._db.executemany(
+            "INSERT INTO fs_events (evidence_id, artifact_ref, path, time_utc, "
+            "macb, source, deleted) VALUES (?,?,?,?,?,?,?)",
+            [(evidence_id,) + tuple(row) for row in rows])
+
+    def add_usn_records(self, evidence_id, rows):
+        """rows from core.ntfs.usn_row()."""
+        self._db.executemany(
+            "INSERT INTO usn_journal (evidence_id, usn, time_utc, "
+            "artifact_ref, file_entry, file_sequence, parent_entry, "
+            "parent_sequence, name, path, reasons, reason_flags, attributes) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(evidence_id,) + tuple(row) for row in rows])
+
+    def add_ntfs_findings(self, evidence_id, rows):
+        """rows: (ref, name, path, size, kind, grade, summary, detail)."""
+        now = _utc_now()
+        self._db.executemany(
+            "INSERT INTO file_findings (evidence_id, artifact_ref, name, "
+            "path, size, module, kind, grade, summary, detail, "
+            "analysed_utc) VALUES (?,?,?,?,?,'ntfs',?,?,?,?,?)",
+            [(evidence_id,) + tuple(row) + (now,) for row in rows])
+
+    def set_ntfs_state(self, evidence_id, status, volumes=0, entries=0,
+                       events=0, journal=0, last_error=None):
+        self._db.execute(
+            "INSERT OR REPLACE INTO ntfs_state (evidence_id, status, volumes, "
+            "entries, events, journal, last_error, updated_utc) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (evidence_id, status, volumes, entries, events, journal,
+             last_error, _utc_now()))
+        self._db.commit()
+        if status in ('done', 'cancelled', 'failed'):
+            self._record_activity(
+                f"ntfs analysis {status}",
+                f"evidence id={evidence_id} volumes={volumes} "
+                f"entries={entries} time events={events} journal={journal}"
+                + (f" error={last_error}" if last_error else ''))
+
+    def ntfs_state(self, evidence_id):
+        row = self._db.execute(
+            "SELECT * FROM ntfs_state WHERE evidence_id = ?",
+            (evidence_id,)).fetchone()
+        return dict(row) if row else None
+
+    def fs_events_for(self, evidence_id, artifact_ref):
+        """Both sets of times for one file, oldest first."""
+        return [dict(row) for row in self._db.execute(
+            "SELECT * FROM fs_events WHERE evidence_id = ? AND "
+            "artifact_ref = ? ORDER BY time_utc", (evidence_id, artifact_ref))]
+
+    def ntfs_counts(self, evidence_id=None):
+        return ntfs_counts(self._db, evidence_id)
+
+    def ntfs_rows(self, section, evidence_id=None, text='',
+                  include_routine=False, limit=None):
+        return query_ntfs(self._db, section, evidence_id, text,
+                          include_routine, limit)
+
+    def usn_records(self, evidence_id=None, text=None, limit=5000):
+        """Change-journal records, newest first."""
+        query = "SELECT * FROM usn_journal WHERE 1 = 1"
+        params = []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        if text:
+            query += " AND (name LIKE ? OR path LIKE ? OR reasons LIKE ?)"
+            params.extend([f'%{text}%'] * 3)
+        query += " ORDER BY time_utc DESC, usn DESC LIMIT ?"
+        params.append(limit)
+        return [dict(row) for row in self._db.execute(query, params)]
+
+    # --- hash sets ----------------------------------------------------
+
+    def hashed_files(self, evidence_id, include_carved=True):
+        """Every file with a digest: analysed files (MD5, SHA-1, SHA-256)
+        and, if asked, carved files (SHA-256), as dicts with `origin`."""
+        rows = [dict(row, origin='file') for row in self._db.execute(
+            "SELECT artifact_ref, name, path, size, md5, sha1, sha256 "
+            "FROM file_analysis WHERE evidence_id = ? AND "
+            "(md5 IS NOT NULL OR sha256 IS NOT NULL)", (evidence_id,))]
+        if include_carved:
+            rows.extend(dict(row, origin='carved', md5=None, sha1=None)
+                        for row in self._db.execute(
+                "SELECT artifact_ref, name, path, size, sha256 FROM "
+                "carved_files WHERE evidence_id = ? AND sha256 IS NOT NULL",
+                (evidence_id,)))
+        return rows
+
+    def clear_hash_matches(self, evidence_id):
+        self._db.execute("DELETE FROM hash_matches WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.commit()
+
+    def replace_hash_matches(self, evidence_id, rows):
+        """rows: (ref, name, path, size, origin, set id, set name,
+        category, algorithm, digest)."""
+        now = _utc_now()
+        self._db.execute("DELETE FROM hash_matches WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.executemany(
+            "INSERT INTO hash_matches (evidence_id, artifact_ref, name, path, "
+            "size, origin, set_id, set_name, category, algorithm, digest, "
+            "matched_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(evidence_id,) + tuple(row) + (now,) for row in rows])
+        self._db.commit()
+
+    def hash_matches(self, evidence_id=None, categories=None, text='',
+                     limit=None):
+        return query_hash_matches(self._db, evidence_id, categories, text,
+                                  limit)
+
+    def hash_match_counts(self, evidence_id=None):
+        """{category: files} -- one file in two sets counts once."""
+        where, params = '', []
+        if evidence_id is not None:
+            where, params = " WHERE evidence_id = ?", [evidence_id]
+        return {row[0]: row[1] for row in self._db.execute(
+            "SELECT category, COUNT(DISTINCT evidence_id || ':' || "
+            "artifact_ref) FROM hash_matches" + where + " GROUP BY category",
+            params)}
+
+    def hash_match_map(self, evidence_id, refs):
+        """{artifact_ref: [match, ...]} for the refs on screen, known bad
+        first."""
+        refs = list(refs)
+        found = {}
+        for start in range(0, len(refs), 500):
+            chunk = refs[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for row in self._db.execute(
+                    f"SELECT * FROM hash_matches WHERE evidence_id = ? AND "
+                    f"artifact_ref IN ({marks}) ORDER BY CASE category "
+                    f"WHEN 'known-bad' THEN 0 WHEN 'notable' THEN 1 "
+                    f"ELSE 2 END", [evidence_id] + chunk):
+                row = dict(row)
+                found.setdefault(row['artifact_ref'], []).append(row)
+        return found
 
     # --- carving -----------------------------------------------------
 
@@ -1421,6 +1586,7 @@ class Case:
                 sha256        TEXT,
                 note          TEXT,
                 analysed_utc  TEXT NOT NULL,
+                sha1          TEXT,
                 UNIQUE(evidence_id, artifact_ref)
             );
 
@@ -1568,6 +1734,86 @@ class Case:
                 last_error    TEXT,
                 updated_utc   TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS fs_events (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT NOT NULL,
+                path          TEXT,
+                time_utc      TEXT NOT NULL,
+                macb          TEXT NOT NULL,
+                source        TEXT NOT NULL,
+                deleted       INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_fs_events_time
+                ON fs_events(time_utc);
+            CREATE INDEX IF NOT EXISTS idx_fs_events_ref
+                ON fs_events(evidence_id, artifact_ref);
+
+            CREATE TABLE IF NOT EXISTS usn_journal (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                usn           INTEGER NOT NULL,
+                time_utc      TEXT NOT NULL,
+                artifact_ref  TEXT NOT NULL,
+                file_entry    INTEGER NOT NULL,
+                file_sequence INTEGER NOT NULL,
+                parent_entry  INTEGER NOT NULL,
+                parent_sequence INTEGER NOT NULL,
+                name          TEXT,
+                path          TEXT,
+                reasons       TEXT,
+                reason_flags  INTEGER NOT NULL,
+                attributes    INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_usn_time ON usn_journal(time_utc);
+            CREATE INDEX IF NOT EXISTS idx_usn_file
+                ON usn_journal(evidence_id, file_entry);
+
+            CREATE TABLE IF NOT EXISTS ntfs_state (
+                evidence_id   INTEGER PRIMARY KEY
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                status        TEXT NOT NULL,
+                volumes       INTEGER NOT NULL DEFAULT 0,
+                entries       INTEGER NOT NULL DEFAULT 0,
+                events        INTEGER NOT NULL DEFAULT 0,
+                journal       INTEGER NOT NULL DEFAULT 0,
+                last_error    TEXT,
+                updated_utc   TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS hash_matches (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT NOT NULL,
+                name          TEXT,
+                path          TEXT,
+                size          INTEGER,
+                origin        TEXT NOT NULL DEFAULT 'file',
+                set_id        TEXT NOT NULL,
+                set_name      TEXT NOT NULL,
+                category      TEXT NOT NULL,
+                algorithm     TEXT NOT NULL,
+                digest        TEXT NOT NULL,
+                matched_utc   TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hash_matches
+                ON hash_matches(evidence_id, artifact_ref);
+
+            CREATE TABLE IF NOT EXISTS report_items (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind          TEXT NOT NULL,
+                evidence_id   INTEGER
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT,
+                time_utc      TEXT,
+                title         TEXT NOT NULL,
+                detail        TEXT,
+                added_utc     TEXT NOT NULL
+            );
         """)
         self._db.commit()
         self._set('schema_version', SCHEMA_VERSION)
@@ -1592,6 +1838,17 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 10:
+            # SHA-1 joins MD5 and SHA-256, for hash sets that carry only it
+            # (NSRL's RDS keys on SHA-1). The NTFS, hash-set and report tables
+            # are created unconditionally above.
+            try:
+                self._db.execute(
+                    "ALTER TABLE file_analysis ADD COLUMN sha1 TEXT")
+            except sqlite3.OperationalError:
+                pass        # already present (created above at v10)
+            self._db.commit()
 
         if version < 9:
             # user_activity and its state are created unconditionally above;
@@ -1699,6 +1956,105 @@ def query_user_activity(connection, evidence_id=None, category=None,
         row['artifact_ref'] = row.get('source_ref')
         out.append(row)
     return out
+
+
+#: The NTFS tab's sections, by the finding kinds each lists.
+NTFS_SECTIONS = {
+    'timestomp': ('timestomp',),
+    'streams': ('ads', 'motw'),
+}
+
+
+def query_ntfs(connection, section, evidence_id=None, text='',
+               include_routine=False, limit=None):
+    """Rows for one section of the NTFS tab: 'timestomp', 'streams' (both
+    from file_findings) or 'journal' (usn_journal), newest/most serious
+    first. Routine rows -- graded benign -- only when asked for."""
+    clauses, params = [], []
+    if evidence_id is not None:
+        clauses.append("evidence_id = ?")
+        params.append(evidence_id)
+    if section == 'journal':
+        if text:
+            clauses.append("(name LIKE ? OR path LIKE ? OR reasons LIKE ?)")
+            params.extend([f'%{text}%'] * 3)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+        query = ("SELECT * FROM usn_journal" + where
+                 + " ORDER BY time_utc DESC, usn DESC")
+    else:
+        kinds = NTFS_SECTIONS[section]
+        clauses.append("module = 'ntfs'")
+        clauses.append(f"kind IN ({','.join('?' * len(kinds))})")
+        params.extend(kinds)
+        if not include_routine:
+            clauses.append("grade != 'benign'")
+        if text:
+            clauses.append("(name LIKE ? OR path LIKE ? OR summary LIKE ? "
+                           "OR detail LIKE ?)")
+            params.extend([f'%{text}%'] * 4)
+        query = ("SELECT * FROM file_findings WHERE " + " AND ".join(clauses)
+                 + " ORDER BY CASE grade WHEN 'suspicious' THEN 0 "
+                 "WHEN 'notable' THEN 1 ELSE 2 END, path")
+    if limit:
+        query += f" LIMIT {int(limit)}"
+    cursor = connection.execute(query, params)
+    names = [d[0] for d in cursor.description]
+    out = []
+    for values in cursor:
+        row = dict(zip(names, values))
+        if 'detail' in row:
+            try:
+                row['detail'] = json.loads(row.get('detail') or '{}')
+            except ValueError:
+                row['detail'] = {}
+        out.append(row)
+    return out
+
+
+def ntfs_counts(connection, evidence_id=None):
+    """{'timestomp': n, 'streams': n, 'journal': n, 'routine_timestomp': n,
+    'routine_streams': n} -- what the tab labels and the tree show."""
+    where, params = '', []
+    if evidence_id is not None:
+        where, params = " AND evidence_id = ?", [evidence_id]
+    counts = {'timestomp': 0, 'streams': 0, 'routine_timestomp': 0,
+              'routine_streams': 0}
+    for kind, grade, count in connection.execute(
+            "SELECT kind, grade, COUNT(*) FROM file_findings WHERE "
+            "module = 'ntfs'" + where + " GROUP BY kind, grade", params):
+        section = 'timestomp' if kind == 'timestomp' else 'streams'
+        key = section if grade != 'benign' else f'routine_{section}'
+        counts[key] += count
+    counts['journal'] = connection.execute(
+        "SELECT COUNT(*) FROM usn_journal" + where.replace(' AND', ' WHERE'),
+        params).fetchone()[0]
+    return counts
+
+
+def query_hash_matches(connection, evidence_id=None, categories=None,
+                       text='', limit=None):
+    """Hash-set matches, known bad first."""
+    clauses, params = [], []
+    if evidence_id is not None:
+        clauses.append("evidence_id = ?")
+        params.append(evidence_id)
+    if categories:
+        categories = list(categories)
+        clauses.append(f"category IN ({','.join('?' * len(categories))})")
+        params.extend(categories)
+    if text:
+        clauses.append("(name LIKE ? OR path LIKE ? OR set_name LIKE ? "
+                       "OR digest LIKE ?)")
+        params.extend([f'%{text}%'] * 4)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+    query = ("SELECT * FROM hash_matches" + where
+             + " ORDER BY CASE category WHEN 'known-bad' THEN 0 "
+             "WHEN 'notable' THEN 1 ELSE 2 END, set_name, path")
+    if limit:
+        query += f" LIMIT {int(limit)}"
+    cursor = connection.execute(query, params)
+    names = [d[0] for d in cursor.description]
+    return [dict(zip(names, values)) for values in cursor]
 
 
 def _decode_vt(row):
