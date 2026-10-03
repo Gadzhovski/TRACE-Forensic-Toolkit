@@ -258,6 +258,24 @@ def job_yara(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_persistence(params, progress, item, should_stop):
+    """Autostarts on one image, graded (core/persistence)."""
+    from trace_app.core import hashsets, persistence
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        library = hashsets.Library(params['hash_library']) \
+            if params.get('hash_library') else None
+        return persistence.analyse_evidence(
+            handler, case, params['evidence_id'], library,
+            progress=lambda done, total, path: progress(done, total, path),
+            should_stop=should_stop)
+    finally:
+        _close(case, handler)
+
+
 def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
@@ -299,8 +317,8 @@ def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
     from trace_app.core import (activity, analysis, carving,  # noqa: F401
-                                hashsets, indexer, ntfs, report,
-                                timeline)
+                                hashsets, indexer, ntfs, persistence,
+                                report, timeline, yara_rules)
     import pytsk3  # noqa: F401
     progress(1, 1, 'ping', force=True)
     item({'pong': params.get('value')})
@@ -315,6 +333,7 @@ JOBS = {
     'hashsets': job_hashsets,
     'report': job_report,
     'yara': job_yara,
+    'persistence': job_persistence,
     'carve': job_carve,
     'ping': job_ping,
 }

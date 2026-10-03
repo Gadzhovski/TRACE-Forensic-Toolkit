@@ -254,6 +254,18 @@ class TriagePanel(QWidget):
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
 
+    def add_persistence_tab(self, panel):
+        """Autostarts (ui/viewers/persistence_panel.py), same image
+        filter."""
+        self._persistence_panel = panel
+        self._tab_for['persistence'] = self.tabs.addTab(
+            panel, icons.icon(icons.PERSISTENCE), "Persistence")
+        panel.count_changed.connect(
+            lambda count: self.tabs.setTabText(
+                self._tab_for['persistence'], f"Persistence ({count:,})"))
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
     def add_hash_tab(self, panel):
         """Hash-set matches (ui/viewers/hash_matches_panel.py), following
         the same image filter."""
@@ -339,7 +351,8 @@ class TriagePanel(QWidget):
             indicators.evidence_id = self.evidence_id
             indicators.set_case(case)
         for extra in (getattr(self, '_ntfs_panel', None),
-                      getattr(self, '_hash_panel', None)):
+                      getattr(self, '_hash_panel', None),
+                      getattr(self, '_persistence_panel', None)):
             if extra is not None:
                 extra.evidence_id = self.evidence_id
                 extra.set_case(case)
@@ -374,7 +387,8 @@ class TriagePanel(QWidget):
         if indicators is not None:
             indicators.set_evidence_filter(self.evidence_id)
         for extra in (getattr(self, '_ntfs_panel', None),
-                      getattr(self, '_hash_panel', None)):
+                      getattr(self, '_hash_panel', None),
+                      getattr(self, '_persistence_panel', None)):
             if extra is not None:
                 extra.set_evidence_filter(self.evidence_id)
 

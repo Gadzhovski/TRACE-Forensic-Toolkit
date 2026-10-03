@@ -1321,3 +1321,34 @@ def test_yara_is_a_job_a_triage_tab_and_findings(qapp, window, tmp_path):
         'yara_reason': 'yara-x is not installed (Windows on ARM)'})
     assert not dialog.yara_box.isEnabled()
     assert 'Windows on ARM' in dialog.yara_box.toolTip()
+
+
+def test_persistence_is_a_job_and_a_triage_tab(qapp, window):
+    """Neither test image holds Windows, so the job finds nothing and the
+    tab says nothing was read; a stored suspicious entry then shows, and
+    previews the file it starts from its own image."""
+    from trace_app.core import persistence
+    panel = window.persistence_panel
+    assert window.queue_persistence(window.case.evidence()) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert 'Nothing read yet' in panel.status_label.text()
+    first = next(f for f in window.case.findings()
+                 if f['evidence_id'] == next(
+                     r['id'] for r in window.case.evidence()
+                     if r['path'].endswith(FIRST)))
+    entry = persistence._entry('Run key', 'svchost',
+                               r'C:\Users\Public\svchost.exe')
+    entry.update(target=r'C:\Users\Public\svchost.exe', exists=True,
+                 target_ref=first['artifact_ref'], signed=False)
+    entry['grade'], entry['reasons'] = persistence.grade(entry)
+    assert entry['grade'] == 'suspicious'
+    window.case.replace_persistence(first['evidence_id'], [entry])
+    panel.refresh()
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert panel.model.rowCount() == 1 and panel.count == 1
+    shown = _capture_viewer(window)
+    window.current_selected_data = None
+    panel.table.clicked.emit(panel.proxy.index(0, 0))
+    pump(qapp, 10, lambda: bool(shown))
+    assert shown

@@ -57,6 +57,10 @@ MODULE_HASHSETS = 'hashsets'
 #: job, after the analysis.
 MODULE_YARA = 'yara'
 
+#: Autostarts (core/persistence): reads the hives, tasks and Startup
+#: folders, then the files they start.
+MODULE_PERSISTENCE = 'persistence'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -134,6 +138,14 @@ _HASHSETS = (
     "Sets chooses which).",
     "Fast: a lookup per digest, after the hashes are taken.")
 
+_PERSISTENCE = (
+    "Persistence (autoruns)",
+    "Everything set to start by itself — Run keys, services and drivers, "
+    "scheduled tasks, Startup folders, Winlogon, IFEO debuggers, WMI "
+    "consumers — each graded by the file it starts: present or missing, "
+    "signed or not, in a hash set, disguised as a Windows program.",
+    "Fast: reads the hives and task files, then each started file once.")
+
 _YARA = (
     "YARA rules",
     "Scan every file and carved file with the YARA rules this case uses "
@@ -154,6 +166,7 @@ def default_choice(modules=None):
     return {'modules': list(modules or ()), 'evidence_ids': None,
             'index': bool(modules), 'activity': bool(modules),
             'ntfs': bool(modules), 'hashsets': False,
+            'persistence': bool(modules),
             'carve_types': [], 'unallocated_only': True}
 
 
@@ -253,6 +266,10 @@ class AnalysisModulesDialog(QDialog):
                 "No hash sets are in use for this case. Tools ▸ Hash Sets "
                 "imports them and switches them on.")
         self.boxes[MODULE_HASHSETS] = self.hash_sets_box
+
+        self.persistence_box = self._module(layout, *_PERSISTENCE)
+        self.persistence_box.setChecked(bool(choice.get('persistence')))
+        self.boxes[MODULE_PERSISTENCE] = self.persistence_box
 
         self.yara_box = self._module(layout, *_YARA)
         yara_ok = choice.get('yara_available', True)
@@ -364,7 +381,8 @@ class AnalysisModulesDialog(QDialog):
             'modules': [key for key, box in self.boxes.items()
                         if key not in (MODULE_CARVE, MODULE_INDEX,
                                        MODULE_ACTIVITY, MODULE_NTFS,
-                                       MODULE_HASHSETS, MODULE_YARA)
+                                       MODULE_HASHSETS, MODULE_YARA,
+                                       MODULE_PERSISTENCE)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
@@ -372,6 +390,7 @@ class AnalysisModulesDialog(QDialog):
             'ntfs': self.ntfs_box.isChecked(),
             'hashsets': self.hash_sets_box.isChecked(),
             'yara': self.yara_box.isChecked(),
+            'persistence': self.persistence_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),

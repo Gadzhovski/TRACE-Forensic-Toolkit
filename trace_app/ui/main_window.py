@@ -1188,6 +1188,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.hash_panel.match_requested.connect(
             lambda: self.queue_hash_matching())
         self.triage_panel.add_hash_tab(self.hash_panel)
+
+        # Everything set to start by itself, graded.
+        from trace_app.ui.viewers.persistence_panel import PersistencePanel
+        self.persistence_panel = PersistencePanel()
+        self.persistence_panel.file_selected.connect(self.preview_artifact)
+        self.persistence_panel.file_activated.connect(self.open_finding)
+        self.persistence_panel.file_menu_requested.connect(
+            self.open_finding_menu)
+        self.triage_panel.add_persistence_tab(self.persistence_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
@@ -2429,6 +2438,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if choice.get('hashsets'):
             # Queued after the analysis jobs, so it reads their hashes.
             self.queue_hash_matching([row['id'] for row in chosen])
+        if choice.get('persistence'):
+            # After hash matching, so the hash-set facts are current.
+            self.queue_persistence(chosen)
         if choice.get('yara'):
             self.queue_yara(chosen)
         if choice['carve_types']:
@@ -2794,6 +2806,50 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'timeline exported',
             f"rows={rows} path={path} sha256={digest.hexdigest()}")
 
+    # --- persistence ---------------------------------------------------
+
+    def queue_persistence(self, rows):
+        from trace_app.ui.viewers.persistence_panel import PersistenceWorker
+        if not self.case:
+            return 0
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                continue
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+
+            def start(job, row=row, evidence_id=evidence_id, name=name):
+                worker = PersistenceWorker(row['path'], self.case.folder,
+                                           evidence_id,
+                                           self.hash_library().folder, self)
+                worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.progressed.connect(
+                    lambda done, total, path: self.job_bar.report(
+                        done, total, os.path.basename(path)))
+                worker.finished_persistence.connect(
+                    lambda count, error: self._persistence_finished(
+                        name, count, error))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            if self.job_bar.submit(Job(
+                    key=f"persistence:{evidence_id}",
+                    title=f"Reading autostarts on {name}", start=start,
+                    stop=lambda worker: worker.stop())):
+                queued += 1
+        return queued
+
+    def _persistence_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Reading autostarts on {name} failed: {error}")
+            logger.error("Persistence on %s failed: %s", name, error)
+        else:
+            self.set_status(f"{count:,} autostart(s) read from {name}")
+        self.refresh_analysis_views()
+
     # --- YARA -------------------------------------------------------------
 
     def yara_library(self):
@@ -3072,7 +3128,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 and not ntfs['streams'] \
                 and not hashed.get(hashsets.KNOWN_BAD) \
                 and not hashed.get(hashsets.NOTABLE) \
-                and not self.case.findings(evidence_id, 'yara', limit=1):
+                and not self.case.findings(evidence_id, 'yara', limit=1) \
+                and not self.case.findings(evidence_id, 'persistence',
+                                           limit=1):
             return
         names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
                  for r in self.case.evidence()}
@@ -3123,6 +3181,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
              lambda: self.case.ntfs_rows('streams', evidence_id)),
             # Hash sets: known bad first. Known good is the opposite of a
             # finding and stays in the Hash sets tab.
+            ('persistence', 'Persistence', icons.PERSISTENCE,
+             len({(f['evidence_id'], f['artifact_ref']) for f in
+                  self.case.findings(evidence_id, 'persistence',
+                                     limit=100000)}),
+             lambda: self._one_per_file(self.case.findings(
+                 evidence_id, 'persistence', limit=100000))),
             ('yara', 'YARA matches', icons.FINDING_YARA,
              len({(f['evidence_id'], f['artifact_ref']) for f in
                   self.case.findings(evidence_id, 'yara', limit=100000)}),
@@ -4550,7 +4614,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # The search index holds a connection and may have a worker walking
         # the image; both have to stop before the handler closes under them.
         for panel in ('search_panel', 'indicators_panel', 'activity_panel',
-                      'ntfs_panel', 'hash_panel', 'timeline_panel'):
+                      'ntfs_panel', 'hash_panel', 'timeline_panel',
+                      'persistence_panel'):
             if getattr(self, panel, None) is not None:
                 try:
                     getattr(self, panel).shutdown()

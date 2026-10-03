@@ -53,6 +53,9 @@ SECTIONS = (
      "Files matching known-bad and notable hash sets."),
     ('ntfs', 'NTFS: timestomping, downloads and streams',
      "Times set by hand, Mark of the Web, alternate data streams."),
+    ('persistence', 'Persistence (autoruns)',
+     "Everything set to start by itself, the suspicious and notable first, "
+     "with the reasons."),
     ('activity', 'User activity',
      "Programs run, files opened, USB devices, logons, web history -- the "
      "newest of each kind."),
@@ -568,6 +571,27 @@ class _Builder:
               _badge(r.get('grade')), e(r.get('summary')),
               _mono(r.get('path'))] for r in hidden[:limit]], css='small'),
             len(hidden), limit))
+        return ''.join(out)
+
+    def section_persistence(self):
+        out = [self.heading(1, 'persistence',
+                            SECTION_TITLES['persistence'])]
+        rows = self.scope(self.case.persistence(None, include_benign=False))
+        routine = sum(self.case.persistence_counts(e['id']).get('benign', 0)
+                      for e in self.evidence)
+        out.append(_table(
+            ['Grade', 'Where', 'Name', 'Starts', 'Why', 'File', 'User',
+             'Evidence'],
+            [[_badge(r.get('grade')), e(r.get('location')), e(r.get('name')),
+              _mono(r.get('command')), e('; '.join(r.get('reasons') or [])),
+              e({1: 'present', 0: 'missing'}.get(r.get('target_exists'),
+                                                 '')),
+              e(r.get('user')), e(self.evidence_name(r.get('evidence_id')))]
+             for r in rows], css='small'))
+        if routine:
+            out.append(f"<p class='caption'>{routine:,} routine autostart(s) "
+                       f"-- Windows' own services and drivers, signed "
+                       f"updaters -- are not listed.</p>")
         return ''.join(out)
 
     def section_activity(self):

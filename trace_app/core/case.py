@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -1145,6 +1145,45 @@ class Case:
             ids)
         self._db.commit()
 
+    # --- persistence -------------------------------------------------
+
+    def replace_persistence(self, evidence_id, entries):
+        """Store core.persistence entries for one image, replacing any."""
+        def flag(value):
+            return None if value is None else (1 if value else 0)
+
+        def when(value):
+            return value.strftime('%Y-%m-%d %H:%M:%S') if hasattr(
+                value, 'strftime') else (value or None)
+        self._db.execute("DELETE FROM persistence WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.executemany(
+            "INSERT INTO persistence (evidence_id, location, name, command, "
+            "target, target_ref, user, time_utc, enabled, target_exists, "
+            "signed, sha256, hash_category, grade, reasons, source, "
+            "source_ref, detail) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(evidence_id, e['location'], e['name'], e['command'],
+              e.get('target'), e.get('target_ref'), e.get('user'),
+              when(e.get('when')), flag(e.get('enabled')),
+              flag(e.get('exists')), flag(e.get('signed')), e.get('sha256'),
+              e.get('hash_category'), e['grade'],
+              json.dumps(e.get('reasons') or []), e.get('source'),
+              e.get('source_ref'), json.dumps(e.get('detail') or {},
+                                              default=str))
+             for e in entries])
+        self._db.commit()
+
+    def persistence(self, evidence_id=None, include_benign=True, text=''):
+        return query_persistence(self._db, evidence_id, include_benign, text)
+
+    def persistence_counts(self, evidence_id=None):
+        where, params = '', []
+        if evidence_id is not None:
+            where, params = " WHERE evidence_id = ?", [evidence_id]
+        return {row[0]: row[1] for row in self._db.execute(
+            "SELECT grade, COUNT(*) FROM persistence" + where
+            + " GROUP BY grade", params)}
+
     # --- hash sets ----------------------------------------------------
 
     def hashed_files(self, evidence_id, include_carved=True):
@@ -1890,6 +1929,31 @@ class Case:
             CREATE INDEX IF NOT EXISTS idx_hash_matches
                 ON hash_matches(evidence_id, artifact_ref);
 
+            CREATE TABLE IF NOT EXISTS persistence (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                location      TEXT NOT NULL,
+                name          TEXT,
+                command       TEXT,
+                target        TEXT,
+                target_ref    TEXT,
+                user          TEXT,
+                time_utc      TEXT,
+                enabled       INTEGER,
+                target_exists INTEGER,
+                signed        INTEGER,
+                sha256        TEXT,
+                hash_category TEXT,
+                grade         TEXT NOT NULL,
+                reasons       TEXT,
+                source        TEXT,
+                source_ref    TEXT,
+                detail        TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_persistence
+                ON persistence(evidence_id, grade);
+
             CREATE TABLE IF NOT EXISTS report_items (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind          TEXT NOT NULL,
@@ -1925,6 +1989,10 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 11:
+            # persistence is created unconditionally above.
+            self._db.commit()
 
         if version < 10:
             # SHA-1 joins MD5 and SHA-256, for hash sets that carry only it
@@ -2116,6 +2184,40 @@ def ntfs_counts(connection, evidence_id=None):
         "SELECT COUNT(*) FROM usn_journal" + where.replace(' AND', ' WHERE'),
         params).fetchone()[0]
     return counts
+
+
+def query_persistence(connection, evidence_id=None, include_benign=True,
+                      text='', limit=None):
+    """Autostart entries, most serious first."""
+    clauses, params = [], []
+    if evidence_id is not None:
+        clauses.append("evidence_id = ?")
+        params.append(evidence_id)
+    if not include_benign:
+        clauses.append("grade != 'benign'")
+    if text:
+        clauses.append("(name LIKE ? OR command LIKE ? OR target LIKE ? "
+                       "OR location LIKE ? OR user LIKE ?)")
+        params.extend([f'%{text}%'] * 5)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+    query = ("SELECT * FROM persistence" + where
+             + " ORDER BY CASE grade WHEN 'suspicious' THEN 0 "
+             "WHEN 'notable' THEN 1 ELSE 2 END, location, name")
+    if limit:
+        query += f" LIMIT {int(limit)}"
+    cursor = connection.execute(query, params)
+    names = [d[0] for d in cursor.description]
+    out = []
+    for values in cursor:
+        row = dict(zip(names, values))
+        for key in ('reasons', 'detail'):
+            try:
+                row[key] = json.loads(row.get(key) or ('[]' if key ==
+                                                       'reasons' else '{}'))
+            except ValueError:
+                row[key] = [] if key == 'reasons' else {}
+        out.append(row)
+    return out
 
 
 def query_hash_matches(connection, evidence_id=None, categories=None,
