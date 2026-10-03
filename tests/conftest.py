@@ -67,3 +67,15 @@ def pump(app, seconds=0.2, until=None):
             return True
         time.sleep(0.01)
     return until() if until is not None else True
+
+
+def pytest_runtest_logreport(report):
+    """On GitHub Actions, each failure is also an annotation: the run's
+    summary then says which test failed and why, without its full log."""
+    if os.environ.get('GITHUB_ACTIONS') != 'true' or not report.failed:
+        return
+    text = str(report.longrepr).strip().splitlines()
+    detail = ' | '.join(line.strip() for line in text[-6:] if line.strip())
+    detail = detail.replace('%', '%25').replace('\r', '').replace('\n', ' ')
+    print(f"\n::error title={report.nodeid} ({report.when})::{detail[:900]}",
+          flush=True)
