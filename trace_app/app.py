@@ -83,7 +83,7 @@ def main():
         return 0
 
     window = MainWindow(case=None if case is TRIAGE else case)
-    window.show()
+    window.show_on_start()
 
     # Once the window is up and the case's evidence has been reopened, ask
     # what to examine. Deferred by a beat so the offer lands on a drawn

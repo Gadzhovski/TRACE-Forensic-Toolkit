@@ -15,7 +15,7 @@ import logging
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QMenu,
+                               QHeaderView, QLabel, QLineEdit, QMenu, QSizePolicy,
                                QSplitter, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -78,6 +78,9 @@ class IndicatorsPanel(QWidget):
         self.kind_combo = QComboBox()
         self.kind_combo.setObjectName("indicatorKindCombo")
         self.kind_combo.setFixedHeight(CONTROL_HEIGHT)
+        self.kind_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.kind_combo.setMinimumContentsLength(16)
         self.kind_combo.currentIndexChanged.connect(self._kind_changed)
         bar.addWidget(self.kind_combo)
 
@@ -96,7 +99,10 @@ class IndicatorsPanel(QWidget):
 
         self.status_label = QLabel()
         self.status_label.setObjectName("indicatorStatus")
-        bar.addWidget(self.status_label)
+        # Elided by the layout rather than setting the tab's minimum width.
+        self.status_label.setSizePolicy(QSizePolicy.Ignored,
+                                        QSizePolicy.Preferred)
+        bar.addWidget(self.status_label, 1)
         layout.addLayout(bar)
 
         splitter = QSplitter(Qt.Vertical)

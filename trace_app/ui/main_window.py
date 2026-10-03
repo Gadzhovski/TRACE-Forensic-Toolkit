@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 import pytsk3
 from Registry import Registry
-from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer, QUrl
+from PySide6.QtCore import QByteArray, Qt, QSize, QThread, Signal, QTimer, QUrl
 from PySide6.QtGui import (QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap,
                            QColor, QCursor, QDesktopServices)
 from PySide6.QtCharts import QChart
@@ -119,6 +119,9 @@ CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
 class MainWindow(VolumeInfoMixin, QMainWindow):
     # Class variable for icon caching
     _icon_cache = {}
+
+    #: The tree dock is never narrower than this.
+    _TREE_MIN = 200
 
     def __init__(self, case=None):
         super().__init__()
@@ -400,12 +403,97 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             table.verticalHeader().setHighlightSections(False)
 
     def showEvent(self, event):
-        """Apply the default dock proportions once, on first show."""
+        """Lay the window out once, on first show -- a beat later, when a
+        maximised window knows its final size."""
         super().showEvent(event)
         if not getattr(self, '_layout_applied', False):
             self._layout_applied = True
-            self._apply_default_layout()
             self._align_toolbars()
+            QTimer.singleShot(0, self._apply_startup_layout)
+
+    # --- window size and dock proportions --------------------------------
+
+    #: Smallest screen worth opening a window on rather than filling.
+    _MAXIMISE_BELOW = (1440, 900)
+
+    def _place_on_screen(self):
+        """Size the window from the screen it opens on: most of it, centred,
+        or all of it on a small laptop screen -- not a fixed 1200x800 that is
+        a postage stamp on 4K and too tall for 768 pixels."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
+                             DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+            self._start_maximised = False
+            return
+        area = screen.availableGeometry()
+        self._start_maximised = (area.width() < self._MAXIMISE_BELOW[0]
+                                 or area.height() < self._MAXIMISE_BELOW[1])
+        width = min(int(area.width() * 0.9), 1800)
+        height = min(int(area.height() * 0.9), 1100)
+        self.setGeometry(area.x() + (area.width() - width) // 2,
+                         area.y() + (area.height() - height) // 2,
+                         width, height)
+
+    def show_on_start(self):
+        """Show as the examiner left it, else maximised on a small screen,
+        else at the size chosen for this screen."""
+        if self._restore_saved_layout():
+            return
+        if getattr(self, '_start_maximised', False):
+            self.showMaximized()
+        else:
+            self.show()
+
+    def _restore_saved_layout(self):
+        from trace_app.infra.window_state import read_window_state
+        geometry, state = read_window_state()
+        if not geometry or not self.restoreGeometry(QByteArray(geometry)):
+            return False
+        # A window saved on a monitor that is no longer attached would open
+        # off screen: only keep it if it lands mostly on one we have.
+        frame = self.frameGeometry()
+        visible = any(
+            screen.availableGeometry().intersected(frame).width()
+            * screen.availableGeometry().intersected(frame).height()
+            > 0.5 * frame.width() * frame.height()
+            for screen in QApplication.screens())
+        if not visible:
+            self._place_on_screen()
+            return False
+        self._saved_state = state
+        self.show()
+        return True
+
+    def _apply_startup_layout(self):
+        state = getattr(self, '_saved_state', None)
+        if state and self.restoreState(QByteArray(state)) \
+                and self.tree_dock.width() >= self._TREE_MIN \
+                and self.tree_dock.isVisible():
+            return
+        self._apply_default_layout()
+
+    def save_layout(self):
+        from trace_app.infra.window_state import save_window_state
+        save_window_state(self.saveGeometry().data(), self.saveState().data())
+
+    def reset_layout(self):
+        """View > Reset Layout: the proportions a first run gets."""
+        from trace_app.infra.window_state import forget_window_state
+        forget_window_state()
+        self._saved_state = None
+        for dock in (self.tree_dock, self.viewer_dock):
+            dock.setFloating(False)
+            dock.show()
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.tree_dock)
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
+        if self.isMaximized() or self.isFullScreen():
+            self._apply_default_layout()
+            return
+        self._place_on_screen()
+        if self._start_maximised:
+            self.showMaximized()
+        QTimer.singleShot(0, self._apply_default_layout)
 
     def _align_toolbars(self):
         """Give every toolbar in the window the same control geometry.
@@ -429,11 +517,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         width = self.width() or DEFAULT_WINDOW_WIDTH
         height = self.height() or DEFAULT_WINDOW_HEIGHT
 
-        # Tree on the left: enough for a path, not a third of the window.
-        self.resizeDocks([self.tree_dock], [int(width * 0.22)], Qt.Horizontal)
+        # Tree on the left: enough for names and the Findings groups, not a
+        # third of the window.
+        tree = max(self._TREE_MIN + 40, min(380, int(width * 0.2)))
+        self.resizeDocks([self.tree_dock], [tree], Qt.Horizontal)
 
         # Utils along the bottom: tall enough to read a viewer, no more.
-        self.resizeDocks([self.viewer_dock], [int(height * 0.30)], Qt.Vertical)
+        viewer = max(200, min(360, int(height * 0.30)))
+        self.resizeDocks([self.viewer_dock], [viewer], Qt.Vertical)
 
     def _build_window(self):
         """Window title, icon, geometry and platform taskbar identity."""
@@ -452,7 +543,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # For macOS and Linux, setting the app icon at application level
             QApplication.instance().setWindowIcon(app_icon)
 
-        self.setGeometry(DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+        self._place_on_screen()
         #: What was chosen last time, so a second run does not start from
         #: nothing. Every file module, until something is chosen; carving is
         #: the slowest pass and is only run when asked for.
@@ -698,9 +789,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         view_menu.addAction(full_screen_action)
 
         # Create the "Normal Screen" action and connect it to the showNormal slot
+        reset_layout_action = QAction("Reset Layout", self)
+        reset_layout_action.setToolTip("Put the tree and the viewers back "
+                                       "where a first run has them")
+        reset_layout_action.triggered.connect(lambda: self.reset_layout())
+
         normal_screen_action = QAction("Normal Screen", self)
         normal_screen_action.triggered.connect(self.showNormal)
         view_menu.addAction(normal_screen_action)
+        view_menu.addAction(reset_layout_action)
 
         # Add a separator
         view_menu.addSeparator()
@@ -835,6 +932,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         tree_dock.setObjectName('treeDock')
 
         tree_dock.setWidget(self.tree_viewer)
+        # Never a sliver: a busy tab once squeezed it to 100 px.
+        self.tree_viewer.setMinimumWidth(self._TREE_MIN)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
         self.result_viewer = QTabWidget(self)
@@ -4256,6 +4355,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             event.ignore()
             return
 
+        self.save_layout()
         # Cleanup resources
         self.cleanup_resources()
         event.accept()

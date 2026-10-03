@@ -30,6 +30,7 @@ from trace_app.core.case import CASE_DB_NAME, query_user_activity
 from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
+from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
 
 logger = logging.getLogger('TRACE.ActivityPanel')
@@ -196,7 +197,7 @@ class ActivityPanel(QWidget):
         title = QLabel("Activity")
         title.setObjectName("panelTitle")
         self.toolbar.addWidget(title)
-        self.status_label = QLabel()
+        self.status_label = ElidedLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setSizePolicy(QSizePolicy.Expanding,
                                         QSizePolicy.Preferred)

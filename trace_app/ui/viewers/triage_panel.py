@@ -28,6 +28,7 @@ from trace_app.ui.viewers.virustotal import verdict_brush
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
+from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
 
 logger = logging.getLogger('TRACE.Triage')
@@ -109,7 +110,7 @@ class TriagePanel(QWidget):
 
         # The state of the analysis, after the title and before the button
         # that runs it, so the bar reads as one sentence.
-        self.status_label = QLabel()
+        self.status_label = ElidedLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setWordWrap(False)
         self.status_label.setSizePolicy(QSizePolicy.Expanding,

@@ -176,6 +176,9 @@ class SearchPanel(QWidget):
         self.examples = QComboBox()
         self.examples.setObjectName("searchExamples")
         self.examples.setFixedHeight(CONTROL_HEIGHT)
+        self.examples.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.examples.setMinimumContentsLength(14)
         self.examples.addItem("Search for…", '')
         for label, example in EXAMPLES:
             if not example:

@@ -1267,3 +1267,25 @@ def test_timeline_histogram_controls(qapp, window):
     assert pump(qapp, 30, lambda: not panel.loading)
     assert panel.filters['start'] == timeline.text(
         timeline.bucket_start(bucket))
+
+
+def test_no_tab_squeezes_the_tree(window):
+    """Every tab must fit beside a proper tree on a 1366-pixel laptop: the
+    Timeline's rows once demanded 2,000 px and Qt took them from the tree,
+    leaving it a sliver. The tree itself has a floor."""
+    tabs = window.result_viewer
+    for index in range(tabs.count()):
+        width = tabs.widget(index).minimumSizeHint().width()
+        assert width <= 700, (tabs.tabText(index), width)
+    assert tabs.minimumSizeHint().width() <= 720
+    assert window.tree_viewer.minimumWidth() >= window._TREE_MIN
+
+
+def test_window_layout_is_remembered(window):
+    from trace_app.infra.window_state import (forget_window_state,
+                                              read_window_state)
+    window.save_layout()
+    geometry, state = read_window_state()
+    assert geometry and state
+    forget_window_state()
+    assert read_window_state() == (None, None)

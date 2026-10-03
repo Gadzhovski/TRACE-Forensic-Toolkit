@@ -43,6 +43,8 @@ from trace_app.core import timeline
 from trace_app.core.case import CASE_DB_NAME
 from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
 from trace_app.ui import icons
+from trace_app.ui.widgets.flow_layout import FlowLayout
+from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
 
 logger = logging.getLogger('TRACE.Timeline')
@@ -510,7 +512,7 @@ class TimelinePanel(QWidget):
         title = QLabel("Timeline")
         title.setObjectName("panelTitle")
         self.toolbar.addWidget(title)
-        self.status_label = QLabel()
+        self.status_label = ElidedLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setSizePolicy(QSizePolicy.Expanding,
                                         QSizePolicy.Preferred)
@@ -541,9 +543,12 @@ class TimelinePanel(QWidget):
         body.setSpacing(4)
         outer.addLayout(body, 1)
 
-        # Range and text.
-        row = QHBoxLayout()
-        row.setSpacing(6)
+        # Range and text. Groups that wrap as wholes, so the panel never
+        # demands more width than its widest group (it once asked 2,000 px,
+        # and Qt took them from the tree).
+        controls_holder = QWidget()
+        controls = FlowLayout(controls_holder, spacing=12)
+        row = self._group(controls)
         self.back_button = QToolButton()
         self.back_button.setObjectName("timelineBack")
         self.back_button.setIcon(icons.icon(icons.BACK))
@@ -565,9 +570,11 @@ class TimelinePanel(QWidget):
         whole.setToolTip("Whole case")
         whole.clicked.connect(self.reset_range)
         row.addWidget(whole)
+        row = self._group(controls)
         row.addWidget(QLabel("From"))
         self.from_edit = self._time_edit()
         row.addWidget(self.from_edit)
+        row = self._group(controls)
         row.addWidget(QLabel("to"))
         self.to_edit = self._time_edit()
         row.addWidget(self.to_edit)
@@ -590,8 +597,11 @@ class TimelinePanel(QWidget):
                 .connect(lambda _c=False, s=seconds: self.around_selected(s))
         self.range_button.setMenu(range_menu)
         row.addWidget(self.range_button)
-        row.addStretch(1)
+        row = self._group(controls)
         self.fs_combo = QComboBox()
+        self.fs_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.fs_combo.setMinimumContentsLength(18)
         self.fs_combo.setObjectName("timelineFsCombo")
         for label, value in (("$SI and $FN times", 'both'),
                              ("$STANDARD_INFORMATION only", 'SI'),
@@ -605,7 +615,7 @@ class TimelinePanel(QWidget):
         self.text_input.setObjectName("activityFilter")
         self.text_input.setPlaceholderText("Filter…")
         self.text_input.setClearButtonEnabled(True)
-        self.text_input.setMaximumWidth(260)
+        self.text_input.setFixedWidth(220)
         self._text_timer = QTimer(self)
         self._text_timer.setSingleShot(True)
         self._text_timer.setInterval(350)
@@ -613,11 +623,11 @@ class TimelinePanel(QWidget):
         self.text_input.textChanged.connect(
             lambda _t: self._text_timer.start())
         row.addWidget(self.text_input)
-        body.addLayout(row)
+        body.addWidget(controls_holder)
 
-        # Sources and switches.
-        row = QHBoxLayout()
-        row.setSpacing(4)
+        # Sources and switches, wrapping one by one.
+        switches_holder = QWidget()
+        row = FlowLayout(switches_holder, spacing=6)
         self.source_buttons = {}
         for key, label, _colour in timeline.SOURCES:
             button = QToolButton()
@@ -630,7 +640,6 @@ class TimelinePanel(QWidget):
             button.toggled.connect(self._sources_changed)
             self.source_buttons[key] = button
             row.addWidget(button)
-        row.addSpacing(10)
         self.deleted_box = QCheckBox("Deleted only")
         self.deleted_box.setToolTip("Deleted files' $MFT times, and "
                                     "deletions in the change journal")
@@ -649,8 +658,7 @@ class TimelinePanel(QWidget):
         self.known_good_box.toggled.connect(
             lambda on: self._set_filter('hide_known_good', on))
         row.addWidget(self.known_good_box)
-        row.addStretch(1)
-        body.addLayout(row)
+        body.addWidget(switches_holder)
 
         # Pivots in force, each removable.
         self.pivot_row = QHBoxLayout()
@@ -715,8 +723,21 @@ class TimelinePanel(QWidget):
         self.set_case(None)
 
     @staticmethod
+    def _group(flow):
+        """A run of controls that wraps as one, added to `flow`."""
+        holder = QWidget()
+        layout = QHBoxLayout(holder)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        flow.addWidget(holder)
+        return layout
+
+    @staticmethod
     def _time_edit():
         edit = QDateTimeEdit()
+        # As wide as a time and its buttons, not the style's default.
+        edit.setFixedWidth(edit.fontMetrics().horizontalAdvance(
+            '8888-88-88 88:88:88') + 52)
         edit.setObjectName("timelineTimeEdit")
         edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         edit.setTimeZone(QTimeZone.utc())
