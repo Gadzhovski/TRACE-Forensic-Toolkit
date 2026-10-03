@@ -90,7 +90,11 @@ One pass over every file, whichever modules are chosen:
 
 - **File type** from content — flags an executable named `.jpg`
 - **Entropy** (mean and peak) — packed or encrypted data
-- **Hashes and duplicates** — MD5 / SHA-256, copies across devices
+- **Hashes and duplicates** — MD5 / SHA-1 / SHA-256, copies across devices
+- **Hash sets** — known good (NSRL) hidden, known bad and notable flagged
+  (below)
+- **NTFS internals** — both sets of $MFT times, the change journal, streams
+  and downloads (below)
 - **Hidden data** — `invoice.pdf.exe`, reversed-text names, data appended after
   the end of a JPEG / PNG / PDF, password-protected archives / Office / PDFs,
   and files that look like encrypted (VeraCrypt-style) volumes
@@ -165,6 +169,86 @@ database the **carver** recovered is read the same way, marked as carved.
 
 Activity sits in its own tab with a sub-tab per category and an **All** view
 in time order, filtered by image or text, and under **Activity** in the tree.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🕒 Timeline
+
+One timeline of the whole case: **$MFT times** ($STANDARD_INFORMATION and
+$FILE_NAME, MACB), the **$UsnJrnl change journal**, every **activity**
+record, **photo** capture times, **document** created/saved dates, dates
+inside **carved** files, and the examination itself (audit, verification,
+bookmarks, notes).
+
+- A **histogram** of events per bucket, stacked by source — drag across it or
+  click a bar to zoom, wheel to zoom around the pointer, Back to undo
+- Filters: time range (UTC), sources with their counts, image, text,
+  deleted only, timestomped only, known-good files hidden, $SI / $FN times
+- **Pivots** from any event: ± a minute to a week around it, every event of
+  the same file, the same user, the same folder
+- A detail pane with both NTFS time sets side by side and what Triage found
+- Click previews the file without leaving the tab; double-click goes to it
+- **CSV export** (audited, with its SHA-256), saved views, *Add to Report*
+- Times without a zone (EXIF, local-time documents) are marked, not guessed
+
+</td>
+<td width="50%" valign="top">
+
+### 📄 Case report
+
+**Case ▸ Create Report** writes a professional report as **HTML** (one
+self-contained file, no scripts, nothing fetched) and/or **PDF** (A4,
+contents with page numbers, clickable cross-references, PDF outline, running
+header with your classification, "Page n of m" footer).
+
+- Details: title, case number, examiner, organisation, classification,
+  logo, your summary and conclusions
+- Thirteen sections, each optional and reorderable: case summary, evidence
+  with hashes and every verification, bookmarks with notes and **pictures
+  read from the image** (scaled, never cropped), findings by grade, hash-set
+  matches, timestomping and downloads, activity, timeline (picked events
+  and/or a range), carved files, indicators, VirusTotal, methods and tool
+  versions, and the audit trail
+- Remembered per case; templates carry the choices to other cases
+- Every value from evidence is escaped, and each report's **SHA-256 goes
+  into the audit trail**
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+### 🧬 NTFS internals
+
+Each NTFS volume's **$MFT** is read raw — including deleted entries — for
+both sets of times. **Timestomping** is graded, not guessed: earlier-than-
+$FILE_NAME alone is what installers do (kept as routine); whole-second times
+where NTFS wrote fractions are notable; both together, suspicious.
+
+The **$UsnJrnl:$J change journal** — every create, write, rename and delete
+it kept, often months back and for files long gone — with paths rebuilt from
+the MFT. **Alternate data streams** are listed (a program hidden in one is
+suspicious), and **Mark of the Web** says where downloaded files came from.
+Triage ▸ NTFS, Findings in the tree, and the Timeline.
+
+</td>
+<td width="50%" valign="top">
+
+### 🧾 Hash sets
+
+**Tools ▸ Hash Sets** keeps your library — import text or CSV lists
+(VirusShare, md5sum output, NSRL 2.x `NSRLFile.txt`, a colleague's list) or
+**link an NSRL RDS v3 database in place**, read-only. Each set is *known
+good*, *known bad* or *notable*.
+
+Every case chooses for itself: hash sets on or off, which sets, which
+algorithms (MD5 / SHA-1 / SHA-256), whether known-good files are hidden from
+the Listing and the Timeline, whether a known-bad match warns, whether
+matching follows hashing. Matches are a Triage tab, Findings groups and the
+Listing's Flag column; imports, option changes and runs are audited.
 
 </td>
 </tr>
@@ -348,6 +432,7 @@ does not match.
 <tr><td>AccessData</td><td><code>.ad1</code></td><td>Read as raw</td></tr>
 <tr><td>VMware virtual disk</td><td><code>.vmdk</code></td><td>Flat and sparse extents; a snapshot reads through its parents</td></tr>
 <tr><td>Hyper-V / Virtual PC</td><td><code>.vhdx</code> <code>.vhd</code></td><td>Fixed, dynamic and differencing (parents chained from the same folder)</td></tr>
+<tr><td>QEMU</td><td><code>.qcow2</code> <code>.qcow</code></td><td>Overlays read through their backing files</td></tr>
 </table>
 
 File system support comes from The Sleuth Kit — NTFS, FAT12/16/32, exFAT,
@@ -537,8 +622,17 @@ python -m pytest                    # image handling, core logic, the UI
   in, and a test runs that check under a foreign time zone.
 - **The UI** — the real window, run headlessly on a two-device case: browsing,
   Triage, previews from the right image, the Application tab's formats
-  (including offline HTML that is proven to make no network request), and
-  VirusTotal against a faked network.
+  (including offline HTML that is proven to make no network request),
+  VirusTotal against a faked network, the Timeline, hash sets and the report
+  job.
+- **NTFS internals** — plaso's $MFT, $UsnJrnl and QCOW2 samples give plaso's
+  own expected values (31,642 MFT events = TRACE's SI + FN + plaso's 72
+  object IDs; the journal's first record to the 100 ns), and every path was
+  checked against libfsntfs.
+- **Reports** — written from a real image with hostile file names (escaped,
+  nothing fetched), the bookmarked photo's picture read from the image, the
+  PDF reopened for its outline, contents page numbers and footer, and each
+  file's SHA-256 matched to its audit line.
 
 Only public images are used, downloaded from their publishers and verified
 against recorded SHA-256s; no evidence is stored in the repository.

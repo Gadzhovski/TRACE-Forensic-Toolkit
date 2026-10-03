@@ -215,7 +215,10 @@ omerbenamram/evtx's samples (MIT / Apache 2.0), pinned to a commit and checked
 by SHA-256. The same tool fetches dfvfs's container images (Apache 2.0): a
 dynamic VHD, a differencing VHDX with its parent, a VMDK, a BitLocker To Go
 volume (password `bde-TEST`, as in dfvfs's own tests) and an NTFS volume with
-two Volume Shadow Copies. `nps-2009-domexusers.E01` (Digital Corpora, 4.4 GB, a multi-user
+two Volume Shadow Copies; and plaso's NTFS samples -- a raw Windows XP
+`$MFT`, a `$UsnJrnl:$J` excerpt and `usnjrnl.qcow2`, a QCOW2 disk holding an
+NTFS volume and its change journal (the NTFS, timeline and QCOW tests).
+`nps-2009-domexusers.E01` (Digital Corpora, 4.4 GB, a multi-user
 Windows XP machine) is used by a local end-to-end test when present.
 
 ## Re-downloading

@@ -207,6 +207,35 @@ def job_hashsets(params, progress, item, should_stop):
         _close(case)
 
 
+def job_report(params, progress, item, should_stop):
+    """Write the case report (core/report). The images are opened only
+    for the pictures in it: bookmarked photos, carved pictures."""
+    from trace_app.core import report
+    from trace_app.core.case import Case
+    case = None
+    images = {}
+    try:
+        case = Case.open(params['case_folder'])
+        for evidence_id, path, unlock in params.get('images') or ():
+            try:
+                images[evidence_id] = _open_image(path, unlock)
+            except Exception as exc:
+                logger.warning("No pictures from %s: %s", path, exc)
+        try:
+            written = report.write_report(
+                case, params['options'], images,
+                progress=lambda done, total, what: progress(done, total,
+                                                            what),
+                should_stop=should_stop)
+        except report.ReportCancelled:
+            return 0
+        for entry in written:
+            item(entry)
+        return len(written)
+    finally:
+        _close(case, *images.values())
+
+
 def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
@@ -248,7 +277,8 @@ def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
     from trace_app.core import (activity, analysis, carving,  # noqa: F401
-                                hashsets, indexer, ntfs)
+                                hashsets, indexer, ntfs, report,
+                                timeline)
     import pytsk3  # noqa: F401
     progress(1, 1, 'ping', force=True)
     item({'pong': params.get('value')})
@@ -261,6 +291,7 @@ JOBS = {
     'activity': job_activity,
     'ntfs': job_ntfs,
     'hashsets': job_hashsets,
+    'report': job_report,
     'carve': job_carve,
     'ping': job_ping,
 }

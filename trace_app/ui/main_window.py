@@ -77,6 +77,7 @@ from trace_app.ui.viewers.ntfs_panel import NtfsPanel, NtfsWorker
 from trace_app.ui.viewers.hash_matches_panel import (HashMatchesPanel,
                                                      HashMatchWorker)
 from trace_app.core import hashsets
+from trace_app.ui.viewers.timeline_panel import TimelinePanel
 from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
 from trace_app.ui.widgets.job_bar import Job, JobBar
@@ -628,6 +629,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.verify_case_action.triggered.connect(self.verify_case_evidence)
         case_menu.addAction(self.verify_case_action)
 
+        self.create_report_action = QAction(icons.icon(icons.REPORT),
+                                            "Create Report...", self)
+        self.create_report_action.triggered.connect(self.create_report)
+        case_menu.addAction(self.create_report_action)
+
         case_menu.addSeparator()
         open_folder_action = QAction("Open Case Folder", self)
         open_folder_action.triggered.connect(self.open_case_folder)
@@ -635,6 +641,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.open_case_folder_action = open_folder_action
 
         for action in (self.case_properties_action, self.verify_case_action,
+                       self.create_report_action,
                        self.open_case_folder_action):
             action.setEnabled(self.case is not None)
         if self.case is None:
@@ -1082,6 +1089,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.activity_panel.set_case(self.case)
         self.result_viewer.addTab(self.activity_panel, 'Activity')
 
+        # Everything with a time, in one order: NTFS times and journal,
+        # activity, photo and document dates, carved files' own dates, and
+        # the examination itself. Reviewed like Triage: a click previews.
+        self.timeline_panel = TimelinePanel()
+        self.timeline_panel.row_selected.connect(self.preview_artifact)
+        self.timeline_panel.row_activated.connect(self.open_finding)
+        self.timeline_panel.report_requested.connect(
+            self.add_timeline_to_report)
+        self.timeline_panel.exported.connect(self._timeline_exported)
+        self.timeline_panel.menu_extender = self._timeline_menu_extras
+        self.timeline_panel.detail_extender = self._timeline_detail
+        self.timeline_panel.set_case(self.case)
+        self.result_viewer.addTab(self.timeline_panel, 'Timeline')
+
     def _build_viewer_dock(self):
         """Bottom "Utils" dock holding the viewer tabs."""
         self.viewer_tab = QTabWidget(self)
@@ -1203,6 +1224,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             QApplication.instance().setStyleSheet(self._resolve_qss_urls(stylesheet))
         except Exception as e:
             logger.error(f"Error loading stylesheet {qss_file}: {e}")
+
+        # A tab bar keeps the tab widths it measured under the old theme;
+        # the light theme's tabs are wider, and the bars scrolled with room
+        # to spare. Setting the icon size again makes each one measure anew.
+        for bar in self.findChildren(QTabBar):
+            bar.setIconSize(bar.iconSize())
+            bar.updateGeometry()
 
         # Remembered, so the next launch -- including its launcher -- opens in
         # the theme the examiner actually chose.
@@ -2480,6 +2508,161 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished()
         self.refresh_analysis_views()
 
+    # --- the report -----------------------------------------------------
+
+    def create_report(self):
+        """Case > Create Report: ask, then write it as a job."""
+        if not self.case:
+            message.information(self, "No case is open",
+                                "A report is made from a case.")
+            return False
+        from trace_app.ui.dialogs.report import ReportDialog
+        dialog = ReportDialog(self.case, self)
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        return self.queue_report(dialog.options)
+
+    def queue_report(self, options):
+        from trace_app.ui.dialogs.report import ReportWorker
+        chosen = options.get('evidence_ids')
+        images = [(row['id'], row['path'], self._unlocks_for(row['path']))
+                  for row in self.case.evidence()
+                  if (chosen is None or row['id'] in chosen)
+                  and os.path.exists(row['path'])]
+        written = []
+
+        def start(job):
+            worker = ReportWorker(self.case.folder, options, images, self)
+            worker.progressed.connect(
+                lambda done, total, what: self.job_bar.report(done, total,
+                                                              what))
+            worker.item_written.connect(written.append)
+            worker.finished_report.connect(
+                lambda count, error: self._report_finished(written, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key='report', title="Creating the report", start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _report_finished(self, written, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"The report failed: {error}")
+            message.warning(self, "Report not created",
+                            "The report could not be written.", error)
+            return
+        if not written:
+            self.set_status("Report cancelled")
+            return
+        self.set_status("Report written to " + ', '.join(
+            os.path.basename(item['path']) for item in written))
+        self.last_report = written
+        if getattr(self, '_report_dialogs', True):
+            from trace_app.ui.dialogs.report import ReportDoneDialog
+            ReportDoneDialog(written, self).exec()
+
+    # --- the timeline ---------------------------------------------------
+
+    def show_in_timeline(self, artifact):
+        """Every event of one file, on the Timeline tab."""
+        self.timeline_panel.show_file(artifact.get('evidence_id'),
+                                      artifact.get('artifact_ref'),
+                                      artifact.get('name') or '')
+        self.result_viewer.setCurrentWidget(self.timeline_panel)
+
+    def _timeline_menu_extras(self, menu, payload):
+        """Show in Listing, bookmark and VirusTotal for an event's file."""
+        menu.addAction("Show in Listing").triggered.connect(
+            lambda: self.open_finding(payload))
+        if not self.activate_evidence(payload.get('evidence_id')):
+            return
+        parsed = parse_artifact_ref(payload.get('artifact_ref'))
+        if parsed['kind'] == 'file':
+            data = {'inode_number': parsed['inode'],
+                    'start_offset': parsed['start_offset'],
+                    'sequence': parsed['sequence'],
+                    'name': payload.get('name') or '',
+                    'path': payload.get('path') or ''}
+            self.add_bookmark_action(menu, data)
+            self.add_virustotal_menu(menu, [data])
+
+    def _timeline_detail(self, row):
+        """For an event on a file: both sets of NTFS times, and what
+        Triage found about the file."""
+        import html as _html
+        if not self.case or not row.get('artifact_ref') \
+                or row.get('evidence_id') is None \
+                or row['source'] == 'activity':
+            return ''
+        e = _html.escape
+        parts = []
+        events = self.case.fs_events_for(row['evidence_id'],
+                                         row['artifact_ref'])
+        if events:
+            parts.append("<h4>NTFS times of this file</h4><table "
+                         "cellspacing='2'><tr><th></th><th>$SI</th>"
+                         "<th>$FN</th></tr>")
+            sets = {'SI': {}, 'FN': {}}
+            for event in events:
+                for letter in event['macb'].replace('.', ''):
+                    sets[event['source']][letter] = event['time_utc']
+            for letter, word in (('B', 'Created'), ('M', 'Modified'),
+                                 ('C', 'Changed'), ('A', 'Accessed')):
+                si, fn = sets['SI'].get(letter, ''), sets['FN'].get(letter,
+                                                                    '')
+                mark = ' style="color:#d9822b"' if si and fn and si < fn \
+                    and letter == 'B' else ''
+                parts.append(f"<tr><td><b>{word}</b></td><td{mark}>{e(si)}"
+                             f"</td><td>{e(fn)}</td></tr>")
+            parts.append("</table>")
+        findings = self.case.findings_map(row['evidence_id'],
+                                          [row['artifact_ref']])
+        notes = [f"{(f.get('grade') or '').capitalize()}: "
+                 f"{f.get('summary') or ''}"
+                 for f in findings.get(row['artifact_ref'], ())
+                 if f.get('grade') != 'benign']
+        matches = self.case.hash_match_map(row['evidence_id'],
+                                           [row['artifact_ref']])
+        notes += [f"Hash set {m['set_name']} "
+                  f"({hashsets.CATEGORIES.get(m['category'])})"
+                  for m in matches.get(row['artifact_ref'], ())]
+        if notes:
+            parts.append("<h4>Findings</h4><ul>" + ''.join(
+                f"<li>{e(n)}</li>" for n in notes) + "</ul>")
+        return ''.join(parts)
+
+    def add_timeline_to_report(self, rows):
+        if not self.case or not rows:
+            return
+        from trace_app.core import timeline as timeline_core
+        added = self.case.add_report_items('timeline', [{
+            'evidence_id': row['evidence_id'],
+            'artifact_ref': row['artifact_ref'],
+            'time': row['time'],
+            'title': f"{timeline_core.describe_kind(row)}: "
+                     f"{row['title'] or row['subject'] or ''}",
+            'detail': {'source': row['source'], 'local': row['local'],
+                       'subject': row['subject'], 'user': row['user'],
+                       'deleted': row['deleted']}} for row in rows])
+        self.set_status(f"Added {added} event(s) to the report"
+                        if added else "Already in the report")
+
+    def _timeline_exported(self, path, rows):
+        import hashlib
+        digest = hashlib.sha256()
+        try:
+            with open(path, 'rb') as handle:
+                for block in iter(lambda: handle.read(1 << 20), b''):
+                    digest.update(block)
+        except OSError:
+            return
+        self.case.record_event(
+            'timeline exported',
+            f"rows={rows} path={path} sha256={digest.hexdigest()}")
+
     # --- hash sets ------------------------------------------------------
 
     def hash_library(self):
@@ -2602,6 +2785,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.triage_panel.set_case(self.case)
         if getattr(self, 'activity_panel', None) is not None:
             self.activity_panel.set_case(self.case)
+        if getattr(self, 'timeline_panel', None) is not None:
+            self.timeline_panel.set_case(self.case)
         self.refresh_analysis_tree()
         self.refresh_activity_tree()
         self.mark_analysis_rows()
@@ -2913,6 +3098,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         menu = QMenu(self)
         open_action = menu.addAction("Show in Listing")
         open_action.triggered.connect(lambda: self.open_finding(finding))
+        if self.case and finding.get('artifact_ref'):
+            timeline_action = menu.addAction(icons.icon(icons.TIMELINE),
+                                             "Show in Timeline")
+            timeline_action.triggered.connect(
+                lambda: self.show_in_timeline(finding))
         menu.addSeparator()
 
         # add_bookmark_action wants what the listing puts in a row, so the
@@ -4135,7 +4325,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # The search index holds a connection and may have a worker walking
         # the image; both have to stop before the handler closes under them.
         for panel in ('search_panel', 'indicators_panel', 'activity_panel',
-                      'ntfs_panel', 'hash_panel'):
+                      'ntfs_panel', 'hash_panel', 'timeline_panel'):
             if getattr(self, panel, None) is not None:
                 try:
                     getattr(self, panel).shutdown()

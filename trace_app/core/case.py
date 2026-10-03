@@ -287,6 +287,10 @@ class Case:
     def examiner(self):
         return self._get('examiner', '')
 
+    @property
+    def description(self):
+        return self._get('description', '')
+
     def update_metadata(self, **fields):
         """Change one or more case_info values."""
         known = {'name', 'number', 'examiner', 'description'}
@@ -1057,6 +1061,63 @@ class Case:
         query += " ORDER BY time_utc DESC, usn DESC LIMIT ?"
         params.append(limit)
         return [dict(row) for row in self._db.execute(query, params)]
+
+    # --- items picked for the report -----------------------------------
+
+    def add_report_items(self, kind, items):
+        """Remember rows the examiner chose for the report. `items` are
+        dicts with evidence_id, artifact_ref, time, title and detail; a row
+        already chosen is not added twice."""
+        now = _utc_now()
+        added = 0
+        for item in items:
+            exists = self._db.execute(
+                "SELECT 1 FROM report_items WHERE kind = ? AND "
+                "IFNULL(evidence_id, -1) = IFNULL(?, -1) AND "
+                "IFNULL(artifact_ref, '') = IFNULL(?, '') AND "
+                "IFNULL(time_utc, '') = IFNULL(?, '') AND title = ?",
+                (kind, item.get('evidence_id'), item.get('artifact_ref'),
+                 item.get('time'), item.get('title') or '')).fetchone()
+            if exists:
+                continue
+            self._db.execute(
+                "INSERT INTO report_items (kind, evidence_id, artifact_ref, "
+                "time_utc, title, detail, added_utc) VALUES (?,?,?,?,?,?,?)",
+                (kind, item.get('evidence_id'), item.get('artifact_ref'),
+                 item.get('time'), item.get('title') or '',
+                 json.dumps(item.get('detail') or {}, default=str), now))
+            added += 1
+        self._db.commit()
+        if added:
+            self._record_activity('added to report',
+                                  f"{added} {kind} item(s)")
+        return added
+
+    def report_items(self, kind=None):
+        query = "SELECT * FROM report_items"
+        params = []
+        if kind:
+            query += " WHERE kind = ?"
+            params.append(kind)
+        rows = []
+        for row in self._db.execute(query + " ORDER BY time_utc, id",
+                                    params):
+            row = dict(row)
+            try:
+                row['detail'] = json.loads(row.get('detail') or '{}')
+            except ValueError:
+                row['detail'] = {}
+            rows.append(row)
+        return rows
+
+    def remove_report_items(self, ids):
+        ids = list(ids)
+        if not ids:
+            return
+        self._db.execute(
+            f"DELETE FROM report_items WHERE id IN ({','.join('?' * len(ids))})",
+            ids)
+        self._db.commit()
 
     # --- hash sets ----------------------------------------------------
 

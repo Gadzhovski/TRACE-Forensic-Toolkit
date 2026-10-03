@@ -1595,3 +1595,36 @@ QLabel#carvedStatus {
 QLabel#bitlockerError {
     color: #C62828;
 }
+
+/* --- Hash sets and report dialogs: titled groups --------------------- */
+
+QDialog#hashSetsDialog QGroupBox,
+QDialog#hashSetImportDialog QGroupBox,
+QDialog#reportDialog QGroupBox {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    margin-top: 16px;
+    padding: 12px 8px 6px 8px;
+}
+QDialog#hashSetsDialog QGroupBox::title,
+QDialog#hashSetImportDialog QGroupBox::title,
+QDialog#reportDialog QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 8px;
+    padding: 0px 4px;
+    color: #495057;
+}
+
+/* The Timeline's histogram strip and detail pane. */
+QWidget#timelineHistogram {
+    border: 1px solid #ced4da;
+}
+QTextBrowser#timelineDetail {
+    border: 1px solid #ced4da;
+}
+QToolButton#timelinePivotChip {
+    border: 1px solid #ced4da;
+    border-radius: 10px;
+    padding: 2px 10px;
+}

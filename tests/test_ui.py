@@ -1115,3 +1115,77 @@ def test_hash_sets_hide_known_good_flag_known_bad(qapp, window,
                         hashsets.case_options(window.case, library))
     window.refresh_analysis_views()
     assert _findings_group(window, 'Known bad (hash sets)') is None
+
+
+def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
+        qapp, window, tmp_path):
+    """The Timeline holds the NTFS times read above for both images; a
+    click previews the event's file and stays; a pivot narrows to one file;
+    an event goes to the report; the CSV export is audited."""
+    import csv
+    from PySide6.QtCore import Qt
+    panel = window.timeline_panel
+    if not window.case._db.execute("SELECT 1 FROM fs_events").fetchone():
+        window.queue_ntfs(window.case.evidence())
+        assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    window.result_viewer.setCurrentWidget(panel)
+    if panel._dirty:            # offscreen, the tab is never "shown"
+        panel.refresh(find_bounds=True)
+    assert pump(qapp, 60, lambda: not panel.loading)
+    events = window.case._db.execute(
+        "SELECT COUNT(*) FROM fs_events").fetchone()[0]
+    assert events and panel.counts.get('fs') == events
+    assert panel.model.rowCount() > 0 and panel.histogram.buckets
+    times = [row['time'] for row in panel.model.rows]
+    assert times == sorted(times)
+
+    position = next(i for i, row in enumerate(panel.model.rows)
+                    if row['source'] == 'fs'
+                    and not row['subject'].rsplit('/', 1)[-1].startswith('$'))
+    row = panel.model.rows[position]
+    shown = _capture_viewer(window)
+    window.current_selected_data = None
+    panel.table.clicked.emit(panel.model.index(position, 0))
+    pump(qapp, 10, lambda: bool(shown))
+    assert shown and window.result_viewer.currentWidget() is panel
+    assert 'NTFS times of this file' in panel.detail.toHtml()
+
+    panel._focus_file(row)
+    assert pump(qapp, 30, lambda: not panel.loading)
+    assert {r['artifact_ref'] for r in panel.model.rows} == \
+        {row['artifact_ref']}
+    assert panel.pivot_holder.isVisibleTo(panel)
+    panel._drop_pivot('focus_ref')
+    assert pump(qapp, 30, lambda: not panel.loading)
+
+    before = len(window.case.report_items('timeline'))
+    panel.report_requested.emit([row])
+    assert len(window.case.report_items('timeline')) == before + 1
+
+    out = str(tmp_path / 'timeline.csv')
+    panel.export_csv(out)
+    assert pump(qapp, 60, lambda: panel._export is None)
+    with open(out, encoding='utf-8-sig', newline='') as handle:
+        rows = list(csv.reader(handle))
+    assert len(rows) - 1 == panel.total
+    assert window.case.activity()[0]['action'] == 'timeline exported'
+
+
+def test_report_is_a_job_and_lands_in_exports(qapp, window):
+    from trace_app.core import report
+    options = report.default_options(window.case)
+    for section in options['sections']:
+        section['enabled'] = True
+    window._report_dialogs = False
+    window.last_report = None
+    assert window.queue_report(options)
+    assert pump(qapp, 180, lambda: not window.job_bar.busy)
+    written = {item['format']: item for item in window.last_report}
+    assert set(written) == {'html', 'pdf'}
+    for item in written.values():
+        assert os.path.exists(item['path'])
+        assert os.path.dirname(item['path']) == os.path.join(
+            window.case.folder, 'exports')
+    with open(written['html']['path'], encoding='utf-8') as handle:
+        page = handle.read()
+    assert FIRST in page and SECOND in page
