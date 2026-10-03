@@ -144,28 +144,34 @@ class TriagePanel(QWidget):
 
         self.mismatch_table = self._make_table(
             ['Name', 'Claims to be', 'Actually is', 'Why', 'Size', 'Path'])
-        self.tabs.addTab(self.mismatch_table, "Type mismatches")
+        self.tabs.addTab(self.mismatch_table, icons.icon(icons.FINDING_MISMATCH),
+                         "Type mismatches")
 
         self.entropy_table = self._make_table(
             ['Name', 'Entropy', 'Peak', 'Type', 'Size', 'Path'])
-        self.tabs.addTab(self.entropy_table, "High entropy")
+        self.tabs.addTab(self.entropy_table, icons.icon(icons.FINDING_ENTROPY),
+                         "High entropy")
 
         self.duplicate_table = self._make_table(
             ['Name', 'Copies', 'Size', 'Wasted', 'SHA-256', 'Path'])
-        self.tabs.addTab(self.duplicate_table, "Duplicates")
+        self.tabs.addTab(self.duplicate_table,
+                         icons.icon(icons.FINDING_DUPLICATES), "Duplicates")
 
         self.hidden_table = self._make_table(
             ['Name', 'Severity', 'Finding', 'Size', 'Path'])
-        self.tabs.addTab(self.hidden_table, "Hidden data")
+        self.tabs.addTab(self.hidden_table, icons.icon(icons.FINDING_HIDDEN),
+                         "Hidden data")
 
         self.photo_table = self._make_table(
             ['Name', 'Taken', 'Camera', 'Location', 'Software', 'Path'])
-        self.tabs.addTab(self.photo_table, "Photos")
+        self.tabs.addTab(self.photo_table, icons.icon(icons.FINDING_PHOTO),
+                         "Photos")
 
         self.author_table = self._make_table(
             ['Name', 'Author', 'Last saved by', 'Company', 'Application',
              'Created', 'Modified', 'Path'])
-        self.tabs.addTab(self.author_table, "Authors")
+        self.tabs.addTab(self.author_table, icons.icon(icons.FINDING_AUTHOR),
+                         "Authors")
 
         #: Widest each free-text column may grow; the full text is in the
         #: cell's tooltip. Uncapped, one long finding or an eight-author paper
@@ -215,7 +221,8 @@ class TriagePanel(QWidget):
         owns the jobs that carve.
         """
         self._carved_panel = panel
-        self._tab_for['carved'] = self.tabs.addTab(panel, "Carved files")
+        self._tab_for['carved'] = self.tabs.addTab(
+            panel, icons.icon(icons.FINDING_CARVED), "Carved files")
         panel.count_changed.connect(self._set_carved_count)
         panel.case = self.case
         panel.set_evidence_filter(self.evidence_id)
@@ -224,7 +231,8 @@ class TriagePanel(QWidget):
         """Make the case's indicators a sub-tab here
         (ui/viewers/indicators_panel.py), following the same image filter."""
         self._indicators_panel = panel
-        self._tab_for['indicators'] = self.tabs.addTab(panel, "Indicators")
+        self._tab_for['indicators'] = self.tabs.addTab(
+            panel, icons.icon(icons.FINDING_INDICATORS), "Indicators")
         panel.count_changed.connect(self._set_indicator_count)
         panel.set_case(self.case)
         panel.set_evidence_filter(self.evidence_id)
@@ -247,7 +255,8 @@ class TriagePanel(QWidget):
         tab and a dock that was hidden by default.
         """
         self._bookmarks_panel = panel
-        self._tab_for['bookmarks'] = self.tabs.addTab(panel, "Bookmarks")
+        self._tab_for['bookmarks'] = self.tabs.addTab(
+            panel, icons.icon(icons.BOOKMARK), "Bookmarks")
         panel.count_changed.connect(self._set_bookmark_count)
         self._set_bookmark_count(panel.count)
 
