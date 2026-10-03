@@ -850,6 +850,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         api_key_action = QAction("API Keys", self)
         api_key_action.triggered.connect(self.show_api_key_dialog)
         options_menu.addAction(api_key_action)
+        options_menu.addSeparator()
+        features_action = QAction("Supported Features...", self)
+        features_action.setToolTip("What this installation can do on this "
+                                   "system, and why anything cannot")
+        features_action.triggered.connect(self.show_supported_features)
+        options_menu.addAction(features_action)
 
         help_menu = QMenu('Help', self)
         about_action = QAction("About", self)
@@ -2604,6 +2610,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"{name} has no NTFS volume to read")
         self.job_bar.job_finished()
         self.refresh_analysis_views()
+
+    def show_supported_features(self):
+        from trace_app.ui.dialogs.supported_features import (
+            SupportedFeaturesDialog)
+        SupportedFeaturesDialog(self).exec()
 
     # --- the report -----------------------------------------------------
 

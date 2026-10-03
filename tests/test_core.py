@@ -516,3 +516,34 @@ def test_heic_photos_give_up_their_exif():
         facts = photo_metadata(handle.read())
     assert facts['make'] == 'SONY' and facts['model'] == 'ILCE-7SM3'
     assert facts['taken'] == '2020:09:14 11:09:34'
+
+
+# --- what this installation supports (infra/capabilities.py) -------------------
+
+def test_every_capability_is_checked_and_reported():
+    from trace_app.infra import capabilities
+    keys = [c.key for c in capabilities.CAPABILITIES]
+    assert len(keys) == len(set(keys))
+    assert {c.group for c in capabilities.CAPABILITIES} <= \
+        set(capabilities.GROUPS)
+    text = capabilities.report_text()
+    for capability in capabilities.CAPABILITIES:
+        assert capability.feature in text
+        ok, _version, detail = capability.check()
+        assert ok or detail
+    # On the platforms CI runs, everything the requirements promise loads.
+    assert capabilities.available('tsk') and capabilities.available('ewf')
+
+
+def test_an_unavailable_feature_says_why(monkeypatch):
+    import platform
+    import sys
+    from trace_app.infra import capabilities
+    probe = capabilities.Capability(
+        'yara', 'File analysis', 'YARA rule scanning', 'yara-x',
+        lambda: __import__('no_such_module_for_trace'))
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setattr(platform, 'machine', lambda: 'ARM64')
+    assert not probe.available
+    assert 'Windows on ARM' in probe.reason()
+    assert 'yara-x' in probe.reason()

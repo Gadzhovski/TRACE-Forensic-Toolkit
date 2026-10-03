@@ -65,6 +65,8 @@ def main():
     configure_logging()
     set_taskbar_identity()
     logging.getLogger('TRACE').info("Starting TRACE %s on %s", __version__, sys.platform)
+    from trace_app.infra.capabilities import log_unavailable
+    log_unavailable()
     magic_id = libmagic_identity()
     if magic_id:
         logging.getLogger('TRACE').info("libmagic %s from %s", *magic_id)

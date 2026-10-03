@@ -30,6 +30,12 @@ libqcow-python>=20260703    # QEMU QCOW / QCOW2
 libbde-python>=20260916     # BitLocker volumes, unlocked with a key given
 libvshadow-python>=20260714 # Volume Shadow Copies (snapshots of NTFS)
 libpff-python>=20260926     # Outlook PST / OST mailboxes
+libfvde-python>=20260923    # FileVault 2 (Core Storage) volumes
+libfsapfs-python>=20260921  # APFS containers and volumes, encrypted too
+libluksde-python>=20260902  # LUKS-encrypted Linux volumes
+libvslvm-python>=20260901   # Linux LVM volume groups
+libesedb-python>=20260704   # ESE databases: SRUM, Edge/IE WebCache
+libmsiecf-python>=20260525  # Internet Explorer index.dat history
 
 # --- Evidence parsing ------------------------------------------------------
 python-registry>=1.3.1   # Windows registry hives
@@ -51,6 +57,10 @@ rarfile>=4.2             # RAR archives: members, sizes, dates, encryption, and
 # not. Wheels for every platform but Windows on ARM, where HEIC keeps its icon
 # rather than pip attempting a compile. (PEP 508 markers have no `not`.)
 pi-heif>=1.4.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
+# YARA rules (VirusTotal's Rust rewrite; yara-python has no Linux or 3.14
+# wheels). No Windows-on-ARM wheel: there, YARA scanning shows as unavailable
+# (Options > Supported Features) rather than pip attempting a Rust build.
+yara-x>=1.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 requests>=2.31.0         # VirusTotal API
 
 # --- libmagic (file type from content) ------------------------------------

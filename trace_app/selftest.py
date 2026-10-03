@@ -110,6 +110,42 @@ def _run(report, images, sandbox):
                          (pyvmdk, pyvhdi, pyqcow, pybde, pyvshadow,
                           pypff))
 
+    @check('volumes and Windows databases: FileVault, APFS, LUKS, LVM, ESE, '
+           'index.dat')
+    def _():
+        import pyesedb
+        import pyfsapfs
+        import pyfvde
+        import pyluksde
+        import pymsiecf
+        import pyvslvm
+        return ', '.join(f"{m.__name__} {m.get_version()}" for m in
+                         (pyfvde, pyfsapfs, pyluksde, pyvslvm, pyesedb,
+                          pymsiecf))
+
+    @check('YARA rules compile and match (yara-x)')
+    def _():
+        import platform
+        if sys.platform == 'win32' and platform.machine().upper() == 'ARM64':
+            return 'not built for Windows on ARM (shown as unavailable)'
+        import yara_x
+        rules = yara_x.compile('rule t { strings: $a = "TRACE" '
+                               'condition: $a }')
+        assert rules.scan(b'xx TRACE xx').matching_rules
+        return 'ok'
+
+    @check('every feature this platform should have is available')
+    def _():
+        import platform
+        from trace_app.infra import capabilities
+        expected_missing = set()
+        if sys.platform == 'win32' and platform.machine().upper() == 'ARM64':
+            expected_missing = {'yara', 'heic'}
+        missing = [c.key for c in capabilities.CAPABILITIES
+                   if not c.available and c.key not in expected_missing]
+        assert not missing, f"unavailable: {', '.join(missing)}"
+        return f"{len(capabilities.CAPABILITIES)} features"
+
     @check('libmagic identifies content')
     def _():
         import magic
