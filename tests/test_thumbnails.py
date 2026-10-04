@@ -147,9 +147,23 @@ class _Entry:
         self.path, self.name = path, path.rsplit('/', 1)[-1]
         self.data, self.size, self.deleted = data, len(data), deleted
         self.ref = f'p0:i{inode}:s1'
+        self.offset = 0
 
     def read(self, length=None, start=0):
         return self.data[start:start + (length or len(self.data))]
+
+
+def fake_walk(files):
+    """walk.iter_files over stand-in entries, reporting every name."""
+    def iter_files(handler, should_stop=None, offsets=None,
+                   every_name=None):
+        for entry in files:
+            if every_name is not None:
+                every_name(entry.offset, entry.path, entry.deleted,
+                           entry.ref)
+            if not getattr(entry, 'is_dir', False):
+                yield entry
+    return iter_files
 
 
 def test_pictures_of_files_that_are_gone_are_findings(tmp_path,
@@ -168,8 +182,7 @@ def test_pictures_of_files_that_are_gone_are_findings(tmp_path,
         _Entry('/Users/bob/AppData/Local/Microsoft/Windows/Explorer/'
                'thumbcache_32.db', cache, inode=14),
     ]
-    monkeypatch.setattr(walk, 'iter_files', lambda handler, stop=None:
-                        iter(files))
+    monkeypatch.setattr(walk, 'iter_files', fake_walk(files))
     case = Case.create(str(tmp_path / 'case'), 'Thumbnails')
     evidence_id = case.add_evidence(os.path.join(SAMPLES,
                                                  'xp-isetcam-Thumbs.db'))

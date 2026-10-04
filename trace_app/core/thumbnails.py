@@ -354,20 +354,29 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
                      should_stop=None):
     """Find every thumbnail cache on one image and record its pictures;
     replaces earlier rows and findings for it. Returns the picture count."""
-    from trace_app.core import walk
-    caches, names = [], {}
+    from trace_app.core import walk, winsearch
+    caches, names, indexes = [], {}, []
     count = 0
-    for entry in walk.iter_files(image_handler, should_stop):
+
+    def note(offset, path, deleted, ref):
+        # Every name on the volume, folders and empty files included: what
+        # a cache's picture is of may be either.
+        folder, _sep, name = path.rpartition('/')
+        state = names.setdefault((offset, folder.lower()), {})
+        lower = name.lower()
+        # Present beats deleted: a name both allocated and in a deleted
+        # entry (saved again) is there.
+        if not deleted or lower not in state:
+            state[lower] = (deleted, ref)
+
+    for entry in walk.iter_files(image_handler, should_stop,
+                                 every_name=note):
         count += 1
         if progress and count % 500 == 0:
             progress(count, 0, entry.path)
-        folder = entry.path.rsplit('/', 1)[0].lower()
-        state = names.setdefault(folder, {})
-        lower = entry.name.lower()
-        # Present beats deleted: a name both allocated and in a deleted
-        # entry (saved again) is there.
-        if not entry.deleted or lower not in state:
-            state[lower] = (entry.deleted, entry.ref)
+        if winsearch.is_index_path(entry.path) and entry.size and \
+                not entry.deleted:
+            indexes.append(entry)
         if is_cache_name(entry.name) and entry.size:
             caches.append(entry)
 
@@ -409,7 +418,7 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
                                 'entry_offset': entry['offset']}))
             elif data[:8] == OLE_MAGIC:
                 folder = cache.path.rsplit('/', 1)[0].lower()
-                here = names.get(folder, {})
+                here = names.get((cache.offset, folder), {})
                 for entry in parse_thumbs_db(data):
                     state, original_ref = None, None
                     if _FOLDER_PICTURE.fullmatch(entry['name'] or ''):
@@ -454,6 +463,7 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         except Exception as exc:
             logger.warning("Could not read %s: %s", cache.path, exc)
 
+    findings += _link_to_search_index(rows, indexes, names, progress)
     case.replace_thumbnails(evidence_id, rows)
     case.clear_findings(evidence_id, MODULE_THUMBNAILS)
     if findings:
@@ -463,6 +473,82 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         f"evidence id={evidence_id} caches={len(caches)} "
         f"pictures={len(rows)} of files gone={len(findings)}")
     return len(rows)
+
+
+def _read_index(entry):
+    """{cache id: item} from a Windows.edb (streamed) or Windows.db."""
+    from trace_app.core import containers, winsearch
+    if entry.name.lower().endswith('.edb'):
+        handle = entry.fs.open_meta(inode=entry.inode)
+        stream = containers.ByteWindow(
+            lambda offset, length: handle.read_random(offset, length), 0,
+            entry.size)
+        return winsearch.cache_index(stream, 'edb')
+    return winsearch.cache_index(entry.read(), 'db')
+
+
+def _link_to_search_index(rows, indexes, names, progress=None):
+    """Name the thumbcache pictures from the Windows Search index: the
+    file each was made of, its times and size as indexed, and whether it is
+    still on the disk. Returns findings for those that are not."""
+    from trace_app.core import winsearch
+    pictures = [r for r in rows if r['cache_kind'] == 'thumbcache']
+    if not pictures or not indexes:
+        return []
+    found = {}
+    for done, entry in enumerate(indexes, 1):
+        if progress:
+            progress(done, len(indexes), entry.path)
+        try:
+            for cache_id, item in _read_index(entry).items():
+                found.setdefault(cache_id, (item, entry))
+        except Exception as exc:
+            logger.warning("Windows Search index %s unreadable: %s",
+                           entry.path, exc)
+    findings = []
+    for row in pictures:
+        match = found.get(row['key'])
+        if match is None:
+            continue
+        item, index = match
+        path = item['path']
+        row['name'] = path.replace('\\', '/').rsplit('/', 1)[-1] or path
+        row['detail'].update({
+            'indexed path': path, 'indexed type': item['type'],
+            'indexed size': item['size'],
+            'indexed modified': times_text(item['datemodified']),
+            'indexed created': times_text(item['datecreated']),
+            'indexed on': times_text(item['search_gathertime']),
+            'index': index.path})
+        drive, volume_path = winsearch.volume_path(path)
+        if drive != 'c' or volume_path is None:
+            continue          # on another drive: its volume is not known
+        folder, _sep, name = volume_path.rpartition('/')
+        here = names.get((index.offset, folder.lower()), {})
+        known = here.get(name.lower())
+        if known is None:
+            row['original_state'] = 'absent'
+        else:
+            row['original_state'] = 'deleted' if known[0] else 'present'
+            row['original_ref'] = known[1]
+        if row['original_state'] in ('absent', 'deleted'):
+            gone = 'is no longer on the disk' if \
+                row['original_state'] == 'absent' else \
+                'is on the disk only as a deleted entry'
+            findings.append((
+                row['cache_ref'], row['name'], row['cache_path'], row['size'],
+                f"thumbnail-{row['original_state']}", 'notable',
+                f"A picture of {path}, which {gone}",
+                json.dumps({'cache id': row['key'], 'indexed path': path,
+                            'modified': row['detail']['indexed modified'],
+                            'original_ref': row.get('original_ref'),
+                            'thumbcache': row['cache_path']},
+                           default=str)))
+    return findings
+
+
+def times_text(value):
+    return value.strftime('%Y-%m-%d %H:%M:%S') if value else None
 
 
 def picture_bytes(cache_data, row):

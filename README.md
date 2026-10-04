@@ -343,8 +343,11 @@ shares since) and **thumbcache_*.db** (Vista to 11, each user's) on the
 image, damaged entries stepped over, and shows the pictures in a grid
 (Triage ▸ Thumbnails) read from the cache on the image as you scroll —
 nothing is extracted. A Thumbs.db names the file each picture is of and
-its modification time; one no longer in its folder, or there only as a
-deleted entry, is a finding and in the report. A cache also browses like a
+its modification time; a thumbcache picture is named from the **Windows
+Search index** on the same image (Windows.edb, or Windows.db on Windows
+11), with the file's path, times and size as indexed. A picture whose file
+is no longer on the disk, or there only as a deleted entry, is a finding
+and in the report. A cache also browses like a
 folder of pictures from the listing.
 
 </td>

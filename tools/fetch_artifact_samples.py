@@ -361,6 +361,24 @@ SAMPLES = {
     'zstd-zeroSeq_extraneous.zst': (
         _ZSTD + 'golden-decompression-errors/zeroSeq_extraneous.zst',
         '85d7b2010abde2ff96ab8e6798b422d3cb78f8dd2108f83dbdd488da7056a6db'),
+    # Windows Search indexes: a Windows 11 VM's, with its thumbnail caches
+    # (AndrewRathbun/DFIRArtifactMuseum, MIT), and sidr's test indexes as
+    # dissect.target tests them (Windows 10 ESE, Windows 11 SQLite).
+    'rathbun-win11-Windows.edb': (
+        'https://raw.githubusercontent.com/AndrewRathbun/DFIRArtifactMuseum/fdcb1fab0c7b00e89129668d9c30174dd4ea3e5b/Windows/WindowsSearchDB/Win11/RathbunVM/Windows.edb',
+        '35ca37a022869e9311defe4211253948b68f55599f79258c16390ee4aa14dbf9'),
+    'rathbun-win11-thumbcache_48.db': (
+        'https://raw.githubusercontent.com/AndrewRathbun/DFIRArtifactMuseum/fdcb1fab0c7b00e89129668d9c30174dd4ea3e5b/Windows/Thumbcache/Win11/RathbunVM/thumbcache_48.db',
+        'c0f99b5840888cf8832bf28c1f314c00b4d7b6e29020c9bc80a499ac75c6fa97'),
+    'rathbun-win11-thumbcache_96.db': (
+        'https://raw.githubusercontent.com/AndrewRathbun/DFIRArtifactMuseum/fdcb1fab0c7b00e89129668d9c30174dd4ea3e5b/Windows/Thumbcache/Win11/RathbunVM/thumbcache_96.db',
+        '19f421db3be1944fbd32ddcdb65c0403549769259943670d7d057204715fa5c5'),
+    'search-Windows.edb': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/search/Windows.edb',
+        '10dd5fc05c2d19aa1fa4a705142e413fc5a4af17ae8e5e4909164262f9de7c66'),
+    'search-Windows.db': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/search/Windows.db',
+        'e655a1af9eb3386ffdc7e19aa8dcda06dfa2c35a1c3b657ac4a9c1c13c83f020'),
 }
 
 

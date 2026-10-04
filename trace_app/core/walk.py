@@ -55,22 +55,28 @@ def volume_offsets(image_handler):
     return [p[2] for p in partitions] if partitions else [0]
 
 
-def iter_files(image_handler, should_stop=None, offsets=None):
-    """FileEntry for every regular file with content, on every volume."""
+def iter_files(image_handler, should_stop=None, offsets=None,
+               every_name=None):
+    """FileEntry for every regular file with content, on every volume.
+
+    `every_name(offset, path, deleted, ref)`, when given, is called for
+    every name the walk passes -- folders and empty files too, which are
+    not yielded -- for a caller that needs to know what exists."""
     for offset in dict.fromkeys(offsets or volume_offsets(image_handler)):
         fs = image_handler.get_fs_info(offset)
         if fs is None:
             continue
         visited = set()
         yield from _walk(fs, fs.open_dir(path='/'), '', 0, offset, visited,
-                         should_stop)
+                         should_stop, every_name)
 
 
 def count_files(image_handler, should_stop=None):
     return sum(1 for _ in iter_files(image_handler, should_stop))
 
 
-def _walk(fs, directory, path, depth, offset, visited, should_stop):
+def _walk(fs, directory, path, depth, offset, visited, should_stop,
+          every_name=None):
     if depth > MAX_DEPTH:
         return
     for entry in directory:
@@ -83,14 +89,20 @@ def _walk(fs, directory, path, depth, offset, visited, should_stop):
         if name in ('.', '..'):
             continue
         meta = info.meta
+        child = f"{path}/{name}"
+        if every_name is not None:
+            every_name(offset, child,
+                       not (int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC),
+                       make_artifact_ref(offset, meta.addr,
+                                         getattr(info.name, 'meta_seq',
+                                                 None)))
         if meta.addr in visited:
             continue
         visited.add(meta.addr)
-        child = f"{path}/{name}"
         if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
             try:
                 yield from _walk(fs, entry.as_directory(), child, depth + 1,
-                                 offset, visited, should_stop)
+                                 offset, visited, should_stop, every_name)
             except WalkCancelled:
                 raise
             except Exception as exc:

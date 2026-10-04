@@ -54,7 +54,12 @@ def caption(row):
 
 
 def describe(row, image_name=''):
+    detail = row.get('detail') or {}
     lines = [row.get('name') and f"Picture of: {row['name']}",
+             detail.get('indexed path') and
+             f"Indexed by Windows Search as: {detail['indexed path']}",
+             detail.get('indexed modified') and
+             f"Modified (as indexed): {detail['indexed modified']} UTC",
              f"Cache: {row.get('cache_path')}"
              + (' (deleted)' if row.get('cache_deleted') else ''),
              f"Kind: {row.get('cache_kind')} — {row.get('system') or ''}"
@@ -65,9 +70,9 @@ def describe(row, image_name=''):
              row.get('modified_utc') and
              f"File modified (catalog): {row['modified_utc']}",
              {'folder': "The picture Windows shows for the folder itself",
-              'absent': "The file is no longer in the folder",
-              'deleted': "The file is in the folder only as a deleted entry",
-              'present': "The file is still in the folder"}.get(
+              'absent': "The file is no longer there",
+              'deleted': "The file is there only as a deleted entry",
+              'present': "The file is still there"}.get(
                  row.get('original_state')),
              (f"{row.get('width')} × {row.get('height')} " if row.get('width')
               else '') + f"{(row.get('format') or '').upper()}, "
