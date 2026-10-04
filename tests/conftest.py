@@ -38,13 +38,32 @@ def pytest_sessionfinish(session, exitstatus):
     shutil.rmtree(_SANDBOX, ignore_errors=True)
 
 
+def _ci_images():
+    """The images CI has: what tools/fetch_test_images.py downloads, and
+    the corpus tools/carve_corpus.py builds."""
+    import ast
+    with open(os.path.join(ROOT, 'tools', 'fetch_test_images.py'),
+              encoding='utf-8') as handle:
+        tree = ast.parse(handle.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, 'id', '') == 'CATALOG' for t in node.targets):
+            return {key.value for key in node.value.keys} | {'carve-corpus.dd'}
+    return {'carve-corpus.dd'}
+
+
 def image_path(name):
-    """Path to a public test image, or skip/fail the test if it is missing."""
+    """Path to a public test image, or skip/fail the test if it is missing.
+
+    With TRACE_REQUIRE_IMAGES=1 (CI) a missing image of the CI set fails;
+    the larger public images CI does not download (DFRWS, the other NIST
+    ones) are used locally and skip there.
+    """
     path = os.path.join(IMAGE_DIR, name)
     if not os.path.exists(path):
         message = (f"{name} is not in test_images/ -- run "
                    f"'python tools/fetch_test_images.py'")
-        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
+        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1' and                 name in _ci_images():
             pytest.fail(message)
         pytest.skip(message)
     return path
