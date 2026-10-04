@@ -294,3 +294,59 @@ def test_slack_carving_reads_nothing_past_the_slack(tmp_path):
     finally:
         handler.close_resources()
         case.close()
+
+
+def test_carved_files_and_their_members_are_searchable(tmp_path):
+    """Carved files go into the search index, read back from the image --
+    a carved .docx by its text, a carved .jar's classes as members -- and
+    a new carve replaces them rather than adding to them."""
+    from trace_app.core import background
+    from trace_app.core.carving import carve_evidence
+    from trace_app.core.case import Case, parse_artifact_ref
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.core.indexer import index_carved
+    from trace_app.core.search_index import INDEX_DONE, SearchIndex
+    path = image_path('carve-corpus.dd')
+    case = Case.create(str(tmp_path / 'case'), 'Carved search')
+    evidence_id = case.add_evidence(path)
+    handler = ImageHandler(path)
+    assert handler.load_image()
+    index = SearchIndex(case.folder)
+    try:
+        carve_evidence(handler, case, evidence_id, ['docx', 'jar'])
+        carved = case.carved_files(evidence_id)
+        assert index_carved(handler.read, case, index, evidence_id) == \
+            len(carved)
+        hits = index.search('"python-docx was here"')
+        # The document, and its word/document.xml as a member.
+        assert sorted(h['kind'] for h in hits) == ['archive-member', 'carved']
+        hit = next(h for h in hits if h['kind'] == 'carved')
+        assert hit['name'].endswith('.docx')
+        span = parse_artifact_ref(hit['artifact_ref'])
+        row = next(r for r in carved if r['offset'] == span['begin'])
+        assert span['end'] - span['begin'] == row['size']
+        members = index.search('name:TestCase.class')
+        assert members and all(m['kind'] == 'archive-member' and
+                               m['path'].startswith('[carved]/') and '.jar!/'
+                               in m['path'] for m in members)
+        before = index._db.execute(
+            "SELECT count(*) FROM indexed_items").fetchone()[0]
+
+        # The carve job indexes what it found when the image is indexed.
+        index.set_state(evidence_id, INDEX_DONE)
+        background._reindex_carved(handler, case, {
+            'case_folder': case.folder, 'evidence_id': evidence_id},
+            lambda: False)
+        index.close()
+        index = SearchIndex(case.folder)
+        assert index._db.execute(
+            "SELECT count(*) FROM indexed_items").fetchone()[0] == before
+        assert len(index.search('"python-docx was here"')) == 2
+        index.clear_carved(evidence_id)
+        assert index._db.execute(
+            "SELECT count(*) FROM indexed_items").fetchone()[0] == 0
+        assert index.search('"python-docx was here"') == []
+    finally:
+        index.close()
+        handler.close_resources()
+        case.close()

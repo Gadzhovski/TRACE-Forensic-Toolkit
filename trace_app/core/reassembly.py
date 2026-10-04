@@ -1,5 +1,5 @@
-"""Rebuilding a file split in two by the file system -- when its own
-structure proves where.
+"""Rebuilding a file the file system split into fragments -- when its
+own structure proves where.
 
 A carver that only takes contiguous runs loses any file stored in two
 fragments. Guessing where the split lies would put foreign bytes into
@@ -8,23 +8,28 @@ their own parts, and only when a checksum confirms the result:
 
 * **ZIP** (and every format built on it -- DOCX, XLSX, ODT, EPUB, APK, JAR):
   the end-of-central-directory record gives the archive's logical size, so
-  the physical span on disk minus that size is the gap. The central
-  directory lists every member's offset: members before the gap are where
-  it says, members after it are shifted by exactly the gap. The member the
-  split falls in is decompressed with the gap removed at each candidate
-  sector boundary; its CRC-32 confirms the one that is right.
+  the physical span on disk minus that size is the gaps' total. The
+  central directory lists every member's offset, and each member's local
+  header is found shifted by the gaps before it -- a whole number of
+  sectors, never less than the member before it. Where the shift grows,
+  a gap lies in the member before: it is decompressed with the gap removed
+  at each candidate sector boundary, and its CRC-32 confirms the one that
+  is right.
 
 * **PDF**: `startxref` and the cross-reference tables record every object's
-  offset -- the same reasoning finds the gap's length and brackets its
-  position, and the split object's Flate stream (whose Adler-32 is part of
-  the zlib format) confirms the boundary. A split in a text object is
-  accepted only if exactly one boundary leaves it clean text; in an
-  encrypted stream nothing can confirm it, so nothing is rebuilt.
+  offset -- the same reasoning finds the gaps' total and, object by object,
+  where each one lies, and the split object's Flate stream (whose Adler-32
+  is part of the zlib format) confirms each boundary. A split in a text
+  object is accepted only if exactly one boundary leaves it clean text; in
+  an encrypted stream nothing can confirm it, so nothing is rebuilt.
 
-The model is Garfinkel's bifragment gap carving (DFRWS 2007): two fragments,
-in order, the second after the first, both starting on a sector boundary.
-Three or more fragments, or fragments stored out of order, are not attempted.
-A reassembled file is reported as such, with both fragments' locations.
+The model is Garfinkel's bifragment gap carving (DFRWS 2007), extended to
+any number of fragments as long as each gap falls in a different member or
+object, so that each split has a checksum of its own to prove it:
+fragments in order, each after the last, each starting on a sector
+boundary. Two gaps inside one member, or fragments stored out of order,
+are not attempted. A reassembled file is reported as such, with every
+fragment's location.
 
 Where the decompressor fails tells roughly where the split is: reading the
 first fragment straight on, deflate breaks shortly after the foreign data
@@ -51,16 +56,6 @@ def _u16(b, o):
 
 def _u32(b, o):
     return struct.unpack_from('<I', b, o)[0]
-
-
-def _assemble(src, start, split, gap, logical_size):
-    """The file with the gap removed: [start, start+split) and then
-    [start+split+gap, start+gap+logical_size)."""
-    first = src.get(start, split)
-    second = src.get(start + split + gap, logical_size - split)
-    if len(first) != split or len(second) != logical_size - split:
-        return None
-    return first + second
 
 
 def _deflate_break(src, start, raw, limit):
@@ -98,7 +93,7 @@ def _candidates(low, high, start, hint):
 # --- ZIP ---------------------------------------------------------------------
 
 def reassemble_zip(src, start, cap):
-    """(content, fragments) for a two-fragment ZIP at `start`, or None."""
+    """(content, fragments) for a fragmented ZIP at `start`, or None."""
     window = src.get(start, min(cap + 1024 * 1024, SEARCH_WINDOW))
     if window[:4] != b'PK\x03\x04':
         return None
@@ -122,7 +117,37 @@ def reassemble_zip(src, start, cap):
     return None
 
 
+def _runs(pieces):
+    """Physical (offset, length) runs, adjacent ones merged."""
+    runs = []
+    for offset, length in pieces:
+        if length <= 0:
+            continue
+        if runs and runs[-1][0] + runs[-1][1] == offset:
+            runs[-1] = (runs[-1][0], runs[-1][1] + length)
+        else:
+            runs.append((offset, length))
+    return runs
+
+
+def _shifts(anchors, total, present):
+    """How far each anchor (in logical order) lies from where it says:
+    0 for the first, then never less than the one before, a whole number
+    of sectors more, at most `total`. `present(anchor, shift)` says whether
+    the anchor is found there. None if one cannot be placed."""
+    shifts = []
+    shift = 0
+    for anchor in anchors:
+        while shift <= total and not present(anchor, shift):
+            shift += SECTOR
+        if shift > total:
+            return None
+        shifts.append(shift)
+    return shifts if shifts and shifts[0] == 0 else None
+
+
 def _zip_with_gap(src, start, window, eocd, cd_size, entries, logical, gap):
+    """The archive rebuilt around its gaps (`gap` is their total)."""
     cd = window[eocd - cd_size:eocd]
     if cd[:4] != b'PK\x01\x02':
         return None
@@ -141,48 +166,71 @@ def _zip_with_gap(src, start, window, eocd, cd_size, entries, logical, gap):
         members.append((offset, method, crc, compressed, name))
         pos += 46 + name_len + extra_len + note_len
     members.sort()
-    # The central directory's logical offset: where it is, less the gap.
+    # The central directory's logical offset: where it is, less the gaps.
     cd_offset = eocd - gap - cd_size
 
-    def header_at(physical, name):
-        head = src.get(start + physical, 30 + len(name))
+    def header_at(member, shift):
+        offset, name = member[0], member[4]
+        head = src.get(start + offset + shift, 30 + len(name))
         return head[:4] == b'PK\x03\x04' and head[30:30 + len(name)] == name
 
-    # Which members are before the gap, which after it.
-    before = [m for m in members if header_at(m[0], m[4])]
-    after = [m for m in members if not header_at(m[0], m[4])
-             and header_at(m[0] + gap, m[4])]
-    if len(before) + len(after) != len(members) or not before:
+    shifts = _shifts(members, gap, header_at)
+    if shifts is None:
         return None
-    if after and max(m[0] for m in before) > min(m[0] for m in after):
+    pieces = []
+    bounds = [m[0] for m in members[1:]] + [cd_offset]
+    after = shifts[1:] + [gap]
+    for member, shift, upper, next_shift in zip(members, shifts, bounds,
+                                                after):
+        offset = member[0]
+        if upper < offset:
+            return None
+        if next_shift == shift:
+            pieces.append((start + offset + shift, upper - offset))
+            continue
+        split = _zip_split(src, start, member, shift, next_shift, upper)
+        if split is None:
+            return None
+        pieces.append((start + offset + shift, split - offset))
+        pieces.append((start + split + next_shift, upper - split))
+    pieces.append((start + cd_offset + gap, logical - cd_offset))
+    fragments = _runs(pieces)
+    content = b''.join(src.get(o, n) for o, n in fragments)
+    if len(content) != logical:
         return None
-    spanning = max(before, key=lambda m: m[0])
-    upper = min((m[0] for m in after), default=cd_offset)
+    return content, fragments
 
-    offset, method, crc, compressed, name = spanning
-    head = src.get(start + offset, 30)
+
+def _zip_split(src, start, member, shift, next_shift, upper):
+    """Where in this member the gap begins (a logical offset), proved by
+    its CRC-32 with the gap removed; None if no boundary does."""
+    offset, method, crc, compressed, _name = member
+    head = src.get(start + offset + shift, 30)
     data_at = offset + 30 + _u16(head, 26) + _u16(head, 28)
+    if method not in (0, 8):
+        return None
     if method == 8:
-        hint, _done = _deflate_break(src, start + data_at, True, compressed)
-        hint -= start
+        hint, _done = _deflate_break(src, start + shift + data_at, True,
+                                     compressed)
+        hint -= start + shift
     else:
         hint = None
+    gap = next_shift - shift
     for split in _candidates(data_at, min(upper, data_at + compressed),
-                             start, hint):
-        content = _assemble(src, start, split, gap, logical)
-        if content is None:
+                             start + shift, hint):
+        first = src.get(start + shift + data_at, split - data_at)
+        second = src.get(start + split + next_shift,
+                         data_at + compressed - split)
+        member_data = first + second
+        if len(member_data) != compressed or gap <= 0:
             continue
-        member = content[data_at:data_at + compressed]
         try:
-            plain = zlib.decompress(member, -15) if method == 8 else \
-                member if method == 0 else None
+            plain = zlib.decompress(member_data, -15) if method == 8 \
+                else member_data
         except zlib.error:
             continue
-        if plain is None:
-            return None
         if (zlib.crc32(plain) & 0xFFFFFFFF) == crc:
-            return content, [(start, split), (start + split + gap,
-                                              logical - split)]
+            return split
     return None
 
 
@@ -300,7 +348,7 @@ def pdf_contradicts_itself(content):
 
 
 def reassemble_pdf(src, start, cap):
-    """(content, fragments) for a two-fragment PDF at `start`, or None."""
+    """(content, fragments) for a fragmented PDF at `start`, or None."""
     window = src.get(start, min(cap + 1024 * 1024, SEARCH_WINDOW))
     if not window.startswith(b'%PDF-'):
         return None
@@ -390,78 +438,113 @@ def _pdf_from_trailer(src, start, window, startxref, startxref_at, end, cap):
         tried += 1
         if tried > 64:
             break
-        result = _pdf_with_gap(src, start, entries, gap, end - gap)
+        result = _pdf_with_gap(src, start, entries, gap, end - gap,
+                               startxref)
         if result:
             return result
     return None
 
 
-def _pdf_with_gap(src, start, entries, gap, logical):
-    def object_at(physical, number, generation):
-        return src.get(start + physical, 40).startswith(
+def _pdf_with_gap(src, start, entries, gap, logical, table=None):
+    """The document rebuilt around its gaps (`gap` is their total): every
+    object found where the cross-reference says, shifted by the gaps
+    before it; each gap proved inside the object it falls in. `table` is
+    the last cross-reference's logical offset, which lies past every gap
+    (that is how the total was found) -- so a gap in the last object is
+    bounded too."""
+    objects = sorted((offset, number, generation)
+                     for number, (offset, generation) in entries.items())
+    if len(objects) < 2:
+        return None
+
+    def object_at(anchor, shift):
+        offset, number, generation = anchor
+        return src.get(start + offset + shift, 40).startswith(
             b'%d %d obj' % (number, generation))
 
-    before, after = [], []
-    for number, (offset, generation) in entries.items():
-        if object_at(offset, number, generation):
-            before.append((offset, number))
-        elif object_at(offset + gap, number, generation):
-            after.append((offset, number))
-        else:
-            return None
-    if not before or not after or \
-            max(o for o, _ in before) > min(o for o, _ in after):
+    shifts = _shifts(objects, gap, object_at)
+    if shifts is None or gap <= 0:
         return None
-    spanning_offset, _number = max(before)
-    upper = min(o for o, _ in after)
+    # Everything from the last cross-reference on lies past every gap.
+    tail = table if table is not None and objects[-1][0] < table < logical         else logical
+    if shifts[-1] != gap and tail == logical:
+        return None
+    pieces = [(start, objects[0][0])]
+    bounds = [o[0] for o in objects[1:]] + [tail]
+    following = shifts[1:] + [gap]
+    for anchor, shift, upper, next_shift in zip(objects, shifts, bounds,
+                                                following):
+        offset = anchor[0]
+        if next_shift == shift:
+            pieces.append((start + offset + shift, upper - offset))
+            continue
+        split = _pdf_split(src, start, offset, upper, shift, next_shift)
+        if split is None:
+            return None
+        pieces.append((start + offset + shift, split - offset))
+        pieces.append((start + split + next_shift, upper - split))
+    pieces.append((start + tail + gap, logical - tail))
+    fragments = _runs(pieces)
+    content = b''.join(src.get(o, n) for o, n in fragments)
+    if len(content) != logical:
+        return None
+    if not all(content[offset:offset + 40].startswith(
+            b'%d %d obj' % (number, generation))
+            for offset, number, generation in objects):
+        return None
+    return content, fragments
 
-    # What decides the split depends on the object it falls in. A Flate
-    # stream is decided by its checksum: the first candidate whose zlib data
-    # inflates to the end, Adler-32 and all, is the split. Anything else --
-    # a dictionary, an uncompressed XML stream -- is text, which foreign bytes
-    # break: a candidate passes if the object comes out as clean text ending
-    # in "endobj" where the next object begins, and a split is accepted only
-    # if exactly one candidate passes. Two that pass would be a guess.
-    body = src.get(start + spanning_offset, upper - spanning_offset)
+
+def _pdf_split(src, start, offset, upper, shift, next_shift):
+    """Where in the object at `offset` the gap begins (logical), or None.
+
+    What decides it depends on the object. A Flate stream is decided by its
+    checksum: the first candidate whose zlib data inflates to the end,
+    Adler-32 and all, is the split. Anything else -- a dictionary, an
+    uncompressed XML stream -- is text, which foreign bytes break: a
+    candidate passes if the object comes out as clean text ending in
+    "endobj" where the next object begins, and a split is accepted only if
+    exactly one candidate passes. Two that pass would be a guess.
+    """
+    body = src.get(start + shift + offset, upper - offset)
     found = _STREAM.search(body)
     dictionary = body[:found.start()] if found else body
     flate = bool(found) and b'/FlateDecode' in dictionary
     if found and not flate and b'/Filter' in dictionary:
         return None             # binary stream nothing can check: not guessed
     if flate:
-        low = spanning_offset + found.end()
-        hint, _done = _deflate_break(src, start + low, False, upper - low)
-        hint -= start
+        low = offset + found.end()
+        hint, _done = _deflate_break(src, start + shift + low, False,
+                                     upper - low)
+        hint -= start + shift
     else:
-        low, hint = spanning_offset, None
+        low, hint = offset, None
 
-    def every_object_in_place(content):
-        return all(content[offset:offset + 40].startswith(
-            b'%d %d obj' % (number, generation))
-            for number, (offset, generation) in entries.items())
+    def joined(split):
+        first = src.get(start + shift + offset, split - offset)
+        second = src.get(start + split + next_shift, upper - split)
+        if len(first) + len(second) != upper - offset:
+            return None
+        return first + second
 
     passing = []
-    for split in _candidates(low, upper, start, hint):
-        content = _assemble(src, start, split, gap, logical)
-        if content is None:
+    for split in _candidates(low, upper, start + shift, hint):
+        text = joined(split)
+        if text is None:
             continue
         if flate:
             decompressor = zlib.decompressobj()
             try:
-                decompressor.decompress(content[low:upper])
+                decompressor.decompress(text[low - offset:])
             except zlib.error:
                 continue
-            if decompressor.eof and every_object_in_place(content):
-                return content, [(start, split), (start + split + gap,
-                                                  logical - split)]
-        elif _clean_object(content[spanning_offset:upper]) and \
-                every_object_in_place(content):
-            passing.append((split, content))
-    if len(passing) == 1:
-        split, content = passing[0]
-        return content, [(start, split), (start + split + gap,
-                                          logical - split)]
-    return None
+            if decompressor.eof:
+                return split
+        elif _clean_object(text):
+            passing.append(split)
+            if len(passing) > 1:
+                return None
+    return passing[0] if len(passing) == 1 else None
 
 
 def _clean_object(text):

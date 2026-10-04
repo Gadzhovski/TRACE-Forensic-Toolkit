@@ -1,8 +1,9 @@
-"""Rebuilding files the file system split in two (core/reassembly.py).
+"""Rebuilding files the file system split into fragments
+(core/reassembly.py).
 
-Every input is generated here: a real ZIP and a real PDF, cut at a sector
-boundary inside the member or stream whose checksum must then prove the
-split, with foreign bytes laid in the gap. The DFRWS images, where the same
+Every input is generated here: a real ZIP and a real PDF, cut at sector
+boundaries inside the members or streams whose checksums must then prove
+each split, with foreign bytes laid in the gaps. The DFRWS images, where the same
 thing happens to real files, are scored by tools/carve_score.py.
 """
 
@@ -145,6 +146,81 @@ def test_a_pdf_in_two_fragments_is_rebuilt_exactly():
                                          len(content) - split)]
 
 
+def _fragmented_on_disk(content, splits, gaps, lead=8 * SECTOR, seed=11):
+    """`content` cut at each of `splits`, with gaps[i] foreign bytes after
+    the i-th cut."""
+    rng = random.Random(seed)
+    noise = lambda n: bytes(rng.getrandbits(8) for _ in range(n))
+    parts = [noise(lead)]
+    edges = [0] + list(splits) + [len(content)]
+    for index, (begin, end) in enumerate(zip(edges, edges[1:])):
+        parts.append(content[begin:end])
+        if index < len(gaps):
+            parts.append(noise(gaps[index]))
+    used = sum(len(p) for p in parts)
+    parts.append(noise((-used) % SECTOR + 16 * SECTOR))
+    return b''.join(parts)
+
+
+def _expected(lead, splits, gaps, size):
+    fragments, position, logical = [], lead, 0
+    for split, gap in zip(list(splits) + [size], list(gaps) + [0]):
+        fragments.append((position, split - logical))
+        position += split - logical + gap
+        logical = split
+    return fragments
+
+
+def test_a_zip_in_three_and_four_fragments_is_rebuilt_exactly():
+    content = _zip()
+    middle = lambda name: (sum(_member_data(content, name)) // 2)         // SECTOR * SECTOR
+    first, report, last = (middle('notes/first.txt'), middle('report.txt'),
+                           middle('zz-last.txt'))
+    lead = 8 * SECTOR
+    for splits, gaps in (((report, last), (37 * SECTOR, 5 * SECTOR)),
+                         ((first, report, last),
+                          (3 * SECTOR, 40 * SECTOR, 9 * SECTOR))):
+        image = _fragmented_on_disk(content, splits, gaps, lead)
+        found = [f for f in _carve(image, ['zip']) if f[1] == lead]
+        assert len(found) == 1, splits
+        kind, _offset, rebuilt, fragments = found[0]
+        assert kind == 'zip' and rebuilt == content
+        assert fragments == _expected(lead, splits, gaps, len(content))
+
+
+def test_two_gaps_in_one_member_are_not_guessed():
+    """Each gap needs a checksum of its own: two inside report.txt leave
+    nothing to prove either, so the archive is not rebuilt."""
+    content = _zip()
+    begin, end = _member_data(content, 'report.txt')
+    third = (end - begin) // 3
+    splits = ((begin + third) // SECTOR * SECTOR,
+              (begin + 2 * third) // SECTOR * SECTOR)
+    lead = 8 * SECTOR
+    image = _fragmented_on_disk(content, splits, (6 * SECTOR, 6 * SECTOR),
+                                lead)
+    assert not [f for f in _carve(image, ['zip'])
+                if f[1] == lead and f[3]]
+
+
+def test_a_pdf_in_three_fragments_is_rebuilt_exactly():
+    content = _pdf()
+    spans = sorted((s for s in _stream_spans(content)
+                    if s[1] - s[0] > 3 * SECTOR), key=lambda s: s[0])
+    first, second = spans[0], spans[-1]
+    assert first[1] < second[0]
+    splits = tuple(((b + e) // 2) // SECTOR * SECTOR for b, e in
+                   (first, second))
+    gaps = (13 * SECTOR, 29 * SECTOR)
+    lead = 8 * SECTOR
+    image = _fragmented_on_disk(content, splits, gaps, lead)
+    found = [f for f in _carve(image, ['pdf']) if f[1] == lead]
+    assert len(found) == 1
+    kind, _offset, rebuilt, fragments = found[0]
+    assert kind == 'pdf' and rebuilt == content
+    assert fragments == _expected(lead, splits, gaps, len(content))
+
+
 def test_a_whole_pdf_is_not_flagged_and_stays_contiguous():
     from trace_app.core.reassembly import pdf_contradicts_itself
     content = _pdf()
@@ -255,19 +331,20 @@ def _rebuilt_against_key(path, name, reassemble, rebuilt):
                                 32 * 1024 * 1024)
             assert result, item['name']
             assert hashlib.md5(result[0]).hexdigest() == item['md5']
-            assert len(result[1]) == 2
+            assert len(result[1]) >= 2
             checked.add(item['name'])
     assert checked == rebuilt
 
 
 def test_a_pdf_split_by_an_ext2_indirect_block_is_rebuilt():
     """DFTT #12's lin_test.pdf: twelve 1 KB blocks, ext2's indirect block,
-    then the rest -- rebuilt to the MD5 in the test's published key."""
+    then the rest; and n_lin_ss.pdf, which ext2's indirect blocks cut into
+    four -- both rebuilt to the MD5s in the test's published key."""
     from tests.conftest import image_path
     from trace_app.core.reassembly import reassemble_pdf
     name = '12-carve-ext2.dd'
     _rebuilt_against_key(image_path(name), name, reassemble_pdf,
-                         {'lin_test.pdf'})
+                         {'lin_test.pdf', 'n_lin_ss.pdf'})
 
 
 def test_dfrws_2006_fragmented_zips_are_rebuilt():

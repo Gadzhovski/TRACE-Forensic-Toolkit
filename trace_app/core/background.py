@@ -31,6 +31,7 @@ No Qt here; ui/process_worker.py adapts this to signals.
 import logging
 import logging.handlers
 import multiprocessing
+import os
 import time
 
 logger = logging.getLogger('TRACE.Background')
@@ -131,12 +132,30 @@ def job_index(params, progress, item, should_stop):
     try:
         index = SearchIndex(params['case_folder'])
         handler = _open_image(params['image_path'], params.get('unlock'))
-        return index_evidence(
+        done = index_evidence(
             handler, index, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
             should_stop=should_stop)
+        # The image's carved files too: a re-index cleared them with the
+        # rest of the image's items.
+        _index_carved(handler, index, params, should_stop)
+        return done
     finally:
         _close(index, handler)
+
+
+def _index_carved(handler, index, params, should_stop):
+    from trace_app.core.case import Case
+    from trace_app.core.indexer import IndexerCancelled, index_carved
+    case = None
+    try:
+        case = Case.open(params['case_folder'])
+        index_carved(handler.read, case, index, params['evidence_id'],
+                     should_stop)
+    except IndexerCancelled:
+        pass
+    finally:
+        _close(case)
 
 
 def job_analysis(params, progress, item, should_stop):
@@ -339,6 +358,27 @@ def job_persistence(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def _reindex_carved(handler, case, params, should_stop):
+    """After a carve, its files into the search index -- if the image
+    has one; an image never indexed gets them when it is."""
+    from trace_app.core.indexer import IndexerCancelled, index_carved
+    from trace_app.core.search_index import SearchIndex
+    if not os.path.exists(os.path.join(params['case_folder'], 'search.db')):
+        return
+    index = None
+    try:
+        index = SearchIndex(params['case_folder'])
+        if index.is_indexed(params['evidence_id']):
+            index_carved(handler.read, case, index, params['evidence_id'],
+                         should_stop)
+    except IndexerCancelled:
+        pass
+    except Exception as exc:
+        logger.warning("Carved files not indexed: %s", exc)
+    finally:
+        _close(index)
+
+
 def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
@@ -355,12 +395,14 @@ def job_carve(params, progress, item, should_stop):
         handler = _open_image(params['image_path'], params.get('unlock'))
         if params.get('case_folder'):
             case = Case.open(params['case_folder'])
-            return carve_evidence(
+            found = carve_evidence(
                 handler, case, params['evidence_id'], params['file_types'],
                 params['unallocated_only'], progress=report,
                 should_stop=should_stop, on_file=item,
                 source=params.get('source'),
                 resume=bool(params.get('resume')))
+            _reindex_carved(handler, case, params, should_stop)
+            return found
         found = [0]
         source = params.get('source') or (
             'unallocated' if params['unallocated_only'] else 'image')

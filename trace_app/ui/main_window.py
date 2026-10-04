@@ -1941,6 +1941,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"Carved {count:,} file(s) from {label}")
         self.job_bar.job_finished()
         if self.case is not None:
+            # The job indexed what it carved, through its own connection.
+            self.search_panel.reload_index()
             self.refresh_analysis_views()
 
     def _read_carved(self, row):
@@ -3558,6 +3560,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
              summary['authors'],
              lambda: self._one_per_file(self.case.findings(evidence_id,
                                                            'authors'))),
+            # Executables only when something about them is worth a look;
+            # the full list is Triage's Executables tab.
+            ('executables', 'Executables', icons.EXECUTABLE,
+             summary['executables_flagged'],
+             lambda: self._one_per_file(self.case.findings(
+                 evidence_id, 'executables',
+                 grades=REPORTED_FINDING_GRADES))),
             ('carved', 'Carved files', icons.FINDING_CARVED,
              summary['carved'],
              lambda: [dict(row, is_carved=True, summary=(
@@ -4587,7 +4596,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         parsed = parse_artifact_ref(row.get('artifact_ref'))
         chain = (row.get('path') or '').split('!/')
         name = row.get('name') or chain[-1]
-        if parsed['kind'] != 'file' or len(chain) < 2:
+        if parsed['kind'] not in ('file', 'span') or len(chain) < 2:
             self.set_status(f"Cannot locate {name} inside its archive.", 5000)
             return
         if not self.image_handler:
@@ -4600,7 +4609,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if (self.current_selected_data or {}).get('_preview_ref') == key:
             return
         try:
-            content = self._archive_source(row.get('evidence_id'), parsed)
+            if parsed['kind'] == 'span':
+                # Inside a carved file: read back from the image (and its
+                # fragments, if it was rebuilt from them).
+                content = self._read_carved({
+                    'evidence_id': row.get('evidence_id'),
+                    'offset': parsed['begin'],
+                    'size': parsed['end'] - parsed['begin']})
+            else:
+                content = self._archive_source(row.get('evidence_id'),
+                                               parsed)
             for member in chain[1:]:
                 content = archives.read_member(content or b'', member)
         except archives.EncryptedArchive:

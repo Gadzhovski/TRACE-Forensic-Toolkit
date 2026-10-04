@@ -496,6 +496,23 @@ class _Builder:
                              for s in ((r.get('detail') or {}).get('strings')
                                        or [])[:5])),
                          _mono(r.get('path'))] for r in yara]))
+        programs = self.scope(self.case.findings(
+            None, 'executables', grades=grades, limit=limit + 1))
+        groups.append(('findings-executables', 'Executables',
+                       ['File', 'Evidence', 'Grade', 'Kind', 'Linked',
+                        'Indicators', 'Path'],
+                       [[e(r.get('name')),
+                         e(self.evidence_name(r.get('evidence_id'))),
+                         _badge(r.get('grade')),
+                         e(' '.join(p for p in (
+                             (r.get('detail') or {}).get('format'),
+                             (r.get('detail') or {}).get('architecture'),
+                             (r.get('detail') or {}).get('kind')) if p)),
+                         e((r.get('detail') or {}).get('compiled')),
+                         e('; '.join(i['text'] for i in (
+                             (r.get('detail') or {}).get('indicators')
+                             or []))),
+                         _mono(r.get('path'))] for r in programs]))
         gone = self.scope(self.case.findings(None, 'thumbnails',
                                              limit=limit + 1))
         groups.append(('findings-thumbnails',

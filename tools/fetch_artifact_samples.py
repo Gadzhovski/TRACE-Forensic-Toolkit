@@ -20,6 +20,7 @@ SHA-256 before it is kept:
 * fox-it/dissect.thumbcache (AGPL test data) -- thumbcache_*.db from Windows
   Vista to 11; and Thumbs.db files from Windows XP and Vista that were
   committed by accident to ISET/isetcam, TabularEditor (MIT) and w3c/sdw
+* release binaries of PuTTY, bat and ripgrep -- executables to analyse
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -379,6 +380,21 @@ SAMPLES = {
     'search-Windows.db': (
         'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/search/Windows.db',
         'e655a1af9eb3386ffdc7e19aa8dcda06dfa2c35a1c3b657ac4a9c1c13c83f020'),
+    # Executables the carving corpus does not have: a 32-bit PE (PuTTY's
+    # Pageant, signed), a dynamically linked ELF (bat, Linux glibc build)
+    # and an arm64 Mach-O (ripgrep, ad hoc signed) -- release archives,
+    # read in memory by the tests.
+    'pageant-w32.exe': (
+        'https://the.earth.li/~sgtatham/putty/0.83/w32/pageant.exe',
+        '48c424e22fffb39a5fd22d24ad834efee9275b7e05801397326a6d842987badf'),
+    'bat-v0.24.0-x86_64-unknown-linux-gnu.tar.gz': (
+        'https://github.com/sharkdp/bat/releases/download/v0.24.0/'
+        'bat-v0.24.0-x86_64-unknown-linux-gnu.tar.gz',
+        '0faf5d51b85bf81b92495dc93bf687d5c904adc9818b16f61ec2e7a4f925c77a'),
+    'ripgrep-14.1.1-aarch64-apple-darwin.tar.gz': (
+        'https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/'
+        'ripgrep-14.1.1-aarch64-apple-darwin.tar.gz',
+        '24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be'),
 }
 
 

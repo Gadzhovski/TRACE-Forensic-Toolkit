@@ -261,6 +261,8 @@ class MetadataViewer(QWidget):
                 if authors.get(key):
                     rows.append((label, authors[key]))
 
+        rows += _executable_rows(name, content)
+
         hidden = [f for f in content_checks.inspect(
                       name, content, (content_checks.MODULE_HIDDEN,))
                   if f.grade in content_checks.REPORTED_GRADES]
@@ -412,3 +414,88 @@ class MetadataViewer(QWidget):
         self.details_view.setVisible(False)
         self.details_heading.setVisible(False)
         self._fit_to_contents()
+
+
+def _executable_rows(name, content):
+    """The Executable section: what core/executables.py reads from a PE,
+    ELF or Mach-O file's headers, its indicators first."""
+    from trace_app.core import executables
+    facts = executables.analyse(content)
+    if facts is None:
+        return []
+    rows = [(None, "Executable")]
+    for grade, text in executables.indicators(facts, name):
+        rows.append((grade.capitalize(), text, "warning"))
+    rows.append(("Format", f"{facts.get('format', '')}, "
+                           f"{facts.get('architecture', '')}"))
+    rows.append(("Kind", facts.get('kind', '')
+                 + (f" ({facts['subsystem']})" if facts.get('subsystem')
+                    else '')))
+    if facts.get('compiled') or facts.get('compiled_note'):
+        rows.append(("Linked", facts.get('compiled')
+                     or facts['compiled_note']))
+    version = facts.get('version') or {}
+    for label, key in (("Original name", 'OriginalFilename'),
+                       ("Description", 'FileDescription'),
+                       ("Company", 'CompanyName'),
+                       ("Product", 'ProductName'),
+                       ("File version", 'FileVersion')):
+        if version.get(key):
+            rows.append((label, version[key]))
+    signature = facts.get('signature')
+    if signature:
+        signer = executables.signed_by(facts)
+        text = f"{signature['type']}, {signer or 'signer not read'}"
+        if signature.get('issuer'):
+            text += f", issued by {signature['issuer']}"
+        if signature.get('valid_from'):
+            text += (f", certificate valid {signature['valid_from']} to "
+                     f"{signature.get('valid_to', '')}")
+        if signature.get('identifier'):
+            text += f", identifier {signature['identifier']}"
+        rows.append(("Signature", text + " (present; not verified)"))
+    elif not facts.get('format', '').startswith('ELF'):
+        rows.append(("Signature", "None"))
+    for label, key in (("PDB", 'pdb'), ("Build ID", 'build_id'),
+                       ("UUID", 'uuid'), ("Interpreter", 'interpreter'),
+                       ("Install name", 'install_name'),
+                       ("Platform", 'platform'),
+                       ("Minimum OS", 'minimum_os'),
+                       ("Entry point", 'entry_point')):
+        if facts.get(key):
+            rows.append((label, facts[key]))
+    if facts.get('compiler'):
+        rows.append(("Compiler", '; '.join(facts['compiler'])))
+    if facts.get('protections'):
+        rows.append(("Protections", ', '.join(facts['protections'])))
+    checksum = facts.get('checksum')
+    if checksum:
+        rows.append(("PE checksum", f"{checksum['stored']} "
+                     + ("(matches)" if checksum['matches'] else
+                        f"(computed {checksum['computed']})")))
+    sections = facts.get('sections') or []
+    if sections:
+        rows.append(("Sections", '; '.join(
+            f"{s['name'] or '(unnamed)'} {s['flags']} "
+            f"{s['raw_size']:,} B, entropy {s['entropy']:.2f}"
+            for s in sections[:24])))
+    imports = facts.get('imports') or []
+    libraries = [i['library'] for i in imports
+                 if i['library'] != '(dynamic symbols)']
+    if libraries:
+        rows.append(("Libraries", ', '.join(libraries[:60])))
+    count = len(executables.all_functions(facts))
+    if count:
+        rows.append(("Imported functions", f"{count:,}"))
+    exports = facts.get('exports')
+    if exports:
+        rows.append(("Exports", f"{exports.get('functions', 0):,}"
+                     + (f" ({exports['name']})" if exports.get('name')
+                        else '')))
+    overlay = facts.get('overlay')
+    if overlay:
+        rows.append(("Appended data", f"{overlay['size']:,} bytes at "
+                     f"{overlay['offset']:,}"
+                     + (f", {overlay['starts']}" if overlay['starts'] else '')
+                     + f", entropy {overlay['entropy']:.2f}"))
+    return rows

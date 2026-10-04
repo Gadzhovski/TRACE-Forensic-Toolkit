@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QVBoxLayout, QWidget)
 
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
-                                     MODULE_HASH, MODULE_HIDDEN, MODULE_MAGIC,
+                                     MODULE_EXECUTABLES, MODULE_HASH,
+                                     MODULE_HIDDEN, MODULE_MAGIC,
                                      MODULE_PHOTO, magic_reader)
 from trace_app.core.carving import CARVABLE_TYPES, CARVE_CATEGORIES
 from trace_app.ui import icons
@@ -111,6 +112,13 @@ _DESCRIPTIONS = {
         "Office, OpenDocument and PDF files — who made a document, and with "
         "what.",
         "Fast: reads documents only."),
+    MODULE_EXECUTABLES: (
+        "Executables",
+        "Windows, Linux and macOS programs and libraries read from their "
+        "headers: architecture, link time, signer, imports, sections and "
+        "appended data — flagging packers, writable code, process-injection "
+        "imports and files that call themselves something else.",
+        "Fast: reads executables only."),
 }
 
 _INDEXING = (

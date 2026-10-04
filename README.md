@@ -100,6 +100,15 @@ One pass over every file, whichever modules are chosen:
   and files that look like encrypted (VeraCrypt-style) volumes
 - **Photo metadata** — camera, capture time, software, GPS position
 - **Document authors** — author, last saved by, company, application, dates
+- **Executables** — Windows PE, Linux ELF and macOS Mach-O (universal too)
+  read from their own headers: architecture, link time (or that a
+  reproducible build put a hash there), signer and certificate dates
+  (present, not verified), imports and exports, sections with their
+  entropy, version strings, PDB / build id, appended data. Flags packers,
+  writable code, near-random code, imports used together for process
+  injection or hollowing, a file that calls itself something else
+  (`svchost.exe` whose version says `mimikatz.exe`) and a driver altered
+  after linking. Checked against pefile and pyelftools on real releases
 - **Search index and indicators** — every file's text indexed for search,
   and the indicators in it listed (right)
 - **Windows activity and browser history** — what the users did (below)
@@ -119,6 +128,10 @@ A per-case full-text index over file contents — PDFs, Office documents, regist
 hives, plain text in ASCII and UTF-16 — built as an analysis module on the
 background queue, for every image or one. Supports `"phrases"`, `prefix*`,
 `AND` / `OR` / `NOT`, `/regex/` and field prefixes such as `email:` and `name:`.
+**Carved files are searched too**, and the files inside them — a carved
+`.docx` by its text, a carved ZIP's members, a carved mailbox's messages —
+read back from the image (each fragment, for a rebuilt file); a new carve
+replaces the last one's entries. So is the text in files' slack.
 
 **Indicators** are pulled out as it indexes: **emails, URLs, domains,
 IPv4/IPv6 addresses, phone numbers, card numbers, IBANs, Bitcoin addresses and
@@ -823,20 +836,22 @@ python tools/carve_score.py 11-carve-fat.dd  # one image
 | Image | Files located | Byte-exact |
 |:--|:--:|:--:|
 | `11-carve-fat.dd` | 15 / 15 | — |
-| `12-carve-ext2.dd` | 10 / 10 | 2 / 2 (1 rebuilt) |
+| `12-carve-ext2.dd` | 10 / 10 | 3 / 3 (2 rebuilt) |
 | `dfrws-2006-challenge.raw` | 27 / 27 | 12 / 12 (2 rebuilt) |
 | `dfrws-2007-challenge.img` | 78 / 114 | 16 / 16 (4 rebuilt) |
 | `carve-corpus.dd` | 51 / 51 | 51 / 51 |
 
 DFRWS 2007 is scored against its full official key — MP3, MPG, AVI, FLV, EXE,
 ELF and mail as well as the original types. The DFRWS images deliberately
-store most files fragmented. TRACE rebuilds ZIPs and PDFs stored in two
-fragments, in order — the two ZIPs DFRWS 2006 split, four of the DFRWS 2007
-PDFs, and a PDF on ext2 interrupted by its indirect block — byte-exact
+store most files fragmented. TRACE rebuilds ZIPs and PDFs stored in any
+number of fragments, in order, as long as each gap falls in a different
+member or object, so each split has a checksum of its own to prove it —
+the two ZIPs DFRWS 2006 split, four of the DFRWS 2007 PDFs, and two PDFs
+on ext2 cut by its indirect blocks (one into four pieces) — byte-exact
 against the published MD5s. Anything else fragmented is located but not
-rebuilt: three or more pieces, pieces out of order, an encrypted PDF (its
-checksum is under the encryption), and formats without a structure that
-proves the split (JPEG, MP3, video). Every miss is a fragmented or
+rebuilt: two gaps inside one member, pieces out of order, an encrypted PDF
+(its checksum is under the encryption), and formats without a structure
+that proves the split (JPEG, MP3, video). Every miss is a fragmented or
 incomplete file.
 
 `carve-corpus.dd` covers the formats those images do not hold. It is built by

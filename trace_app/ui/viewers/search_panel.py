@@ -344,7 +344,13 @@ class SearchPanel(QWidget):
 
             kind = row.get('kind') or 'file'
             if kind == 'archive-member':
-                type_text = 'In archive'
+                type_text = ('In carved file'
+                             if (row.get('path') or '').startswith('[carved]')
+                             else 'In archive')
+            elif kind == 'carved':
+                type_text = 'Carved file'
+            elif kind == 'slack':
+                type_text = 'File slack'
             elif row.get('is_deleted'):
                 type_text = 'Deleted File'
             else:

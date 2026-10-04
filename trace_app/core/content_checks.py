@@ -43,6 +43,7 @@ REPORTED_GRADES = (GRADE_SUSPICIOUS, GRADE_NOTABLE)
 MODULE_HIDDEN = 'hidden'
 MODULE_PHOTO = 'photo'
 MODULE_AUTHORS = 'authors'
+MODULE_EXECUTABLES = 'executables'
 
 #: Largest file read whole for these checks. Photos and documents are well
 #: under it; a file above it keeps its name checks and nothing else.
@@ -98,11 +99,15 @@ def family(head):
     if head[4:12] in (b'ftypheic', b'ftypheix', b'ftypmif1', b'ftypavif',
                       b'ftypavis'):
         return 'heif'
+    from trace_app.core.executables import kind_of
+    if kind_of(head):
+        return 'executable'
     return ''
 
 
 #: Families any of the content checks want the whole file for.
-NEEDS_FULL = {'jpeg', 'png', 'pdf', 'zip', 'ole', '7z', 'tiff', 'webp', 'heif'}
+NEEDS_FULL = {'jpeg', 'png', 'pdf', 'zip', 'ole', '7z', 'tiff', 'webp', 'heif',
+              'executable'}
 
 
 def wants_full_read(head, modules):
@@ -117,6 +122,8 @@ def wants_full_read(head, modules):
         wanted |= {'jpeg', 'tiff', 'webp', 'heif', 'png'}
     if MODULE_AUTHORS in modules:
         wanted |= {'pdf', 'zip', 'ole'}
+    if MODULE_EXECUTABLES in modules:
+        wanted.add('executable')
     return fam in wanted
 
 
@@ -143,7 +150,32 @@ def inspect(name, data, modules, size=None):
             findings.append(Finding(
                 MODULE_AUTHORS, 'document', GRADE_BENIGN,
                 _authors_summary(facts), facts))
+    if MODULE_EXECUTABLES in modules and data:
+        finding = executable_finding(name, data)
+        if finding is not None:
+            findings.append(finding)
     return findings
+
+
+# --- executables ---------------------------------------------------------------------
+
+def executable_finding(name, data):
+    """One finding per PE / ELF / Mach-O file (core/executables.py),
+    graded by its worst indicator; what is stored is a digest of the
+    analysis -- the File Metadata tab reads the whole of it again."""
+    from trace_app.core import executables
+    facts = executables.analyse(data)
+    if facts is None:
+        return None
+    flags = executables.indicators(facts, name)
+    grades = {grade for grade, _text in flags}
+    grade = (GRADE_SUSPICIOUS if GRADE_SUSPICIOUS in grades else
+             GRADE_NOTABLE if GRADE_NOTABLE in grades else GRADE_BENIGN)
+    summary = executables.summary(facts)
+    if flags:
+        summary += '. ' + '; '.join(text for _grade, text in flags)
+    return Finding(MODULE_EXECUTABLES, 'executable', grade, summary,
+                   executables.digest(facts, flags))
 
 
 # --- deceptive names ----------------------------------------------------------------

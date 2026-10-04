@@ -9,6 +9,7 @@ behaviour that stops people using a feature at all.
 """
 
 import logging
+import os
 
 import pytsk3
 
@@ -105,6 +106,53 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
                         last_error=str(exc))
         logger.error("Indexing failed: %s", exc)
         raise
+
+
+def index_carved(read, case, index, evidence_id, should_stop=None):
+    """Index one image's carved files, and the members of those that are
+    archives (a carved .docx's text, a ZIP's files, a mailbox's messages).
+
+    Each is read back from the image at its offset -- or its fragments, if
+    it was rebuilt from them -- never from the copy in the case folder, and
+    is referenced by its span, as a carved file is everywhere else. The
+    previous carve's items are dropped first: a carve replaces the last.
+    Returns the number of carved files indexed.
+    """
+    from trace_app.core.carving import read_carved
+    from trace_app.core.case import make_span_ref
+    index.clear_carved(evidence_id)
+    count = 0
+    for row in case.carved_files(evidence_id, limit=1_000_000):
+        if should_stop is not None and should_stop():
+            raise IndexerCancelled()
+        offset, size = int(row['offset']), int(row['size'])
+        ref = make_span_ref(0, offset, offset + size)
+        origin = row.get('origin') or {}
+        name = os.path.basename(row['path']) or row['name']
+        path = f"[carved]/{name}"
+        if origin.get('path'):
+            path += f" (was {origin['path']})"
+        text = ''
+        content = None
+        if size <= MAX_FILE_BYTES:
+            try:
+                content = read_carved(read, offset, size, row.get('fragments'))
+                text = extract_text(content, name, limit=MAX_TEXT_PER_FILE)
+            except Exception as exc:
+                logger.debug("Carved %s unreadable: %s", name, exc)
+        index.add_item(evidence_id, ref, 'carved', name, path, text, size,
+                       mtime_utc=(row.get('embedded_date') or '')
+                       if row.get('embedded_date') != 'N/A' else '')
+        if content and detect_archive(content):
+            _index_archive(index, evidence_id, ref, content, path,
+                           ARCHIVE_DEPTH)
+        count += 1
+        if count % 200 == 0:
+            index.commit()
+    index.commit()
+    logger.info("Indexed %d carved file(s) for evidence %s", count,
+                evidence_id)
+    return count
 
 
 def _count_files(image_handler, offset, should_stop):

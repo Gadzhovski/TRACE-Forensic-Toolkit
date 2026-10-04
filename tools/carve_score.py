@@ -51,11 +51,13 @@ BASELINE = {
     'carve-corpus.dd': 51,
 }
 
-#: Files rebuilt from two fragments, byte-exact against the key. Gated like
+#: Files rebuilt from fragments, byte-exact against the key. Gated like
 #: the score: a change that loses one is a regression even if a contiguous
 #: carve still "locates" the file.
 REBUILT_BASELINE = {
-    '12-carve-ext2.dd': 1,              # lin_test.pdf: ext2's indirect block
+    # lin_test.pdf (2 fragments: ext2's indirect block) and n_lin_ss.pdf
+    # (4: the indirect blocks of a 700 KB file).
+    '12-carve-ext2.dd': 2,
     'dfrws-2006-challenge.raw': 2,      # 4b.zip, 4c.zip
     'dfrws-2007-challenge.img': 4,      # 2.pdf, 3.pdf, 13.pdf, 14.pdf
 }

@@ -385,9 +385,18 @@ class SearchIndex:
 
     def clear_evidence(self, evidence_id):
         """Drop everything indexed for one piece of evidence, before a re-run."""
+        self._clear("evidence_id = ?", (evidence_id,))
+
+    def clear_carved(self, evidence_id):
+        """Drop one image's carved files and the members found in them,
+        before they are indexed again (a new carve replaces the last)."""
+        self._clear("evidence_id = ? AND artifact_ref IN (SELECT artifact_ref "
+                    "FROM indexed_items WHERE evidence_id = ? AND kind = "
+                    "'carved')", (evidence_id, evidence_id))
+
+    def _clear(self, where, params):
         rows = self._db.execute(
-            "SELECT id FROM indexed_items WHERE evidence_id = ?",
-            (evidence_id,)).fetchall()
+            f"SELECT id FROM indexed_items WHERE {where}", params).fetchall()
         ids = [row['id'] for row in rows]
         for item_id in ids:
             # An external-content table needs the 'delete' command with the
@@ -402,8 +411,8 @@ class SearchIndex:
                     (item_id, row['name'], row['path'], row['body']))
             self._db.execute("DELETE FROM entities WHERE item_id = ?",
                              (item_id,))
-        self._db.execute("DELETE FROM indexed_items WHERE evidence_id = ?",
-                         (evidence_id,))
+            self._db.execute("DELETE FROM indexed_items WHERE id = ?",
+                             (item_id,))
         self._db.commit()
 
     # --- progress ---------------------------------------------------------

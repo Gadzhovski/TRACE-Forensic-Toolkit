@@ -1779,7 +1779,10 @@ class Case:
                 'hidden': count('hidden', REPORTED_FINDING_GRADES),
                 'photos': count('photo'),
                 'photos_located': count('photo', located=True),
-                'authors': count('authors')}
+                'authors': count('authors'),
+                'executables': count('executables'),
+                'executables_flagged': count('executables',
+                                             REPORTED_FINDING_GRADES)}
 
     def _create_schema(self):
         """Create every table, including the ones no feature uses yet.

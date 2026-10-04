@@ -23,7 +23,8 @@ import pytsk3
 
 from trace_app.core import content_checks
 from trace_app.core.case import make_artifact_ref
-from trace_app.core.content_checks import (MODULE_AUTHORS, MODULE_HIDDEN,
+from trace_app.core.content_checks import (MODULE_AUTHORS,
+                                           MODULE_EXECUTABLES, MODULE_HIDDEN,
                                            MODULE_PHOTO)
 
 logger = logging.getLogger('TRACE.Analysis')
@@ -35,7 +36,7 @@ MODULE_MAGIC = 'magic'
 MODULE_ENTROPY = 'entropy'
 MODULE_HASH = 'hash'
 MODULES = (MODULE_MAGIC, MODULE_ENTROPY, MODULE_HASH, MODULE_HIDDEN,
-           MODULE_PHOTO, MODULE_AUTHORS)
+           MODULE_PHOTO, MODULE_AUTHORS, MODULE_EXECUTABLES)
 
 #: How each module reads in a dialog and a progress line.
 MODULE_LABELS = {
@@ -45,10 +46,12 @@ MODULE_LABELS = {
     MODULE_HIDDEN: "Hidden data",
     MODULE_PHOTO: "Photo metadata",
     MODULE_AUTHORS: "Document authors",
+    MODULE_EXECUTABLES: "Executables",
 }
 
 #: Modules whose checks live in content_checks.
-_CONTENT_MODULES = (MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS)
+_CONTENT_MODULES = (MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
+                    MODULE_EXECUTABLES)
 
 #: Enough for every magic signature in practice -- the longest are a few dozen
 #: bytes, and libmagic's own heuristics look at rather less than this. Reading

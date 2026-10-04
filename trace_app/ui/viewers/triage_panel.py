@@ -179,6 +179,12 @@ class TriagePanel(QWidget):
         self.tabs.addTab(self.yara_table, icons.icon(icons.FINDING_YARA),
                          "YARA")
 
+        self.executable_table = self._make_table(
+            ['Name', 'Severity', 'Kind', 'Architecture', 'Linked', 'Signed',
+             'Indicators', 'Path'])
+        self.tabs.addTab(self.executable_table, icons.icon(icons.EXECUTABLE),
+                         "Executables")
+
         #: Widest each free-text column may grow; the full text is in the
         #: cell's tooltip. Uncapped, one long finding or an eight-author paper
         #: pushed every column after it off the screen.
@@ -187,12 +193,14 @@ class TriagePanel(QWidget):
             id(self.photo_table): {3: 220, 5: 200},
             id(self.author_table): {2: 260, 3: 180, 4: 180, 5: 220},
             id(self.yara_table): {2: 220, 5: 420},
+            id(self.executable_table): {6: 240, 7: 420},
         }
 
         #: Sub-tab index by the name the tree uses for it. The bookmarks tab
         #: is added by the host (add_bookmarks_tab), since its panel is shared.
         self._tab_for = {'mismatch': 0, 'entropy': 1, 'duplicates': 2,
-                         'hidden': 3, 'photos': 4, 'authors': 5, 'yara': 6}
+                         'hidden': 3, 'photos': 4, 'authors': 5, 'yara': 6,
+                         'executables': 7}
 
         self.refresh()
 
@@ -471,12 +479,13 @@ class TriagePanel(QWidget):
         self._fill_photos()
         self._fill_authors()
         self._fill_yara()
+        self._fill_executables()
         self._set_counts(summary)
 
     def _finding_tables(self):
         return (self.mismatch_table, self.entropy_table, self.duplicate_table,
                 self.hidden_table, self.photo_table, self.author_table,
-                self.yara_table)
+                self.yara_table, self.executable_table)
 
     def _fill_hidden(self):
         rows = self.case.findings(self.evidence_id, 'hidden',
@@ -573,6 +582,41 @@ class TriagePanel(QWidget):
             for column in range(table.columnCount()):
                 table.item(position, column).setToolTip('\n'.join(tip))
 
+    def _fill_executables(self):
+        """Every PE, ELF and Mach-O file, those with something worth a
+        look first (core/executables.py)."""
+        rows = self.case.findings(self.evidence_id, 'executables',
+                                  limit=50000)
+        table = self.executable_table
+        table.setRowCount(len(rows))
+        for position, row in enumerate(rows):
+            facts = row.get('detail') or {}
+            signed = facts.get('signed')
+            flags = facts.get('indicators') or []
+            values = [
+                row.get('name') or '',
+                (row.get('grade') or '').capitalize()
+                if flags else '',
+                ' '.join(p for p in (facts.get('format'), facts.get('kind'))
+                         if p),
+                facts.get('architecture') or '',
+                facts.get('compiled') or facts.get('compiled_note') or '',
+                ('Yes' + (f", {signed}" if signed else '')
+                 if signed is not None else
+                 ('' if (facts.get('format') or '').startswith('ELF')
+                  else 'No')),
+                '; '.join(f['text'] for f in flags),
+                row.get('path') or '',
+            ]
+            self._fill_row(table, position, values, row)
+            if flags:
+                tone = ('malicious' if row.get('grade') == 'suspicious'
+                        else 'suspicious')
+                for column in (2, 7):
+                    table.item(position, column).setForeground(
+                        verdict_brush(tone))
+            table.item(position, 7).setToolTip(row.get('summary') or '')
+
     def _set_counts(self, summary):
         # The count belongs on the tab, so it is readable whichever tab is
         # open -- an examiner should be able to see there are findings without
@@ -582,7 +626,8 @@ class TriagePanel(QWidget):
                   ('duplicates', "Duplicates", 'duplicate_groups'),
                   ('hidden', "Hidden data", 'hidden'),
                   ('photos', "Photos", 'photos'),
-                  ('authors', "Authors", 'authors'))
+                  ('authors', "Authors", 'authors'),
+                  ('executables', "Executables", 'executables'))
         for key, label, field in labels:
             self.tabs.setTabText(self._tab_for[key],
                                  f"{label} ({summary.get(field, 0)})")

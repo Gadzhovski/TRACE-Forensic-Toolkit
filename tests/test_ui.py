@@ -1586,6 +1586,9 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
     labels = [window.viewer_tab.tabText(i)
               for i in range(window.viewer_tab.count())]
     assert labels.index('Database') == labels.index('Application') + 1
+    # Nothing selected: switching tabs would otherwise re-read the file an
+    # earlier test left selected, into this tab, over this database.
+    window.current_selected_data = None
     window.viewer_tab.setCurrentWidget(viewer)
     window.update_viewer_with_file_content(content, {
         'name': 'history.db', 'path': '/history.db', 'start_offset': 0})
@@ -1600,3 +1603,47 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
     assert viewer.grid.item(0, 4).text() == 'https://example.org/page/11'
     viewer.display(b'not a database', {})
     assert viewer.info.text() == 'Not a SQLite database.'
+
+
+def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
+                                                                 window):
+    """Neither image holds a program, so a signed one and one that calls
+    itself something else are recorded as the analysis records them: both
+    in Triage's Executables tab, only the flagged one under Findings."""
+    import json
+    from trace_app.core import content_checks
+    from trace_app.core.case import make_artifact_ref
+    from tests.conftest import ROOT
+    path = os.path.join(ROOT, 'test_images', 'carve_samples', 'pageant.exe')
+    if not os.path.exists(path):
+        pytest.skip("run tools/carve_corpus.py")
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    evidence = window.case.evidence()[0]['id']
+    rows = []
+    for inode, name in ((99990, 'pageant.exe'), (99991, 'svchost.exe')):
+        finding = content_checks.executable_finding(name, data)
+        rows.append((make_artifact_ref(0, inode, 1), name, '/' + name,
+                     len(data), finding.kind, finding.grade,
+                     finding.summary, json.dumps(finding.detail)))
+    window.case.add_module_findings(evidence, 'executables', rows)
+    window.refresh_analysis_views()
+    try:
+        triage = window.triage_panel
+        index = triage._tab_for['executables']
+        assert triage.tabs.tabText(index) == 'Executables (2)'
+        table = triage.executable_table
+        cells = [[table.item(r, c).text() for c in range(table.columnCount())]
+                 for r in range(table.rowCount())]
+        assert cells[0][0] == 'svchost.exe'           # flagged first
+        assert cells[0][2] == 'Notable'
+        assert cells[0][7] == 'Calls itself Pageant'
+        assert cells[1][2] == '' and cells[1][3] == 'PE32+ program'
+        assert cells[1][6] == 'Yes, by Simon Tatham'
+        group = _findings_group(window, 'Executables')
+        assert group is not None and group.text(0) == 'Executables (1)'
+        assert [leaf.text(0) for leaf in _leaves(group)][0].startswith(
+            'svchost.exe')
+    finally:
+        window.case.clear_findings(evidence, 'executables')
+        window.refresh_analysis_views()
