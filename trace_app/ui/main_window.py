@@ -1741,9 +1741,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             browse = menu.addAction("Browse Archive")
             if kind in CARVED_ARCHIVE_TYPES:
                 menu.setDefaultAction(browse)
-        copy_hash = None
+        copy_hash = lookup = None
         if row.get('sha256'):
-            copy_hash = menu.addAction("Copy SHA-256")
+            copy_hash = menu.addAction("Copy Hashes")
+            copy_hash.setToolTip("MD5, SHA-1 and SHA-256")
+            if self.case and row.get('evidence_id') is not None:
+                lookup = menu.addMenu("VirusTotal").addAction(
+                    "Look Up Hash")
+                lookup.setToolTip("Sends only the SHA-256.")
 
         evidence_id = row.get('evidence_id')
         if self.case and evidence_id is not None:
@@ -1771,8 +1776,28 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         elif chosen == location_action:
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(path)))
         elif copy_hash is not None and chosen == copy_hash:
-            QApplication.clipboard().setText(row['sha256'])
-            self.set_status("SHA-256 copied")
+            QApplication.clipboard().setText('\n'.join(
+                f"{label}: {row[key]}" for label, key in (
+                    ('MD5', 'md5'), ('SHA-1', 'sha1'), ('SHA-256', 'sha256'))
+                if row.get(key)))
+            self.set_status("Hashes copied")
+        elif lookup is not None and chosen == lookup:
+            self.vt_lookup_carved(row)
+
+    def vt_lookup_carved(self, row):
+        """Ask VirusTotal about a carved file by its SHA-256 alone."""
+        if not self.activate_evidence(row.get('evidence_id')):
+            return
+        offset, size = int(row.get('offset') or 0), int(row.get('size') or 0)
+        name = ((row.get('origin') or {}).get('name') or row.get('name')
+                or '')
+        self.vt_submit([{
+            'name': name, 'path': f"carved at byte {offset:,}",
+            'inode': None, 'start_offset': None,
+            'artifact_ref': row.get('artifact_ref')
+            or make_span_ref(0, offset, offset + size),
+            'image_path': self.current_image_path,
+            'sha256': row['sha256']}], METHOD_HASH)
 
     def _bookmark_carved(self, row, ref):
         label, ok = QInputDialog.getText(

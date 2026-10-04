@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -1355,13 +1355,73 @@ class Case:
         self._db.execute(
             "INSERT INTO carved_files (evidence_id, artifact_ref, name, path, "
             "offset, size, type, sha256, embedded_date, date_source, "
-            "carved_utc, fragments) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "carved_utc, fragments, status, checks, md5, sha1, source, "
+            "origin) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (evidence_id, make_span_ref(0, offset, offset + size),
              record['name'], path, offset, size, record['type'],
              record.get('sha256'), record.get('embedded_date'),
              record.get('date_source'), _utc_now(),
              json.dumps(record['fragments']) if record.get('fragments')
+             else None, record.get('status'),
+             json.dumps(record['checks']) if record.get('checks') else None,
+             record.get('md5'), record.get('sha1'), record.get('source'),
+             json.dumps(record['origin']) if record.get('origin')
              else None))
+
+    def set_carved_origin(self, evidence_id, offset, origin):
+        """Record the file a carve was found to be (core/carve_origin)."""
+        self._db.execute(
+            "UPDATE carved_files SET origin = ? WHERE evidence_id = ? AND "
+            "offset = ?", (json.dumps(origin, default=str), evidence_id,
+                           offset))
+
+    def carved_duplicates(self, evidence_id=None):
+        """{sha256: [(evidence_id, offset), ...]} for every digest carved
+        more than once -- the same bytes found in several places."""
+        where, params = '', []
+        if evidence_id is not None:
+            where, params = " AND evidence_id = ?", [evidence_id]
+        groups = {}
+        for digest, evidence, offset in self._db.execute(
+                "SELECT sha256, evidence_id, offset FROM carved_files "
+                "WHERE sha256 IN (SELECT sha256 FROM carved_files WHERE "
+                f"sha256 IS NOT NULL{where} GROUP BY sha256 HAVING "
+                f"COUNT(*) > 1){where} ORDER BY evidence_id, offset",
+                params + params):
+            groups.setdefault(digest, []).append((evidence, offset))
+        return groups
+
+    def start_carving_run(self, evidence_id, settings, engine):
+        cursor = self._db.execute(
+            "INSERT INTO carving_runs (evidence_id, started_utc, status, "
+            "settings, engine) VALUES (?,?,?,?,?)",
+            (evidence_id, _utc_now(), 'running', json.dumps(settings),
+             engine))
+        self._db.commit()
+        return cursor.lastrowid
+
+    def finish_carving_run(self, run_id, status, stats, found):
+        self._db.execute(
+            "UPDATE carving_runs SET finished_utc = ?, status = ?, stats = ?, "
+            "found = ? WHERE id = ?",
+            (_utc_now(), status, json.dumps(stats), found, run_id))
+        self._db.commit()
+
+    def carving_runs(self, evidence_id=None, limit=50):
+        query, params = "SELECT * FROM carving_runs", []
+        if evidence_id is not None:
+            query, params = query + " WHERE evidence_id = ?", [evidence_id]
+        rows = []
+        for row in self._db.execute(query + " ORDER BY id DESC LIMIT ?",
+                                    params + [limit]):
+            row = dict(row)
+            for key in ('settings', 'stats'):
+                try:
+                    row[key] = json.loads(row.get(key) or '{}')
+                except ValueError:
+                    row[key] = {}
+            rows.append(row)
+        return rows
 
     def carved_fragments(self, evidence_id, offset):
         """[(offset, length), ...] of the file carved at `offset` if it was
@@ -1392,10 +1452,12 @@ class Case:
             row = dict(row)
             if not os.path.isabs(row['path']):
                 row['path'] = os.path.join(self.folder, row['path'])
-            try:
-                row['fragments'] = json.loads(row.get('fragments') or 'null')
-            except ValueError:
-                row['fragments'] = None
+            for key, empty in (('fragments', 'null'), ('checks', '[]'),
+                               ('origin', 'null')):
+                try:
+                    row[key] = json.loads(row.get(key) or empty)
+                except ValueError:
+                    row[key] = None
             rows.append(row)
         return rows
 
@@ -1869,10 +1931,32 @@ class Case:
                 embedded_date  TEXT,
                 date_source    TEXT,
                 carved_utc     TEXT NOT NULL,
-                fragments      TEXT
+                fragments      TEXT,
+                -- What the file's structure proved (core/carve_verify.py),
+                -- and where it came from (core/carve_origin.py).
+                status         TEXT,
+                checks         TEXT,
+                md5            TEXT,
+                sha1           TEXT,
+                source         TEXT,
+                origin         TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_carved_evidence
                 ON carved_files(evidence_id, offset);
+
+            -- Every carve run: its settings, engine and what it saw.
+            CREATE TABLE IF NOT EXISTS carving_runs (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id    INTEGER NOT NULL
+                               REFERENCES evidence(id) ON DELETE CASCADE,
+                started_utc    TEXT NOT NULL,
+                finished_utc   TEXT,
+                status         TEXT NOT NULL,
+                settings       TEXT,
+                engine         TEXT,
+                stats          TEXT,
+                found          INTEGER DEFAULT 0
+            );
 
             -- How the last carve of each piece of evidence went.
             CREATE TABLE IF NOT EXISTS carving_state (
@@ -2078,6 +2162,19 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 13:
+            # Carved files gain what their structure proved and where they
+            # came from; carving_runs is created above. Older carves keep
+            # NULLs: "not checked", never "checked and found nothing".
+            for column in ('status', 'checks', 'md5', 'sha1', 'source',
+                           'origin'):
+                try:
+                    self._db.execute(
+                        f"ALTER TABLE carved_files ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass        # already present (created above at v13)
+            self._db.commit()
 
         if version < 12:
             # thumbnails is created unconditionally above.

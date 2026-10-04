@@ -404,12 +404,29 @@ Office core.xml, RTF \creatim, a PE's linker time (labelled as forgeable).
 a ZIP's central directory or a PDF's cross-reference table gives the gap, and
 a checksum (the member's CRC-32, the stream's Adler-32) confirms where it
 falls. Each rebuilt file is listed with the pieces it was joined from.
-Carve one image or all of them, from unallocated space
-(an allocation map skips live files) or the whole image, from the Triage tab or
+**Every carve says what its structure proves** — each check listed: a ZIP's
+every member CRC-32, a PNG's every chunk CRC, a PDF's every cross-reference
+offset, a SQLite database's page count and integrity check, an OLE file's
+sector chains, a PE's checksum, a JPEG's restart markers and the bytes a JPEG
+never writes inside image data. The status follows from them: **Complete**
+(the format's own checksums prove it whole), **Valid** (every check passed,
+but the format has nothing that could prove no foreign data is inside),
+**Reconstructed** (rebuilt from proved fragments) or **Partial** (a check
+failed — truncated, damaged or mixed with another file). On the DFRWS 2006
+challenge no fragmented file is called complete; 10 of its 13 are caught.
+A carve that begins where a **deleted file** began is given that file's
+**name, path and times** from its directory entry. Each carve gets MD5,
+SHA-1 and SHA-256, identical carves are counted as copies, a carved file's
+hash can be looked up on VirusTotal, and each run records its settings,
+engine, signature hits checked and rejected, by type — in the audit trail
+and the report.
+Carve one image or all of them, from unallocated space (every free stretch
+between live files) or the whole image, from the Triage tab or
 as an analysis module. In a case each file is recorded with its image, offset,
-SHA-256 and embedded date, saved per image, audited and listed under Findings;
-without a case, carving still works for the session. Previews read the bytes
-back from the image, not the copy.
+hashes and embedded date, saved per image, audited and listed under Findings;
+without a case, carving still works for the session. Filter by status, size,
+named or unique. Previews read the bytes back from the image, not the
+copy.
 
 </td>
 <td width="50%" valign="top">

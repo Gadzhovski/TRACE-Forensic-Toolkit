@@ -63,8 +63,49 @@ _ICON_FOR_TYPE = {
     'ole': icons.FILE_DOC, 'html': icons.FILE_HTML,
 }
 
-_COLUMNS = ['Name', 'Evidence', 'Type', 'Size', 'Offset', 'Embedded date',
-            'Date from', 'Pieces', 'SHA-256', 'Saved to']
+_COLUMNS = ['Name', 'Evidence', 'Type', 'Status', 'Size', 'Offset', 'Was',
+            'Copies', 'Embedded date', 'Date from', 'Pieces', 'SHA-256',
+            'Saved to']
+#: Column positions used below.
+_STATUS, _WAS, _COPIES, _DATE, _PIECES, _DIGEST, _SAVED = 3, 6, 7, 8, 10, \
+    11, 12
+_FIT = {1: 220, 6: 320, 11: 140, 12: 320}
+
+_STATUS_TONE = {'complete': 'clean', 'reconstructed': 'clean',
+                'valid': 'unknown', 'partial': 'suspicious'}
+_MARK = {True: '\u2713', False: '\u26a0', None: '\u2022'}
+
+
+def checks_text(row):
+    """The status and the checks behind it, one per line."""
+    from trace_app.core.carve_verify import STATUS_LABELS
+    status = row.get('status')
+    if not status:
+        return "Carved before checks were recorded."
+    from trace_app.core.carve_verify import STATUS_MEANINGS
+    lines = [f"{STATUS_LABELS.get(status, status)}: "
+             f"{STATUS_MEANINGS.get(status, '')}"]
+    lines += [f"{_MARK.get(ok, '-')} {text}"
+              for ok, text in row.get('checks') or []]
+    for name in ('md5', 'sha1', 'sha256'):
+        if row.get(name):
+            lines.append(f"{name.upper().replace('SHA', 'SHA-')}: "
+                         f"{row[name]}")
+    return '\n'.join(lines)
+
+
+def origin_text(row):
+    origin = row.get('origin') or {}
+    if not origin:
+        return '', ''
+    tip = '\n'.join(p for p in (
+        f"Was: {origin.get('path')}", origin.get('basis'),
+        origin.get('modified') and f"Modified: {origin['modified']} UTC",
+        origin.get('created') and f"Created: {origin['created']} UTC",
+        origin.get('changed') and
+        f"Entry changed: {origin['changed']} UTC (usually when it was "
+        f"deleted)") if p)
+    return origin.get('path') or '', tip
 
 
 def _pieces(row):
@@ -199,6 +240,7 @@ class CarvedFilesPanel(QWidget):
         self.carve_button.setObjectName("carveButton")
         self.carve_button.clicked.connect(self._request)
         bar.addWidget(self.carve_button)
+        self._duplicates = {}
 
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -226,6 +268,51 @@ class CarvedFilesPanel(QWidget):
         self.status_label.setObjectName("carvedStatus")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+
+        # What is shown of what was carved.
+        filters = QToolBar()
+        prepare_toolbar(filters)
+        filters.setObjectName("carvedFilterBar")
+        filters.addWidget(QLabel("Show"))
+        self.status_filter = QComboBox()
+        self.status_filter.setObjectName("carvedStatusFilter")
+        for label, key in (("Every status", None), ("Complete", 'complete'),
+                           ("Valid", 'valid'),
+                           ("Reconstructed", 'reconstructed'),
+                           ("Partial", 'partial')):
+            self.status_filter.addItem(label, key)
+        self.status_filter.setToolTip(
+            "Complete: every check passed and the format's own checksums "
+            "prove the file whole. Valid: every check passed, but the format "
+            "has nothing that could prove no foreign data is inside. "
+            "Reconstructed: rebuilt from fragments a checksum proved. "
+            "Partial: a check failed -- truncated, damaged or mixed with "
+            "another file's data.")
+        self.status_filter.currentIndexChanged.connect(
+            lambda _index: self._show(self._rows))
+        filters.addWidget(self.status_filter)
+        self.named_box = QCheckBox("Named only")
+        self.named_box.setToolTip("Only carves found to be a deleted file "
+                                  "the file system still names")
+        self.named_box.toggled.connect(lambda _on: self._show(self._rows))
+        filters.addWidget(self.named_box)
+        self.unique_box = QCheckBox("Hide copies")
+        self.unique_box.setToolTip("Show each set of identical carves "
+                                   "(same SHA-256) once")
+        self.unique_box.toggled.connect(lambda _on: self._show(self._rows))
+        filters.addWidget(self.unique_box)
+        filters.addWidget(QLabel("at least"))
+        self.min_size = QComboBox()
+        self.min_size.setObjectName("carvedMinSize")
+        for label, size in (("any size", 0), ("1 KB", 1024),
+                            ("10 KB", 10240), ("100 KB", 102400),
+                            ("1 MB", 1 << 20), ("10 MB", 10 << 20)):
+            self.min_size.addItem(label, size)
+        self.min_size.currentIndexChanged.connect(
+            lambda _index: self._show(self._rows))
+        filters.addWidget(self.min_size)
+        align_controls(filters)
+        layout.addWidget(filters)
 
         self.stack = QStackedWidget()
         layout.addWidget(self.stack, 1)
@@ -332,7 +419,11 @@ class CarvedFilesPanel(QWidget):
             self._session.append(record)
         if self._shown(record):
             self._rows.append(record)
-            self._add_table_row(record)
+            digest = record.get('sha256')
+            if digest:
+                self._duplicates[digest] = self._duplicates.get(digest, 0) + 1
+            if self._filtered([record]):
+                self._add_table_row(record)
             if self.stack.currentIndex() == 1:
                 self._add_gallery_item(record)
             self._update_status()
@@ -348,14 +439,43 @@ class CarvedFilesPanel(QWidget):
         self._rows = [r for r in self._rows if r.get('evidence_key') != key]
         self._show(self._rows)
 
+    def _filtered(self, rows):
+        status = self.status_filter.currentData()
+        smallest = self.min_size.currentData() or 0
+        seen, out = set(), []
+        for row in rows:
+            if status and row.get('status') != status:
+                continue
+            if self.named_box.isChecked() and not row.get('origin'):
+                continue
+            if int(row.get('size') or 0) < smallest:
+                continue
+            digest = row.get('sha256')
+            if self.unique_box.isChecked() and digest:
+                if digest in seen:
+                    continue
+                seen.add(digest)
+            out.append(row)
+        return out
+
+    def _count_copies(self, rows):
+        counts = {}
+        for row in rows:
+            if row.get('sha256'):
+                counts[row['sha256']] = counts.get(row['sha256'], 0) + 1
+        self._duplicates = counts
+
     def _show(self, rows):
+        self._count_copies(rows)
+        shown = self._filtered(rows)
+        self._visible = shown
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
-        for row in rows:
+        for row in shown:
             self._add_table_row(row, fit=False)
         self.table.setSortingEnabled(True)
-        if rows:
-            fit_columns(self.table, {1: 220, 8: 140, 9: 320})
+        if shown:
+            fit_columns(self.table, _FIT)
             self.table.setColumnWidth(0, max(self.table.columnWidth(0), 160))
         if self.stack.currentIndex() == 1:
             self._rebuild_gallery()
@@ -394,8 +514,38 @@ class CarvedFilesPanel(QWidget):
             where = f" from {images} images" if images > 1 else ""
             kept = ("in the case" if self.case is not None
                     else "for this session only — open a case to keep them")
-            self.status_label.setText(
-                f"{count:,} file(s) recovered{where}, kept {kept}.")
+            states = {}
+            for row in self._rows:
+                states[row.get('status')] = states.get(row.get('status'), 0) \
+                    + 1
+            named = sum(1 for r in self._rows if r.get('origin'))
+            copies = sum(n - 1 for n in self._duplicates.values() if n > 1)
+            parts = [f"{states[k]:,} {k}" for k in
+                     ('complete', 'valid', 'reconstructed', 'partial')
+                     if states.get(k)]
+            text = f"{count:,} file(s) recovered{where}, kept {kept}"
+            if parts:
+                text += f": {', '.join(parts)}"
+            if named:
+                text += f"; {named:,} named from deleted entries"
+            if copies:
+                text += f"; {copies:,} identical cop{'y' if copies == 1 else 'ies'}"
+            text += '.'
+            runs = self._latest_runs()
+            if runs:
+                candidates = rejected = 0
+                for run in runs:
+                    stats = run.get('stats') or {}
+                    candidates += sum((stats.get('candidates') or {})
+                                      .values())
+                    rejected += sum((stats.get('rejected') or {}).values())
+                if candidates:
+                    text += (f" Latest run{'s' if len(runs) > 1 else ''}: "
+                             f"{candidates:,} signature hits checked, "
+                             f"{rejected:,} rejected as not the format.")
+                self.status_label.setToolTip('\n\n'.join(
+                    self._run_tooltip(run) for run in runs))
+            self.status_label.setText(text)
         elif self.case is None:
             self.status_label.setText(
                 "Carving recovers deleted files from an image's raw bytes by "
@@ -407,6 +557,34 @@ class CarvedFilesPanel(QWidget):
                 "image's raw bytes by their signatures; it can also run from "
                 "Analysis ▸ Run Analysis Modules.")
 
+    def _latest_runs(self):
+        """The latest run of each image shown."""
+        if self.case is None:
+            return []
+        latest = {}
+        for run in self.case.carving_runs(self.evidence_filter, limit=500):
+            latest.setdefault(run['evidence_id'], run)
+        return list(latest.values())
+
+    @staticmethod
+    def _run_tooltip(run):
+        stats = run.get('stats') or {}
+        lines = [f"Run {run['id']} ({run['status']}), "
+                 f"{run.get('started_utc', '')} to "
+                 f"{run.get('finished_utc') or '…'} UTC",
+                 f"Engine: {run.get('engine')}",
+                 f"Source: {(run.get('settings') or {}).get('source')}",
+                 f"Scanned {stats.get('bytes_scanned', 0):,} bytes; skipped "
+                 f"{stats.get('bytes_skipped', 0):,} allocated", '',
+                 "Type: kept / checked / rejected"]
+        candidates = stats.get('candidates') or {}
+        for kind in sorted(set(candidates) | set(stats.get('kept') or {})):
+            lines.append(f"{kind.upper()}: "
+                         f"{(stats.get('kept') or {}).get(kind, 0):,} / "
+                         f"{candidates.get(kind, 0):,} / "
+                         f"{(stats.get('rejected') or {}).get(kind, 0):,}")
+        return '\n'.join(lines)
+
     def _add_table_row(self, row, fit=True):
         sorting = self.table.isSortingEnabled()
         self.table.setSortingEnabled(False)
@@ -416,12 +594,20 @@ class CarvedFilesPanel(QWidget):
         offset = int(row.get('offset') or 0)
         date = row.get('embedded_date') or UNKNOWN_DATE
         pieces, pieces_tip = _pieces(row)
+        from trace_app.core.carve_verify import STATUS_LABELS
+        from trace_app.ui.viewers.virustotal import verdict_brush
+        was, was_tip = origin_text(row)
+        copies = self._duplicates.get(row.get('sha256'), 1)
         values = [
             QTableWidgetItem(row.get('name') or ''),
             QTableWidgetItem(row.get('evidence_label') or ''),
             QTableWidgetItem((row.get('type') or '').upper()),
+            QTableWidgetItem(STATUS_LABELS.get(row.get('status'),
+                                               'Not checked')),
             _SortItem(FileSystemUtils.get_readable_size(size), size),
             _SortItem(f"0x{offset:x}", offset),
+            QTableWidgetItem(was),
+            _SortItem(str(copies) if copies > 1 else '', copies),
             QTableWidgetItem(date),
             QTableWidgetItem(row.get('date_source') or ''),
             QTableWidgetItem(pieces),
@@ -429,6 +615,15 @@ class CarvedFilesPanel(QWidget):
                              if row.get('sha256') else ''),
             QTableWidgetItem(self._shown_path(row.get('path') or '')),
         ]
+        values[_STATUS].setToolTip(checks_text(row))
+        tone = _STATUS_TONE.get(row.get('status'))
+        if tone:
+            values[_STATUS].setForeground(verdict_brush(tone))
+        values[_WAS].setToolTip(was_tip)
+        if copies > 1:
+            values[_COPIES].setToolTip(
+                f"{copies} carves have this SHA-256: the same bytes found "
+                f"in {copies} places")
         values[0].setData(Qt.UserRole, row)
         if self.icon_resolver:
             icon = self.icon_resolver(row.get('type') or 'unknown')
@@ -437,18 +632,18 @@ class CarvedFilesPanel(QWidget):
         values[0].setToolTip(f"Found at byte {offset:,} of "
                              f"{row.get('evidence_label') or 'the image'}")
         if date == UNKNOWN_DATE:
-            values[5].setToolTip(
+            values[_DATE].setToolTip(
                 f"{(row.get('type') or '').upper()} carries no date in its "
                 "own data, and a carved file has no file-system record to "
                 "read one from.")
-        values[7].setToolTip(pieces_tip)
-        values[8].setToolTip(row.get('sha256') or '')
-        values[9].setToolTip(row.get('path') or '')
+        values[_PIECES].setToolTip(pieces_tip)
+        values[_DIGEST].setToolTip(checks_text(row))
+        values[_SAVED].setToolTip(row.get('path') or '')
         for column, item in enumerate(values):
             self.table.setItem(position, column, item)
         self.table.setSortingEnabled(sorting)
         if fit and position == 0:
-            fit_columns(self.table, {1: 220, 8: 140, 9: 320})
+            fit_columns(self.table, _FIT)
 
     def _shown_path(self, path):
         """Inside a case, the path from the case folder: it is shorter and
@@ -475,7 +670,7 @@ class CarvedFilesPanel(QWidget):
         self._thumb_timer.stop()
         self.gallery.clear()
         self._thumb_queue = []
-        for row in self._rows:
+        for row in getattr(self, '_visible', self._rows):
             self._add_gallery_item(row)
 
     def _add_gallery_item(self, row):

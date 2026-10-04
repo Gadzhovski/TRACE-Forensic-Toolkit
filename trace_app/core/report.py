@@ -732,8 +732,46 @@ class _Builder:
     def section_carved(self):
         out = [self.heading(1, 'carved', SECTION_TITLES['carved'])]
         limit = int(self.options.get('carved_limit') or 200)
+        from trace_app.core.carve_verify import STATUS_LABELS
         rows = self.scope(self.case.carved_files(None))
-        out.append(f"<p class='caption'>{len(rows):,} file(s) carved.</p>")
+        states = {}
+        for row in rows:
+            states[row.get('status')] = states.get(row.get('status'), 0) + 1
+        named = sum(1 for row in rows if row.get('origin'))
+        counts = {}
+        for row in rows:
+            if row.get('sha256'):
+                counts[row['sha256']] = counts.get(row['sha256'], 0) + 1
+        copies = sum(n - 1 for n in counts.values() if n > 1)
+        summary = ', '.join(f"{states[k]:,} {STATUS_LABELS[k].lower()}"
+                            for k in ('complete', 'valid', 'reconstructed',
+                                      'partial')
+                            if states.get(k))
+        out.append(f"<p class='caption'>{len(rows):,} file(s) carved"
+                   + (f": {summary}" if summary else '')
+                   + (f"; {named:,} named from the deleted file-system "
+                      f"entry they began at" if named else '')
+                   + (f"; {copies:,} identical copies" if copies else '')
+                   + ". Complete: every check passed and the format's own "
+                     "checksums prove the file whole. Valid: every check "
+                     "passed; the format has nothing that could prove no "
+                     "foreign data is inside. Reconstructed: rebuilt from "
+                     "fragments a checksum proved. Partial: a check failed."
+                     "</p>")
+        for run in self.case.carving_runs(None, limit=20):
+            if self.evidence and run['evidence_id'] not in \
+                    {e_['id'] for e_ in self.evidence}:
+                continue
+            stats = run.get('stats') or {}
+            candidates = sum((stats.get('candidates') or {}).values())
+            rejected = sum((stats.get('rejected') or {}).values())
+            out.append(
+                f"<p class='caption'>Run {run['id']} on "
+                f"{e(self.evidence_name(run['evidence_id']))} "
+                f"({e(run['status'])}, {e(run.get('started_utc'))} UTC): "
+                f"{e((run.get('settings') or {}).get('source'))}, "
+                f"{candidates:,} signature hits checked, {run['found']:,} "
+                f"kept, {rejected:,} rejected. {e(run.get('engine'))}.</p>")
         table = []
         for row in rows[:limit]:
             self.check()
@@ -743,15 +781,22 @@ class _Builder:
                                        row.get('name'), carved=row)
                 if picture:
                     self.pictures += 1
+            failed = [text for ok, text in row.get('checks') or []
+                      if ok is False]
+            status = STATUS_LABELS.get(row.get('status'), 'Not checked')
+            if failed:
+                status += ': ' + '; '.join(failed)
             table.append([
                 f"<img class='small-thumb' src='{picture}' alt=''/>"
                 if picture else '',
                 e(row.get('name')), e(self.evidence_name(row.get(
                     'evidence_id'))), e((row.get('type') or '').upper()),
+                e(status), e((row.get('origin') or {}).get('path')),
                 f"{row.get('offset') or 0:,}", e(_size(row.get('size'))),
                 e(row.get('embedded_date')), _mono(row.get('sha256'))])
-        out.append(_limited(_table(['', 'File', 'Evidence', 'Type', 'Offset',
-                                    'Size', 'Date inside', 'SHA-256'],
+        out.append(_limited(_table(['', 'File', 'Evidence', 'Type', 'Status',
+                                    'Was', 'Offset', 'Size', 'Date inside',
+                                    'SHA-256'],
                                    table, css='small'), len(rows), limit))
         return ''.join(out)
 
