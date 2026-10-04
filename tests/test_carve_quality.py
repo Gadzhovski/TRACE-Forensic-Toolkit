@@ -213,3 +213,84 @@ def test_carve_evidence_records_the_run(tmp_path):
     finally:
         handler.close_resources()
         case.close()
+
+
+def test_an_interrupted_carve_resumes_to_the_same_result(tmp_path):
+    """Stopped half way and resumed, a carve ends with exactly what one
+    uninterrupted run finds -- the two ZIPs rebuilt from fragments that lie
+    in the half already done included."""
+    from trace_app.core import carving
+    from trace_app.core.carving import CARVABLE_TYPES, carve_evidence
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    path = image_path('dfrws-2006-challenge.raw')
+    case = Case.create(str(tmp_path / 'case'), 'Resume')
+    evidence_id = case.add_evidence(path)
+    handler = ImageHandler(path)
+    assert handler.load_image()
+    types = [t.lower() for t in CARVABLE_TYPES]
+    size, seen = handler.get_size(), {}
+    old = carving.CHECKPOINT_SECONDS
+    carving.CHECKPOINT_SECONDS = 0
+    try:
+        carve_evidence(handler, case, evidence_id, types, False,
+                       progress=lambda p, t, f: seen.__setitem__('at', p),
+                       should_stop=lambda: seen.get('at', 0) > size // 2)
+        state = case.carving_state(evidence_id)
+        assert state['status'] == 'cancelled'
+        assert 0 < state['bytes_done'] < size
+        first = {r['offset'] for r in case.carved_files(evidence_id)}
+        carve_evidence(handler, case, evidence_id, types, False,
+                       resume=True)
+        rows = case.carved_files(evidence_id)
+        assert len(rows) == 29 and len({r['offset'] for r in rows}) == 29
+        assert first < {r['offset'] for r in rows}
+        assert {r['status'] for r in rows
+                if r['offset'] in (0xE07200, 0x15FAE00)} == {'reconstructed'}
+        latest = case.carving_runs(evidence_id)[0]
+        assert latest['settings']['resumed_from'] == state['bytes_done']
+        assert case.carving_state(evidence_id)['status'] == 'done'
+    finally:
+        carving.CHECKPOINT_SECONDS = old
+        handler.close_resources()
+        case.close()
+
+
+def test_slack_is_found_and_read():
+    """DFTT #2 hid 3slack3 wholly in file4.dat's slack."""
+    from trace_app.core import slack
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(image_path('fat-img-kw.dd'))
+    assert handler.load_image()
+    try:
+        regions = {path: (offset, length) for offset, length, path, _ref in
+                   slack.slack_ranges(handler)}
+        offset, length = regions['/file4.dat']
+        text = slack.text_of(handler.read(offset, length))
+    finally:
+        handler.close_resources()
+    assert '3slack3' in text
+    assert all(length < 4096 for _o, length in regions.values())
+
+
+def test_slack_carving_reads_nothing_past_the_slack(tmp_path):
+    from trace_app.core.carving import CARVABLE_TYPES, carve_evidence
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    path = image_path('8-jpeg-search.dd')
+    case = Case.create(str(tmp_path / 'case'), 'Slack')
+    evidence_id = case.add_evidence(path)
+    handler = ImageHandler(path)
+    assert handler.load_image()
+    try:
+        carve_evidence(handler, case, evidence_id,
+                       [t.lower() for t in CARVABLE_TYPES], source='slack')
+        (run,) = case.carving_runs(evidence_id)
+        assert run['settings']['source'] == 'slack'
+        # The whole slack of 11 files, a few KB: not the image.
+        assert 0 < run['stats']['bytes_scanned'] < 64 * 1024
+        assert all(r['source'] == 'slack'
+                   for r in case.carved_files(evidence_id))
+    finally:
+        handler.close_resources()
+        case.close()

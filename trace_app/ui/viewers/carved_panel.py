@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
                                QTableWidgetItem, QToolBar,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.carving import CARVABLE_TYPES, CARVE_CATEGORIES
+from trace_app.core.carving import (CARVABLE_TYPES, CARVE_CATEGORIES,
+                                    SOURCE_LABELS, SOURCES)
 from trace_app.infra.constants import TABLE_ROW_HEIGHT, UNKNOWN_DATE
 from trace_app.infra.paths import carved_files_dir
 from trace_app.infra.utils import FileSystemUtils
@@ -138,7 +139,8 @@ class CarvingWorker(ProcessWorker):
     kind = 'carve'
 
     def __init__(self, image_path, file_types, unallocated_only,
-                 case_folder=None, evidence_id=None, label='', parent=None):
+                 case_folder=None, evidence_id=None, label='', parent=None,
+                 source=None, resume=False):
         self.image_path = image_path
         self.evidence_id = evidence_id
         self.label = label or os.path.basename(image_path)
@@ -146,6 +148,9 @@ class CarvingWorker(ProcessWorker):
             'image_path': image_path,
             'file_types': list(file_types),
             'unallocated_only': unallocated_only,
+            'source': source or ('unallocated' if unallocated_only
+                                 else 'image'),
+            'resume': resume,
             'case_folder': case_folder,
             'evidence_id': evidence_id,
             # Decided here: the per-user folder is the window's to choose.
@@ -185,10 +190,12 @@ class _SortItem(QTableWidgetItem):
 class CarvedFilesPanel(QWidget):
     """Carve, and list what was carved."""
 
-    #: (targets, types, unallocated_only). `targets` is a list of evidence
-    #: keys -- evidence ids with a case, image paths without -- or None for
-    #: every image.
-    carve_requested = Signal(object, list, bool)
+    #: (targets, types, source). `targets` is a list of evidence keys --
+    #: evidence ids with a case, image paths without -- or None for every
+    #: image; `source` one of carving.SOURCES.
+    carve_requested = Signal(object, list, str)
+    #: Carry on an interrupted carve of this evidence id.
+    resume_requested = Signal(int)
     #: A row the examiner landed on: preview it.
     file_selected = Signal(dict)
     #: A double-click: open it -- an archive is browsed like a folder.
@@ -229,17 +236,30 @@ class CarvedFilesPanel(QWidget):
                                              categories=CARVE_CATEGORIES)
         self.type_button.set_selected(CARVABLE_TYPES)
         bar.addWidget(self.type_button)
-        self.unallocated_box = QCheckBox("Unallocated space only")
-        self.unallocated_box.setChecked(True)
-        self.unallocated_box.setToolTip(
-            "Skip space that belongs to live files: they are already in the "
-            "tree, and carving them again buries the deleted data in "
-            "duplicates. Untick to search the whole image.")
-        bar.addWidget(self.unallocated_box)
+        bar.addWidget(QLabel("in"))
+        self.source_combo = QComboBox()
+        self.source_combo.setObjectName("carveSourceCombo")
+        for key in SOURCES:
+            self.source_combo.addItem(SOURCE_LABELS[key], key)
+        self.source_combo.setToolTip(
+            "Unallocated space: every free stretch between live files -- "
+            "deleted data, without burying it in copies of live files.\n"
+            "File slack: the unused end of each live file's last cluster, "
+            "where older data survives.\n"
+            "Whole image: every byte.")
+        bar.addWidget(self.source_combo)
         self.carve_button = QPushButton("Start Carving")
         self.carve_button.setObjectName("carveButton")
         self.carve_button.clicked.connect(self._request)
         bar.addWidget(self.carve_button)
+        self.resume_button = QPushButton("Resume")
+        self.resume_button.setObjectName("carveButton")
+        self.resume_button.setToolTip("Carry on the interrupted carve of "
+                                      "this image from where it stopped, "
+                                      "keeping what it found")
+        self.resume_button.clicked.connect(self._resume)
+        self.resume_button.hide()
+        bar.addWidget(self.resume_button)
         self._duplicates = {}
 
         spacer = QWidget()
@@ -387,7 +407,39 @@ class CarvedFilesPanel(QWidget):
             return
         key = self.target_combo.currentData()
         self.carve_requested.emit(None if key is None else [key], types,
-                                  self.unallocated_box.isChecked())
+                                  self.source_combo.currentData())
+
+    def _resumable(self):
+        """The evidence ids whose last carve stopped before the end."""
+        if self.case is None:
+            return []
+        out = []
+        for row in self.case.evidence():
+            if self.evidence_filter is not None and \
+                    row['id'] != self.evidence_filter:
+                continue
+            state = self.case.carving_state(row['id'])
+            if state and state['status'] in ('cancelled', 'failed',
+                                             'running') and \
+                    state['bytes_done'] < state['bytes_total']:
+                out.append((row['id'], state))
+        return out
+
+    def _resume(self):
+        for evidence_id, _state in self._resumable():
+            self.resume_requested.emit(evidence_id)
+
+    def update_resume(self, running=()):
+        """Show Resume when a carve shown here stopped part way (and is
+        not running now)."""
+        stopped = [(e, s) for e, s in self._resumable() if e not in running]
+        self.resume_button.setVisible(bool(stopped))
+        if stopped:
+            evidence_id, state = stopped[0]
+            share = 100 * state['bytes_done'] // max(1, state['bytes_total'])
+            self.resume_button.setToolTip(
+                f"Carry on from {share}% ({state['status']}), keeping the "
+                f"{state['found']:,} file(s) it found")
 
     # --- what was carved ---------------------------------------------
 
@@ -486,6 +538,7 @@ class CarvedFilesPanel(QWidget):
                 or record.get('evidence_id') == self.evidence_filter)
 
     def refresh(self):
+        self.update_resume()
         if self.case is not None:
             names = {r['id']: r.get('display_name')
                      or os.path.basename(r['path'])

@@ -358,17 +358,26 @@ def job_carve(params, progress, item, should_stop):
             return carve_evidence(
                 handler, case, params['evidence_id'], params['file_types'],
                 params['unallocated_only'], progress=report,
-                should_stop=should_stop, on_file=item)
+                should_stop=should_stop, on_file=item,
+                source=params.get('source'),
+                resume=bool(params.get('resume')))
         found = [0]
+        source = params.get('source') or (
+            'unallocated' if params['unallocated_only'] else 'image')
 
         def sink(content, file_type, offset, fragments=None):
             item(write_carved(params['folder'], content, file_type, offset,
-                              fragments))
+                              fragments, source=source))
             found[0] += 1
+        ranges = None
+        if source == 'slack':
+            from trace_app.core import slack
+            ranges = [(begin, length) for begin, length, _p, _r in
+                      slack.slack_ranges(handler, should_stop)]
         try:
             carve_image(handler, params['file_types'], sink,
-                        params['unallocated_only'], progress=report,
-                        should_stop=should_stop)
+                        source == 'unallocated', progress=report,
+                        should_stop=should_stop, ranges=ranges)
         except CarvingCancelled:
             pass
         return found[0]

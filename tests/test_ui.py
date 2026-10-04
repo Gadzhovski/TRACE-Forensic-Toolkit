@@ -1541,3 +1541,25 @@ def test_deleted_files_are_a_job_and_a_triage_tab(qapp, window, truth):
                                                  ref['start_offset'])
     assert captured and captured[-1] == expected
     assert expected[:3] == b'\xff\xd8\xff'
+
+
+def test_an_interrupted_carve_offers_resume(qapp, window):
+    """A carve that stopped part way shows Resume, which carries it on."""
+    from trace_app.core.carving import CARVABLE_TYPES
+    panel = window.carved_panel
+    second = next(r['id'] for r in window.case.evidence()
+                  if r['path'].endswith(SECOND))
+    window.case.set_carving_state(second, 'cancelled',
+                                  types=','.join(t.lower() for t in
+                                                 CARVABLE_TYPES),
+                                  unallocated_only=True, bytes_done=1024,
+                                  bytes_total=10 ** 9, found=0)
+    window.triage_panel.set_evidence_filter(second)
+    panel.refresh()
+    assert panel.resume_button.isVisibleTo(panel)
+    assert window.resume_carving(second) == 1
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    assert window.case.carving_state(second)['status'] == 'done'
+    panel.refresh()
+    assert not panel.resume_button.isVisibleTo(panel)
+    window.triage_panel.set_evidence_filter(None)

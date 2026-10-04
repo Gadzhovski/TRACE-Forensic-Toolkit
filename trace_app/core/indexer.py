@@ -194,6 +194,9 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
             _index_file(image_handler, index, evidence_id, offset, inode,
                         getattr(meta, 'seq', None), name, child_path,
                         meta.size, _entry_times(meta))
+            if int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
+                _index_slack(image_handler, index, evidence_id, fs_info,
+                             offset, inode, name, child_path, meta.size)
 
             # Committing periodically means a cancel or a crash keeps most of
             # the work rather than none of it.
@@ -204,6 +207,31 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
 
     walk(fs_info.open_dir(path='/'), '', 0)
     return done
+
+
+def _index_slack(image_handler, index, evidence_id, fs_info, offset, inode,
+                 name, path, size):
+    """The text in a live file's slack, as an item of its own: whatever
+    was in its last cluster before it (core/slack.py). Referenced by its
+    byte span, so it previews from the image."""
+    from trace_app.core import slack
+    from trace_app.core.case import make_span_ref
+    try:
+        base = image_handler.partition_bytes(offset)[0]
+        handle = fs_info.open_meta(inode=inode)
+        region = slack.file_slack(handle, int(size), fs_info.info.block_size,
+                                  base)
+        if region is None:
+            return
+        text = slack.text_of(image_handler.read(region[0], region[1]))
+    except Exception as exc:
+        logger.debug("Slack of %s unreadable: %s", path, exc)
+        return
+    if text:
+        index.add_item(evidence_id,
+                       make_span_ref(0, region[0], region[0] + region[1]),
+                       'slack', f"{name} (slack)", f"{path} [slack]", text,
+                       region[1])
 
 
 def _entry_times(meta):

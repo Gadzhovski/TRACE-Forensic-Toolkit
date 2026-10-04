@@ -430,8 +430,14 @@ hash can be looked up on VirusTotal, and each run records its settings,
 engine, signature hits checked and rejected, by type — in the audit trail
 and the report.
 Carve one image or all of them, from unallocated space (every free stretch
-between live files) or the whole image, from the Triage tab or
-as an analysis module. In a case each file is recorded with its image, offset,
+between live files), **file slack** (the unused end of each live file's
+last cluster, where older data survives — never reading on into live data)
+or the whole image, from the Triage tab or as an analysis module. A carve
+checkpoints as it goes: one that was cancelled, failed or cut short by a
+crash shows **Resume**, which carries it on with the settings it ran with
+and ends with exactly what an uninterrupted run finds. Slack's text is also
+**indexed**, so search, keyword lists and indicators reach it (DFTT's
+3slack3, planted wholly in a file's slack, is found there). In a case each file is recorded with its image, offset,
 hashes and embedded date, saved per image, audited and listed under Findings;
 without a case, carving still works for the session. Filter by status, size,
 named or unique. Previews read the bytes back from the image, not the

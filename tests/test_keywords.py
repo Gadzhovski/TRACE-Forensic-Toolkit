@@ -6,9 +6,11 @@ and a published table of where each one is and which grep regular
 expressions should find it. A list made of that table is run over the
 image's search index; every string stored inside a file -- allocated or
 deleted, and the file name in a directory entry -- is found where the table
-says. Strings that cross files or sit in slack or unallocated space are not
-in any file, so a search of the index does not find them; the table marks
-them as such and so does this test.
+says, and so is the one wholly inside a file's slack (3slack3: indexing
+reads each live file's slack as an item of its own). Strings that cross
+from one file or into slack, or lie in unallocated space, are in no single
+item, so a search of the index does not find them; the table marks them as
+such and so does this test.
 """
 
 import os
@@ -26,7 +28,7 @@ DFTT_TERMS = [
     ('3cross3', set()),                        # unallocated
     ('1slack1', set()),                        # file into slack
     ('2slack2', set()),
-    ('3slack3', set()),
+    ('3slack3', {'/file4.dat [slack]'}),       # wholly in file4's slack
     ('1fragment1', {'/file4.dat'}),
     ('2fragment sentence2', {'/file6.dat'}),
     ('deleted', {'/_ILE5.DAT'}),               # a deleted file
@@ -36,7 +38,7 @@ DFTT_TERMS = [
     (r'/f[a-z]r[0-9]?s[[:space:]]*t/', {'/file1.dat'}),
     (r'/d[a-z]l.?t.?d/', {'/_ILE5.DAT'}),
     (r'/[r-t][[:space:]]?[j-m][[:space:]]?[a-c]{2,2}[[:space:]]?[j-m]/',
-     set()),                                   # the slack strings
+     {'/file4.dat [slack]'}),                  # 3slack3; the others cross
     (r'/[1572943][[:space:]]?fr.{2,3}ent[[:space:]]?/',
      {'/file4.dat', '/file6.dat'}),
     (r'/a\??[a-c]\\*[a-c]\**/', {'/file7.dat'}),

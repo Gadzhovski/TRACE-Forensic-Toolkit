@@ -1393,8 +1393,20 @@ def allocation_map(image_handler):
     return ImageHandler._merge_ranges(ranges)
 
 
+#: Where a carve looks: free space between live files, the slack at the
+#: end of live files' last clusters, or every byte of the image.
+SOURCES = ('unallocated', 'slack', 'image')
+SOURCE_LABELS = {'unallocated': 'Unallocated space', 'slack': 'File slack',
+                 'image': 'Whole image'}
+
+#: Checkpoint a carve's progress at least this often (seconds), so an
+#: interrupted run resumes close to where it stopped.
+CHECKPOINT_SECONDS = 20
+
+
 def carve_image(image_handler, file_types, sink, unallocated_only=True,
-                progress=None, should_stop=None, stats=None):
+                progress=None, should_stop=None, stats=None, ranges=None,
+                start_offset=0, seen=()):
     """Carve `file_types` out of the image; returns how many were found.
 
     `progress(position, size, found)` is called once per chunk, and
@@ -1402,6 +1414,11 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     with everything found so far already handed to the sink. `stats`, a
     dict, is filled with what the run saw: candidates and rejections by
     type, bytes scanned and skipped as allocated.
+
+    `ranges` -- [(offset, length), ...] in image order -- confines the carve
+    to those regions alone (file slack), nothing read past their ends.
+    `start_offset` resumes a carve: everything before it is skipped, and
+    `seen` -- (offset, type) pairs already carved -- is not carved again.
     """
     global _STATS
     run = {'candidates': {}, 'rejected': {}, 'bytes_scanned': 0,
@@ -1409,7 +1426,8 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     _STATS = run
     try:
         return _carve_image(image_handler, file_types, sink,
-                            unallocated_only, progress, should_stop, run)
+                            unallocated_only, progress, should_stop, run,
+                            ranges, start_offset, seen)
     finally:
         _STATS = None
         if stats is not None:
@@ -1417,7 +1435,8 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
 
 
 def _carve_image(image_handler, file_types, sink, unallocated_only,
-                 progress, should_stop, run):
+                 progress, should_stop, run, ranges=None, start_offset=0,
+                 seen=()):
     wanted = {t.lower() for t in file_types if t.lower() in EXTENSION_CARVER}
     families = {EXTENSION_CARVER[t] for t in wanted}
     if 'tar' in families:
@@ -1432,9 +1451,28 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
                     sum(end - begin for begin, end in allocated) / 1048576)
 
     size = image_handler.get_size()
+    if ranges is not None:
+        return _carve_ranges(image_handler, ranges, families, wanted, sink,
+                             progress, should_stop, run, start_offset, seen,
+                             size)
     carver = Carver(sink, wanted=wanted, reader=image_handler.read,
                     image_size=size)
-    offset = 0
+    carver._seen.update(seen)
+    offset = (start_offset // CHUNK_SIZE) * CHUNK_SIZE
+    if offset:
+        # Resuming: what was carved before is kept, but reassembly works
+        # from the fragment headers the scan noted -- so the part already
+        # done is read once more for those alone, carving nothing.
+        for skipped in range(0, offset, CHUNK_SIZE):
+            if should_stop and should_stop():
+                raise CarvingCancelled()
+            for begin, end in free_ranges(skipped,
+                                          min(skipped + CHUNK_SIZE, size),
+                                          allocated):
+                chunk = image_handler.read(begin, end - begin)
+                if chunk:
+                    carver.note_unfinished(chunk, begin, families,
+                                           limit=end - begin)
     while offset < size:
         if should_stop and should_stop():
             raise CarvingCancelled()
@@ -1472,6 +1510,34 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
         offset += CHUNK_SIZE
 
     carver.reassemble_fragmented(allocated, should_stop)
+    if progress:
+        progress(size, size, carver.found)
+    return carver.found
+
+
+def _carve_ranges(image_handler, ranges, families, wanted, sink, progress,
+                  should_stop, run, start_offset, seen, size):
+    """Carve inside each region alone: no reader past it, so a carve
+    cannot run on into the live file in the next cluster."""
+    carver = Carver(sink, wanted=wanted, reader=None, image_size=size)
+    carver._seen.update(seen)
+    for index, (begin, length) in enumerate(ranges):
+        if begin + length <= start_offset or length < 16:
+            continue
+        if should_stop and should_stop():
+            raise CarvingCancelled()
+        if progress and index % 256 == 0:
+            progress(begin, size, carver.found)
+        chunk = image_handler.read(begin, length)
+        if not chunk:
+            continue
+        run['bytes_scanned'] += len(chunk)
+        for family in families:
+            try:
+                Carver.CARVERS[family](carver, chunk, begin)
+            except Exception as exc:
+                logger.warning("%s carver failed in slack at %d: %s",
+                               family, begin, exc)
     if progress:
         progress(size, size, carver.found)
     return carver.found
@@ -1565,7 +1631,7 @@ def write_carved(folder, content, file_type, offset, fragments=None,
 
 def carve_evidence(image_handler, case, evidence_id, file_types,
                    unallocated_only=True, progress=None, should_stop=None,
-                   on_file=None):
+                   on_file=None, source=None, resume=False):
     """Carve one piece of evidence into its case; returns files found.
 
     Results replace the previous carve of the same evidence, are written to
@@ -1577,14 +1643,36 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     from trace_app.core import carve_origin
     types = [t.lower() for t in file_types]
     folder = case.carved_dir_for(evidence_id)
-    case.clear_carved(evidence_id)
     size = image_handler.get_size()
-    source = 'unallocated' if unallocated_only else 'image'
+    source = source or ('unallocated' if unallocated_only else 'image')
+    previous = case.carving_state(evidence_id) if resume else None
+    start_offset, seen, already = 0, set(), 0
+    if previous and previous.get('status') != 'done':
+        # Carry on where it stopped, with what it was doing.
+        runs = case.carving_runs(evidence_id, limit=1)
+        settings = runs[0]['settings'] if runs else {}
+        types = settings.get('types') or types
+        source = settings.get('source') or source
+        start_offset = int(previous.get('bytes_done') or 0)
+        rows = case.carved_files(evidence_id, limit=10 ** 7)
+        seen = {(int(r['offset']), r['type']) for r in rows}
+        already = len(rows)
+    else:
+        resume = False
+        case.clear_carved(evidence_id)
     case.set_carving_state(evidence_id, 'running', types=','.join(types),
-                           unallocated_only=unallocated_only, bytes_done=0,
-                           bytes_total=size, found=0)
+                           unallocated_only=source == 'unallocated',
+                           bytes_done=start_offset, bytes_total=size,
+                           found=already)
     run_id = case.start_carving_run(
-        evidence_id, {'types': types, 'source': source}, engine_identity())
+        evidence_id, {'types': types, 'source': source,
+                      'resumed_from': start_offset if resume else None},
+        engine_identity())
+    ranges, slack_list = None, []
+    if source == 'slack':
+        from trace_app.core import slack
+        slack_list = slack.slack_ranges(image_handler, should_stop)
+        ranges = [(begin, length) for begin, length, _p, _r in slack_list]
     # Where deleted files began: a carve starting there was that file.
     try:
         starts = carve_origin.deleted_file_starts(image_handler, should_stop)
@@ -1592,11 +1680,41 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
         logger.warning("Deleted files could not be listed for naming "
                        "carves: %s", exc)
         starts = {}
-    found = [0]
+    slack_owners = sorted((begin, begin + length, path, ref)
+                          for begin, length, path, ref in slack_list)
+
+    def slack_owner(offset):
+        import bisect as _bisect
+        index = _bisect.bisect_right(slack_owners,
+                                     (offset, float('inf'), '', '')) - 1
+        if index >= 0 and slack_owners[index][0] <= offset < \
+                slack_owners[index][1]:
+            return slack_owners[index][2], slack_owners[index][3]
+        return None
+
+    found = [already]
     tally = {'kept': {}, 'status': {}, 'named': 0}
+    import time as _time
+    checkpoint = {'at': _time.monotonic(), 'position': start_offset}
+
+    def report(position, total, count):
+        checkpoint['position'] = position
+        if _time.monotonic() - checkpoint['at'] >= CHECKPOINT_SECONDS:
+            checkpoint['at'] = _time.monotonic()
+            case.commit()
+            case.set_carving_state(evidence_id, 'running',
+                                   bytes_done=position, found=found[0])
+        if progress:
+            progress(position, total, count)
 
     def sink(content, file_type, offset, fragments=None):
         origin = carve_origin.match(starts, offset, len(content))
+        if source == 'slack':
+            owner = slack_owner(offset)
+            origin = origin or ({'path': owner[0], 'ref': owner[1],
+                                 'basis': f"found in the slack of the live "
+                                          f"file {owner[0]}"}
+                                if owner else None)
         record = write_carved(folder, content, file_type, offset, fragments,
                               source=source, origin=origin)
         case.add_carved(evidence_id, record)
@@ -1633,11 +1751,13 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             f"duplicates={summary['duplicates']} engine={engine_identity()}")
 
     try:
-        carve_image(image_handler, types, sink, unallocated_only,
-                    progress=progress, should_stop=should_stop, stats=stats)
+        carve_image(image_handler, types, sink, source == 'unallocated',
+                    progress=report, should_stop=should_stop, stats=stats,
+                    ranges=ranges, start_offset=start_offset, seen=seen)
     except CarvingCancelled:
         finish('cancelled')
-        case.set_carving_state(evidence_id, 'cancelled', found=found[0])
+        case.set_carving_state(evidence_id, 'cancelled', found=found[0],
+                               bytes_done=checkpoint['position'])
         logger.info("Carving cancelled after %d file(s)", found[0])
         return found[0]
     except Exception as exc:

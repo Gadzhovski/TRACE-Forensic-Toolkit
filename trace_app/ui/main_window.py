@@ -1164,6 +1164,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.carved_panel = CarvedFilesPanel()
         self.carved_panel.icon_resolver = self._get_file_icon
         self.carved_panel.carve_requested.connect(self.start_carving)
+        self.carved_panel.resume_requested.connect(self.resume_carving)
         self.carved_panel.file_selected.connect(self.preview_carved)
         self.carved_panel.file_activated.connect(self.open_carved)
         self.carved_panel.file_menu_requested.connect(self.open_carved_menu)
@@ -1841,8 +1842,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if panel is not None:
             panel.set_targets(self._carving_targets())
 
-    def start_carving(self, targets, file_types, unallocated_only):
+    def resume_carving(self, evidence_id):
+        """Carry on an interrupted carve, with the settings it ran with."""
+        if not self.case:
+            return 0
+        state = self.case.carving_state(evidence_id) or {}
+        types = [t for t in (state.get('types') or '').split(',') if t]
+        return self.start_carving([evidence_id], types, None, resume=True)
+
+    def start_carving(self, targets, file_types, unallocated_only,
+                      resume=False):
         """Queue one carve per image: those in `targets`, or every one.
+        `unallocated_only` is a source (carving.SOURCES) or, from the
+        analysis dialog, True / False for unallocated / whole image.
 
         Jobs share the status-bar queue with analysis and indexing -- two
         readers of one image are slower than one -- and are cancelled from
@@ -1866,23 +1878,31 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 logger.warning("Skipping carving of missing %s", path)
                 continue
             if self._queue_carving_job(evidence_id, path, label, file_types,
-                                       unallocated_only):
+                                       unallocated_only, resume):
                 queued += 1
         if queued:
             self.set_status(f"Carving {queued} image(s) in the background")
         return queued
 
     def _queue_carving_job(self, evidence_id, path, label, file_types,
-                           unallocated_only):
+                           unallocated_only, resume=False):
         key = evidence_id if evidence_id is not None else path
         case_folder = self.case.folder if self.case is not None else None
+        if isinstance(unallocated_only, str) or unallocated_only is None:
+            source = unallocated_only
+        else:
+            source = 'unallocated' if unallocated_only else 'image'
 
         def start(job):
-            self.carved_panel.forget(key)
-            worker = CarvingWorker(path, file_types, unallocated_only,
+            if not resume:
+                self.carved_panel.forget(key)
+            self.carved_panel.update_resume(running={evidence_id})
+            worker = CarvingWorker(path, file_types,
+                                   source in (None, 'unallocated'),
                                    case_folder=case_folder,
                                    evidence_id=evidence_id, label=label,
-                                   parent=self)
+                                   parent=self, source=source,
+                                   resume=resume)
             worker.progressed.connect(
                 lambda done, total, found: self.job_bar.report(
                     done, total, f"{found:,} file(s) found"))
