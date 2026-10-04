@@ -702,6 +702,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         menu_bar = QMenuBar(self)
         file_actions = {
             'Add Evidence File': self.load_image_evidence,
+            'Add Evidence Folder...': self.load_folder_evidence,
             'Remove Evidence File': self.remove_image_evidence,
             'separator': None,  # This will add a separator
             'Exit': self.close
@@ -770,6 +771,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             lambda: self.queue_yara(self.case.evidence() if self.case
                                     else []))
         analysis_menu.addAction(self.scan_yara_action)
+        self.scan_sigma_action = QAction("Check Event Logs with Sigma", self)
+        self.scan_sigma_action.triggered.connect(
+            lambda: self.queue_sigma(self.case.evidence() if self.case
+                                     else []))
+        analysis_menu.addAction(self.scan_sigma_action)
         self.search_keywords_action = QAction("Search Keyword Lists", self)
         self.search_keywords_action.triggered.connect(
             lambda: self.queue_keywords())
@@ -778,6 +784,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for action in (self.run_analysis_action, self.cancel_analysis_action,
                        self.find_by_hash_action,
                        self.match_hash_sets_action, self.scan_yara_action,
+                       self.scan_sigma_action,
                        self.search_keywords_action):
             action.setEnabled(self.case is not None)
         if self.case is None:
@@ -862,6 +869,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                               "YARA Rules...", self)
         yara_action.triggered.connect(self.show_yara_rules)
         tools_menu.addAction(yara_action)
+        sigma_action = QAction(icons.icon(icons.SIGMA), "Sigma Rules...",
+                               self)
+        sigma_action.triggered.connect(self.show_sigma_rules)
+        tools_menu.addAction(sigma_action)
         keywords_action = QAction(icons.icon(icons.KEYWORDS),
                                   "Keyword Lists...", self)
         keywords_action.triggered.connect(self.show_keyword_lists)
@@ -1887,15 +1898,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 jobs.append((None, path, os.path.basename(path)))
 
         queued = 0
+        logical = []
         for evidence_id, path, label in jobs:
             if not os.path.exists(path):
                 logger.warning("Skipping carving of missing %s", path)
+                continue
+            from trace_app.core.logical_sources import kind_of
+            if kind_of(path):
+                # Files, not a disk: no sectors, nothing unallocated.
+                logical.append(label)
                 continue
             if self._queue_carving_job(evidence_id, path, label, file_types,
                                        unallocated_only, resume):
                 queued += 1
         if queued:
             self.set_status(f"Carving {queued} image(s) in the background")
+        elif logical:
+            self.set_status(f"Nothing to carve in {', '.join(logical)}: "
+                            f"logical evidence holds files, not a disk",
+                            8000)
         return queued
 
     def _queue_carving_job(self, evidence_id, path, label, file_types,
@@ -2531,6 +2552,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 for entry in self.yara_library().sets())
             preselected['yara_available'] = bool(in_use)
             preselected['yara'] = bool(in_use)
+        from trace_app.core import sigma
+        if not sigma.available():
+            preselected['sigma_available'] = False
+            preselected['sigma_reason'] = sigma.unavailable_reason()
+        else:
+            sigma_options = sigma.case_options(self.case,
+                                               self.sigma_library())
+            in_use = sigma_options.get('enabled') and any(
+                sigma.set_enabled_in(sigma_options, entry)
+                for entry in self.sigma_library().sets())
+            preselected['sigma_available'] = bool(in_use)
+            preselected['sigma'] = bool(in_use)
         preselected['hashsets'] = bool(usable and options.get('auto_match'))
         from trace_app.core import keywords
         keyword_options = keywords.case_options(self.case,
@@ -2567,6 +2600,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_deleted(chosen)
         if choice.get('yara'):
             self.queue_yara(chosen)
+        if choice.get('sigma'):
+            self.queue_sigma(chosen)
         if choice.get('keywords'):
             # After indexing, which it reads.
             self.queue_keywords([row['id'] for row in chosen])
@@ -3054,6 +3089,88 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             logger.error("YARA on %s failed: %s", name, error)
         else:
             self.set_status(f"YARA: {count:,} file(s) in {name} matched")
+        self.refresh_analysis_views()
+
+    # --- Sigma ---------------------------------------------------------------
+
+    def sigma_library(self):
+        from trace_app.core import sigma
+        library = getattr(self, '_sigma_library', None)
+        if library is None:
+            library = self._sigma_library = sigma.Library()
+        return library
+
+    def show_sigma_rules(self):
+        """Tools > Sigma Rules: the library, and this case's options."""
+        from trace_app.ui.dialogs.sigma_rules import SigmaRulesDialog
+        dialog = SigmaRulesDialog(self.case, self.sigma_library(), self)
+        wanted = []
+        dialog.scan_requested.connect(lambda: wanted.append(True))
+        dialog.exec()
+        if wanted and self.case:
+            self.queue_sigma(self.case.evidence())
+
+    def queue_sigma(self, rows):
+        """One Sigma job per image, on the shared queue."""
+        from trace_app.core import sigma
+        if not self.case:
+            return 0
+        if not sigma.available():
+            message.information(self, "Sigma is unavailable",
+                                "Sigma rules do not run on this system.",
+                                sigma.unavailable_reason())
+            return 0
+        options = sigma.case_options(self.case, self.sigma_library())
+        if not options.get('enabled') or not any(
+                sigma.set_enabled_in(options, entry)
+                for entry in self.sigma_library().sets()):
+            message.information(self, "No Sigma rules in use",
+                                "This case uses no Sigma rules.",
+                                "Tools \u25b8 Sigma Rules imports them "
+                                "(SigmaHQ's release zip, or your own) and "
+                                "chooses which this case uses.")
+            return 0
+        queued = 0
+        for row in rows:
+            if os.path.exists(row['path']) and \
+                    self._queue_sigma_job(row, options):
+                queued += 1
+        if queued:
+            self.set_status(f"Checking the event logs of {queued} image(s) "
+                            f"with Sigma rules in the background")
+        return queued
+
+    def _queue_sigma_job(self, row, options):
+        from trace_app.ui.dialogs.sigma_rules import SigmaWorker
+        evidence_id = row['id']
+        name = row.get('display_name') or os.path.basename(row['path'])
+
+        def start(job):
+            worker = SigmaWorker(row['path'], self.case.folder, evidence_id,
+                                 self.sigma_library().folder, options, self,
+                                 unlock=self._unlocks_for(row['path']))
+            worker.progressed.connect(
+                lambda done, total, path: self.job_bar.report(
+                    done, total, os.path.basename(path)))
+            worker.finished_scan.connect(
+                lambda count, error: self._sigma_finished(name, count,
+                                                          error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"sigma:{evidence_id}", title=f"Sigma check of {name}",
+            start=start, stop=lambda worker: worker.stop()))
+
+    def _sigma_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Sigma check of {name} failed: {error}")
+            logger.error("Sigma on %s failed: %s", name, error)
+        else:
+            self.set_status(f"Sigma: {count:,} detection(s) in the event "
+                            f"logs of {name}")
         self.refresh_analysis_views()
 
     # --- deleted files -----------------------------------------------------
@@ -3603,6 +3720,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   self.case.findings(evidence_id, 'yara', limit=100000)}),
              lambda: self._one_per_file(self.case.findings(
                  evidence_id, 'yara', limit=100000))),
+            # Each event a Sigma rule matched (medium and above): these
+            # are events, so one row each, not one per log.
+            ('sigma', 'Sigma detections', icons.SIGMA,
+             len(self.case.findings(evidence_id, 'sigma',
+                                    grades=REPORTED_FINDING_GRADES,
+                                    limit=100000)),
+             lambda: self.case.findings(evidence_id, 'sigma',
+                                        grades=REPORTED_FINDING_GRADES,
+                                        limit=100000)),
             ('hash:known-bad', 'Known bad (hash sets)', icons.HASH_SETS,
              hashed.get(hashsets.KNOWN_BAD, 0),
              lambda: self._one_per_file(self.case.hash_matches(
@@ -5136,23 +5262,40 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """Open an image with a specific filter on Kali Linux."""
         # Define the supported image file extensions, including both lowercase and uppercase variants
         supported_image_extensions = ["*.e01", "*.E01", "*.s01", "*.S01",
-                                      "*.l01", "*.L01", "*.raw", "*.RAW",
+                                      "*.raw", "*.RAW",
                                       "*.img", "*.IMG", "*.dd", "*.DD",
-                                      "*.iso", "*.ISO", "*.ad1", "*.AD1",
+                                      "*.iso", "*.ISO",
                                       "*.001", "*.s01", "*.ex01", "*.dmg",
                                       "*.sparse", "*.sparseimage",
                                       "*.vmdk", "*.VMDK", "*.vhd", "*.VHD",
                                       "*.vhdx", "*.VHDX", "*.qcow2",
                                       "*.QCOW2", "*.qcow"]
+        # Logical evidence (core/logical_sources.py): files, not a disk.
+        logical_extensions = ["*.ad1", "*.AD1", "*.l01", "*.L01", "*.lx01",
+                              "*.Lx01", "*.zip", "*.ZIP", "*.tar", "*.tgz",
+                              "*.tar.gz", "*.tar.bz2", "*.tar.xz"]
 
-        # Construct the file filter string with both uppercase and lowercase extensions
-        file_filter = "Supported Image Files ({})".format(" ".join(supported_image_extensions))
+        file_filter = ";;".join((
+            "All Evidence ({})".format(" ".join(supported_image_extensions
+                                                + logical_extensions)),
+            "Disk Images ({})".format(" ".join(supported_image_extensions)),
+            "Logical Evidence: AD1, L01, ZIP, TAR ({})".format(
+                " ".join(logical_extensions))))
 
         # Open file dialog with the specified file filter
         image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", file_filter)
 
         if image_path:
             self.open_evidence_image(image_path)
+
+    def load_folder_evidence(self):
+        """A folder of collected files as evidence -- a triage collection
+        (KAPE, Velociraptor, UAC), a phone's extraction, exported files.
+        Read in place, never written to."""
+        folder = QFileDialog.getExistingDirectory(self, "Select Evidence "
+                                                        "Folder")
+        if folder:
+            self.open_evidence_image(folder)
 
     def open_evidence_image(self, image_path, record_in_case=True):
         """Load an image and show it. Returns True when it opened.
@@ -5185,9 +5328,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             handler = ImageHandler(image_path)
             if not handler.loaded:
                 raise ValueError(
-                    "The file could not be opened as a disk image. It may be "
-                    "corrupt, incomplete (a missing .E02 segment, say), or an "
-                    "unsupported format.")
+                    "The evidence could not be opened"
+                    + (f": {handler.load_error}." if handler.load_error
+                       else ". It may be corrupt, incomplete (a missing .E02 "
+                            "segment, say), or an unsupported format."))
             progress.setValue(50)
 
             self._image_handlers[image_path] = handler

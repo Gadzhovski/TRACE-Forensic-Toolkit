@@ -499,15 +499,12 @@ def grade(entry):
 def collect(image_handler, case=None, evidence_id=None, hash_lookup=None,
             should_stop=None, progress=None):
     """Every autostart on every Windows volume of the image, graded."""
-    from trace_app.core.activity import (Volume, _hive, _profiles, _sid_names,
-                                         _split, lnk)
+    from trace_app.core.activity import (_hive, _profiles, _sid_names,
+                                         _split, _volumes, lnk)
     from trace_app.core.walk import volume_offsets
     out = []
-    for offset in volume_offsets(image_handler):
-        try:
-            volume = Volume(image_handler, offset)
-        except Exception:
-            continue
+    for offset, volume in ((o, v) for o in volume_offsets(image_handler)
+                           for v in _volumes(image_handler, o)):
         if volume.fs is None:
             continue
         windows = volume.find('Windows') or volume.find('WINNT')

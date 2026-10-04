@@ -42,6 +42,16 @@ _WHY = {
 }
 
 
+#: Sigma levels, most serious first.
+_LEVEL_ORDER = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3,
+                'informational': 4}
+#: Event data worth seeing in the Details column of a Sigma detection.
+_SIGMA_TELLING = ('CommandLine', 'Image', 'ParentImage', 'ScriptBlockText',
+                  'ServiceName', 'ImagePath', 'TargetUserName',
+                  'SubjectUserName', 'IpAddress', 'TargetObject',
+                  'TargetFilename', 'QueryName', 'DestinationIp',
+                  'GrantedAccess', 'Properties', 'ObjectName')
+
 class AnalysisWorker(ProcessWorker):
     """Runs the analysis modules in a child process (core/background.py),
     so the window stays responsive however long the run."""
@@ -185,6 +195,11 @@ class TriagePanel(QWidget):
         self.tabs.addTab(self.executable_table, icons.icon(icons.EXECUTABLE),
                          "Executables")
 
+        self.sigma_table = self._make_table(
+            ['Log', 'Level', 'Rule', 'Time (UTC)', 'Event', 'Computer',
+             'ATT&CK', 'Details', 'Path'])
+        self.tabs.addTab(self.sigma_table, icons.icon(icons.SIGMA), "Sigma")
+
         #: Widest each free-text column may grow; the full text is in the
         #: cell's tooltip. Uncapped, one long finding or an eight-author paper
         #: pushed every column after it off the screen.
@@ -194,13 +209,14 @@ class TriagePanel(QWidget):
             id(self.author_table): {2: 260, 3: 180, 4: 180, 5: 220},
             id(self.yara_table): {2: 220, 5: 420},
             id(self.executable_table): {6: 240, 7: 420},
+            id(self.sigma_table): {3: 320, 7: 180, 8: 420, 9: 320},
         }
 
         #: Sub-tab index by the name the tree uses for it. The bookmarks tab
         #: is added by the host (add_bookmarks_tab), since its panel is shared.
         self._tab_for = {'mismatch': 0, 'entropy': 1, 'duplicates': 2,
                          'hidden': 3, 'photos': 4, 'authors': 5, 'yara': 6,
-                         'executables': 7}
+                         'executables': 7, 'sigma': 8}
 
         self.refresh()
 
@@ -480,12 +496,13 @@ class TriagePanel(QWidget):
         self._fill_authors()
         self._fill_yara()
         self._fill_executables()
+        self._fill_sigma()
         self._set_counts(summary)
 
     def _finding_tables(self):
         return (self.mismatch_table, self.entropy_table, self.duplicate_table,
                 self.hidden_table, self.photo_table, self.author_table,
-                self.yara_table, self.executable_table)
+                self.yara_table, self.executable_table, self.sigma_table)
 
     def _fill_hidden(self):
         rows = self.case.findings(self.evidence_id, 'hidden',
@@ -617,6 +634,47 @@ class TriagePanel(QWidget):
                         verdict_brush(tone))
             table.item(position, 7).setToolTip(row.get('summary') or '')
 
+    def _fill_sigma(self):
+        """Every event a Sigma rule matched, most serious first."""
+        rows = self.case.findings(self.evidence_id, 'sigma', limit=50000)
+        rows.sort(key=lambda r: (_LEVEL_ORDER.get(
+            (r.get('detail') or {}).get('level'), 5),
+            (r.get('detail') or {}).get('time') or ''))
+        self._sigma_count = len(rows)
+        table = self.sigma_table
+        table.setRowCount(len(rows))
+        for position, row in enumerate(rows):
+            facts = row.get('detail') or {}
+            data = facts.get('data') or {}
+            telling = [f"{k}: {v}" for k, v in data.items()
+                       if k in _SIGMA_TELLING and v][:3]
+            values = [
+                row.get('name') or '',
+                (facts.get('level') or '').capitalize(),
+                facts.get('rule') or '',
+                (facts.get('time') or '')[:23],
+                str(facts.get('event_id') or ''),
+                facts.get('computer') or '',
+                ', '.join(facts.get('attack') or []),
+                '; '.join(telling),
+                row.get('path') or '',
+            ]
+            self._fill_row(table, position, values, row)
+            if row.get('grade') in ('suspicious', 'notable'):
+                tone = 'malicious' if row['grade'] == 'suspicious' \
+                    else 'suspicious'
+                for column in (2, 3):
+                    table.item(position, column).setForeground(
+                        verdict_brush(tone))
+            tip = [facts.get('rule') or '', facts.get('description') or '']
+            if facts.get('falsepositives'):
+                tip.append("False positives: "
+                           + '; '.join(facts['falsepositives']))
+            tip += [f"{k}: {v}" for k, v in list(data.items())[:25]]
+            for column in range(table.columnCount()):
+                table.item(position, column).setToolTip(
+                    '\n'.join(t for t in tip if t)[:4000])
+
     def _set_counts(self, summary):
         # The count belongs on the tab, so it is readable whichever tab is
         # open -- an examiner should be able to see there are findings without
@@ -633,6 +691,8 @@ class TriagePanel(QWidget):
                                  f"{label} ({summary.get(field, 0)})")
         self.tabs.setTabText(self._tab_for['yara'],
                              f"YARA ({getattr(self, '_yara_count', 0)})")
+        self.tabs.setTabText(self._tab_for['sigma'],
+                             f"Sigma ({getattr(self, '_sigma_count', 0)})")
 
     def _icon_for(self, name):
         if not self.icon_resolver:

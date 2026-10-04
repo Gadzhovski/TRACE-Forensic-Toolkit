@@ -1653,3 +1653,62 @@ def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
     finally:
         window.case.clear_findings(evidence, 'executables')
         window.refresh_analysis_views()
+
+
+def test_an_ad1_opens_as_a_tree_of_files(qapp, stubbed_dialogs):
+    """FTK Imager's AD1 is logical evidence: its folders under the root, a
+    picture previewed from its zlib chunks, and no carving offered on it
+    -- there are files, not a disk."""
+    from tests.conftest import ROOT
+    from trace_app.ui.main_window import MainWindow
+    path = os.path.join(ROOT, 'test_images', 'artifact_samples',
+                        'text-and-pictures.ad1')
+    if not os.path.exists(path):
+        pytest.skip("run tools/fetch_artifact_samples.py")
+    window = MainWindow()
+    try:
+        assert window.open_evidence_image(path)
+        root = window.tree_viewer.topLevelItem(
+            window.tree_viewer.topLevelItemCount() - 1)
+        names = sorted(root.child(i).text(0) for i in range(root.childCount()))
+        assert names == ['Pictures', 'Text']
+        handler = window.image_handler
+        node = handler.get_fs_info(0).lookup('/Text/norvig-big.txt')
+        content, _ = handler.get_file_content(node.inode, 0)
+        assert hashlib.md5(content).hexdigest() == node.facts['md5']
+        assert window.start_carving(None, ['jpg'], True) == 0
+    finally:
+        window.cleanup_resources()
+
+
+def test_sigma_detections_are_a_triage_tab_and_findings(qapp, window):
+    """Sigma detections as the scan records them: every one in Triage's
+    Sigma tab, most serious first; medium and above under Findings."""
+    import json
+    from trace_app.core.case import make_artifact_ref
+    evidence = window.case.evidence()[0]['id']
+    ref = make_artifact_ref(0, 99995, 1)
+    rows = []
+    for rule, level, grade in (('Mimikatz DC Sync', 'high', 'suspicious'),
+                               ('Whoami Execution', 'medium', 'notable'),
+                               ('Process Creation', 'low', 'benign')):
+        detail = {'rule': rule, 'level': level, 'attack': ['T1003.006'],
+                  'time': '2019-03-25 12:00:00.000000', 'event_id': 4662,
+                  'computer': 'DC01', 'data': {'SubjectUserName': 'admin'}}
+        rows.append((ref, 'Security.evtx', '/Security.evtx', 100, 'sigma',
+                     grade, f"{rule} ({level})", json.dumps(detail)))
+    window.case.add_module_findings(evidence, 'sigma', rows)
+    window.refresh_analysis_views()
+    try:
+        triage = window.triage_panel
+        assert triage.tabs.tabText(triage._tab_for['sigma']) == 'Sigma (3)'
+        table = triage.sigma_table
+        assert [table.item(r, 3).text() for r in range(3)] == [
+            'Mimikatz DC Sync', 'Whoami Execution', 'Process Creation']
+        assert table.item(0, 2).text() == 'High'
+        assert 'SubjectUserName: admin' in table.item(0, 8).text()
+        group = _findings_group(window, 'Sigma detections')
+        assert group is not None and group.text(0) == 'Sigma detections (2)'
+    finally:
+        window.case.clear_findings(evidence, 'sigma')
+        window.refresh_analysis_views()

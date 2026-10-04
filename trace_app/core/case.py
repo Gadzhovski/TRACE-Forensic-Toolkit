@@ -91,7 +91,7 @@ REPORTED_MISMATCHES = ('suspicious', 'notable')
 REPORTED_FINDING_GRADES = ('suspicious', 'notable')
 
 #: Finding modules written by jobs of their own, not the file analysis.
-OWN_JOB_MODULES = ('ntfs', 'yara', 'persistence', 'keywords',
+OWN_JOB_MODULES = ('ntfs', 'yara', 'sigma', 'persistence', 'keywords',
                    'thumbnails')
 
 
@@ -469,16 +469,20 @@ class Case:
                                  'compared.'))
                 continue
 
-            # Size is far cheaper than a hash and settles most mismatches.
+            # Size is far cheaper than a hash and settles most mismatches --
+            # for a single raw file, whose bytes are what was hashed. An
+            # E01, a virtual disk or logical evidence was hashed by what it
+            # holds, not by its container's size.
+            plain = _is_plain_image(path)
             try:
-                size = os.path.getsize(path)
+                size = os.path.getsize(path) if plain else None
             except OSError as exc:
                 self._note_check(row['id'], '', '', '', STATUS_MISSING,
                                  str(exc))
                 outcomes.append((row, STATUS_MISSING, str(exc)))
                 continue
 
-            if row['size'] is not None and size != row['size']:
+            if plain and row['size'] is not None and size != row['size']:
                 self._note_check(
                     row['id'], 'size', str(row['size']), str(size),
                     STATUS_CHANGED,
@@ -492,7 +496,7 @@ class Case:
 
             algorithm = ('md5' if row['md5'] else
                          'sha1' if row['sha1'] else 'sha256')
-            digest = _hash_file(path, algorithm, progress)
+            digest = _hash_file(path, algorithm, progress) if plain else                 _hash_evidence(path, algorithm, progress)
             if digest is None:
                 self._note_check(row['id'], algorithm, str(expected), '',
                                  STATUS_MISSING, 'The file could not be read.')
@@ -2535,6 +2539,42 @@ def _utc_now():
     """
     return datetime.datetime.now(datetime.timezone.utc).replace(
         microsecond=0).isoformat()
+
+
+def _is_plain_image(path):
+    """A single raw file whose own bytes are the evidence (dd, raw, iso
+    ...), as opposed to an E01's media, a virtual disk's guest, a split
+    image's segments or logical evidence -- which are hashed by what they
+    hold (ImageHandler.calculate_hashes), so they are re-checked the same
+    way."""
+    if not os.path.isfile(path):
+        return False
+    try:
+        from trace_app.core.image_handler import ImageHandler
+        kind = ImageHandler.get_image_type(_PathOnly(path))
+    except Exception:
+        return True
+    return kind == 'raw' and not path.lower().endswith('.001')
+
+
+class _PathOnly:
+    def __init__(self, path):
+        self.image_path = path
+
+
+def _hash_evidence(path, algorithm, progress=None):
+    """The digest ImageHandler.calculate_hashes computes for `path`, the
+    same one record_hashes stored; None if it cannot be computed."""
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(path)
+    try:
+        if not handler.loaded:
+            return None
+        results = handler.calculate_hashes(progress)
+    finally:
+        handler.close_resources()
+    digest = results.get(f'computed_{algorithm}')
+    return None if not digest or digest == 'Error' else digest
 
 
 def _hash_file(path, algorithm='md5', progress=None):

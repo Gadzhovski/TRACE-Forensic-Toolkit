@@ -21,6 +21,10 @@ SHA-256 before it is kept:
   Vista to 11; and Thumbs.db files from Windows XP and Vista that were
   committed by accident to ISET/isetcam, TabularEditor (MIT) and w3c/sdw
 * release binaries of PuTTY, bat and ripgrep -- executables to analyse
+* mkorman90/regipy (MIT): dirty hives with their .LOG1/.LOG2
+* SigmaHQ's rule release and sbousseaden/EVTX-ATTACK-SAMPLES attack logs
+* logical evidence: AD1 images (pyad1, dissect.evidence) and EnCase L01
+  files (ggeng2/Logical_Image_DataSet)
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -52,6 +56,22 @@ _CPYTHON = ('https://raw.githubusercontent.com/python/cpython/'
 _DISSECT = ('https://media.githubusercontent.com/media/fox-it/'
             'dissect.thumbcache/c73ae487161720794542c13b1170186a9a64d156/'
             'tests/data/')
+
+_PYAD1 = ('https://raw.githubusercontent.com/pcbje/pyad1/'
+          '74b21889410fb40b96e3f1f1f6ab369019d6984d/test_data/')
+_DISSECT_EVIDENCE = ('https://media.githubusercontent.com/media/fox-it/'
+                     'dissect.evidence/'
+                     'b2d1ac23288a0a77b1e6158b2dfcad0c945c5d2d/tests/_data/'
+                     'ad1/')
+_L01 = ('https://media.githubusercontent.com/media/ggeng2/'
+        'Logical_Image_DataSet/7633f6e5442070ee6f21ecc6bcf369b8827cf52e/L01/'
+        'L01_list_of_metadata/')
+
+_REGIPY = ('https://raw.githubusercontent.com/mkorman90/regipy/'
+           'ce341e7e1b3daca35496b0b21d10d293183aa176/regipy_tests/data/')
+
+_ATTACK = ('https://raw.githubusercontent.com/sbousseaden/'
+           'EVTX-ATTACK-SAMPLES/4ceed2f4706daf601c212a8f91c113dd85349a2c/')
 
 #: local name -> (URL, SHA-256)
 SAMPLES = {
@@ -395,6 +415,130 @@ SAMPLES = {
         'https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/'
         'ripgrep-14.1.1-aarch64-apple-darwin.tar.gz',
         '24ad76777745fbff131c8fbc466742b011f925bfa4fffa2ded6def23b5b937be'),
+    # Logical evidence. pyad1's AD1 image (Apache 2.0): four segments made
+    # by FTK Imager 3.4.3.3, with FTK's log of the image's MD5/SHA-1 (from
+    # dissect.evidence's copy). dissect.evidence's own AD1 test images
+    # (AGPL test data, downloaded, not copied in): compressed, long names,
+    # plain, and one encrypted with a passphrase. EnCase L01 files from
+    # ggeng2/Logical_Image_DataSet (published research data set).
+    'text-and-pictures.ad1': (
+        _PYAD1 + 'text-and-pictures.ad1',
+        'b48affafe6826f226bb4b3e0c97add2bc8766a6740ad992001515767d955ff8d'),
+    'text-and-pictures.ad2': (
+        _PYAD1 + 'text-and-pictures.ad2',
+        '1bb53246dec28cf699f68656233138dc7842d789ca2aed7c712b281f19cbb062'),
+    'text-and-pictures.ad3': (
+        _PYAD1 + 'text-and-pictures.ad3',
+        '262db84b9d479b6e7ff1e68aafb89739ea55105f03225ef1d69298c72472d05b'),
+    'text-and-pictures.ad4': (
+        _PYAD1 + 'text-and-pictures.ad4',
+        'a50791bbb4a8bc374f386d6dbad702a153fa217df0df3b91b73bbf0a960ab8dd'),
+    'text-and-pictures.ad1.txt': (
+        _DISSECT_EVIDENCE + 'pcbje/text-and-pictures.ad1.txt',
+        '24301f28955b835630b6ba7c026741b6bba307a1f6377ae567c9d4e230d26a93'),
+    'ad1-compressed.ad1': (
+        _DISSECT_EVIDENCE + 'compressed.ad1',
+        'd88b6186b732dd7be752df52ed863bd9d2c273b1c8b2b3520e9032bfa1018a7c'),
+    'ad1-long.ad1': (
+        _DISSECT_EVIDENCE + 'long.ad1',
+        '1245a140cfd79870781080d74aeec2f90c9b4530b2ac12e9a3b77c6015262b0f'),
+    'ad1-test.ad1': (
+        _DISSECT_EVIDENCE + 'test.ad1',
+        '0c7b2a1b296a75590fd3f31d2d595cdad6c2442c2f394251c57506e9c488481a'),
+    'ad1-encrypted.ad1': (
+        _DISSECT_EVIDENCE + 'encrypted-passphrase/encrypted.ad1',
+        '8126f55a545935a465a3b632bbced287b2843fae2a5f398c48d8a98e1bdbd26a'),
+    'l01-docx.L01': (
+        _L01 + 'NTFS/docx.L01',
+        'c7207d70082a39acb7644c9d49a81c3dd70a841ec5e940e652114910a13da26c'),
+    # Mac disk images (dfvfs test data): a zlib-compressed UDIF DMG and a
+    # sparse image, each GPT + HFS+.
+    'hfsplus_zlib.dmg': (
+        _DFVFS + 'hfsplus_zlib.dmg',
+        '5a21d44542141f93e26c3ff02057ebb6cc691c812897409f157dcaa27d629422'),
+    'hfsplus.sparseimage': (
+        _DFVFS + 'hfsplus.sparseimage',
+        'f36c72c0571b2a9be9174ea2c12007808e1dbbee932652b1eb530f8536d01814'),
+    # Dirty hives with their transaction logs (regipy's test data, MIT;
+    # xz-compressed, read in memory by the tests).
+    'regipy-transactions_NTUSER.DAT.xz': (
+        _REGIPY + 'transactions_NTUSER.DAT.xz',
+        'c1d2e899316ac133ff55b148efedb97a45ef044c3b0e367b40c15de81f4d67ad'),
+    'regipy-transactions_ntuser.dat.log1.xz': (
+        _REGIPY + 'transactions_ntuser.dat.log1.xz',
+        '9d59a4bb625168b7483e3d4a1d7d1fd95543d0e77e1f4be791337f3d8bd402ac'),
+    'regipy-transactions_ntuser.dat.log2.xz': (
+        _REGIPY + 'transactions_ntuser.dat.log2.xz',
+        '6e9b3099069c75dc818d6f6078edec9d57f27ec241693bca961642ddc2f0fb07'),
+    'regipy-SYSTEM_B.xz': (
+        _REGIPY + 'SYSTEM_B.xz',
+        'd3e2898f432e8f098b1615adb34ca2da48e8bb3c4bbb663dbf5de61580352cf4'),
+    'regipy-SYSTEM_B.LOG1.xz': (
+        _REGIPY + 'SYSTEM_B.LOG1.xz',
+        'acf3874baff41928b7c85e7521af910244fb33f87939e159e271d27429c7ec83'),
+    'regipy-SYSTEM_B.LOG2.xz': (
+        _REGIPY + 'SYSTEM_B.LOG2.xz',
+        '4c1dcbc1de37f59c1bfaf943752f3bb83b2430dc480854da569419e9eeda58fb'),
+    'regipy-UsrClass.dat.xz': (
+        _REGIPY + 'UsrClass.dat.xz',
+        'e8963dc88aa7dfca034d00c7c94adbaaca10739b0f767717cd82cf1196a46abe'),
+    'regipy-UsrClass.dat.LOG1.xz': (
+        _REGIPY + 'UsrClass.dat.LOG1.xz',
+        '50857812937b02668aa6806a09453e3889887d662267570dc77bb95cbc91cbfb'),
+    'regipy-UsrClass.dat.LOG2.xz': (
+        _REGIPY + 'UsrClass.dat.LOG2.xz',
+        '20366a8c8422c59ba890c8576746afd9629ff8b11b0a3472295a774cefaa6226'),
+    # Sigma: SigmaHQ's rule release r2026-07-01 (Detection Rule License),
+    # and attack logs from sbousseaden/EVTX-ATTACK-SAMPLES (GPL-3.0
+    # test data, downloaded, not copied in), each recording one
+    # technique.
+    'sigma_all_rules-r2026-07-01.zip': (
+        'https://github.com/SigmaHQ/sigma/releases/download/'
+        'r2026-07-01/sigma_all_rules.zip',
+        '5725c91b5813587ad6a4b0b8e0233fa44348b1595f818d8b7fd39d6033385085'),
+    'attack-CA_DCSync_4662.evtx': (
+        _ATTACK + 'Credential%20Access/CA_DCSync_4662.evtx',
+        '679b2ff27af6c932c07bf3e81391e455fae98e69bf3aff0f524e31aadc418131'),
+    'attack-DE_104_system_log_cleared.evtx': (
+        _ATTACK + 'Defense%20Evasion/DE_104_system_log_cleared.evtx',
+        '5579cdca073ee4864ea82d656aa2d25400b5c1e85b8e688db5d85f6dc558c2af'),
+    'attack-DE_1102_security_log_cleared.evtx': (
+        _ATTACK + 'Defense%20Evasion/DE_1102_security_log_cleared.evtx',
+        'a0615707b547a2ac254688fd725c3c590f62440fc9b7947c2843dd40498a39e8'),
+    'attack-exec_emotet_ps_4104.evtx': (
+        _ATTACK + 'Other/emotet/exec_emotet_ps_4104.evtx',
+        'c1639a23219f24f308e7001ffacb7e72ad6570154542adfbe5198c7c4abebd61'),
+    'attack-exec_sysmon_1_lolbin_rundll32_advpack_RegisterOCX.evtx': (
+        _ATTACK + 'Execution/exec_sysmon_1_lolbin_rundll32_advpack_RegisterOCX.evtx',
+        '6d5b52398a67b36c160ec22db8e027efbc3e40943075d2d79c748931bc8d9982'),
+    'attack-exec_sysmon_lobin_regsvr32_sct.evtx': (
+        _ATTACK + 'Execution/exec_sysmon_lobin_regsvr32_sct.evtx',
+        'd6978888a7dead4523c01df417aa7ea6ad2599a5bbf1acd05d89882aac956442'),
+    'attack-LM_Remote_Service02_7045.evtx': (
+        _ATTACK + 'Lateral%20Movement/LM_Remote_Service02_7045.evtx',
+        'af758eb492b6d5ab6665f7e4c44b31490f57be78c37dc0a8b1da714bb0d3d458'),
+    'attack-LM_WMI_4624_4688_TargetHost.evtx': (
+        _ATTACK + 'Lateral%20Movement/LM_WMI_4624_4688_TargetHost.evtx',
+        '3ff3fcdb55c08ec0eaa39b25c1e02a205314f367bcedc662586bd063185ca41d'),
+    'attack-LM_wmiexec_impacket_sysmon_whoami.evtx': (
+        _ATTACK + 'Lateral%20Movement/LM_wmiexec_impacket_sysmon_whoami.evtx',
+        '21b8852b2b386f4d3f6f0c8a7304de8e628bb43cfa23888ab317b95b784ffe59'),
+    'attack-sysmon_10_lsass_mimikatz_sekurlsa_logonpasswords.evtx': (
+        _ATTACK + 'Credential%20Access/sysmon_10_lsass_mimikatz_sekurlsa_logonpasswords.evtx',
+        '9a1689574ed08c1fb18e7ff3f3bed612109aedcb7bf8efbf3537d756e669e96f'),
+    'attack-System_7045_namedpipe_privesc.evtx': (
+        _ATTACK + 'Privilege%20Escalation/System_7045_namedpipe_privesc.evtx',
+        '21a62694861beff246ea9fb357b908541b4acefaefdb7ecd6281b64df96cb187'),
+    'attack-Powershell_4104_MiniDumpWriteDump_Lsass.evtx': (
+        _ATTACK + 'Credential%20Access/Powershell_4104_MiniDumpWriteDump_Lsass.evtx',
+        '54ff62eff26af588782e066b7b3b1b952bc83e1b75a84d81f9492e654cb5c319'),
+    'attack-phish_windows_credentials_powershell_scriptblockLog_4104.evtx': (
+        _ATTACK + 'Credential%20Access/'
+        'phish_windows_credentials_powershell_scriptblockLog_4104.evtx',
+        '177db8fa70262b4e2eba4e2902c97e82e3c6943fd111bde2ee522d5f1d57e856'),
+    'l01-zip.L01': (
+        _L01 + 'NTFS/zip.L01',
+        '1306ead913d084f808cd9da09c428928e319cc31bfbafbd5565564d3b60ffe31'),
 }
 
 

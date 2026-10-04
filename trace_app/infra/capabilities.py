@@ -145,14 +145,24 @@ def _built_in(module):
 CAPABILITIES = (
     Capability('tsk', 'Evidence images', "File systems (NTFS, FAT, exFAT, "
                "ext2/3/4, HFS+, ISO 9660...)", 'The Sleuth Kit (pytsk3)', _tsk),
-    Capability('ewf', 'Evidence images', "EnCase images (.E01, .Ex01, .L01)",
+    Capability('ewf', 'Evidence images', "EnCase images (.E01, .Ex01) and "
+               "logical evidence files (.L01, .Lx01)",
                'libewf', _module_version('pyewf')),
+    Capability('ad1', 'Evidence images', "AccessData AD1 logical images "
+               "(not encrypted ones)", 'TRACE', _built_in(
+                   'trace_app.core.ad1')),
+    Capability('logical', 'Evidence images', "Folders, ZIP and TAR as "
+               "evidence (triage collections, extractions)", 'Python',
+               _built_in('trace_app.core.logical_sources')),
     Capability('vmdk', 'Evidence images', "VMware disks (.vmdk)", 'libvmdk',
                _module_version('pyvmdk')),
     Capability('vhdi', 'Evidence images', "Hyper-V / Virtual PC disks "
                "(.vhd, .vhdx)", 'libvhdi', _module_version('pyvhdi')),
     Capability('qcow', 'Evidence images', "QEMU disks (.qcow2)", 'libqcow',
                _module_version('pyqcow')),
+    Capability('modi', 'Evidence images', "Mac disk images (.dmg -- zlib, "
+               "bzip2, LZFSE, LZMA, ADC -- .sparseimage, .sparsebundle)",
+               'libmodi', _module_version('pymodi')),
     Capability('bde', 'Volumes and encryption', "BitLocker volumes",
                'libbde', _module_version('pybde')),
     Capability('fvde', 'Volumes and encryption', "FileVault 2 (Core "
@@ -170,6 +180,8 @@ CAPABILITIES = (
                'libmagic', _libmagic),
     Capability('yara', 'File analysis', "YARA rule scanning", 'yara-x',
                _yara),
+    Capability('sigma', 'File analysis', "Sigma rules over Windows event "
+               "logs", 'PyYAML', _module_version('yaml', '__version__')),
     Capability('pdf', 'File analysis', "PDF and e-book reading, the case "
                "report's PDF", 'PyMuPDF', _module_version('pymupdf',
                                                          'VersionBind')),

@@ -27,6 +27,8 @@ libewf-python>=20260924
 libvmdk-python>=20260714    # VMware VMDK virtual disks
 libvhdi-python>=20260901    # Hyper-V / Virtual PC VHD and VHDX
 libqcow-python>=20260703    # QEMU QCOW / QCOW2
+libmodi-python>=20260902    # Mac disk images: DMG (compressed too), sparse
+                            # images and sparse bundles
 libbde-python>=20260916     # BitLocker volumes, unlocked with a key given
 libvshadow-python>=20260714 # Volume Shadow Copies (snapshots of NTFS)
 libpff-python>=20260926     # Outlook PST / OST mailboxes
@@ -61,6 +63,8 @@ pi-heif>=1.4.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 # wheels). No Windows-on-ARM wheel: there, YARA scanning shows as unavailable
 # (Options > Supported Features) rather than pip attempting a Rust build.
 yara-x>=1.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
+# Sigma rules are YAML. No Windows ARM64 wheel before Python 3.12.
+PyYAML>=6.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.12'
 requests>=2.31.0         # VirusTotal API
 
 # --- libmagic (file type from content) ------------------------------------

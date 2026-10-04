@@ -40,6 +40,7 @@ SOURCES = (
     ('photo', 'Photos', '#E3A008'),
     ('document', 'Documents', '#E8743B'),
     ('carved', 'Carved files', '#3FB950'),
+    ('sigma', 'Sigma detections', '#E5534B'),
     ('case', 'Case events', '#8A939E'),
 )
 SOURCE_LABELS = {key: label for key, label, _colour in SOURCES}
@@ -239,6 +240,20 @@ def _branches(filters):
                     "0, d.detail FROM file_findings d WHERE "
                     f"d.module = 'authors' AND {raw} IS NOT NULL AND {sql}",
                     params))
+
+    if 'sigma' in wanted and not deleted_only and not stomped_only:
+        moment = "substr(json_extract(g.detail, '$.time'), 1, 26)"
+        rule = "json_extract(g.detail, '$.rule')"
+        where = common('g', moment, 'g.evidence_id', 'g.artifact_ref',
+                       'g.path', ('g.path', 'g.summary', rule))
+        if where is not None:
+            sql, params = where
+            out.append((
+                f"SELECT {moment}, 0, 'sigma', "
+                "'Sigma: ' || json_extract(g.detail, '$.level'), "
+                f"g.evidence_id, {rule}, g.path, NULL, g.artifact_ref, 0, "
+                "g.detail FROM file_findings g WHERE g.module = 'sigma' AND "
+                f"json_extract(g.detail, '$.time') != '' AND {sql}", params))
 
     if 'carved' in wanted and not deleted_only and not stomped_only:
         where = common('c', 'c.embedded_date', 'c.evidence_id',

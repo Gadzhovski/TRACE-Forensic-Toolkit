@@ -277,6 +277,28 @@ def job_yara(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_sigma(params, progress, item, should_stop):
+    """Sigma rules over every event log of one image (core/sigma)."""
+    from trace_app.core import sigma
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        library = sigma.Library(params['library'])
+        try:
+            return sigma.scan_evidence(
+                handler, case, params['evidence_id'], library,
+                params.get('options'),
+                progress=lambda done, total, path: progress(done, total,
+                                                            path),
+                should_stop=should_stop)
+        except sigma.ScanCancelled:
+            return 0
+    finally:
+        _close(case, handler)
+
+
 def job_keywords(params, progress, item, should_stop):
     """The case's keyword lists over its search index (core/keywords)."""
     from trace_app.core import keywords
@@ -449,6 +471,7 @@ JOBS = {
     'hashsets': job_hashsets,
     'report': job_report,
     'yara': job_yara,
+    'sigma': job_sigma,
     'keywords': job_keywords,
     'thumbnails': job_thumbnails,
     'deleted': job_deleted,

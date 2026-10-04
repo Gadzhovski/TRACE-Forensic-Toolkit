@@ -69,7 +69,20 @@ class EWFImgInfo(pytsk3.Img_Info):
 # ImageHandler class with optimizations
 #: Filesystems that store a local wall-clock time with no timezone recorded.
 #: Reporting one of these as UTC claims knowledge the evidence does not carry.
-_TIMEZONE_NAIVE = frozenset({'FAT12', 'FAT16', 'FAT32', 'ExFAT'})
+_TIMEZONE_NAIVE = frozenset({'FAT12', 'FAT16', 'FAT32', 'ExFAT', 'ZIP'})
+
+
+class _NoMedia:
+    """The image of logical evidence: no sectors to read or carve."""
+
+    def get_size(self):
+        return 0
+
+    def read(self, offset, size):
+        return b''
+
+    def close(self):
+        pass
 
 class _OrphanMeta:
     """A copy of the fields a listing needs from a TSK_FS_META.
@@ -125,6 +138,11 @@ class ImageHandler:
         self._kinds = {}            # start sector -> containers.volume_kind
         self._lvm = {}              # start sector -> (handle, group, [lv])
         self._apfs = {}             # start sector -> (container, [volume])
+        #: Logical evidence (core/logical.py): an AD1 or L01 image, a
+        #: folder, a ZIP or TAR -- one file system at 0, no sectors.
+        self.logical_fs = None
+        #: What replaying each hive's transaction logs did (regf_log).
+        self.hive_recovery = {}
 
         #: False when the image could not be opened; callers should check
         #: this rather than waiting for a later AttributeError.
@@ -156,6 +174,8 @@ class ImageHandler:
                     first.close()
                 except Exception:
                     pass
+        if getattr(self, 'logical_fs', None) is not None:
+            self.logical_fs.close()
         if hasattr(self, '_volumes'):
             self._volumes.clear()
             self._bitlocker.clear()
@@ -338,6 +358,9 @@ class ImageHandler:
         being read from disk and thrown away. Returns an empty dict for raw
         images, which carry no such record.
         """
+        if self.logical_fs is not None:
+            return {k: v for k, v in self.logical_fs.facts.items()
+                    if not k.startswith('_')}
         if self.get_image_type() != 'ewf':
             return {}
 
@@ -401,13 +424,15 @@ class ImageHandler:
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
-        _, extension = os.path.splitext(self.image_path)
+        from trace_app.core import logical_sources
+        if logical_sources.kind_of(self.image_path):
+            return "logical"
+        _, extension = os.path.splitext(self.image_path.rstrip('/\\'))
         extension = extension.lower()
 
-        ewf = [".e01", ".s01", ".l01", ".ex01"]
+        ewf = [".e01", ".s01", ".ex01"]
         raw = [".raw", ".img", ".dd", ".iso",
-               ".ad1", ".001", ".dmg", ".sparse",
-               ".sparseimage"]
+               ".001", ".sparse"]
 
         if extension in ewf:
             return "ewf"
@@ -517,6 +542,8 @@ class ImageHandler:
         stored_md5, stored_sha1 = None, None
 
         image_type = self.get_image_type()
+        if image_type == "logical":
+            return self._logical_hashes(progress_callback)
 
         try:
             # First get total size for progress reporting
@@ -553,7 +580,12 @@ class ImageHandler:
                 finally:
                     ewf_handle.close()
 
-            elif image_type == "virtual":
+            elif image_type == "virtual" or (
+                    image_type == "raw" and
+                    self.image_path.lower().endswith('.001')):
+                # A split raw image (x.001, x.002...) is read by TSK as one
+                # disk; hashing only the first segment's file gave a hash
+                # of part of it.
                 # The disk, not its container files: a split VMDK is many
                 # files, a VHDX's layout changes as it is compacted, and a
                 # differencing disk is meaningless without its parents. What
@@ -625,6 +657,109 @@ class ImageHandler:
                 'error': str(e)
             }
 
+    @property
+    def is_logical(self):
+        """Logical evidence: files, no disk -- nothing to carve."""
+        return self.logical_fs is not None
+
+    def _logical_hashes(self, progress_callback=None):
+        """Verification hashes of logical evidence.
+
+        * AD1: the image-wide MD5 and SHA-1 as FTK Imager computes them
+          (core/ad1.py), checked against the ones in its log (x.ad1.txt)
+          when the log is beside it.
+        * L01: the media hash libewf computes, checked against the one
+          the file records.
+        * ZIP / TAR: the archive file itself.
+        * A folder: MD5 / SHA-1 / SHA-256 over every file, in sorted path
+          order, as path + NUL + content -- so a file added, removed,
+          renamed or changed changes it.
+        """
+        from trace_app.core import logical_sources
+        kind = logical_sources.kind_of(self.image_path)
+        result = {'computed_md5': None, 'computed_sha1': None,
+                  'computed_sha256': None, 'size': 0,
+                  'path': self.image_path, 'stored_md5': None,
+                  'stored_sha1': None}
+        try:
+            if kind == 'ad1':
+                from trace_app.core import ad1
+                computed = ad1.verify(
+                    self.image_path,
+                    progress=(lambda done, total: progress_callback(done,
+                                                                    total))
+                    if progress_callback else None)
+                result.update(computed or {})
+                result.update(ad1.logged_hashes(self.image_path))
+                result['size'] = sum(os.path.getsize(p) for p in
+                                     ad1.segment_paths(self.image_path))
+                return result
+            if kind == 'l01':
+                filenames = pyewf.glob(self.image_path)
+                handle = pyewf.handle()
+                handle.open(filenames)
+                try:
+                    total = handle.get_media_size()
+                    for algorithm, key in (('MD5', 'stored_md5'),
+                                           ('SHA1', 'stored_sha1')):
+                        try:
+                            result[key] = handle.get_hash_value(algorithm)
+                        except Exception:
+                            pass
+                finally:
+                    handle.close()
+                hashers = [hashlib.md5(), hashlib.sha1()]
+                result['size'] = self._hash_ewf_parallel(
+                    filenames, total, hashers, progress_callback)
+                result['computed_md5'] = hashers[0].hexdigest()
+                result['computed_sha1'] = hashers[1].hexdigest()
+                return result
+            hashers = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
+            if kind == 'folder':
+                files = [(self.logical_fs.path_of(n.inode), n)
+                         for n in self.logical_fs.nodes.values()
+                         if not n.is_dir]
+                files.sort(key=lambda pair: pair[0])
+                total = sum(n.size for _p, n in files) or 1
+                done = 0
+                for path, node in files:
+                    for hasher in hashers:
+                        hasher.update(path.encode('utf-8',
+                                                  'surrogateescape') + b'\0')
+                    position = 0
+                    while position < node.size:
+                        chunk = node.reader(position, min(CHUNK_SIZE,
+                                                          node.size - position))
+                        if not chunk:
+                            break
+                        for hasher in hashers:
+                            hasher.update(chunk)
+                        position += len(chunk)
+                        done += len(chunk)
+                        if progress_callback:
+                            progress_callback(done, total)
+                result['size'] = done
+            else:
+                total = os.path.getsize(self.image_path) or 1
+                with open(self.image_path, 'rb') as handle:
+                    while True:
+                        chunk = handle.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        for hasher in hashers:
+                            hasher.update(chunk)
+                        result['size'] += len(chunk)
+                        if progress_callback:
+                            progress_callback(result['size'], total)
+            result['computed_md5'], result['computed_sha1'], \
+                result['computed_sha256'] = (h.hexdigest() for h in hashers)
+            return result
+        except Exception as exc:
+            logger.error("Could not hash %s: %s", self.image_path, exc)
+            result.update({'computed_md5': 'Error', 'computed_sha1': 'Error',
+                           'computed_sha256': 'Error', 'error': str(exc)})
+            return result
+
     def load_image(self):
         """Load the image and read its volume/filesystem information.
 
@@ -643,8 +778,25 @@ class ImageHandler:
             elif image_type == "raw":
                 self.img_info = pytsk3.Img_Info(self.image_path)
             elif image_type == "virtual":
-                self.img_info, self.container_note = \
-                    containers.open_virtual_disk(self.image_path)
+                try:
+                    self.img_info, self.container_note = \
+                        containers.open_virtual_disk(self.image_path)
+                except containers.ContainerError:
+                    # A raw disk named .dmg (hdiutil's UDRW has a trailer;
+                    # a dd renamed does not): read it as it is.
+                    if not self.image_path.lower().endswith('.dmg'):
+                        raise
+                    self.img_info = pytsk3.Img_Info(self.image_path)
+                    self.container_note = 'DMG read as a raw disk'
+            elif image_type == "logical":
+                from trace_app.core.logical_sources import open_logical
+                self.logical_fs = open_logical(self.image_path)
+                self.img_info = _NoMedia()
+                self.fs_info = self.logical_fs
+                self.container_note = (
+                    f"{self.logical_fs.label}: "
+                    f"{len(self.logical_fs.nodes) - 1:,} items")
+                return True
             else:
                 raise ValueError(f"Unsupported image type: {image_type}")
 
@@ -713,7 +865,7 @@ class ImageHandler:
         this reports what is on the media.
         """
         found = []
-        if start_offset in self._volumes:
+        if start_offset in self._volumes or self.logical_fs is not None:
             return found         # not at a byte offset of the image
         try:
             base = start_offset * self.sector_size
@@ -841,6 +993,8 @@ class ImageHandler:
         (containers.shadow_key) -- opened on first use, so a bookmark into a
         snapshot resolves after the case is reopened.
         """
+        if self.logical_fs is not None:
+            return self.logical_fs if start_offset == 0 else None
         if start_offset not in self.fs_info_cache:
             shadow = containers.split_shadow_key(start_offset)
             if shadow is not None and start_offset not in self._volumes:
@@ -938,6 +1092,8 @@ class ImageHandler:
     def volume_kind(self, start_sector):
         """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
         partition (or an unpartitioned image at 0)."""
+        if self.logical_fs is not None:
+            return None
         if start_sector not in self._kinds:
             if start_sector >= containers.SHADOW_KEY_BASE:
                 self._kinds[start_sector] = None
@@ -1094,6 +1250,8 @@ class ImageHandler:
         volume" holding the reader program -- and only its metadata says
         what it is. TSK opens that decoy and lists it as FAT32.
         """
+        if self.logical_fs is not None:
+            return False
         cached = self._bitlocker_checked.get(start_sector)
         if cached is None:
             try:
@@ -1152,6 +1310,8 @@ class ImageHandler:
     def shadow_copies(self, start_sector):
         """The partition's Volume Shadow Copies, oldest first:
         [{'key', 'index', 'created', 'size', 'identifier'}]."""
+        if self.logical_fs is not None:
+            return []
         if start_sector not in self._shadows:
             try:
                 stream = self._volume_stream(start_sector)
@@ -1190,8 +1350,11 @@ class ImageHandler:
         try:
             fs = self.get_fs_info(start_offset)
             from trace_app.core.apfs import is_apfs
+            from trace_app.core.logical import is_logical
             if is_apfs(fs):
                 return "APFS"
+            if is_logical(fs):
+                return fs.label
             fs_type = fs.info.ftype
 
             # Map the file system type to its name
@@ -1442,6 +1605,20 @@ class ImageHandler:
         try:
             registry_file = fs_info.open(hive_path)
             hive_data = registry_file.read_random(0, registry_file.info.meta.size)
+            # Changes Windows had logged but not yet written into the hive
+            # (core/regf_log.py), from the logs beside it.
+            from trace_app.core import regf_log
+            if regf_log.is_dirty(hive_data):
+                logs = []
+                for suffix in ('.LOG1', '.LOG2', '.LOG'):
+                    try:
+                        log = fs_info.open(hive_path + suffix)
+                        logs.append((hive_path.rsplit('/', 1)[-1] + suffix,
+                                     log.read_random(0, log.info.meta.size)))
+                    except Exception:
+                        continue
+                hive_data, facts = regf_log.recover(hive_data, logs)
+                self.hive_recovery[hive_path] = facts
             return hive_data
         except Exception as e:
             if required:

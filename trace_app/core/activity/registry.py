@@ -7,8 +7,9 @@ shares that are gone). From SYSTEM: the Shimcache (programs Windows saw, in
 order, with each file's modification time) and USB storage devices. From
 Amcache.hve: programs present or run, with their SHA-1.
 
-Hives are read from bytes with python-registry. Hive transaction logs
-(.LOG1/.LOG2) are not replayed, so a hive is read as it was last flushed.
+Hives are read from bytes with python-registry, after their transaction
+logs (.LOG1/.LOG2) are replayed in memory (core/regf_log.py) when the hive
+is dirty -- so the newest keys Windows had logged are read too.
 """
 
 import codecs

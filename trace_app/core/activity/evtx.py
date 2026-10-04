@@ -355,7 +355,7 @@ def summarise(record_id, written, root):
                                    else None)
     out = {'record_id': record_id, 'written': written, 'event_id': None,
            'provider': '', 'channel': '', 'computer': '', 'user_sid': '',
-           'time': written, 'data': {}}
+           'level': None, 'time': written, 'data': {}}
     if event is None:
         return out
     system = event.find('System')
@@ -373,6 +373,11 @@ def summarise(record_id, written, root):
                 out['channel'] = child.text()
             elif child.name == 'Computer':
                 out['computer'] = child.text()
+            elif child.name == 'Level':
+                try:
+                    out['level'] = int(child.text() or 0)
+                except ValueError:
+                    pass
             elif child.name == 'Security':
                 out['user_sid'] = _text(_first(child.attr('UserID')))
             elif child.name == 'TimeCreated':

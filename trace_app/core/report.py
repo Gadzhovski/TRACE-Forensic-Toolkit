@@ -513,6 +513,21 @@ class _Builder:
                              (r.get('detail') or {}).get('indicators')
                              or []))),
                          _mono(r.get('path'))] for r in programs]))
+        detections = self.scope(self.case.findings(
+            None, 'sigma', grades=grades, limit=limit + 1))
+        groups.append(('findings-sigma', 'Event log detections (Sigma)',
+                       ['Log', 'Evidence', 'Level', 'Rule', 'Time (UTC)',
+                        'Event', 'Computer', 'ATT&CK'],
+                       [[e(r.get('name')),
+                         e(self.evidence_name(r.get('evidence_id'))),
+                         _badge(r.get('grade')),
+                         e((r.get('detail') or {}).get('rule')),
+                         e(((r.get('detail') or {}).get('time') or '')[:19]),
+                         e(str((r.get('detail') or {}).get('event_id')
+                               or '')),
+                         e((r.get('detail') or {}).get('computer')),
+                         e(', '.join((r.get('detail') or {}).get('attack')
+                                     or []))] for r in detections]))
         gone = self.scope(self.case.findings(None, 'thumbnails',
                                              limit=limit + 1))
         groups.append(('findings-thumbnails',

@@ -58,6 +58,9 @@ MODULE_HASHSETS = 'hashsets'
 #: job, after the analysis.
 MODULE_YARA = 'yara'
 
+#: Sigma rules over every event log (core/sigma): its own job.
+MODULE_SIGMA = 'sigma'
+
 #: Autostarts (core/persistence): reads the hives, tasks and Startup
 #: folders, then the files they start.
 MODULE_PERSISTENCE = 'persistence'
@@ -172,6 +175,15 @@ _YARA = (
     "(Tools ▸ YARA Rules); a match is a finding with the rule and the "
     "strings it matched.",
     "Slower: reads every file, up to the size set for the case.")
+
+_SIGMA = (
+    "Event log detection (Sigma)",
+    "Check every Windows event log -- on the disk or in a collection -- "
+    "with the Sigma rules this case uses (Tools ▸ Sigma Rules): log "
+    "clearing, credential dumping, lateral movement, malicious services. "
+    "Each event a rule matches is a finding with its level and ATT&CK "
+    "techniques.",
+    "Fast: reads the event logs only.")
 
 _DELETED = (
     "Deleted files",
@@ -334,6 +346,16 @@ class AnalysisModulesDialog(QDialog):
                                      "case (Tools ▸ YARA Rules).")
         self.boxes[MODULE_YARA] = self.yara_box
 
+        self.sigma_box = self._module(layout, *_SIGMA)
+        sigma_ok = choice.get('sigma_available', True)
+        self.sigma_box.setChecked(bool(choice.get('sigma')) and sigma_ok)
+        if not sigma_ok:
+            self.sigma_box.setEnabled(False)
+            self.sigma_box.setToolTip(choice.get('sigma_reason') or
+                                      "No Sigma rules are in use for this "
+                                      "case (Tools ▸ Sigma Rules).")
+        self.boxes[MODULE_SIGMA] = self.sigma_box
+
         self.keywords_box = self._module(layout, *_KEYWORDS)
         keywords_ok = choice.get('keywords_available', True)
         self.keywords_box.setChecked(bool(choice.get('keywords'))
@@ -446,6 +468,7 @@ class AnalysisModulesDialog(QDialog):
                         if key not in (MODULE_CARVE, MODULE_INDEX,
                                        MODULE_ACTIVITY, MODULE_NTFS,
                                        MODULE_HASHSETS, MODULE_YARA,
+                                       MODULE_SIGMA,
                                        MODULE_PERSISTENCE, MODULE_KEYWORDS,
                                        MODULE_THUMBNAILS, MODULE_DELETED)
                         and box.isChecked()],
@@ -455,6 +478,7 @@ class AnalysisModulesDialog(QDialog):
             'ntfs': self.ntfs_box.isChecked(),
             'hashsets': self.hash_sets_box.isChecked(),
             'yara': self.yara_box.isChecked(),
+            'sigma': self.sigma_box.isChecked(),
             'persistence': self.persistence_box.isChecked(),
             'keywords': self.keywords_box.isChecked(),
             'thumbnails': self.thumbnails_box.isChecked(),

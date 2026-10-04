@@ -396,7 +396,9 @@ def unlock_apfs(volume, password=None, recovery_password=None):
 # --- virtual disks --------------------------------------------------------------
 
 VIRTUAL_DISK_EXTENSIONS = {'.vmdk': 'vmdk', '.vhd': 'vhdi', '.vhdx': 'vhdi',
-                           '.qcow2': 'qcow', '.qcow': 'qcow'}
+                           '.qcow2': 'qcow', '.qcow': 'qcow',
+                           '.dmg': 'modi', '.sparseimage': 'modi',
+                           '.sparsebundle': 'modi'}
 
 #: Deepest chain of differencing disks followed (snapshots of snapshots).
 MAX_PARENTS = 32
@@ -434,6 +436,8 @@ def open_virtual_disk(path):
         return _open_vhdi(path)
     if kind == 'qcow':
         return _open_qcow(path)
+    if kind == 'modi':
+        return _open_modi(path)
     raise ContainerError(f"{os.path.basename(path)} is not a virtual disk")
 
 
@@ -517,6 +521,76 @@ def _open_qcow(path):
         raise ContainerError(f"{os.path.basename(path)} is encrypted")
     note = 'QCOW' if len(chain) == 1 else         f'QCOW overlay ({len(chain) - 1} backing file'         f'{"s" if len(chain) > 2 else ""})'
     return LibyalImgInfo(top, top.get_media_size(), chain[1:]), note
+
+
+#: UDIF chunk types (the blkx table), for saying how a DMG is stored.
+_UDIF_COMPRESSION = {0x80000004: 'ADC', 0x80000005: 'zlib',
+                     0x80000006: 'bzip2', 0x80000007: 'LZFSE',
+                     0x80000008: 'LZMA'}
+
+
+def _open_modi(path):
+    """A Mac disk image -- UDIF (.dmg, compressed with zlib, bzip2,
+    LZFSE, LZMA or ADC, or not), a sparse image or a sparse bundle --
+    through libmodi, which decompresses as it reads."""
+    import pymodi
+    handle = pymodi.handle()
+    try:
+        handle.open(path)
+        if os.path.isdir(path):
+            handle.open_band_data_files()
+    except (IOError, OSError) as exc:
+        try:
+            handle.close()
+        except Exception:
+            pass
+        raise ContainerError(f"Could not open {os.path.basename(path)}: "
+                             f"{exc}") from exc
+    lowered = path.lower().rstrip('/\\')
+    if lowered.endswith('.sparsebundle'):
+        note = 'Sparse bundle'
+    elif lowered.endswith('.sparseimage'):
+        note = 'Sparse image'
+    else:
+        methods = _udif_methods(path)
+        note = 'DMG (UDIF' + (f", {', '.join(methods)}" if methods else
+                              ', uncompressed') + ')'
+    return LibyalImgInfo(handle, handle.get_media_size()), note
+
+
+def _udif_methods(path):
+    """The compressions a UDIF image's chunks use, from its koly trailer
+    and blkx table; [] if it has none or cannot say."""
+    import base64
+    import plistlib
+    import struct
+    try:
+        with open(path, 'rb') as handle:
+            handle.seek(-512, os.SEEK_END)
+            koly = handle.read(512)
+            if koly[:4] != b'koly':
+                return []
+            offset, length = struct.unpack('>QQ', koly[0xd8:0xe8])
+            if not length or length > 64 * 1024 * 1024:
+                return []
+            handle.seek(offset)
+            plist = plistlib.loads(handle.read(length))
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return []
+    found = []
+    for block in plist.get('resource-fork', {}).get('blkx', []):
+        data = block.get('Data') or b''
+        if isinstance(data, str):
+            data = base64.b64decode(data)
+        if data[:4] != b'mish' or len(data) < 204:
+            continue
+        count = struct.unpack('>I', data[200:204])[0]
+        for index in range(count):
+            kind = struct.unpack_from('>I', data, 204 + index * 40)[0]
+            name = _UDIF_COMPRESSION.get(kind)
+            if name and name not in found:
+                found.append(name)
+    return found
 
 
 def _parent_name(disk):

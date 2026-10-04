@@ -153,6 +153,10 @@ file, so it takes seconds:
 
 - **Programs run** — Prefetch (XP to Windows 11, including Windows 10's
   compressed files), Amcache with SHA-1, Shimcache, UserAssist
+- **PowerShell** — every command typed (PSReadLine history, per user and
+  host, multi-line commands joined) and every script block run (event
+  4104, its parts joined; the ones PowerShell itself flagged as suspicious
+  marked) — decoded as PowerShell ran it, so obfuscation is undone
 - **Files and folders opened** — Recent shortcuts (target times, volume,
   machine and MAC), Jump Lists, RecentDocs, ShellBags (folders on drives and
   shares that are gone)
@@ -352,6 +356,26 @@ tags and metadata, and each matched string with its offset and bytes.
 Powered by yara-x (VirusTotal's YARA in Rust). Not available on Windows on
 ARM, which has no build of it — Options ▸ Supported Features says so.
 
+### 🚨 Event log detection (Sigma)
+
+What Hayabusa and Chainsaw do, inside TRACE: **Tools ▸ Sigma Rules**
+imports SigmaHQ's release zip, a folder or your own rules, and every
+Windows event log on the evidence — on a disk or anywhere in a triage
+collection — is checked against them. Rule sources map to event logs as
+those tools map them (a category such as `process_creation` reads Sysmon 1
+and Security 4688, the latter with its fields renamed), and the rule
+language follows the Sigma specification: wildcards and escapes, the
+modifiers SigmaHQ uses (contains, all, re, windash, cidr, base64offset,
+fieldref…) and full conditions. A rule TRACE cannot run on Windows logs
+(Linux, cloud, aggregations) is counted with its reason, never run wrongly:
+2,547 of SigmaHQ's 2,554 Windows rules run. Each matching event is a
+finding graded by level — with its time, computer, event data and ATT&CK
+techniques — in **Triage ▸ Sigma**, under **Findings**, on the
+**Timeline** and in the report. Checked on attack logs
+(EVTX-ATTACK-SAMPLES): DCSync, log clearing, Impacket wmiexec, Meterpreter
+getsystem, Mimikatz opening LSASS and regsvr32 Squiblydoo each trip the
+rules written for them.
+
 </td>
 </tr>
 <tr>
@@ -499,8 +523,17 @@ listing filter (`*.pdf`).
 
 ### 🪟 Registry viewer
 
-Extracts Windows registry hives straight from the image and browses the key tree
-with value names, types and data.
+Reads Windows registry hives straight from the image -- or from a triage
+collection's `C/` folder -- and browses the key tree with value names, types
+and data. **Transaction logs are replayed**: a hive from a running or
+uncleanly shut down Windows 8.1+ system keeps its newest changes only in its
+`.LOG1` / `.LOG2`, and TRACE applies them in memory -- every log entry
+checked by the Marvin32 hashes Windows wrote, in sequence order across both
+logs, as the registry format specification describes (old-format Vista–8
+logs too). The recovered hive is byte-identical to what yarp, by the
+specification's author, recovers. Activity, persistence and the viewer all
+read the recovered hive, and the viewer says how many changes came from the
+logs.
 
 </td>
 </tr>
@@ -587,15 +620,31 @@ does not match.
 
 <table>
 <tr><th align="left">Format</th><th align="left">Extensions</th><th align="left">Notes</th></tr>
-<tr><td>EnCase / Expert Witness</td><td><code>.E01</code> <code>.Ex01</code> <code>.s01</code> <code>.L01</code></td><td>Split segments supported</td></tr>
-<tr><td>Raw / dd</td><td><code>.dd</code> <code>.raw</code> <code>.img</code> <code>.001</code></td><td></td></tr>
+<tr><td>EnCase / Expert Witness</td><td><code>.E01</code> <code>.Ex01</code> <code>.s01</code></td><td>Split segments supported</td></tr>
+<tr><td>Raw / dd</td><td><code>.dd</code> <code>.raw</code> <code>.img</code> <code>.001</code></td><td>Split images (<code>.001</code>, <code>.002</code>…) read and hashed as one</td></tr>
 <tr><td>ISO</td><td><code>.iso</code></td><td></td></tr>
-<tr><td>Apple Disk Image</td><td><code>.dmg</code> <code>.sparse</code> <code>.sparseimage</code></td><td>Read as raw</td></tr>
-<tr><td>AccessData</td><td><code>.ad1</code></td><td>Read as raw</td></tr>
+<tr><td>Apple Disk Image</td><td><code>.dmg</code> <code>.sparseimage</code> <code>.sparsebundle</code></td><td>Through libmodi: UDIF compressed with zlib, bzip2, LZFSE, LZMA or ADC, decompressed as it is read; sparse images and sparse bundles (a folder of bands)</td></tr>
 <tr><td>VMware virtual disk</td><td><code>.vmdk</code></td><td>Flat and sparse extents; a snapshot reads through its parents</td></tr>
 <tr><td>Hyper-V / Virtual PC</td><td><code>.vhdx</code> <code>.vhd</code></td><td>Fixed, dynamic and differencing (parents chained from the same folder)</td></tr>
 <tr><td>QEMU</td><td><code>.qcow2</code> <code>.qcow</code></td><td>Overlays read through their backing files</td></tr>
 </table>
+
+**Logical evidence** — files, not a disk — opens as a tree of folders and
+files that every feature reads (browsing, previews, analysis, indexing,
+activity, YARA, timeline, report); there is nothing to carve:
+
+<table>
+<tr><th align="left">Format</th><th align="left">Extensions</th><th align="left">Notes</th></tr>
+<tr><td>AccessData AD1</td><td><code>.ad1</code> <code>.ad2</code>…</td><td>FTK Imager's custom content images, read in Python: every segment, each file's stored MD5 / SHA-1, its times; the image hash computed as FTK Imager computes it and checked against its log (<code>x.ad1.txt</code>). Encrypted AD1s are recognised and refused</td></tr>
+<tr><td>EnCase logical evidence</td><td><code>.L01</code> <code>.Lx01</code></td><td>Through libewf's file entries: files, times, stored MD5s</td></tr>
+<tr><td>Folder</td><td>File ▸ Add Evidence Folder…</td><td>A triage collection (KAPE, Velociraptor, UAC), an extraction, exported files: read in place, never written to. Hashed by every file's path and content</td></tr>
+<tr><td>ZIP / TAR</td><td><code>.zip</code> <code>.tar</code> <code>.tgz</code> <code>.tar.gz</code> <code>.tar.bz2</code> <code>.tar.xz</code></td><td>Read member by member, never unpacked to disk. ZIP times are local with no zone, shown as such</td></tr>
+</table>
+
+In a collection the drive usually sits in a folder (`C/` from KAPE,
+`uploads/auto/C%3A/` from Velociraptor): Windows activity, browser history
+and persistence are read from wherever a system's `Windows` / `Users` (or
+`etc` / `home`, or macOS's `Library` / `private`) folders are.
 
 File system support comes from The Sleuth Kit — NTFS, FAT12/16/32, exFAT,
 Ext2/3/4, HFS+, APFS, UFS, ISO 9660 and YAFFS2. NTFS, FAT, exFAT, Ext2/3/4, HFS+

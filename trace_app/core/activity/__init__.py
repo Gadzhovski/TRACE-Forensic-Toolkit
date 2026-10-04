@@ -82,15 +82,36 @@ class _Entry:
                  'created', 'modified')
 
 
+def _volumes(image_handler, offset):
+    try:
+        return Volume.all(image_handler, offset)
+    except Exception:
+        return []
+
+
 class Volume:
     """A file system in the image, with case-insensitive path lookups --
     XP writes WINDOWS\\system32, later versions Windows\\System32."""
 
-    def __init__(self, image_handler, offset):
+    def __init__(self, image_handler, offset, root='/'):
         self.handler = image_handler
         self.offset = offset
         self.fs = image_handler.get_fs_info(offset)
+        #: Where the system's file system starts: '/' on a disk; in
+        #: logical evidence, the folder a collector put the drive in.
+        self.root = root
         self._cache = {}
+
+    @classmethod
+    def all(cls, image_handler, offset):
+        """The volume at `offset` -- one per system root if it is a
+        collection of several (logical evidence)."""
+        fs = image_handler.get_fs_info(offset)
+        from trace_app.core.logical import is_logical, system_roots
+        if is_logical(fs):
+            return [cls(image_handler, offset, root)
+                    for root in system_roots(fs)]
+        return [cls(image_handler, offset)]
 
     def listdir(self, path):
         """Entries of the directory at `path` ('/'-separated), or []."""
@@ -132,8 +153,13 @@ class Volume:
             return None
 
     def find(self, *parts):
-        """The entry at a case-insensitive path, or None."""
-        path = '/'
+        """The entry at a case-insensitive path, or None. A path already
+        under the root (an entry's own path, split) is taken as it is."""
+        path = self.root
+        if path != '/':
+            prefix = [p.lower() for p in path.strip('/').split('/')]
+            if [p.lower() for p in parts[:len(prefix)]] == prefix:
+                parts = parts[len(prefix):]
         entry = None
         for part in parts:
             wanted = part.lower()
@@ -190,11 +216,8 @@ def collect(image_handler, progress=None, should_stop=None, carved=()):
         if progress:
             progress(steps[0], 0, label)
 
-    for offset in offsets:
-        try:
-            volume = Volume(image_handler, offset)
-        except Exception:
-            continue
+    for offset, volume in ((o, v) for o in offsets
+                           for v in _volumes(image_handler, o)):
         if volume.fs is None:
             continue
         for reader in (_windows, _browsers, _other_systems):
@@ -241,7 +264,7 @@ def _windows(volume, step):
         out += _software_hive(volume, windows, step)
         out += _amcache(volume, windows, step)
         out += _setupapi(volume, windows, step)
-        out += _event_logs(volume, windows, step)
+        out += _event_logs(volume, windows, step, sids)
         out += _srum(volume, windows, step, sids)
     out += _recycle_bin(volume, sids, step)
     for user, home in users:
@@ -249,6 +272,8 @@ def _windows(volume, step):
         out += _user_shortcuts(volume, user, home, step)
         out += _ie_history(volume, user, home, step)
         out += _windows_timeline(volume, user, home, step)
+        from trace_app.core.activity import powershell
+        out += powershell.history(volume, user, home, step)
     return out
 
 
@@ -317,6 +342,21 @@ def _hive(volume, entry):
     data = volume.read(entry)
     if data[:4] != b'regf':
         return None
+    from trace_app.core import regf_log
+    if regf_log.is_dirty(data):
+        # Its newest changes may be only in its transaction logs.
+        folder = _split(entry.path)[:-1]
+        logs = []
+        for suffix in ('.LOG1', '.LOG2', '.LOG'):
+            log = volume.find(*folder, entry.name + suffix)
+            if log is not None and not log.is_dir:
+                logs.append((log.name, volume.read(log)))
+        data, facts = regf_log.recover(data, logs)
+        if facts['applied']:
+            logger.info("%s: %d log entr%s applied from %s", entry.path,
+                        facts['applied'],
+                        'y' if facts['applied'] == 1 else 'ies',
+                        ', '.join(facts['logs']))
     try:
         return registry.open_hive(data)
     except Exception as exc:
@@ -690,9 +730,24 @@ _EVTX_LOGS = (
 _EVT_LOGS = ('SecEvent.Evt', 'SysEvent.Evt')
 
 
-def _event_logs(volume, windows, step):
+#: PowerShell's script block log (4104), read whole into script blocks.
+_POWERSHELL_LOG = 'microsoft-windows-powershell%4operational.evtx'
+
+
+def _event_logs(volume, windows, step, sids=None):
     out = []
     logs = volume.find(windows.name, 'System32', 'winevt', 'Logs')
+    from trace_app.core.activity import evtx, powershell
+    for entry in volume.children(logs, '.evtx'):
+        if entry.name.lower() != _POWERSHELL_LOG:
+            continue
+        step(entry.path)
+        try:
+            events = evtx.records(volume.read(entry))
+            out += powershell.script_block_records(
+                events, entry.path, volume.ref(entry), sids)
+        except Exception as exc:
+            logger.debug("Could not read %s: %s", entry.path, exc)
     wanted = {name.lower() for name in _EVTX_LOGS}
     for entry in volume.children(logs, '.evtx'):
         if entry.name.lower() not in wanted:

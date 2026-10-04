@@ -1,6 +1,5 @@
+import io
 import logging
-import os
-import tempfile
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon
@@ -35,6 +34,8 @@ class _HiveLoader(QThread):
     loaded = Signal(str, object)
     #: A message to show when nothing could be read.
     failed = Signal(str)
+    #: What replaying the hive's transaction logs changed.
+    recovered = Signal(str)
 
     def __init__(self, image_handler, hive_name, parent=None):
         super().__init__(parent)
@@ -42,46 +43,43 @@ class _HiveLoader(QThread):
         self.hive_name = hive_name
 
     def run(self):
-        temp_hive_path = None
+        """The hive from the first volume that has it -- every partition
+        and volume (an unpartitioned image and logical evidence too), and
+        in a triage collection under its system's folder. Read in memory
+        with its transaction logs applied (ImageHandler.get_registry_hive);
+        nothing is written to disk."""
+        from trace_app.core.logical import is_logical, system_roots
         try:
-            partitions = self.image_handler.get_partitions()
-            if not partitions:
-                self.failed.emit("No partitions found in this image.")
-                return
-
-            for partition in partitions:
-                start_offset = partition[2]
+            for start_offset in self.image_handler.volume_offsets():
                 if self.isInterruptionRequested():
                     return
-                if self.image_handler.get_fs_type(start_offset) != "NTFS":
-                    continue
-
                 fs_info = self.image_handler.get_fs_info(start_offset)
-                hive_data = self.image_handler.get_registry_hive(
-                    fs_info, f"/Windows/System32/config/{self.hive_name}")
-                if not hive_data:
+                if fs_info is None:
                     continue
-
-                with tempfile.NamedTemporaryFile(delete=False) as temp_hive:
-                    temp_hive.write(hive_data)
-                    temp_hive_path = temp_hive.name
-
-                with open(temp_hive_path, "rb") as hive_file:
-                    reg = Registry.Registry(hive_file)
+                roots = system_roots(fs_info) if is_logical(fs_info)                     else ['/']
+                for root in roots:
+                    path = (root.rstrip('/') +
+                            f"/Windows/System32/config/{self.hive_name}")
+                    hive_data = self.image_handler.get_registry_hive(
+                        fs_info, path, required=False)
+                    if not hive_data:
+                        continue
+                    reg = Registry.Registry(io.BytesIO(hive_data))
+                    facts = self.image_handler.hive_recovery.get(path) or {}
+                    if facts.get('applied'):
+                        self.recovered.emit(
+                            f"{self.hive_name}: {facts['applied']} change(s) "
+                            f"applied from its transaction logs "
+                            f"({', '.join(facts['logs'])}) -- the hive as "
+                            f"Windows last had it")
                     if not self.isInterruptionRequested():
                         self.loaded.emit(self.hive_name, reg.root())
-                return
+                    return
 
             self.failed.emit(f"{self.hive_name} was not found in this image.")
         except Exception as e:
             logger.error("An error occurred while loading the selected hive: %s", e)
             self.failed.emit(f"Could not read {self.hive_name}: {e}")
-        finally:
-            if temp_hive_path and os.path.exists(temp_hive_path):
-                try:
-                    os.remove(temp_hive_path)
-                except OSError:
-                    pass
 
 
 class RegistryExtractor(QWidget):
@@ -223,6 +221,7 @@ class RegistryExtractor(QWidget):
         self._loader = _HiveLoader(self.image_handler, hive, self)
         self._loader.loaded.connect(self._on_hive_loaded)
         self._loader.failed.connect(self._on_hive_failed)
+        self._loader.recovered.connect(self.statusMessage.emit)
         self._loader.finished.connect(self._on_load_finished)
         self._loader.start()
 
