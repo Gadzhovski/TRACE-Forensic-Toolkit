@@ -1573,6 +1573,8 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
     import sqlite3
     path = str(tmp_path / 'history.db')
     db = sqlite3.connect(path)
+    # Debian and Ubuntu build SQLite to zero deleted rows; most don't.
+    db.execute("PRAGMA secure_delete = OFF")
     db.execute("CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT)")
     db.executemany("INSERT INTO urls (url) VALUES (?)",
                    [(f'https://example.org/page/{i}',) for i in range(30)])
@@ -1586,15 +1588,19 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
     labels = [window.viewer_tab.tabText(i)
               for i in range(window.viewer_tab.count())]
     assert labels.index('Database') == labels.index('Application') + 1
-    # Nothing selected: switching tabs would otherwise re-read the file an
-    # earlier test left selected, into this tab, over this database.
+    # Nothing selected, and no read from an earlier test still to land:
+    # either would show another file in this tab, over this database.
     window.current_selected_data = None
+    window._cancel_worker('file_worker')
+    window._cancel_worker('media_worker')
+    pump(qapp, 2)
     window.viewer_tab.setCurrentWidget(viewer)
+    pump(qapp, 1)
     window.update_viewer_with_file_content(content, {
         'name': 'history.db', 'path': '/history.db', 'start_offset': 0})
     assert viewer.tables.item(0).text() == 'urls (29 rows)'
     assert viewer.grid.rowCount() == 29
-    assert pump(qapp, 100, lambda: viewer.tables.count() == 2)
+    assert pump(qapp, 100, lambda: viewer.tables.count() == 2),         viewer.info.text()
     assert '1 deleted record(s) recovered' in viewer.info.text()
     viewer.tables.setCurrentRow(1)
     headers = [viewer.grid.horizontalHeaderItem(c).text()
