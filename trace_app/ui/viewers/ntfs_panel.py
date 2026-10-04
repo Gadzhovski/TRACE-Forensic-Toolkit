@@ -41,6 +41,8 @@ SHOWN_LIMIT = 50000
 SECTIONS = (
     ('timestomp', 'Timestomping', icons.FINDING_TIMESTOMP),
     ('streams', 'Streams && downloads', icons.FINDING_STREAM),
+    ('slack', 'Index slack', icons.DELETED_FILES),
+    ('logfile', '$LogFile', icons.CHANGE_JOURNAL),
     ('journal', 'Change journal', icons.CHANGE_JOURNAL),
 )
 
@@ -51,6 +53,10 @@ _COLUMNS = {
                 'Came from', 'Path'),
     'journal': ('Time (UTC)', 'Evidence', 'Name', 'What happened', 'Path',
                 'MFT entry', 'USN'),
+    'slack': ('Name', 'Evidence', 'Still listed', 'Created', 'Modified',
+              'Size', 'Folder'),
+    'logfile': ('LSN', 'Evidence', 'What happened', 'Name', 'Created',
+                'Modified', 'Path', 'MFT entry'),
 }
 
 _TONE = {'suspicious': 'malicious', 'notable': 'suspicious'}
@@ -115,6 +121,21 @@ class NtfsModel(QAbstractTableModel):
                     row.get('reasons') or '', row.get('path') or '',
                     f"{row.get('file_entry')}-{row.get('file_sequence')}",
                     str(row.get('usn') or 0))[column]
+        if self.section == 'logfile':
+            what = {'name added': 'Name added', 'name removed':
+                    'Name removed', 'record created': 'Record created',
+                    'record freed': 'Record freed'}.get(detail.get('kind'),
+                                                        '')
+            return (str(detail.get('lsn') or ''), evidence, what,
+                    row.get('name') or '', detail.get('created') or '',
+                    detail.get('modified') or '', row.get('path') or '',
+                    detail.get('MFT entry') or '')[column]
+        if self.section == 'slack':
+            return (row.get('name') or '', evidence,
+                    'yes' if detail.get('still listed') else 'no',
+                    detail.get('created') or '', detail.get('modified') or '',
+                    f"{row.get('size') or 0:,}",
+                    detail.get('folder') or '')[column]
         if self.section == 'timestomp':
             si = detail.get('standard_information') or {}
             fn = detail.get('file_name') or {}
@@ -152,7 +173,8 @@ class NtfsModel(QAbstractTableModel):
                                  (row.get('detail') or {}).items())
             return self._cell(row, column) or None
         if role == Qt.ForegroundRole and self.section != 'journal':
-            severity_column = 2 if self.section == 'timestomp' else 3
+            severity_column = {'timestomp': 2, 'slack': 2,
+                               'logfile': 2}.get(self.section, 3)
             tone = _TONE.get(row.get('grade'))
             if tone and column in (severity_column, severity_column + 1):
                 return verdict_brush(tone)
@@ -334,6 +356,8 @@ class NtfsPanel(QWidget):
         self.model.set_rows(section, rows, self._names)
         widths = {'timestomp': (200, 120, 90, 320, 190, 190, 190, 190),
                   'streams': (220, 120, 90, 90, 320, 300),
+                  'slack': (240, 120, 90, 190, 190, 90),
+                  'logfile': (110, 120, 130, 220, 190, 190, 360),
                   'journal': (190, 120, 220, 260, 420, 90)}[section]
         for column, width in enumerate(widths):
             self.table.setColumnWidth(column, width)
@@ -346,9 +370,11 @@ class NtfsPanel(QWidget):
 
     def _status(self, section, rows, counts):
         if not counts.get('journal') and not any(
-                counts.get(k) for k in ('timestomp', 'streams',
+                counts.get(k) for k in ('timestomp', 'streams', 'slack',
+                                        'logfile',
                                         'routine_timestomp',
-                                        'routine_streams')):
+                                        'routine_streams',
+                                        'routine_slack')):
             return ("Nothing read yet. Run Analysis with \"NTFS: $MFT times, "
                     "change journal and streams\" to read each NTFS volume's "
                     "own records.")
@@ -364,6 +390,15 @@ class NtfsPanel(QWidget):
         if section == 'timestomp':
             return (f"{len(rows):,} file(s){more}. Hover Why for both sets "
                     f"of times.{hidden}")
+        if section == 'logfile':
+            return (f"{len(rows):,} operation(s) from $LogFile{more}, "
+                    f"newest first -- files created, named, unnamed and "
+                    f"freed. The log keeps no time of its own; the times "
+                    f"shown are its $FILE_NAME copies'.")
+        if section == 'slack':
+            return (f"{len(rows):,} name(s) left in folders' $I30 index "
+                    f"slack{more} -- files deleted, renamed or moved away, "
+                    f"with their times.{hidden}")
         return f"{len(rows):,} stream(s) and download(s){more}.{hidden}"
 
     def _set_counts(self, counts):
@@ -375,7 +410,8 @@ class NtfsPanel(QWidget):
 
     @property
     def count(self):
-        return sum(self.counts.get(k, 0) for k in ('timestomp', 'streams'))
+        return sum(self.counts.get(k, 0) for k in ('timestomp', 'streams',
+                                                    'slack'))
 
     # --- actions ----------------------------------------------------------
 

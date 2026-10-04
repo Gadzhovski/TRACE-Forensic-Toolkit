@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QAppli
 from PySide6.QtCore import QThread, Signal, Qt
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH
+from trace_app.ui import fonts
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Verify')
@@ -96,7 +97,7 @@ class VerificationWidget(QWidget):
 
         self.hash_label = QTextEdit("Calculating hashes...")
         self.hash_label.setReadOnly(True)
-        self.hash_label.setFont(QFont("Courier", 10))
+        self.hash_label.setFont(fonts.monospace(10))
         self.hash_label.setObjectName("hashResultBox")
         layout.addWidget(self.hash_label)
 

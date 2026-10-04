@@ -327,3 +327,44 @@ def test_a_real_ubuntu_image_end_to_end():
     boots = [r for r in records if r['what'] == 'System boot']
     assert boots and boots[0]['subject'].startswith('kernel ')
     assert any(r['subject'] == '/tmp/sp800-30.pdf' for r in records)
+
+
+@pytest.mark.parametrize('name, count, index, expected', [
+    ('fsevents-0000000002d89b58', 12, 3,
+     ('.Spotlight-V100/Store-V1', 47747061, 0x01000080, None)),
+    ('fsevents-00000000001a0b79', 6, 2, ('Hi, Sierra', 1706838, 0x01000008,
+                                         116)),
+])
+def test_fsevents_as_plaso_reads_them(name, count, index, expected):
+    """plaso's FSEvents test logs, versions 1 and 2: its record counts and
+    the values its tests check."""
+    from trace_app.core.activity import fsevents
+    items = fsevents.records(sample(name))
+    assert len(items) == count
+    item = items[index]
+    assert (item['path'], item['event_id'], item['flags'],
+            item['node_id']) == expected
+    assert fsevents.flag_names(0x01000080) == ['DirectoryCreated',
+                                               'IsDirectory']
+
+
+def test_fsevents_reach_activity(tmp_path):
+    """A Mac volume's .fseventsd in a collection: every record of dfvfs's
+    log, in Activity, saying what happened and that its time is the log's."""
+    from trace_app.core.activity import collect
+    from trace_app.core.image_handler import ImageHandler
+    folder = tmp_path / 'mac' / '.fseventsd'
+    folder.mkdir(parents=True)
+    (folder / '000000000000b208').write_bytes(
+        sample('fsevents_000000000000b208'))
+    (folder / 'fseventsd-uuid').write_bytes(b'0123')
+    handler = ImageHandler(str(tmp_path / 'mac'))
+    try:
+        records = [r for r in collect(handler) if r['source'] == 'FSEvents']
+    finally:
+        handler.close_resources()
+    assert len(records) == 5000
+    first = records[0]
+    assert first['category'] == 'files' and first['subject'].startswith('/')
+    assert 'no time per record' in first['detail']['basis']
+    assert any(r['what'] == 'Removed (folder)' for r in records)

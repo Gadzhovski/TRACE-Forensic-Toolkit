@@ -229,7 +229,10 @@ class ImageHandler:
         try:
             fs_info = self.get_fs_info(start_offset)
             if not fs_info:
-                logger.warning(f"Unable to get filesystem info for offset {start_offset}")
+                # A partition with no file system TSK reads (a table, swap,
+                # free space) has no allocations to map: normal, not a fault.
+                logger.debug("No file system at sector %s: nothing to map",
+                             start_offset)
                 return allocation_map
 
             block_size = fs_info.info.block_size
@@ -694,6 +697,16 @@ class ImageHandler:
                 result['size'] = sum(os.path.getsize(p) for p in
                                      ad1.segment_paths(self.image_path))
                 return result
+            if kind == 'ios_backup':
+                # As stored -- encrypted or not, unlocked or not.
+                from trace_app.core import ios_backup
+                hashers = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
+                result['size'] = ios_backup.hash_folder(
+                    self.image_path, hashers, progress_callback)
+                result['computed_md5'], result['computed_sha1'], \
+                    result['computed_sha256'] = (h.hexdigest()
+                                                 for h in hashers)
+                return result
             if kind == 'l01':
                 filenames = pyewf.glob(self.image_path)
                 handle = pyewf.handle()
@@ -1093,7 +1106,9 @@ class ImageHandler:
         """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
         partition (or an unpartitioned image at 0)."""
         if self.logical_fs is not None:
-            return None
+            # An encrypted iOS backup is locked until its password is given.
+            return self.logical_fs.facts.get('_locked') \
+                if start_sector == 0 else None
         if start_sector not in self._kinds:
             if start_sector >= containers.SHADOW_KEY_BASE:
                 self._kinds[start_sector] = None
@@ -1108,7 +1123,8 @@ class ImageHandler:
     def encryption(self, start_sector):
         """The kind of an encrypted volume at a partition, or None."""
         kind = self.volume_kind(start_sector)
-        return kind if kind in ('bitlocker', 'fvde', 'luks') else None
+        return kind if kind in ('bitlocker', 'fvde', 'luks', 'ios_backup') \
+            else None
 
     def unlocked_kind(self, start_sector):
         return self._unlocked_kind.get(start_sector)
@@ -1119,6 +1135,8 @@ class ImageHandler:
         key. Raises containers.ContainerError with the reason."""
         if start_sector in self._bitlocker:
             return True
+        if kind == 'ios_backup' and self.logical_fs is not None:
+            return self._unlock_backup(secret.get('password'))
         window = self._partition_window(start_sector)
         keep = []
         if kind == 'bitlocker':
@@ -1142,6 +1160,28 @@ class ImageHandler:
         self._shadows.pop(start_sector, None)       # re-read, decrypted
         logger.info("%s volume at sector %d unlocked",
                     containers.ENCRYPTION_NAMES.get(kind, kind), start_sector)
+        return True
+
+    def _unlock_backup(self, password):
+        """An encrypted iOS backup's files, listed and decrypted as read."""
+        from trace_app.core import ios_backup
+        unlock = self.logical_fs.facts.get('_unlock')
+        if unlock is None:
+            raise containers.ContainerError("This evidence has no password")
+        if not password:
+            raise containers.ContainerError("Enter the backup's password")
+        from trace_app.infra import capabilities
+        if not capabilities.available('ios_encrypted'):
+            raise containers.ContainerError(
+                capabilities.reason('ios_encrypted'))
+        try:
+            unlock(password)
+        except ios_backup.BackupError as exc:
+            raise containers.ContainerError(str(exc)) from exc
+        self._unlocked_kind[0] = 'ios_backup'
+        self._directory_cache.clear()
+        self.get_fs_type.cache_clear()
+        logger.info("iOS backup unlocked")
         return True
 
     # --- LVM and APFS: several volumes in one partition -------------------
@@ -1265,8 +1305,7 @@ class ImageHandler:
 
     def is_unlocked(self, start_sector):
         return start_sector in self._bitlocker or \
-            self._unlocked_kind.get(start_sector) == 'apfs' or \
-            self._unlocked_kind.get(start_sector) == 'apfs'
+            self._unlocked_kind.get(start_sector) in ('apfs', 'ios_backup')
 
     def bitlocker_facts(self, start_sector):
         return containers.bitlocker_facts(self._partition_window(start_sector))

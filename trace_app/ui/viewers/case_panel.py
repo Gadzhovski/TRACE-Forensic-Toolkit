@@ -71,6 +71,9 @@ class CasePanel(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("caseTabs")
         self.tabs.setDocumentMode(True)
+        # No base line: in document mode Qt rules one along the top of the
+        # tab row, a stray line no other tab strip in TRACE has.
+        self.tabs.tabBar().setDrawBase(False)
         layout.addWidget(self.tabs, 1)
 
         self.details = PropertyTable()

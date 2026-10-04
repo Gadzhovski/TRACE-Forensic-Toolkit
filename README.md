@@ -442,13 +442,14 @@ unrar tool, and evidence is never handed to an outside program.
 
 ### 🔍 File carving
 
-Recovers deleted files by signature — **59 types** in nine groups:
+Recovers deleted files by signature — **60 types** in nine groups:
 
 - **Pictures:** JPG, PNG, GIF, BMP, TIFF, WEBP, HEIC, AVIF, PSD
 - **Documents:** PDF, DOCX/XLSX/PPTX/VSDX, ODT/ODS/ODP/ODG, EPUB, OLE
   (doc/xls/ppt/msg), RTF, HTML
 - **Email:** PST, OST, mbox, EML
-- **Databases & logs:** SQLite, EVTX, registry hives
+- **Databases & logs:** SQLite and its write-ahead logs (paired with the
+  database they replay onto), EVTX, registry hives
 - **Windows artifacts:** LNK
 - **Executables:** EXE/DLL/SYS, ELF, Mach-O, APK, JAR
 - **Archives:** ZIP, GZ, BZ2, XZ, TAR, RAR, 7Z

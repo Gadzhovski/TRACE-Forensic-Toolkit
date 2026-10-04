@@ -3,7 +3,8 @@
 
 A Triage sub-tab: a grid of the pictures, Thumbs.db pictures of files that
 are no longer in their folder first, each captioned with the file it is of
-(Thumbs.db) or its cache id (thumbcache). A picture is read from its cache
+(Thumbs.db) or its cache id (thumbcache); a Remote Desktop cache's tiles
+follow its collage. A picture is read from its cache
 on the image only when it scrolls into view, and kept while it stays near.
 Landing on one shows it in the viewer; double-click goes to the cache file.
 """
@@ -55,7 +56,11 @@ def caption(row):
 
 def describe(row, image_name=''):
     detail = row.get('detail') or {}
-    lines = [row.get('name') and f"Picture of: {row['name']}",
+    rdp = row.get('cache_kind') == 'rdp'
+    lines = [row.get('name') and (
+                 f"{row['name']} — part of a remote session's screen, kept "
+                 f"by the Remote Desktop client" if rdp
+                 else f"Picture of: {row['name']}"),
              detail.get('indexed path') and
              f"Indexed by Windows Search as: {detail['indexed path']}",
              detail.get('indexed modified') and
@@ -276,7 +281,8 @@ class ThumbnailsPanel(QWidget):
             text = "Thumbnail caches are read into a case."
         elif not rows:
             text = ("No thumbnail caches read yet. Run Analysis ▸ Thumbnail "
-                    "caches finds every Thumbs.db and thumbcache_*.db.")
+                    "caches finds every Thumbs.db, thumbcache_*.db and "
+                    "Remote Desktop bitmap cache.")
         else:
             counts = self.case.thumbnail_counts(self.evidence_id)
             text = (f"{counts['pictures']:,} picture(s) in "

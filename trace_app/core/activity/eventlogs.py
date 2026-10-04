@@ -16,6 +16,7 @@ their events' numbers and string positions.
 """
 
 import datetime
+import re
 import struct
 
 from trace_app.core.activity import evtx, times
@@ -152,6 +153,38 @@ def describe(event):
         return ({6005: 'System started', 6006: 'System shut down',
                  6008: 'Unexpected shutdown'}[eid], event['computer'], {})
 
+    if 'Windows Defender' in channel or 'Windows Defender' in provider:
+        threat = data.get('Threat Name') or ''
+        common = {'path': data.get('Path') or '',
+                  'process': data.get('Process Name') or '',
+                  'user': data.get('Detection User') or '',
+                  'severity': data.get('Severity Name') or '',
+                  'category': data.get('Category Name') or '',
+                  'action': data.get('Action Name') or ''}
+        defender = {1116: 'Threat detected', 1117: 'Threat action taken',
+                    1118: 'Threat action failed', 1119: 'Threat action failed',
+                    1006: 'Threat detected', 1007: 'Threat action taken',
+                    5001: 'Real-time protection turned off',
+                    5004: 'Real-time protection settings changed',
+                    5007: 'Settings changed', 5010: 'Spyware scanning off',
+                    5012: 'Virus scanning off', 1013: 'History deleted'}
+        if eid == 5007:
+            # Defender rewrites its own settings hundreds of times; what an
+            # examiner wants is an exclusion added or protection turned off.
+            value = data.get('New Value') or ''
+            if '\\Exclusions\\' in value:
+                return ('Defender exclusion added', value.split(
+                    '\\Exclusions\\', 1)[1],
+                        {'old value': data.get('Old Value') or ''})
+            if re.search(r'(?i)\\(Real-Time Protection\\Disable\w+|'
+                         r'DisableAntiSpyware|DisableAntiVirus) = 0x1$',
+                         value):
+                return ('Defender protection turned off',
+                        value.rsplit('\\', 1)[-1], {})
+            return None
+        if eid in defender:
+            return (defender[eid], threat or data.get('Path') or '', common)
+        return None
     if 'LocalSessionManager' in channel:
         names = {21: 'Remote desktop logon', 22: 'Remote desktop shell start',
                  23: 'Remote desktop logoff',

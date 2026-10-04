@@ -69,8 +69,8 @@ MODULE_PERSISTENCE = 'persistence'
 #: queued after indexing.
 MODULE_KEYWORDS = 'keywords'
 
-#: Thumbnail caches (core/thumbnails): finds Thumbs.db and thumbcache_*.db
-#: by name, then reads only those.
+#: Thumbnail caches (core/thumbnails): finds Thumbs.db, thumbcache_*.db
+#: and RDP bitmap caches by name, then reads only those.
 MODULE_THUMBNAILS = 'thumbnails'
 
 #: Deleted files (core/deleted): lists what the file systems still record,
@@ -198,7 +198,8 @@ _THUMBNAILS = (
     "The pictures Windows kept in Thumbs.db (XP, network shares) and "
     "thumbcache_*.db (Vista to 11) — often of pictures and documents since "
     "deleted. A Thumbs.db names each file; those no longer in their folder "
-    "are findings (Triage ▸ Thumbnails).",
+    "are findings. Also Remote Desktop's bitmap caches: tiles of the "
+    "screens of sessions this computer connected to (Triage ▸ Thumbnails).",
     "Fast: lists the file systems, then reads only the caches.")
 
 _KEYWORDS = (

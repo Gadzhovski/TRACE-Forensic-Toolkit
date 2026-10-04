@@ -324,10 +324,13 @@ class PDFViewer(QWidget):
                 self.update_navigation_states()
             except Exception as e:
                 if filetype != "pdf":
-                    logger.error("Could not open %s document: %s", filetype, e)
+                    logger.info("Could not open %s document (damaged?): %s", filetype, e)
                     return False
-                # If direct open fails, try to clean up the PDF (common with carved files)
-                logger.error(f"Initial PDF load failed: {e}, attempting cleanup...")
+                # If direct open fails, try to clean up the PDF (common with
+                # carved files). Damaged evidence is not a TRACE fault: the
+                # viewer says so on screen, the log at INFO.
+                logger.debug("PDF did not open (%s); retrying without bytes "
+                             "after %%%%EOF", e)
                 try:
                     cleaned_content = self.cleanup_pdf_content(content)
                     self.pdf = fitz_open(stream=cleaned_content, filetype="pdf")
@@ -338,7 +341,8 @@ class PDFViewer(QWidget):
                     self.update_navigation_states()
                     logger.debug("Successfully loaded PDF after cleanup")
                 except Exception as e2:
-                    logger.error(f"Failed to load PDF even after cleanup: {e2}")
+                    logger.info("PDF could not be opened (damaged or "
+                                "incomplete): %s", e2)
         else:
             self.page_label.clear()
 

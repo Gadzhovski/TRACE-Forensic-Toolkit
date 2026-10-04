@@ -141,6 +141,11 @@ def _run(report, images, sandbox):
         expected_missing = set()
         if sys.platform == 'win32' and platform.machine().upper() == 'ARM64':
             expected_missing = {'yara', 'heic'}
+            # Their wheels for Windows on ARM start at these Pythons.
+            if sys.version_info < (3, 12):
+                expected_missing.add('sigma')
+            if sys.version_info < (3, 11):
+                expected_missing.add('ios_encrypted')
         missing = [c.key for c in capabilities.CAPABILITIES
                    if not c.available and c.key not in expected_missing]
         assert not missing, f"unavailable: {', '.join(missing)}"
@@ -197,7 +202,10 @@ def _run(report, images, sandbox):
                 assert handle.read().strip(), f"{theme} theme is empty"
         svg = QIcon(resource_path('Icons/devices/computer-laptop.svg'))
         assert not svg.pixmap(32, 32).isNull(), "SVG icons do not render"
-        return "logo, both themes, SVG icons"
+        from trace_app.core import geo
+        land = geo.land_rings(resource_path('resources', 'world_land.json'))
+        assert len(land) > 100, "the Map tab's offline outline is missing"
+        return "logo, both themes, SVG icons, the map's world outline"
 
     @check('image formats')
     def _():

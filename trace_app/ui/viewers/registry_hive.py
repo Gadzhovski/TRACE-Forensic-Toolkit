@@ -20,69 +20,65 @@ logger = logging.getLogger('TRACE.Registry')
 
 
 
-class _HiveLoader(QThread):
-    """Reads a registry hive out of the image, off the UI thread.
+class _HiveFinder(QThread):
+    """Finds the hives on each piece of evidence in turn
+    (core/registry_hives.py), off the UI thread: the Evidence list then says
+    which images hold a registry at all."""
 
-    Extracting a hive walks every partition, pulls the file out of NTFS and
-    parses it. On a large image that is seconds of work, and it used to run in
-    the click handler -- so the whole window stopped repainting until it
-    finished. Only the reading happens here; the tree is built on the UI
-    thread, where it has to be.
-    """
+    #: (evidence path, [Hive]).
+    found = Signal(str, object)
 
-    #: (hive name, parsed root key) on success.
-    loaded = Signal(str, object)
-    #: A message to show when nothing could be read.
-    failed = Signal(str)
-    #: What replaying the hive's transaction logs changed.
-    recovered = Signal(str)
-
-    def __init__(self, image_handler, hive_name, parent=None):
+    def __init__(self, evidence, parent=None):
         super().__init__(parent)
-        self.image_handler = image_handler
-        self.hive_name = hive_name
+        self.evidence = evidence            # [(path, handler)]
 
     def run(self):
-        """The hive from the first volume that has it -- every partition
-        and volume (an unpartitioned image and logical evidence too), and
-        in a triage collection under its system's folder. Read in memory
-        with its transaction logs applied (ImageHandler.get_registry_hive);
-        nothing is written to disk."""
-        from trace_app.core.logical import is_logical, system_roots
-        try:
-            for start_offset in self.image_handler.volume_offsets():
-                if self.isInterruptionRequested():
-                    return
-                fs_info = self.image_handler.get_fs_info(start_offset)
-                if fs_info is None:
-                    continue
-                roots = system_roots(fs_info) if is_logical(fs_info)                     else ['/']
-                for root in roots:
-                    path = (root.rstrip('/') +
-                            f"/Windows/System32/config/{self.hive_name}")
-                    hive_data = self.image_handler.get_registry_hive(
-                        fs_info, path, required=False)
-                    if not hive_data:
-                        continue
-                    reg = Registry.Registry(io.BytesIO(hive_data))
-                    facts = self.image_handler.hive_recovery.get(path) or {}
-                    if facts.get('applied'):
-                        self.recovered.emit(
-                            f"{self.hive_name}: {facts['applied']} change(s) "
-                            f"applied from its transaction logs "
-                            f"({', '.join(facts['logs'])}) -- the hive as "
-                            f"Windows last had it")
-                    if not self.isInterruptionRequested():
-                        self.loaded.emit(self.hive_name, reg.root())
-                    return
+        from trace_app.core import registry_hives
+        for path, handler in self.evidence:
+            if self.isInterruptionRequested():
+                return
+            try:
+                hives = registry_hives.find_hives(
+                    handler, self.isInterruptionRequested)
+            except Exception as exc:
+                logger.error("Could not look for hives in %s: %s", path, exc)
+                hives = []
+            if not self.isInterruptionRequested():
+                self.found.emit(path, hives)
 
-            self.failed.emit(f"{self.hive_name} was not found in this image.")
-        except Exception as e:
-            logger.error("An error occurred while loading the selected hive: %s", e)
-            self.failed.emit(f"Could not read {self.hive_name}: {e}")
+
+class _HiveLoader(QThread):
+    """Reads one hive out of the evidence, off the UI thread, in memory with
+    its transaction logs applied; the tree is built on the UI thread."""
+
+    #: (parsed root key, recovery facts) on success.
+    loaded = Signal(object, object)
+    failed = Signal(str)
+
+    def __init__(self, image_handler, hive, parent=None):
+        super().__init__(parent)
+        self.image_handler = image_handler
+        self.hive = hive
+
+    def run(self):
+        from trace_app.core import registry_hives
+        try:
+            data, facts = registry_hives.read_hive(self.image_handler,
+                                                   self.hive)
+            root = Registry.Registry(io.BytesIO(data)).root()
+            if not self.isInterruptionRequested():
+                self.loaded.emit(root, facts)
+        except Exception as exc:
+            logger.error("Could not read %s: %s", self.hive.path, exc)
+            self.failed.emit(f"Could not read {self.hive.label}: {exc}")
 
 
 class RegistryExtractor(QWidget):
+    """The Registry tab: pick a piece of evidence, then one of the hives
+    found on it -- system, per user, Amcache, RegBack copies -- and browse
+    it. It reads the evidence chosen here, never whichever image happens
+    to be active elsewhere in the window."""
+
     #: Progress text for the window's status bar. Emitted rather than written
     #: directly, so this widget stays independent of the window it sits in.
     statusMessage = Signal(str)
@@ -90,19 +86,25 @@ class RegistryExtractor(QWidget):
     #: Item data slot recording whether a node's children have been built.
     POPULATED_ROLE = Qt.UserRole + 1
 
-    def __init__(self, image_handler):
+    def __init__(self, image_handler=None):
         super().__init__()
-        self.image_handler = image_handler
+        #: [(path, display name, handler)] -- the evidence open in the window.
+        self._evidence = []
+        #: {path: [Hive]} once searched.
+        self._hives = {}
+        #: The path the examiner picked; None until they pick one.
+        self._chosen = None
+        self._finder = None
         #: The running hive reader, retained so it is not collected mid-read.
         self._loader = None
-        # Looked up on each use rather than cached here: an icon fetched once
-        # keeps the tint of whatever theme was active at construction, so
-        # these stayed light-theme grey after a switch to dark.
+        #: (path, Hive) of what the tree shows.
+        self.shown = None
+        self._source_rows = []
         self.init_ui()
 
     def set_image_handler(self, image_handler):
-        """Point this viewer at a newly loaded image."""
-        self.image_handler = image_handler
+        """Kept for callers of the old interface: the browser follows its
+        own Evidence choice, not the window's active image."""
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -129,8 +131,17 @@ class RegistryExtractor(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
 
+        self.evidenceSelector = QComboBox()
+        self.evidenceSelector.setToolTip("The evidence to read hives from")
+        self.evidenceSelector.setSizeAdjustPolicy(
+            QComboBox.AdjustToContents)
+        self.evidenceSelector.activated.connect(self._evidence_picked)
+        self.toolbar.addWidget(self.evidenceSelector)
+
         self.hiveSelector = QComboBox()
-        self.hiveSelector.addItems(["SOFTWARE", "SYSTEM", "SAM", "SECURITY", "DEFAULT", "COMPONENTS"])
+        self.hiveSelector.setToolTip("The hives found on that evidence")
+        self.hiveSelector.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.hiveSelector.setMinimumContentsLength(24)
         self.toolbar.addWidget(self.hiveSelector)
 
         self.loadHiveButton = QPushButton("Load")
@@ -186,6 +197,7 @@ class RegistryExtractor(QWidget):
         self.treeWidget.itemExpanded.connect(self._on_item_expanded)
         # Every control in this toolbar gets the shared height, once it is built.
         align_controls(self.toolbar)
+        self._fill_evidence()
 
     def onCustomContextMenuRequested(self, position):
         # Create the context menu
@@ -202,41 +214,200 @@ class RegistryExtractor(QWidget):
                 selectedText = selectedIndexes[0].data()  # Assuming single selection for simplicity
                 QApplication.clipboard().setText(selectedText)
 
+    # --- which evidence, which hive ------------------------------------------
+
+    def set_evidence(self, evidence):
+        """The evidence open in the window: [(path, display name,
+        handler)]. Hives are looked for on any not searched yet."""
+        if [(p, n, id(h)) for p, n, h in evidence] == \
+                [(p, n, id(h)) for p, n, h in self._evidence]:
+            return                  # every click activates an image
+        known = {path for path, _n, _h in evidence}
+        handlers = {path: handler for path, _n, handler in evidence}
+        old = {path: handler for path, _n, handler in self._evidence}
+        # Gone, or reopened under the same path: forget what was found.
+        for path in list(self._hives):
+            if path not in known or old.get(path) is not handlers.get(path):
+                self._hives.pop(path, None)
+        self._evidence = list(evidence)
+        if self._chosen not in known:
+            self._chosen = None
+        if self.shown and self.shown[0] not in self._hives:
+            self.clear()
+        self._fill_evidence()
+        self._search()
+
+    def _search(self):
+        if self._finder is not None and self._finder.isRunning():
+            self._finder.requestInterruption()
+            self._finder.wait(10000)
+        pending = [(path, handler) for path, _n, handler in self._evidence
+                   if path not in self._hives]
+        if not pending:
+            return
+        self._finder = _HiveFinder(pending, self)
+        self._finder.found.connect(self._hives_found)
+        self._finder.start()
+
+    def shutdown(self):
+        for thread in (self._finder, self._loader):
+            if thread is not None and thread.isRunning():
+                thread.requestInterruption()
+                thread.wait(10000)
+
+    def wait_for_search(self, timeout_ms=60000):
+        """For tests and scripts: block until every evidence is searched."""
+        if self._finder is not None:
+            self._finder.wait(timeout_ms)
+        QApplication.processEvents()
+
+    def _hives_found(self, path, hives):
+        if path not in {p for p, _n, _h in self._evidence}:
+            return
+        self._hives[path] = hives
+        self._fill_evidence()
+
+    def _fill_evidence(self):
+        selector = self.evidenceSelector
+        selector.blockSignals(True)
+        selector.clear()
+        for path, name, _handler in self._evidence:
+            hives = self._hives.get(path)
+            note = ('searching…' if hives is None else
+                    'no Windows registry' if not hives else
+                    f"{len(hives)} hive{'s' if len(hives) != 1 else ''}")
+            selector.addItem(f"{name} — {note}", path)
+        if not self._evidence:
+            selector.addItem("No evidence open", None)
+        current = self._chosen or self._default_evidence()
+        index = selector.findData(current)
+        selector.setCurrentIndex(index if index >= 0 else 0)
+        selector.setEnabled(bool(self._evidence))
+        selector.blockSignals(False)
+        self._fill_hives()
+
+    def _default_evidence(self):
+        """The first evidence with a registry; else the first."""
+        for path, _n, _h in self._evidence:
+            if self._hives.get(path):
+                return path
+        return self._evidence[0][0] if self._evidence else None
+
+    def _evidence_picked(self, _index):
+        self._chosen = self.evidenceSelector.currentData()
+        self._fill_hives()
+
+    def current_evidence(self):
+        path = self.evidenceSelector.currentData()
+        for item in self._evidence:
+            if item[0] == path:
+                return item
+        return None
+
+    def _fill_hives(self):
+        selector = self.hiveSelector
+        previous = selector.currentData()
+        selector.clear()
+        evidence = self.current_evidence()
+        hives = self._hives.get(evidence[0]) if evidence else None
+        if evidence is None:
+            selector.addItem("—", None)
+        elif hives is None:
+            selector.addItem("Looking for hives…", None)
+        elif not hives:
+            selector.addItem("No Windows registry on this evidence", None)
+        else:
+            for index, hive in enumerate(hives):
+                selector.addItem(hive.label, index)
+                selector.setItemData(index, f"{hive.path}  ·  "
+                                     f"{hive.size:,} bytes", Qt.ToolTipRole)
+            if previous is not None and previous < len(hives):
+                selector.setCurrentIndex(previous)
+        ready = bool(hives)
+        selector.setEnabled(ready)
+        self.loadHiveButton.setEnabled(ready and not (
+            self._loader is not None and self._loader.isRunning()))
+
+    def selected_hive(self):
+        evidence = self.current_evidence()
+        index = self.hiveSelector.currentData()
+        if evidence is None or index is None:
+            return None, None
+        return evidence, self._hives[evidence[0]][index]
+
+    def select_hive(self, evidence_path, name, user=''):
+        """Choose a hive by evidence, name and user (for tests and links).
+        True when it is there."""
+        index = self.evidenceSelector.findData(evidence_path)
+        if index < 0:
+            return False
+        self.evidenceSelector.setCurrentIndex(index)
+        self._evidence_picked(index)
+        for position, hive in enumerate(self._hives.get(evidence_path)
+                                        or []):
+            if hive.name == name and (not user or hive.user == user):
+                self.hiveSelector.setCurrentIndex(position)
+                return True
+        return False
+
+    # --- reading -------------------------------------------------------------
+
     def load_selected_hive(self):
         """Start reading the selected hive; the tree fills in when it arrives."""
-        if self.image_handler is None:
+        evidence, hive = self.selected_hive()
+        if hive is None:
             return
-
         if self._loader is not None and self._loader.isRunning():
             self._loader.requestInterruption()
             self._loader.wait(2000)
-
-        hive = self.hiveSelector.currentText()
-        self.statusMessage.emit(f"Reading the {hive} hive...")
+        name = evidence[1]
+        self.statusMessage.emit(f"Reading {hive.label} from {name}…")
         self.loadHiveButton.setEnabled(False)
         # No placeholder row here: progress goes to the window's status bar,
         # and a tree entry saying "Reading..." reads like a registry key.
         self.treeWidget.clear()
-
-        self._loader = _HiveLoader(self.image_handler, hive, self)
-        self._loader.loaded.connect(self._on_hive_loaded)
+        self._loader = _HiveLoader(evidence[2], hive, self)
+        self._loader.loaded.connect(
+            lambda root, facts: self._on_hive_loaded(evidence, hive, root,
+                                                     facts))
         self._loader.failed.connect(self._on_hive_failed)
-        self._loader.recovered.connect(self.statusMessage.emit)
         self._loader.finished.connect(self._on_load_finished)
         self._loader.start()
 
+    def wait_for_load(self, timeout_ms=60000):
+        """For tests and scripts: block until the hive is read and shown."""
+        if self._loader is not None:
+            self._loader.wait(timeout_ms)
+        QApplication.processEvents()
+
     def _on_load_finished(self):
         """Re-enable the button once the reader stops, however it ended."""
-        self.loadHiveButton.setEnabled(True)
+        self.loadHiveButton.setEnabled(bool(self.selected_hive()[1]))
 
-    def _on_hive_loaded(self, hive_name, root_key):
-        self.display_registry_hive(hive_name, root_key)
+    def _on_hive_loaded(self, evidence, hive, root_key, facts):
+        path, name, _handler = evidence
+        self.shown = (path, hive)
+        self.display_registry_hive(hive.label, root_key)
+        root = self.treeWidget.topLevelItem(0)
+        root.setToolTip(0, f"{name}: {hive.path}")
+        self._source_rows = [("Evidence", name), ("File", hive.path)]
+        if hive.volume:
+            self._source_rows.append(("Volume", hive.volume))
+        if hive.user:
+            self._source_rows.append(("User profile", hive.user))
+        if facts.get('applied'):
+            self._source_rows.append((
+                "Transaction logs", f"{facts['applied']} change(s) applied "
+                f"from {', '.join(facts.get('logs') or [])} -- the hive as "
+                f"Windows last had it"))
         try:
             count = len(root_key.subkeys())
             self.statusMessage.emit(
-                f"{hive_name} loaded  ·  {count} top-level keys")
+                f"{hive.label} from {name} loaded  ·  {count} top-level keys"
+                + (f"  ·  {facts['applied']} change(s) applied from its "
+                   f"transaction logs" if facts.get('applied') else ''))
         except Exception:
-            self.statusMessage.emit(f"{hive_name} loaded")
+            self.statusMessage.emit(f"{hive.label} loaded")
         self._on_load_finished()
 
     def _on_hive_failed(self, message):
@@ -334,7 +505,10 @@ class RegistryExtractor(QWidget):
         metadata["Last Modified"] = registry_object.timestamp().strftime(
             "%Y-%m-%d %H:%M:%S UTC")
 
-        self.metadataPanel.set_rows(list(metadata.items()))
+        # Where this hive came from, under every key: a key is only
+        # evidence together with the file and device it was read from.
+        self.metadataPanel.set_rows(list(metadata.items())
+                                    + self._source_rows)
 
     def setup_table(self, values):
         # Reset and set up table
@@ -375,6 +549,8 @@ class RegistryExtractor(QWidget):
 
     # clear the window
     def clear(self):
+        self.shown = None
+        self._source_rows = []
         self.treeWidget.clear()
         self.metadataPanel.clear_rows()
         self.tableWidget.clear()

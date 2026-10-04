@@ -129,9 +129,8 @@ def index_carved(read, case, index, evidence_id, should_stop=None):
         ref = make_span_ref(0, offset, offset + size)
         origin = row.get('origin') or {}
         name = os.path.basename(row['path']) or row['name']
-        path = f"[carved]/{name}"
-        if origin.get('path'):
-            path += f" (was {origin['path']})"
+        from trace_app.core.carving import carved_path
+        path = carved_path(name, origin)
         text = ''
         content = None
         if size <= MAX_FILE_BYTES:

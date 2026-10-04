@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
                                QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
                                QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy,
-                               QTabBar, QToolButton)
+                               QTabBar, QToolButton, QStackedWidget)
 
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.table_columns import fit_columns
@@ -50,6 +50,7 @@ from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
 from trace_app.infra.paths import config_file, resource_path
 from trace_app.ui import icons
+from trace_app.ui.widgets import item_views
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.viewers.registry_hive import RegistryExtractor
 from trace_app.ui.viewers.text import TextViewer
@@ -77,7 +78,7 @@ from trace_app.ui.viewers.indicators_panel import IndicatorsPanel, kind_label
 from trace_app.ui.viewers.ntfs_panel import NtfsPanel, NtfsWorker
 from trace_app.ui.viewers.hash_matches_panel import (HashMatchesPanel,
                                                      HashMatchWorker)
-from trace_app.core import containers, hashsets, thumbnails
+from trace_app.core import containers, hashsets, rdpcache, thumbnails
 from trace_app.ui.viewers.timeline_panel import TimelinePanel
 from trace_app.ui.viewers.search_panel import IndexWorker, SearchPanel
 from trace_app.ui.viewers.triage_panel import AnalysisWorker, TriagePanel
@@ -127,6 +128,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def __init__(self, case=None):
         super().__init__()
+        # Every table, tree and list scrolls by pixels and fills its width
+        # (ui/widgets/item_views.py). Also done at startup for the launcher;
+        # here too so a window built without app.py (tests) behaves alike.
+        item_views.install()
 
         #: The open case, or None for quick triage. Everything case-related
         #: checks this rather than a separate mode flag: there is one source
@@ -412,6 +417,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self._layout_applied = True
             self._align_toolbars()
             QTimer.singleShot(0, self._apply_startup_layout)
+            # TRACE's logo on the taskbar, not Qt's generic window: set now,
+            # and again once the start-up work is done (ui/window_icon.py).
+            self.refresh_taskbar_icon()
+            QTimer.singleShot(1500, self.refresh_taskbar_icon)
+
+    def refresh_taskbar_icon(self):
+        from trace_app.ui import window_icon
+        window_icon.apply(self)
 
     # --- window size and dock proportions --------------------------------
 
@@ -700,15 +713,29 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _build_menus(self):
         """Menu bar: File, View, Tools, Options and Help."""
         menu_bar = QMenuBar(self)
-        file_actions = {
-            'Add Evidence File': self.load_image_evidence,
-            'Add Evidence Folder...': self.load_folder_evidence,
-            'Remove Evidence File': self.remove_image_evidence,
-            'separator': None,  # This will add a separator
-            'Exit': self.close
-        }
-
-        self.create_menu(menu_bar, 'File', file_actions)
+        # Every command has an icon, set through icons.apply_to so it is
+        # re-tinted with the theme (a plain QIcon kept the old theme's
+        # colour). Checkable entries -- themes, panel toggles -- have none:
+        # Qt draws their tick where the icon goes.
+        file_menu = QMenu('File', self)
+        self.add_evidence_action = icons.action(
+            icons.EVIDENCE_ADD, "Add Evidence File...", self)
+        self.add_evidence_action.triggered.connect(self.load_image_evidence)
+        self.add_folder_action = icons.action(
+            icons.EVIDENCE_FOLDER, "Add Evidence Folder...", self)
+        self.add_folder_action.triggered.connect(self.load_folder_evidence)
+        self.remove_evidence_action = icons.action(
+            icons.EVIDENCE_REMOVE, "Remove Evidence File...", self)
+        self.remove_evidence_action.triggered.connect(
+            self.remove_image_evidence)
+        for action in (self.add_evidence_action, self.add_folder_action,
+                       self.remove_evidence_action):
+            file_menu.addAction(action)
+        file_menu.addSeparator()
+        exit_action = icons.action(icons.EXIT, "Exit", self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        menu_bar.addMenu(file_menu)
 
         # Case entries live in their own menu rather than crowding File, and
         # disable themselves in quick triage: an action that cannot work is
@@ -895,6 +922,33 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         about_action.triggered.connect(lambda: AboutDialog(self).exec())
         help_menu.addAction(about_action)
 
+        for action, name in (
+                (self.case_properties_action, icons.CASE_PROPERTIES),
+                (self.verify_case_action, icons.VERIFY),
+                (self.create_report_action, icons.REPORT),
+                (self.open_case_folder_action, icons.OPEN_FOLDER),
+                (self.run_analysis_action, icons.RUN),
+                (self.cancel_analysis_action, icons.CANCEL),
+                (self.find_by_hash_action, icons.FIND_HASH),
+                (self.match_hash_sets_action, icons.HASH_SETS),
+                (self.scan_yara_action, icons.FINDING_YARA),
+                (self.scan_sigma_action, icons.SIGMA),
+                (self.search_keywords_action, icons.KEYWORDS),
+                (full_screen_action, icons.FULL_SCREEN),
+                (normal_screen_action, icons.NORMAL_SCREEN),
+                (reset_layout_action, icons.RESET_LAYOUT),
+                (image_info_action, icons.IMAGE_INFO),
+                (verify_image_action, icons.VERIFY),
+                (hash_sets_action, icons.HASH_SETS),
+                (yara_action, icons.FINDING_YARA),
+                (sigma_action, icons.SIGMA),
+                (keywords_action, icons.KEYWORDS),
+                (api_key_action, icons.API_KEYS),
+                (features_action, icons.FEATURES),
+                (about_action, icons.HELP)):
+            icons.apply_to(action, name)
+        self.image_info_action = image_info_action
+
         menu_bar.addMenu(view_menu)
         menu_bar.addMenu(tools_menu)
         menu_bar.addMenu(options_menu)
@@ -913,16 +967,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.main_toolbar.setObjectName("mainToolbar")
         self.main_toolbar.setMovable(False)
         self.main_toolbar.setFloatable(False)
-        self.main_toolbar.addAction(
-            self.create_action(icons.EVIDENCE_ADD, "Load Image", self.load_image_evidence))
-        self.main_toolbar.addAction(
-            self.create_action(icons.EVIDENCE_REMOVE, "Remove Image", self.remove_image_evidence))
+        # The commands used most, in the order an examination runs: bring
+        # evidence in, check it, analyse it, report. They are the menu's own
+        # actions, so a button is enabled exactly when its menu entry is
+        # (case-only commands grey out in quick triage, with the reason).
+        for action in (self.add_evidence_action, self.add_folder_action,
+                       self.remove_evidence_action):
+            self.main_toolbar.addAction(action)
         self.main_toolbar.addSeparator()
 
-        # Create verify_image_button as an attribute of MainWindow
         self.verify_image_button = self.create_action(icons.VERIFY, "Verify Image",
                                                      self.show_verify_menu)
         self.main_toolbar.addAction(self.verify_image_button)
+        self.main_toolbar.addAction(self.image_info_action)
+        self.main_toolbar.addSeparator()
+
+        self.main_toolbar.addAction(self.run_analysis_action)
+        self.main_toolbar.addAction(self.search_keywords_action)
+        self.main_toolbar.addSeparator()
+        self.main_toolbar.addAction(self.create_report_action)
 
 
         # Navigation buttons (Back, Forward, Up) will be added to the listing search toolbar
@@ -1048,6 +1111,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Add vertical separator after navigation buttons
         self.listing_toolbar.addSeparator()
 
+        # How the listing is shown: Details (the table), List, or icons --
+        # Explorer's views, one button with a menu, as Explorer has it.
+        self._build_listing_view_button()
+        self.listing_toolbar.addSeparator()
+
         # RIGHT SIDE: Search functionality
         # Add search bar
         self.listing_search_bar = QLineEdit()
@@ -1076,7 +1144,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Every control in this toolbar gets the shared height, once it is built.
         align_controls(self.listing_toolbar)
         self.listing_layout.addWidget(self.listing_toolbar)
-        self.listing_layout.addWidget(self.listing_table)  # Table below toolbar
+        # Below the toolbar: the table (Details) or the list/icon view over
+        # the same model and selection (ui/widgets/listing_views.py).
+        from trace_app.ui.widgets.listing_views import ListingIconView
+        self.listing_icon_view = ListingIconView(self.listing_table,
+                                                 self._listing_picture_bytes)
+        self.listing_icon_view.clicked.connect(
+            lambda index: self._listing_view_activated(index, False))
+        self.listing_icon_view.doubleClicked.connect(
+            lambda index: self._listing_view_activated(index, True))
+        self.listing_icon_view.customContextMenuRequested.connect(
+            self._listing_view_menu)
+        self.listing_stack = QStackedWidget()
+        self.listing_stack.addWidget(self.listing_table)
+        self.listing_stack.addWidget(self.listing_icon_view)
+        self.listing_layout.addWidget(self.listing_stack)
+        from trace_app.infra.window_state import read_listing_view
+        self.set_listing_view(read_listing_view(), remember=False)
 
         # Create a widget to hold the layout
         self.listing_widget = QWidget()
@@ -1255,6 +1339,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.deleted_panel.file_menu_requested.connect(
             self.open_finding_menu)
         self.triage_panel.add_deleted_tab(self.deleted_panel)
+
+        # Where located evidence was: photo GPS and records with a
+        # position. Offline unless the examiner agrees to fetch map tiles.
+        from trace_app.ui.viewers.map_panel import MapPanel
+        self.map_panel = MapPanel()
+        self.map_panel.point_selected.connect(self.preview_located)
+        self.map_panel.point_activated.connect(self.open_located)
+        self.map_panel.point_menu_requested.connect(
+            lambda point, position: self.open_finding_menu(
+                self._located_artifact(point), position))
+        self.triage_panel.add_map_tab(self.map_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
@@ -1263,6 +1358,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.activity_panel = ActivityPanel()
         self.activity_panel.row_selected.connect(self.preview_activity_source)
         self.activity_panel.row_activated.connect(self.open_activity_source)
+        self.activity_panel.deleted_requested.connect(self.show_deleted_file)
         self.activity_panel.run_requested.connect(
             lambda: self.run_analysis_modules(self.activity_panel.evidence_id))
         self.activity_panel.set_case(self.case)
@@ -2163,7 +2259,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # A Thumbs.db is an OLE file like a Word document; its streams, not
         # its first bytes, say what it is -- so its name earns it a read.
         if header is not None and not archives.detect_archive(header) and \
-                not thumbnails.is_cache_name(name):
+                not thumbnails.is_cache_name(name) and \
+                not rdpcache.is_rdp_cache_name(name):
             return False
 
         self.set_status(f"Opening {name}…")
@@ -3532,10 +3629,39 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 'artifact_name': path.replace('\\', '/').rsplit('/', 1)[-1],
                 'artifact_path': path}
 
+    def _located_artifact(self, point):
+        """A map point as the artifact it was read from: a photo finding is
+        one already; an activity record is its source file."""
+        return point['row'] if point['kind'] == 'photo' \
+            else self._activity_source(point['row'])
+
+    def preview_located(self, point):
+        """A point landed on in the Map tab: show its file."""
+        artifact = self._located_artifact(point)
+        if artifact.get('artifact_ref'):
+            self.preview_artifact(artifact)
+
+    def open_located(self, point):
+        self.open_finding(self._located_artifact(point))
+
     def preview_activity_source(self, row):
-        """A click on an activity row: show the file it was read from."""
+        """A click on an activity row: show the file it was read from --
+        for a Recycle Bin record whose content was deleted from the bin,
+        that content (what the examiner wants), not the $I record."""
+        content = row.get('recycle_content')
+        if content and content.get('artifact_ref'):
+            self.preview_artifact(dict(content,
+                                       artifact_name=content.get('name'),
+                                       artifact_path=content.get('path')))
+            return
         if row.get('source_ref'):
             self.preview_artifact(self._activity_source(row))
+
+    def show_deleted_file(self, item):
+        """Triage > Deleted files on one row (a deleted_files dict)."""
+        self.show_triage('deleted', item.get('evidence_id'))
+        self.deleted_panel.select(item.get('evidence_id'),
+                                  item.get('artifact_ref'))
 
     def open_activity_source(self, row):
         """Double-click: go to the file it was read from."""
@@ -4452,6 +4578,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 elif column == 14 and flag:
                     cell.setToolTip(tip)
                 self.listing_table.setItem(row, column, cell)
+        # The list and icon views hide what the table hides.
+        if getattr(self, 'listing_icon_view', None) is not None:
+            self.listing_icon_view.sync_hidden()
         if concealed_rows:
             self.set_status(f"{concealed_rows:,} known-good file(s) hidden "
                             f"here (Tools ▸ Hash Sets)")
@@ -4898,6 +5027,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if opened:
             self.set_status(
                 f"Reopened {opened} of {len(rows)} piece(s) of evidence")
+        # Reopening kept the window busy while the taskbar asked for its
+        # icon: send it again now that it can answer.
+        self.refresh_taskbar_icon()
 
         if missing:
             lines = [f"{row.get('display_name') or row['path']} {why}"
@@ -5049,6 +5181,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Not a dock toggle: the tab is closed by its own button and reopened
         # here, or by the next lookup.
         vt_action = self._view_menu.addAction("VirusTotal Results")
+        icons.apply_to(vt_action, icons.SEARCH_BROWSER)
         vt_action.triggered.connect(self.show_vt_panel)
 
     def enable_tabs(self, state):
@@ -5214,7 +5347,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # the image; both have to stop before the handler closes under them.
         for panel in ('search_panel', 'indicators_panel', 'activity_panel',
                       'ntfs_panel', 'hash_panel', 'timeline_panel',
-                      'persistence_panel'):
+                      'persistence_panel', 'map_panel',
+                      'registry_extractor_widget'):
             if getattr(self, panel, None) is not None:
                 try:
                     getattr(self, panel).shutdown()
@@ -5378,6 +5512,21 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._image_handlers.clear()
         self.image_handler = None
         self._refresh_carving_targets()
+        self._refresh_registry_evidence()
+
+    def _refresh_registry_evidence(self):
+        """Tell the Registry tab which evidence is open: it reads the one
+        the examiner picks there, not the active image."""
+        widget = getattr(self, 'registry_extractor_widget', None)
+        if widget is None:
+            return
+        evidence = []
+        for path, handler in self._image_handlers.items():
+            row = self.case.evidence_for_path(path) \
+                if getattr(self, 'case', None) is not None else None
+            name = (row or {}).get('display_name') or os.path.basename(path)
+            evidence.append((path, name, handler))
+        widget.set_evidence(evidence)
 
     def activate_image(self, image_path):
         """Make `image_path` the image the window reads from.
@@ -5393,6 +5542,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         handler = self._image_handlers.get(image_path)
         if handler is None:
             return False
+        self._refresh_registry_evidence()
         if handler is self.image_handler and \
                 image_path == self.current_image_path:
             return True
@@ -5457,6 +5607,87 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         path = self.image_of_item(item)
         return self.activate_image(path) if path else True
 
+    # --- listing views -----------------------------------------------------
+
+    _LISTING_VIEW_ICONS = {
+        'details': icons.VIEW_DETAILS, 'list': icons.VIEW_LIST,
+        'small': icons.VIEW_SMALL_ICONS, 'medium': icons.VIEW_MEDIUM_ICONS,
+        'large': icons.VIEW_LARGE_ICONS,
+        'extra_large': icons.VIEW_EXTRA_LARGE_ICONS}
+
+    def _build_listing_view_button(self):
+        """A View button whose menu picks the listing's view; its icon is
+        the view in use."""
+        from PySide6.QtGui import QActionGroup
+        from trace_app.ui.widgets.listing_views import MODES, ORDER
+        self.listing_view_button = QToolButton()
+        self.listing_view_button.setObjectName("listingViewButton")
+        self.listing_view_button.setPopupMode(QToolButton.InstantPopup)
+        self.listing_view_button.setToolTip("Change the view")
+        menu = QMenu(self.listing_view_button)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self._listing_view_actions = {}
+        for mode in ORDER:
+            action = QAction(MODES[mode][0], self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, m=mode: self.set_listing_view(m))
+            group.addAction(action)
+            menu.addAction(action)
+            self._listing_view_actions[mode] = action
+        self.listing_view_button.setMenu(menu)
+        self.listing_view_button.setProperty("dropdown", True)
+        self.listing_toolbar.addWidget(self.listing_view_button)
+
+    def set_listing_view(self, mode, remember=True):
+        """Show the listing as `mode` (listing_views.MODES)."""
+        from trace_app.ui.widgets.listing_views import MODES
+        if mode not in MODES:
+            mode = 'details'
+        self.listing_view = mode
+        if mode == 'details':
+            self.listing_stack.setCurrentWidget(self.listing_table)
+        else:
+            self.listing_icon_view.set_mode(mode)
+            self.listing_stack.setCurrentWidget(self.listing_icon_view)
+        # Line icons are tinted at paint time, so this one follows the theme.
+        self.listing_view_button.setIcon(
+            icons.icon(self._LISTING_VIEW_ICONS[mode]))
+        self.listing_view_button.setToolTip(
+            f"Change the view ({MODES[mode][0]})")
+        self._listing_view_actions[mode].setChecked(True)
+        if remember:
+            from trace_app.infra.window_state import save_listing_view
+            save_listing_view(mode)
+
+    def _listing_view_activated(self, index, navigate):
+        """A click (or double-click) in the list/icon view: what the same
+        click on the table's row does."""
+        item = self.listing_table.item(index.row(), 0)
+        if item is not None:
+            self.on_listing_table_item_clicked(item, navigate=navigate)
+
+    def _listing_view_menu(self, position):
+        """The listing's context menu, from the list/icon view: the menu
+        reads the shared selection and needs only where to appear."""
+        point = self.listing_icon_view.viewport().mapToGlobal(position)
+        self.open_listing_context_menu(
+            self.listing_table.viewport().mapFromGlobal(point))
+
+    def _listing_picture_bytes(self, data):
+        """The bytes of a listing row's file, for its thumbnail -- from the
+        image the listing was filled from, not whichever is active."""
+        path = os.path.normpath(self._listing_image) \
+            if self._listing_image else None
+        handler = self._image_handlers.get(path) if path else None
+        handler = handler or self.image_handler
+        if handler is None or data.get('inode_number') is None:
+            return None
+        content, _meta = handler.get_file_content(data['inode_number'],
+                                                  data['start_offset'])
+        return content
+
     def activate_listing_image(self):
         """Activate the image the listing was filled from."""
         return self.activate_image(self._listing_image) \
@@ -5486,6 +5717,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self._release_auxiliary_handler(selected_option)
                 removed = self._image_handlers.pop(
                     os.path.normpath(selected_option), None)
+                self._refresh_registry_evidence()
                 if removed is not None:
                     if removed is self.image_handler:
                         self.image_handler = None
@@ -5538,8 +5770,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if self.image_handler.encryption(0):
                 # A volume image of an encrypted drive: what TSK would list
                 # is its decoy (To Go's FAT32 discovery volume) or nothing.
-                self._add_bitlocker_node(root_item_tree, 0, "Volume",
-                                         self.image_handler.get_size())
+                label, size = "Volume", self.image_handler.get_size()
+                if self.image_handler.is_logical:
+                    # An encrypted iPhone backup: a folder, so no media
+                    # size -- what it takes on disk instead.
+                    from trace_app.core.logical_sources import KIND_LABELS
+                    facts = self.image_handler.logical_fs.facts
+                    label = KIND_LABELS.get(facts.get('_locked') or
+                                            self.image_handler.
+                                            unlocked_kind(0), "Evidence")
+                    size = facts.get('_stored_size')
+                self._add_bitlocker_node(root_item_tree, 0, label, size)
             elif kind == 'lvm':
                 self._add_lvm_nodes(root_item_tree, 0, "Volume")
             elif kind == 'apfs':
@@ -5623,11 +5864,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             or 'bitlocker'
         name = containers.ENCRYPTION_NAMES.get(kind, kind)
         unlocked = handler.is_unlocked(start)
-        readable = handler.get_readable_size(size_in_bytes)
         state = (f"FS: {handler.get_fs_type(start)}, {name} unlocked"
                  if unlocked else f"{name}, locked -- right-click to unlock")
-        text = f"{label} ({where + ', ' if where else ''}Size: {readable}, " \
-               f"{state})"
+        size = (f"Size: {handler.get_readable_size(size_in_bytes)}, "
+                if size_in_bytes else '')
+        text = f"{label} ({where + ', ' if where else ''}{size}{state})"
         data = {"inode_number": None, "start_offset": start,
                 "end_offset": end, "is_bitlocker": True,
                 "encryption": kind, "volume_label": label}
@@ -5779,7 +6020,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"{label} unlocked: its files can now be browsed,"
                             f" and analysis reads them too.")
             return
-        size = self.image_handler.partition_bytes(start)[1]
+        size = self.image_handler.logical_fs.facts.get('_stored_size') \
+            if self.image_handler.is_logical else \
+            self.image_handler.partition_bytes(start)[1]
         fresh = self._add_bitlocker_node(parent, start, label, size,
                                          end=data.get('end_offset'))
         # Back where the locked node was, its shadow copies after it.

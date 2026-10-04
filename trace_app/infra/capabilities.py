@@ -182,6 +182,9 @@ CAPABILITIES = (
                _yara),
     Capability('sigma', 'File analysis', "Sigma rules over Windows event "
                "logs", 'PyYAML', _module_version('yaml', '__version__')),
+    Capability('ios_encrypted', 'Volumes and encryption', "Encrypted iPhone "
+               "backups, opened with their password", 'cryptography',
+               _module_version('cryptography', '__version__')),
     Capability('pdf', 'File analysis', "PDF and e-book reading, the case "
                "report's PDF", 'PyMuPDF', _module_version('pymupdf',
                                                          'VersionBind')),

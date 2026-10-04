@@ -65,3 +65,32 @@ def forget_window_state():
                 parser.write(handle)
     except (configparser.Error, OSError) as exc:
         logger.debug("Could not forget the window layout: %s", exc)
+
+
+_LISTING = 'Listing'
+
+
+def read_listing_view(default='details'):
+    """The Listing's view mode the examiner last chose."""
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(config_file())
+        return parser.get(_LISTING, 'view', fallback=default)
+    except (configparser.Error, OSError):
+        return default
+
+
+def save_listing_view(mode):
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(config_file())
+    except (configparser.Error, OSError):
+        pass
+    if not parser.has_section(_LISTING):
+        parser.add_section(_LISTING)
+    parser.set(_LISTING, 'view', mode)
+    try:
+        with open(config_file(), 'w', encoding='utf-8') as handle:
+            parser.write(handle)
+    except OSError as exc:
+        logger.warning("Could not save the listing view: %s", exc)

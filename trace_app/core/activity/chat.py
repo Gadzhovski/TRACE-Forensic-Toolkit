@@ -5,7 +5,8 @@ Read, from SQLite (recognised by its tables, so a carved database is read
 the same way):
 
 * Skype (classic) main.db -- messages, calls, file transfers, SMS
-* iMessage chat.db (macOS) -- messages, with the other party
+* iMessage chat.db (macOS) and sms.db (iPhone) -- messages, with the
+  other party
 * Android mmssms.db -- text messages (an Android image, or a phone backup)
 * Dropbox sync_history.db -- files uploaded and downloaded, with paths
 
@@ -204,7 +205,9 @@ def dropbox(db, user, path, ref, source='Dropbox'):
 #: (required tables, reader): the first whose tables are all present.
 DATABASES = (
     ({'messages', 'chats', 'calls', 'transfers', 'accounts'}, skype),
-    ({'message', 'handle', 'chat'}, imessage),
+    # 'chat' too on a whole database; a copy can lose it (MVT's sms.db
+    # has message and handle only), so the columns decide.
+    ({'message', 'handle'}, imessage),
     ({'sms', 'threads'}, android_sms),
     ({'sms'}, android_sms),
     ({'sync_history'}, dropbox),
@@ -223,6 +226,10 @@ def read_database(data, wal, user, path, ref, carved=False):
                 if required <= tables:
                     if reader is android_sms and \
                             'body' not in _columns(db, 'sms'):
+                        continue
+                    if reader is imessage and not {
+                            'is_from_me', 'date', 'handle_id'} <= \
+                            _columns(db, 'message'):
                         continue
                     records = reader(db, user, path, ref)
                     if carved:
@@ -344,6 +351,7 @@ _DATABASE_HOMES = (
     ('Library', 'Application Support', 'Skype', '*', 'main.db'),
     ('.Skype', '*', 'main.db'),
     ('Library', 'Messages', 'chat.db'),
+    ('Library', 'SMS', 'sms.db'),             # an iPhone's Messages
     ('AppData', 'Local', 'Dropbox', '*', 'sync_history.db'),
     ('.dropbox', '*', 'sync_history.db'),
 )

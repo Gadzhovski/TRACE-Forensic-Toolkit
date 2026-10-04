@@ -471,6 +471,7 @@ class VirusTotalPanel(QWidget):
         self.report_tabs = QTabWidget()
         self.report_tabs.setObjectName("vtReportTabs")
         self.report_tabs.setDocumentMode(True)
+        self.report_tabs.tabBar().setDrawBase(False)   # no stray top line
         self.engine_table = self._table(self._ENGINE_COLUMNS, "vtEngines")
         self.engine_table.setSortingEnabled(True)
         self.report_tabs.addTab(self.engine_table, "Engines")

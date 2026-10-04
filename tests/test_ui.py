@@ -312,6 +312,193 @@ def test_images_display(qapp, viewer, fmt, name):
     assert _shown(viewer) == 'picture'
 
 
+@pytest.mark.parametrize('content,says', [
+    (b'\0' * 8192, 'all zero bytes'),
+    (bytes(range(256)) * 32, 'no PDF header'),
+], ids=['zeros', 'other-data'])
+def test_a_pdf_name_over_other_bytes_is_not_opened(qapp, viewer, caplog,
+                                                   content, says):
+    """A deleted .pdf whose clusters now hold zeros or other data: said
+    plainly, and nothing logged as an error (it used to log two ERRORs
+    from the PDF reader per click)."""
+    import logging
+    with caplog.at_level(logging.INFO):
+        viewer.display_application_content(content, 'invoice.pdf')
+    pump(qapp, 0.1)
+    assert _shown(viewer) == 'placeholder'
+    assert says in viewer.placeholder.text()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert viewer._pdf_viewer is None or viewer._pdf_viewer.pdf is None
+
+
+def test_a_pdf_with_bytes_before_its_header_still_opens(qapp, viewer):
+    """Acrobat's rule: '%PDF-' anywhere in the first 1,024 bytes."""
+    import pymupdf
+    document = pymupdf.open()
+    document.new_page()
+    data = b'\0' * 300 + document.tobytes()
+    viewer.display_application_content(data, 'carved.pdf')
+    pump(qapp, 0.1)
+    assert _shown(viewer) == 'document'
+
+
+def test_menus_toolbar_and_views_are_consistent(qapp):
+    """Every menu command has an icon (checkable entries have Qt's tick
+    instead); the toolbar's buttons are the menus' own actions; and every
+    table, tree and list scrolls by pixels, tables filling their width."""
+    from PySide6.QtWidgets import (QAbstractItemView, QHeaderView,
+                                   QTableView)
+    from trace_app.ui.main_window import MainWindow
+    window = MainWindow()
+    try:
+        missing = [f"{menu.text()} > {action.text()}"
+                   for menu in window.menuBar().actions()
+                   for action in menu.menu().actions()
+                   if not action.isSeparator() and not action.isCheckable()
+                   and action.icon().isNull()]
+        assert not missing, missing
+        toolbar = [a for a in window.main_toolbar.actions()
+                   if not a.isSeparator()]
+        assert len(toolbar) == 8
+        assert window.run_analysis_action in toolbar
+        assert all(not a.icon().isNull() for a in toolbar)
+        views = [v for v in window.findChildren(QAbstractItemView)
+                 if not isinstance(v, QHeaderView)]
+        assert len(views) > 20
+        for view in views:
+            view.ensurePolished()
+            assert view.horizontalScrollMode() == \
+                QAbstractItemView.ScrollPerPixel, view.objectName()
+            if isinstance(view, QTableView):
+                assert view.horizontalHeader().stretchLastSection(), \
+                    view.objectName()
+    finally:
+        window.cleanup_resources()
+
+
+def test_listing_views_share_the_table(qapp, monkeypatch):
+    """Details, List and the icon views are one model and one selection:
+    each mode shows in the stack, a click in an icon view goes through the
+    listing's own handler, hidden rows stay hidden, and the choice is
+    remembered."""
+    from PySide6.QtWidgets import QTableWidgetItem
+    from PySide6.QtCore import Qt
+    from trace_app.infra import window_state
+    from trace_app.ui.main_window import MainWindow
+    from trace_app.ui.widgets.listing_views import ORDER
+    saved = []
+    monkeypatch.setattr(window_state, 'save_listing_view', saved.append)
+    window = MainWindow()
+    try:
+        table = window.listing_table
+        table.setRowCount(3)
+        for row, name in enumerate(('a.jpg', 'b.txt', 'c.png')):
+            item = QTableWidgetItem(name)
+            item.setData(Qt.UserRole, {'type': 'file', 'name': name,
+                                       'inode_number': row,
+                                       'start_offset': 0, 'size': 10})
+            table.setItem(row, 0, item)
+        view = window.listing_icon_view
+        assert view.model() is table.model()
+        assert view.selectionModel() is table.selectionModel()
+        for mode in ORDER:
+            window.set_listing_view(mode)
+            assert window._listing_view_actions[mode].isChecked()
+            assert window.listing_stack.currentWidget() is (
+                table if mode == 'details' else view)
+        assert saved == list(ORDER)
+        window.set_listing_view('large', remember=False)
+        clicked = []
+        monkeypatch.setattr(window, 'on_listing_table_item_clicked',
+                            lambda item, navigate=True:
+                            clicked.append((item.text(), navigate)))
+        index = table.model().index(2, 0)
+        view.clicked.emit(index)
+        view.doubleClicked.emit(index)
+        assert clicked == [('c.png', False), ('c.png', True)]
+        table.setRowHidden(1, True)
+        view.sync_hidden()
+        assert view.isRowHidden(1) and not view.isRowHidden(0)
+    finally:
+        window.cleanup_resources()
+
+
+def test_icon_views_draw_pictures_as_thumbnails(qapp):
+    import io
+    from PIL import Image
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+    from trace_app.ui.widgets.listing_views import (ListingIconView,
+                                                    thumbnail)
+    pictures = {}
+    for name, size in (('wide.png', (400, 200)), ('tall.jpg', (100, 300))):
+        buffer = io.BytesIO()
+        Image.new('RGB', size, (200, 40, 40)).save(
+            buffer, 'PNG' if name.endswith('png') else 'JPEG')
+        pictures[name] = buffer.getvalue()
+    # Scaled to fit, never cropped.
+    wide = thumbnail(pictures['wide.png'], 96)
+    assert (wide.width(), wide.height()) == (96, 48)
+    tall = thumbnail(pictures['tall.jpg'], 96)
+    assert (tall.width(), tall.height()) == (32, 96)
+    assert thumbnail(b'not a picture', 96).isNull()
+    from trace_app.ui.widgets.listing_views import size_in_bytes
+    # Rows carry the size as the Size column shows it.
+    assert size_in_bytes('8.25 KB') == 8448
+    assert size_in_bytes(4096) == 4096 and size_in_bytes('?') is None
+    table = QTableWidget(4, 1)
+    for row, (name, size) in enumerate((
+            ('wide.png', '8.25 KB'), ('tall.jpg', 300),
+            ('notes.txt', '1.00 KB'), ('huge.jpg', '2.00 GB'))):
+        item = QTableWidgetItem(name)
+        item.setData(Qt.UserRole, {'type': 'file', 'name': name,
+                                   'inode_number': row, 'start_offset': 0,
+                                   'size': size})
+        table.setItem(row, 0, item)
+    read = []
+    view = ListingIconView(table, lambda d: read.append(d['name'])
+                           or pictures.get(d['name']))
+    view.resize(600, 300)
+    view.set_mode('large')
+    view.show()
+    pump(qapp, 2, lambda: len(view._thumbs) == 2)
+    assert sorted(read) == ['tall.jpg', 'wide.png']   # pictures only
+    assert view.thumbnail_for(table.model().index(0, 0)) is not None
+    assert view.thumbnail_for(table.model().index(2, 0)) is None
+    view.set_mode('list')                     # small icons: file-type icons
+    assert view.thumbnail_for(table.model().index(0, 0)) is None
+    view.close()
+
+
+def test_monospace_is_an_outline_font(qapp):
+    """Not "Courier": a bitmap font on Windows, which DirectWrite cannot
+    draw (the "8514oem ... CreateFontFaceFromHDC() failed" warning)."""
+    from PySide6.QtGui import QFontInfo
+    from trace_app.ui import fonts
+    font = fonts.monospace(10)
+    assert 'Courier' not in font.families()
+    assert font.fixedPitch()
+    assert font.styleHint() == font.StyleHint.Monospace
+    # Where the platform has fonts (not offscreen), one is really used.
+    if QFontInfo(font).family() in fonts.MONOSPACE:
+        assert QFontInfo(font).fixedPitch()
+
+
+def test_qt_messages_reach_the_log(qapp, caplog):
+    import logging
+    from PySide6.QtCore import qInstallMessageHandler, qWarning
+    from trace_app.app import route_qt_messages
+    route_qt_messages()
+    try:
+        with caplog.at_level(logging.DEBUG, logger='TRACE.Qt'):
+            qWarning("a test warning from Qt")
+        assert any(r.name == 'TRACE.Qt' and r.levelno == logging.WARNING
+                   and 'a test warning from Qt' in r.getMessage()
+                   for r in caplog.records)
+    finally:
+        qInstallMessageHandler(None)
+
+
 def test_a_disguised_file_is_shown_as_what_it_is(qapp, viewer):
     from PIL import Image
     buffer = io.BytesIO()
@@ -1410,6 +1597,52 @@ def test_luks_lvm_and_apfs_volumes_in_the_tree(qapp, stubbed_dialogs,
         node.setExpanded(True)
         window.on_item_expanded(node)
         assert 'passwords.txt' in [t for t, _d in _children(node)]
+    finally:
+        window.cleanup_resources()
+
+
+def test_encrypted_ios_backup_unlocks_in_the_tree(qapp, stubbed_dialogs,
+                                                  monkeypatch, tmp_path):
+    """An encrypted iPhone backup opens locked, its password is asked for
+    like a volume's, and the phone's files list once it is given; the
+    password goes to background jobs, never to the case."""
+    pytest.importorskip('cryptography')
+    from tests.test_mobile import MVT, PASSWORD, encrypt_backup
+    from trace_app.ui.dialogs import bitlocker
+    from trace_app.ui.main_window import MainWindow
+    path = encrypt_backup(_artifact_sample(MVT),
+                          str(tmp_path / '00008030-001A2B3C4D5E'))
+
+    def fake_exec(dialog):
+        assert dialog.encryption == 'ios_backup'
+        dialog.password.setText(PASSWORD)
+        dialog._try()
+        return dialog.result()
+    monkeypatch.setattr(bitlocker.UnlockVolumeDialog, 'exec', fake_exec)
+    window = MainWindow()
+    try:
+        assert window.open_evidence_image(path)
+        root = _root(window, '00008030-001A2B3C4D5E')
+        [(text, data)] = _children(root)
+        assert data.get('encryption') == 'ios_backup' and 'locked' in text
+        # Named for what it is, with what it takes on disk -- a folder has
+        # no media size, and "Size: 0.00 B" said the backup was empty.
+        stored = sum(os.path.getsize(os.path.join(folder, name))
+                     for folder, _d, names in os.walk(path)
+                     for name in names)
+        assert text.startswith('iOS backup (Size: ')
+        assert window.image_handler.get_readable_size(stored) in text
+        assert '0.00 B' not in text
+        window.unlock_bitlocker_item(root.child(0))
+        [(text, data)] = _children(root)
+        assert 'unlocked' in text and text.startswith('iOS backup (Size: ')
+        assert '0.00 B' not in text
+        assert window._unlocks_for(path) == {
+            0: {'password': PASSWORD, '_kind': 'ios_backup'}}
+        node = root.child(0)
+        node.setExpanded(True)
+        window.on_item_expanded(node)
+        assert [t for t, _d in _children(node)] == ['Backup', 'private']
     finally:
         window.cleanup_resources()
 

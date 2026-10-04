@@ -64,6 +64,7 @@ CARVE_MAX_SIZE = {
     'webp': 64 * 1024 * 1024,
     'avi': 256 * 1024 * 1024,
     'sqlite': 256 * 1024 * 1024,
+    'wal': 256 * 1024 * 1024,
     'regf': 256 * 1024 * 1024,
     'evtx': 256 * 1024 * 1024,
     'pst': 256 * 1024 * 1024,
@@ -209,7 +210,10 @@ TREE_ICON_SIZE = 20
 TREE_INDENTATION = 20
 
 TABLE_ICON_SIZE = 20
-TOOLBAR_ICON_SIZE = 18
+#: 20, not 18: icons are drawn on Tabler's 24-unit grid, and 20 px at a
+#: 125% display is 25 device pixels, drawn at exactly 24 -- every stroke on
+#: whole pixels (icons._TintedSvgEngine). 18 px was 22.5, and blurred.
+TOOLBAR_ICON_SIZE = 20
 #: Icon beside a panel heading (File System Browser, File Carving, Registry).
 #: A Tabler glyph carries internal padding, so this renders at roughly the
 #: same visual weight as the heading text next to it.

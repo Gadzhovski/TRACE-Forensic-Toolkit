@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushB
 
 from trace_app.infra.constants import BUTTON_WIDTH, TABLE_ICON_SIZE
 from trace_app.infra.utils import FileSystemUtils
+from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.VolumeInfo')
 
@@ -225,7 +226,7 @@ class VolumeInfoMixin:
         bottom_layout.setSpacing(15)
 
         # Section title
-        details_title = QLabel("Volume Details")
+        details_title = QLabel("Volumes and Analysis")
         details_title.setObjectName("volumeInfoSectionTitle")
         bottom_layout.addWidget(details_title)
 
@@ -280,7 +281,19 @@ class VolumeInfoMixin:
             volume_table.setItem(0, 0, no_part_item)
             volume_table.setSpan(0, 0, 1, 10)
 
-        bottom_layout.addWidget(volume_table, 1)
+        # Volumes, and beside them what the case's analysis found in this
+        # image (core/evidence_summary.py) -- the window used to stop at
+        # what the image is, however much had been learned from it.
+        from PySide6.QtWidgets import QTabWidget
+        from trace_app.ui.widgets.property_table import PropertyTable
+        tabs = QTabWidget()
+        tabs.setObjectName("volumeInfoTabs")
+        tabs.addTab(volume_table, icons.icon(icons.CASE), "Volumes")
+        analysis_table = PropertyTable("Field", "Value")
+        analysis_table.setObjectName("volumeInfoAnalysis")
+        analysis_table.set_rows(self._analysis_rows())
+        tabs.addTab(analysis_table, icons.icon(icons.TRIAGE), "Analysis")
+        bottom_layout.addWidget(tabs, 1)
 
         # Close button at bottom right
         button_layout = QHBoxLayout()
@@ -296,6 +309,23 @@ class VolumeInfoMixin:
         main_layout.addWidget(bottom_widget, 1)
 
         dialog.exec()
+
+    def _analysis_rows(self):
+        """What the case recorded about the image on screen, for the
+        Analysis tab -- or why there is nothing to show."""
+        case = getattr(self, 'case', None)
+        if case is None:
+            return [(None, "Analysis"),
+                    ("Not recorded", "Analysis results are kept in a case; "
+                                     "this is a quick-triage session.")]
+        path = getattr(self, 'current_image_path', None) or \
+            getattr(self.image_handler, 'image_path', None)
+        row = case.evidence_for_path(path) if path else None
+        if row is None:
+            return [(None, "Analysis"),
+                    ("Not recorded", "This image is not part of the case.")]
+        from trace_app.core import evidence_summary
+        return evidence_summary.rows_for(case, row['id'])
 
     def _populate_volume_table(self, table, partitions):
         """Populate the volume table with partition information."""

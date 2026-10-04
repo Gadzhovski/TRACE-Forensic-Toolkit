@@ -1,6 +1,7 @@
 """The logical evidence TRACE opens, each as a LogicalFileSystem
-(core/logical.py): a folder, a ZIP or TAR, an AD1 image (core/ad1.py) and
-an EnCase L01/Lx01 image (through libewf's file entries).
+(core/logical.py): a folder, a ZIP or TAR, an AD1 image (core/ad1.py), an
+EnCase L01/Lx01 image (through libewf's file entries) and an iPhone
+backup (core/ios_backup.py).
 
 A folder or archive is how triage collections arrive -- KAPE and
 Velociraptor outputs, UAC, a phone's file system extraction -- and how
@@ -31,18 +32,19 @@ CACHE_MEMBER = 64 * 1024 * 1024
 CACHED_MEMBERS = 4
 
 KIND_LABELS = {'folder': 'Folder', 'zip': 'ZIP', 'tar': 'TAR', 'ad1': 'AD1',
-               'l01': 'L01'}
+               'l01': 'L01', 'ios_backup': 'iOS backup'}
 
 
 def kind_of(path):
-    """'folder', 'zip', 'tar', 'ad1', 'l01' -- or None for anything else
-    (a disk image)."""
+    """'folder', 'ios_backup', 'zip', 'tar', 'ad1', 'l01' -- or None for
+    anything else (a disk image)."""
     if not path:
         return None
     if path.lower().rstrip('/\\').endswith('.sparsebundle'):
         return None                 # a Mac disk image that is a folder
     if os.path.isdir(path):
-        return 'folder'
+        from trace_app.core.ios_backup import is_backup
+        return 'ios_backup' if is_backup(path) else 'folder'
     lowered = path.lower()
     if lowered.endswith('.ad1'):
         return 'ad1'
@@ -61,6 +63,9 @@ def open_logical(path):
     if kind == 'ad1':
         from trace_app.core.ad1 import open_ad1
         return open_ad1(path)
+    if kind == 'ios_backup':
+        from trace_app.core.ios_backup import open_backup
+        return open_backup(path)
     opener = {'folder': open_folder, 'zip': open_zip, 'tar': open_tar,
               'l01': open_l01}.get(kind)
     if opener is None:

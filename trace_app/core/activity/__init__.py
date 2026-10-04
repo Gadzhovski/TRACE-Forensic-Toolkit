@@ -43,6 +43,7 @@ CATEGORIES = (
     ('system', 'System and installed programs'),
     ('communication', 'Messages and calls'),
     ('cloud', 'Cloud sync'),
+    ('antivirus', 'Antivirus detections'),
 )
 
 #: Larger than this is not read (a 2 GB Security.evtx is real but rare).
@@ -144,6 +145,50 @@ class Volume:
         self._cache[key] = out
         return out
 
+    def deleted_entries(self, directory):
+        """Deleted entries in a directory entry whose metadata is still
+        theirs -- what `listdir` leaves out. TSK lists such a name without
+        its metadata; it is opened by the entry number the name records,
+        as core/deleted.py does (an emptied Recycle Bin's $I and $R)."""
+        if directory is None or self.fs is None:
+            return []
+        try:
+            listing = self.fs.open_dir(path=directory.path or '/')
+        except (OSError, IOError):
+            return []
+        out, seen = [], set()
+        for entry in listing:
+            info = entry.info
+            if info.name is None or not (
+                    int(getattr(info.name, 'flags', 0) or 0)
+                    & pytsk3.TSK_FS_NAME_FLAG_UNALLOC):
+                continue
+            name = info.name.name.decode('utf-8', 'replace')
+            meta = info.meta
+            address = meta.addr if meta is not None else info.name.meta_addr
+            if not address or (address, name) in seen:
+                continue
+            seen.add((address, name))
+            if meta is None:
+                try:
+                    meta = self.fs.open_meta(inode=address).info.meta
+                except (OSError, IOError):
+                    continue
+            if int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
+                continue                  # the entry is another file's now
+            item = _Entry()
+            item.name = name
+            item.path = posixpath.join(directory.path, name)
+            item.inode = address
+            item.seq = getattr(info.name, 'meta_seq', None)
+            item.is_dir = meta.type == pytsk3.TSK_FS_META_TYPE_DIR
+            item.size = meta.size
+            item.deleted = True
+            item.created = times.unix(getattr(meta, 'crtime', 0) or 0)
+            item.modified = times.unix(getattr(meta, 'mtime', 0) or 0)
+            out.append(item)
+        return out
+
     def _open_dir(self, path):
         if self.fs is None:
             return None
@@ -201,8 +246,9 @@ class Volume:
 def collect(image_handler, progress=None, should_stop=None, carved=()):
     """Every activity record in the image.
 
-    `carved` is [(name, bytes, ref)] of SQLite databases the carver
-    recovered, read as browser history if they are.
+    `carved` is [(name, bytes, ref[, wal bytes])] of SQLite databases the
+    carver recovered -- with the carved WAL paired with each, if any --
+    read as browser history or chat databases if they are.
     """
     from trace_app.core.walk import volume_offsets
     offsets = volume_offsets(image_handler)
@@ -229,12 +275,14 @@ def collect(image_handler, progress=None, should_stop=None, carved=()):
                 logger.warning("Activity (%s) on the volume at %s stopped "
                                "early: %s", reader.__name__.strip('_'),
                                offset, exc)
-    for name, data, ref in carved:
+    for item in carved:
+        name, data, ref = item[:3]
+        wal = item[3] if len(item) > 3 else None
         step(name)
-        found = _history(data, None, '', name, ref, '', carved=True)
+        found = _history(data, wal, '', name, ref, '', carved=True)
         if not found:
             from trace_app.core.activity import chat
-            found = chat.read_database(data, None, '', name, ref,
+            found = chat.read_database(data, wal, '', name, ref,
                                        carved=True)
         out.extend(found)
     return out
@@ -249,7 +297,13 @@ def _other_systems(volume, step):
         out += linux.collect(volume, step, homes)
     if macos.is_macos(volume):
         out += macos.collect(volume, step, homes)
+    # Any Mac-formatted volume keeps FSEvents, an external drive too.
+    from trace_app.core.activity import fsevents
+    out += fsevents.activity(volume, step)
     out += chat.collect(volume, step, homes)
+    # Phones: an iPhone backup or file system, an Android extraction.
+    from trace_app.core.activity import mobile
+    out += mobile.collect(volume, step)
     return out
 
 
@@ -274,6 +328,8 @@ def _windows(volume, step):
         out += _windows_timeline(volume, user, home, step)
         from trace_app.core.activity import powershell
         out += powershell.history(volume, user, home, step)
+    from trace_app.core.activity import defender
+    out += defender.records(volume, step)
     return out
 
 
@@ -726,6 +782,7 @@ _EVTX_LOGS = (
     'Microsoft-Windows-TerminalServices-RemoteConnectionManager%4Operational'
     '.evtx',
     'Microsoft-Windows-RemoteDesktopServices-RdpCoreTS%4Operational.evtx',
+    'Microsoft-Windows-Windows Defender%4Operational.evtx',
 )
 _EVT_LOGS = ('SecEvent.Evt', 'SysEvent.Evt')
 
@@ -758,10 +815,12 @@ def _event_logs(volume, windows, step, sids=None):
         except Exception as exc:
             logger.debug("Could not read %s: %s", entry.path, exc)
             continue
-        out += [record('logons', f'Event log ({entry.name[:-5]})', when,
+        out += [record('antivirus' if 'Defender' in (event.get('channel')
+                                                     or '') else 'logons',
+                       f'Event log ({entry.name[:-5]})', when,
                        what, subject, detail, path=entry.path,
                        ref=volume.ref(entry))
-                for when, what, subject, detail, _event in events]
+                for when, what, subject, detail, event in events]
     config = volume.find(windows.name, 'System32', 'config')
     for entry in volume.children(config, '.evt'):
         if entry.name.lower() not in {n.lower() for n in _EVT_LOGS}:
@@ -801,20 +860,39 @@ def _recycle_bin(volume, sids, step):
     root = volume.find('$Recycle.Bin')
     for user_dir in volume.children(root, dirs=True):
         user = sids.get(user_dir.name.upper(), user_dir.name)
-        for entry in volume.children(user_dir):
-            if not entry.name.upper().startswith('$I'):
+        live = [e for e in volume.listdir(user_dir.path) if not e.is_dir]
+        # An emptied bin: its $I records and $R contents are deleted
+        # entries, often still whole (a $I is small enough to be resident
+        # in its MFT entry). They are the deletions the user meant to hide.
+        gone = [e for e in volume.deleted_entries(user_dir)
+                if not e.is_dir]
+        names = {e.name.upper() for e in live}
+        gone = [e for e in gone if e.name.upper() not in names]
+        for entry in live + gone:
+            if not entry.name.upper().startswith('$I') or not entry.size:
                 continue
             step(entry.path)
             facts = recyclebin.parse_i_file(volume.read(entry))
-            if facts:
-                out.append(record(
-                    'recycle', 'Recycle Bin', facts['deleted'],
-                    'File deleted', facts['path'],
-                    {'size': facts['size'],
-                     'content still present': 'yes' if volume.find(
-                         *_split(user_dir.path), '$R' + entry.name[2:])
-                     else 'no'},
-                    user=user, path=entry.path, ref=volume.ref(entry)))
+            if not facts:
+                continue
+            wanted = ('$R' + entry.name[2:]).upper()
+            content = next((e for e in live if e.name.upper() == wanted),
+                           None) or next(
+                (e for e in gone if e.name.upper() == wanted), None)
+            content_path = content.path if content else posixpath.join(
+                user_dir.path, '$R' + entry.name[2:])
+            out.append(record(
+                'recycle', 'Recycle Bin', facts['deleted'],
+                'File deleted', facts['path'],
+                {'size': facts['size'],
+                 'record': ('deleted -- the bin was emptied'
+                            if entry.deleted else 'in the bin'),
+                 'content still present': (
+                     'no' if content is None else
+                     'deleted from the bin (see Deleted Files)'
+                     if content.deleted else 'yes'),
+                 'content file': content_path},
+                user=user, path=entry.path, ref=volume.ref(entry)))
     old = volume.find('RECYCLER') or volume.find('RECYCLED')
     for user_dir in volume.children(old, dirs=True):
         info2 = volume.find(*_split(user_dir.path), 'INFO2')
@@ -1017,6 +1095,10 @@ def _homes(volume):
     root = volume.find('root')
     if root is not None and root.is_dir:
         homes.append(('root', root))
+    # An iPhone's one user: Safari, Messages and the rest live here.
+    mobile = volume.find('private', 'var', 'mobile')
+    if mobile is not None and mobile.is_dir:
+        homes.append(('mobile', mobile))
     return homes
 
 
@@ -1126,9 +1208,20 @@ def run_evidence(image_handler, case, evidence_id, progress=None,
                                row['size'], row.get('fragments'))
         except Exception:
             data = None
-        if data:
-            carved.append((f"carved {row['name']}", data,
-                           row.get('artifact_ref') or ''))
+        if not data:
+            continue
+        # Its carved WAL, when one was paired with it: what the
+        # application committed last may be only there.
+        wal = None
+        related = row.get('related') or {}
+        if related.get('wal'):
+            try:
+                wal = read_carved(image_handler.read, related['offset'],
+                                  related['size'])
+            except Exception:
+                wal = None
+        carved.append((f"carved {row['name']}", data,
+                       row.get('artifact_ref') or '', wal))
     case.set_user_activity_state(evidence_id, 'running')
     try:
         records = collect(image_handler, progress, should_stop, carved)

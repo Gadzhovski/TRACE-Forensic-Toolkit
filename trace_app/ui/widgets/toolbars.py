@@ -16,6 +16,10 @@ from PySide6.QtWidgets import (QComboBox, QLabel, QLineEdit, QPushButton, QSizeP
 from trace_app.infra.constants import (CONTROL_HEIGHT, CONTROL_SPACING, GROUP_SPACING,
                                        TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE)
 
+#: Room an icon-only dropdown button adds for its chevron (the themes'
+#: menu-indicator rule draws a 14 px arrow 4 px from the right).
+DROPDOWN_ARROW_WIDTH = 18
+
 
 class _ChildAligner(QObject):
     """Re-applies control geometry when a toolbar gains a child."""
@@ -67,7 +71,9 @@ def align_controls(toolbar):
             # because a fixed size policy stops the layout centring it -- the
             # explicit Qt.AlignVCenter is what balances the space above and
             # below.
-            child.setFixedSize(CONTROL_HEIGHT + 4, CONTROL_HEIGHT + 4)
+            # A dropdown is wider by its chevron: icon and arrow side by side.
+            extra = DROPDOWN_ARROW_WIDTH if child.property('dropdown') else 0
+            child.setFixedSize(CONTROL_HEIGHT + 4 + extra, CONTROL_HEIGHT + 4)
             _centre(toolbar, child)
 
     for cls in (QLineEdit, QComboBox, QPushButton):

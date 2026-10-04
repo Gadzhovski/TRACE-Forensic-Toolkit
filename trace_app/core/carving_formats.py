@@ -106,6 +106,67 @@ def measure_sqlite(src, start):
     return page * pages, 'sqlite'
 
 
+WAL_MAGICS = (b'\x37\x7f\x06\x82', b'\x37\x7f\x06\x83')
+WAL_VERSION = 3007000
+
+
+def wal_checksum(data, s0, s1, big):
+    """SQLite's WAL checksum over `data` (a multiple of 8 bytes)."""
+    form = '>' if big else '<'
+    for x0, x1 in struct.iter_unpack(form + 'II',
+                                     data[:len(data) // 8 * 8]):
+        s0 = (s0 + x0 + s1) & 0xFFFFFFFF
+        s1 = (s1 + x1 + s0) & 0xFFFFFFFF
+    return s0, s1
+
+
+def wal_header(h):
+    """(page size, salt, big-endian checksums, s0, s1) of a WAL's 32-byte
+    header whose own checksum holds, or None."""
+    if len(h) < 32 or h[:4] not in WAL_MAGICS:
+        return None
+    if _u32be(h, 4) != WAL_VERSION:
+        return None
+    page = _u32be(h, 8)
+    if page < 512 or page > 65536 or page & (page - 1):
+        return None
+    big = h[3] == 0x83
+    s0, s1 = wal_checksum(h[:24], 0, 0, big)
+    if (s0, s1) != (_u32be(h, 24), _u32be(h, 28)):
+        return None
+    return page, h[16:24], big, s0, s1
+
+
+def measure_sqlite_wal(src, start):
+    """A SQLite write-ahead log: its header, then every frame whose salt is
+    the header's and whose checksum -- cumulative, over each frame header's
+    first 8 bytes and its page -- continues the chain. The first frame that
+    breaks it (a torn write, or a stale frame of an earlier generation
+    behind the current ones) ends what the log proves; nothing past it is
+    taken. At least one frame is required."""
+    header = wal_header(src.get(start, 32))
+    if header is None:
+        return None
+    page, salt, big, s0, s1 = header
+    at, frames = start + 32, 0
+    while True:
+        frame = src.get(at, 24 + page)
+        if len(frame) < 24 + page or frame[8:16] != salt:
+            break
+        t0, t1 = wal_checksum(frame[:8], s0, s1, big)
+        t0, t1 = wal_checksum(frame[24:], t0, t1, big)
+        if (t0, t1) != (_u32be(frame, 16), _u32be(frame, 20)):
+            break
+        if not _u32be(frame, 0):          # page numbers start at 1
+            break
+        s0, s1 = t0, t1
+        frames += 1
+        at += 24 + page
+    if not frames:
+        return None
+    return at - start, 'wal'
+
+
 def measure_regf(src, start):
     """4096-byte base block plus the hive-bins data size it records."""
     h = src.get(start, 4096 + 32)

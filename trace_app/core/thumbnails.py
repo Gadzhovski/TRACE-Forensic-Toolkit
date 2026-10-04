@@ -19,6 +19,10 @@ themselves were deleted.
   holding a short header and a JPEG. Vista's has 256_<cache id> streams and
   no names.
 
+* **RDP bitmap caches** (Cache????.bin, bcache*.bmc; core/rdpcache.py):
+  tiles of remote sessions' screens, each tile a picture, plus a collage
+  of them all in file order.
+
 A Thumbs.db names the files whose pictures it holds, so each is looked up
 in the folder it sits in: a picture of a file that is no longer there, or
 is there only as a deleted entry, is a finding.
@@ -377,7 +381,8 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         if winsearch.is_index_path(entry.path) and entry.size and \
                 not entry.deleted:
             indexes.append(entry)
-        if is_cache_name(entry.name) and entry.size:
+        if (is_cache_name(entry.name) or _is_rdp_cache(entry.path)) and \
+                entry.size:
             caches.append(entry)
 
     rows, findings = [], []
@@ -398,7 +403,9 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         common = {'cache_ref': cache.ref, 'cache_path': cache.path,
                   'cache_deleted': 1 if cache.deleted else 0, 'user': user}
         try:
-            if is_thumbcache(data[:8]):
+            if _is_rdp_cache(cache.path):
+                rows += _rdp_rows(data, common)
+            elif is_thumbcache(data[:8]):
                 parsed = parse_thumbcache(data)
                 for entry in parsed['entries']:
                     picture = data[entry['data_offset']:
@@ -473,6 +480,48 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         f"evidence id={evidence_id} caches={len(caches)} "
         f"pictures={len(rows)} of files gone={len(findings)}")
     return len(rows)
+
+
+def _is_rdp_cache(path):
+    from trace_app.core import rdpcache
+    name = path.rsplit('/', 1)[-1]
+    if not rdpcache.is_rdp_cache_name(name):
+        return False
+    # A Cache0000.bin is only the RDP client's in its own folder.
+    return name.lower().endswith('.bmc') or \
+        'terminal server client' in path.lower()
+
+
+def _rdp_rows(data, common):
+    """thumbnails rows for an RDP bitmap cache: the collage first, then a
+    row per tile."""
+    from trace_app.core import rdpcache
+    try:
+        parsed = rdpcache.parse(data)
+    except rdpcache.RdpCacheError:
+        return []
+    tiles = parsed['tiles']
+    system = ('Remote Desktop, Windows 7 or later' if parsed['format'] ==
+              'bin' else 'Remote Desktop, before Windows 7')
+    shared = dict(common, cache_kind='rdp', cache_size='',
+                  system=system, original_state=None, original_ref=None,
+                  modified_utc=None, format='png')
+    rows = []
+    if tiles:
+        rows.append(dict(
+            shared, key='', location='collage',
+            name=f"All {len(tiles):,} tiles, in the order stored",
+            width=None, height=None, size=sum(len(t['bgrx']) for t in tiles),
+            sha256=None, detail={'tiles': len(tiles),
+                                 'compressed tiles': parsed['compressed']}))
+    for number, tile in enumerate(tiles, 1):
+        rows.append(dict(
+            shared, key=tile['key'], location=f'tile:{number}',
+            name=f"Tile {number}", width=tile['width'],
+            height=tile['height'], size=len(tile['bgrx']),
+            sha256=hashlib.sha256(tile['bgrx']).hexdigest(),
+            detail={'offset': tile['offset']}))
+    return rows
 
 
 def _read_index(entry):
@@ -556,4 +605,7 @@ def picture_bytes(cache_data, row):
     if row['cache_kind'] == 'thumbcache':
         start = int(row['location'])
         return bytes(cache_data[start:start + int(row['size'] or 0)])
+    if row['cache_kind'] == 'rdp':
+        from trace_app.core import rdpcache
+        return rdpcache.picture(cache_data, row['location'])
     return thumbs_db_picture(cache_data, row['location'])

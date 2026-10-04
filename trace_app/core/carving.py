@@ -59,7 +59,7 @@ CARVE_CATEGORIES = {
     "Documents": ["PDF", "DOCX", "XLSX", "PPTX", "VSDX", "ODT", "ODS", "ODP",
                   "ODG", "EPUB", "OLE", "RTF", "HTML"],
     "Email": ["PST", "OST", "MBOX", "EML"],
-    "Databases & logs": ["SQLITE", "EVTX", "REGF"],
+    "Databases & logs": ["SQLITE", "WAL", "EVTX", "REGF"],
     "Windows artifacts": ["LNK"],
     "Executables": ["EXE", "DLL", "SYS", "ELF", "MACHO", "APK", "JAR"],
     "Archives": ["ZIP", "GZ", "BZ2", "XZ", "TAR", "RAR", "7Z"],
@@ -83,7 +83,7 @@ EXTENSION_CARVER = {
     **{ext: 'isobmff' for ext in ('mov', 'mp4', 'm4v', '3gp', 'heic', 'avif',
                                   'm4a')},
     **{ext: 'riff' for ext in ('wav', 'webp', 'avi')},
-    'sqlite': 'sqlite', 'regf': 'regf', 'evtx': 'evtx',
+    'sqlite': 'sqlite', 'wal': 'wal', 'regf': 'regf', 'evtx': 'evtx',
     'pst': 'pst', 'ost': 'pst',
     'exe': 'pe', 'dll': 'pe', 'sys': 'pe',
     'lnk': 'lnk', 'mp3': 'mp3', 'ogg': 'ogg', 'opus': 'ogg', 'flv': 'flv',
@@ -1196,6 +1196,13 @@ class Carver:
         self._carve_sized(chunk, base_offset, (b'SQLite format 3\x00',),
                           formats.measure_sqlite)
 
+    def carve_wal_files(self, chunk, base_offset):
+        # A -wal file: its frames' checksum chain is its extent (see
+        # carving_formats.measure_sqlite_wal). Paired with its database
+        # after the scan (pair_wal_files).
+        self._carve_sized(chunk, base_offset, formats.WAL_MAGICS,
+                          formats.measure_sqlite_wal)
+
     def carve_regf_files(self, chunk, base_offset):
         self._carve_sized(chunk, base_offset, (b'regf',), formats.measure_regf)
 
@@ -1306,6 +1313,7 @@ class Carver:
         'ole': carve_ole_files,
         'html': carve_html_files,
         'sqlite': carve_sqlite_files,
+        'wal': carve_wal_files,
         'regf': carve_regf_files,
         'evtx': carve_evtx_files,
         'pst': carve_pst_files,
@@ -1335,7 +1343,7 @@ class Carver:
 #: then recognised as inside a file already carved, rather than carved again
 #: as files of their own. MP3 last -- its frame sync is the weakest signature.
 _CARVE_ORDER = [
-    'pst', 'sqlite', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
+    'pst', 'sqlite', 'wal', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
     'ogg', 'wmv', 'zip', 'tar', 'tar_v7', 'gz', 'bz2', 'xz', '7z', 'rar',
     'ole', 'pdf',
     'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'tiff',
@@ -1380,9 +1388,12 @@ def allocation_map(image_handler):
     ranges = []
     try:
         partitions = image_handler.get_partitions()
-        offsets = [p[2] for p in partitions] if partitions else [0]
+        # The partition table lists its own sectors, unallocated gaps and
+        # GPT headers too (offsets 0, 1, 2, 34...), several at one offset:
+        # only file systems have allocations, each mapped once.
+        offsets = sorted({p[2] for p in partitions}) if partitions else [0]
         for start in offsets:
-            if partitions or image_handler.has_filesystem(start):
+            if image_handler.has_filesystem(start):
                 ranges.extend(image_handler.build_allocation_map(start))
     except Exception as exc:
         logger.warning("Could not build the allocation map (%s); carving "
@@ -1572,9 +1583,126 @@ def read_carved(read, offset, size, fragments=None):
     return content if len(content) == size else None
 
 
-def carved_name(offset, file_type):
-    """A carved file is named after where on disk it was found."""
-    return f"{offset:x}.{file_type}"
+#: Longest name part kept after the offset.
+NAME_LIMIT = 80
+_UNSAFE = re.compile(r'[\x00-\x1f<>:"/\\|?*]+')
+_RESERVED = re.compile(r'^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$', re.I)
+
+
+def safe_name(text):
+    """`text` as a file name on Windows, macOS and Linux: no separators,
+    reserved characters or device names, no trailing dot or space, at most
+    NAME_LIMIT characters; '' when nothing is left."""
+    text = _UNSAFE.sub('_', text or '').strip(' .')
+    if len(text) > NAME_LIMIT:
+        stem, dot, extension = text.rpartition('.')
+        if dot and 0 < len(extension) <= 8:
+            text = stem[:NAME_LIMIT - len(extension) - 1].rstrip(' .') + \
+                '.' + extension
+        else:
+            text = text[:NAME_LIMIT].rstrip(' .')
+    if _RESERVED.match(text):
+        text = '_' + text
+    return text
+
+
+def carved_name(offset, file_type, origin=None, content=None):
+    """A carved file is named after where on disk it was found -- the
+    offset, in hex, always first, so every name is unique and says where
+    the bytes are -- then, when one is known, what it was called:
+
+    * `<offset>-<name>` when a deleted entry names it (carve_origin); its
+      extension follows the carve's type when the two disagree
+      ('notes.txt.jpg'): the name is the file system's, the type is what
+      the bytes are;
+    * `<offset>-[title] <title>.<ext>` when the document's own metadata
+      gives a title (Office, OpenDocument, PDF, OLE) -- labelled, since it
+      is what the author typed, not a file name;
+    * otherwise `<offset>.<ext>`.
+
+    A slack carve's origin is the live file it was found behind, not its
+    name, and is not used."""
+    base = f"{offset:x}"
+    named = (origin or {}).get('name')
+    if named:
+        name = safe_name(named)
+        if name:
+            if not name.lower().endswith('.' + file_type.lower()) and \
+                    not _same_extension(name, file_type):
+                name += f".{file_type}"
+            return f"{base}-{name}"
+    title = _embedded_title(content, file_type)
+    if title:
+        return f"{base}-{safe_name(f'[title] {title}.{file_type}')}"
+    return f"{base}.{file_type}"
+
+
+#: Extensions one carved type is also written under.
+_ALSO = {'jpg': ('jpeg', 'jpe'), 'tiff': ('tif',), 'html': ('htm',),
+         'ole': ('doc', 'xls', 'ppt', 'msg'), 'mpg': ('mpeg',),
+         'exe': ('scr', 'com'), 'regf': ('dat', 'hve'),
+         'sqlite': ('db', 'sqlite3', 'sqlitedb'), 'mbox': ('mbx',)}
+
+
+def _same_extension(name, file_type):
+    extension = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    return extension in _ALSO.get(file_type.lower(), ())
+
+
+def _embedded_title(content, file_type):
+    """A document's title from its own metadata, or ''."""
+    if not content or file_type.lower() not in (
+            'pdf', 'ole', 'docx', 'xlsx', 'pptx', 'vsdx', 'odt', 'ods',
+            'odp', 'odg', 'epub', 'rtf'):
+        return ''
+    try:
+        from trace_app.core.content_checks import document_authors
+        title = document_authors(bytes(content)).get('title') or ''
+    except Exception:
+        return ''
+    title = ' '.join(str(title).split())
+    return title if len(title) >= 2 else ''
+
+
+#: How a carve's analysis rows, findings and search items give its path:
+#: '[carved]/<name>', with the file it was when a deleted entry says so.
+CARVED_PREFIX = '[carved]/'
+
+
+def carved_path(name, origin=None):
+    path = f"{CARVED_PREFIX}{name}"
+    if (origin or {}).get('path'):
+        path += f" (was {origin['path']})"
+    return path
+
+
+def analyse_carve(record, content, magic=None):
+    """The file analysis of one carve -- type, entropy, hidden data, photo
+    metadata, authors, executables -- as a row for add_analysis_batch:
+    (span ref, name, path, deleted, facts). The carve's own hashes are
+    reused, not computed again."""
+    from trace_app.core import analysis
+    from trace_app.core.case import make_span_ref
+    modules = tuple(m for m in analysis.MODULES
+                    if m != analysis.MODULE_HASH
+                    and (m != analysis.MODULE_MAGIC or magic is not None))
+    # Judged under the name the file system gave it, when one did -- an
+    # 'invoice.pdf' holding a program is a mismatch of the evidence's --
+    # not under the copy's name, whose added extension ('invoice.pdf.exe')
+    # would be a "deceptive name" of TRACE's own making.
+    judged = (record.get('origin') or {}).get('name') or \
+        f"{int(record['offset']):x}.{record['type']}"
+    try:
+        facts = analysis.analyse_bytes(judged, content, modules,
+                                       magic=magic, size=len(content))
+    except Exception as exc:
+        logger.debug("Carve %s not analysed: %s", record['name'], exc)
+        facts = {'size': len(content)}
+    for key in ('md5', 'sha1', 'sha256'):
+        facts[key] = record.get(key)
+    offset = int(record['offset'])
+    return (make_span_ref(0, offset, offset + len(content)), record['name'],
+            carved_path(record['name'], record.get('origin')), True, facts)
 
 
 def write_carved(folder, content, file_type, offset, fragments=None,
@@ -1592,7 +1720,7 @@ def write_carved(folder, content, file_type, offset, fragments=None,
     copy still reads correctly outside TRACE.
     """
     os.makedirs(folder, exist_ok=True)
-    name = carved_name(offset, file_type)
+    name = carved_name(offset, file_type, origin, content)
     path = os.path.join(folder, name)
     with open(path, 'wb') as handle:
         handle.write(content)
@@ -1627,6 +1755,128 @@ def write_carved(folder, content, file_type, offset, fragments=None,
         'source': carve_source,
         'origin': origin,
     }
+
+
+#: Databases larger than this are not replayed for pairing.
+PAIR_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _wal_mode_page_size(database):
+    """A database's page size if its header says WAL mode (read and write
+    versions both 2), else None: only those have a -wal."""
+    if len(database) < 100 or database[18] != 2 or database[19] != 2:
+        return None
+    page = struct.unpack_from('>H', database, 16)[0]
+    return 65536 if page == 1 else page
+
+
+def _schema(database):
+    from trace_app.core.activity import sqlite_bytes
+    with sqlite_bytes.open_database(database) as db:
+        if db.execute("PRAGMA integrity_check(5)").fetchall() != [('ok',)]:
+            return None
+        return frozenset((kind, name) for kind, name in db.execute(
+            "SELECT type, name FROM sqlite_master"))
+
+
+def pair_wal(wal, databases):
+    """Which of `databases` [(key, bytes)] a carved WAL belongs to.
+
+    A WAL does not name its database (its salts are its own). Its
+    committed frames are replayed onto each candidate in WAL mode with the
+    same page size; one is the WAL's when the replayed header records the
+    database size of the WAL's last commit, integrity_check passes and the
+    schema is the one the database had (a WAL from another database
+    rewrites pages into nonsense, into another schema, or past the end its
+    header counts). Returns
+    {'database': key, 'basis': ...}, {'ambiguous': [keys], ...} when more
+    than one passes -- two copies of one application's database can -- or
+    None."""
+    from trace_app.core.activity import sqlite_bytes
+    from trace_app.core.carving_formats import wal_header
+    header = wal_header(wal)
+    if header is None:
+        return None
+    page = header[0]
+    pages = len(sqlite_bytes.apply_wal(b'', wal)) // page
+    if not pages:
+        return None                     # no committed frame: nothing to add
+    proven = []
+    for key, database in databases:
+        if _wal_mode_page_size(database) != page:
+            continue
+        replayed = sqlite_bytes.apply_wal(database, wal)
+        # SQLite rewrites page 1 -- and the page count in its header --
+        # whenever a transaction changes the database's size, so after the
+        # replay the header must record the size the WAL's last commit
+        # did. Onto another database the frames land past what its header
+        # counts, where integrity_check does not look.
+        if struct.unpack_from('>I', replayed, 28)[0] != pages:
+            continue
+        try:
+            before, after = _schema(database), _schema(replayed)
+        except Exception:
+            continue
+        if before is not None and after == before:
+            proven.append(key)
+    if len(proven) == 1:
+        return {'database': proven[0],
+                'basis': "its committed frames replay onto this database: "
+                         "the header then records the size of the WAL's "
+                         "last commit, integrity_check passes and the "
+                         "schema is unchanged; no other carved database "
+                         "does"}
+    if proven:
+        return {'ambiguous': proven,
+                'basis': "replays cleanly onto more than one carved "
+                         "database: not paired"}
+    return None
+
+
+def pair_wal_files(read, case, evidence_id):
+    """Pair each carved WAL of one evidence with its carved database
+    (pair_wal), recording `related` on both. Returns pairs made."""
+    wals = case.carved_files(evidence_id, 'wal', limit=10 ** 6)
+    if not wals:
+        return 0
+    databases = []
+    for row in case.carved_files(evidence_id, 'sqlite', limit=10 ** 6):
+        if int(row['size']) <= PAIR_MAX_BYTES:
+            try:
+                data = read_carved(read, int(row['offset']), int(row['size']),
+                                   row.get('fragments'))
+            except Exception:
+                continue
+            if _wal_mode_page_size(data):
+                databases.append((row, data))
+    by_offset = {int(row['offset']): row for row, _data in databases}
+    pairs = 0
+    for wal_row in wals:
+        try:
+            wal = read_carved(read, int(wal_row['offset']),
+                              int(wal_row['size']), wal_row.get('fragments'))
+            found = pair_wal(wal, [(int(row['offset']), data)
+                                   for row, data in databases])
+        except Exception as exc:
+            logger.debug("WAL %s not paired: %s", wal_row['name'], exc)
+            continue
+        if not found:
+            continue
+        if 'database' in found:
+            database = by_offset[found['database']]
+            case.set_carved_related(evidence_id, int(wal_row['offset']), {
+                'database': database['name'],
+                'offset': int(database['offset']), 'basis': found['basis']})
+            case.set_carved_related(evidence_id, int(database['offset']), {
+                'wal': wal_row['name'], 'offset': int(wal_row['offset']),
+                'size': int(wal_row['size']), 'basis': found['basis']})
+            pairs += 1
+        else:
+            case.set_carved_related(evidence_id, int(wal_row['offset']), {
+                'ambiguous': [by_offset[o]['name'] for o in
+                              found['ambiguous']], 'basis': found['basis']})
+    case.commit()
+    return pairs
 
 
 def carve_evidence(image_handler, case, evidence_id, file_types,
@@ -1694,6 +1944,9 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
 
     found = [already]
     tally = {'kept': {}, 'status': {}, 'named': 0}
+    analysed = []
+    from trace_app.core.analysis import magic_reader
+    magic = magic_reader()
     import time as _time
     checkpoint = {'at': _time.monotonic(), 'position': start_offset}
 
@@ -1718,6 +1971,12 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
         record = write_carved(folder, content, file_type, offset, fragments,
                               source=source, origin=origin)
         case.add_carved(evidence_id, record)
+        # Judged like a file on disk, while its bytes are in hand: a carved
+        # executable, encrypted blob or located photo becomes a finding.
+        analysed.append(analyse_carve(record, content, magic))
+        if len(analysed) >= 50:
+            case.add_analysis_batch(evidence_id, analysed)
+            analysed.clear()
         found[0] += 1
         tally['kept'][file_type] = tally['kept'].get(file_type, 0) + 1
         tally['status'][record['status']] = \
@@ -1731,9 +1990,17 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     stats = {}
 
     def finish(status):
+        if analysed:
+            case.add_analysis_batch(evidence_id, analysed)
+            analysed.clear()
         case.commit()
+        try:
+            paired = pair_wal_files(image_handler.read, case, evidence_id)
+        except Exception as exc:
+            logger.warning("Carved WAL files not paired: %s", exc)
+            paired = 0
         summary = dict(stats, kept=tally['kept'], status=tally['status'],
-                       named=tally['named'],
+                       named=tally['named'], wal_pairs=paired,
                        duplicates=sum(len(v) - 1 for v in
                                       case.carved_duplicates(
                                           evidence_id).values()))
@@ -1748,7 +2015,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             + ' '.join(f"{k}={v}" for k, v in sorted(
                 tally['status'].items()))
             + f" named from deleted entries={tally['named']} "
-            f"duplicates={summary['duplicates']} engine={engine_identity()}")
+            f"duplicates={summary['duplicates']} wal pairs={paired} "
+            f"engine={engine_identity()}")
 
     try:
         carve_image(image_handler, types, sink, source == 'unallocated',

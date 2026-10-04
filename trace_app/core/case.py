@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -93,6 +93,10 @@ REPORTED_FINDING_GRADES = ('suspicious', 'notable')
 #: Finding modules written by jobs of their own, not the file analysis.
 OWN_JOB_MODULES = ('ntfs', 'yara', 'sigma', 'persistence', 'keywords',
                    'thumbnails')
+
+#: Analysis rows and findings of carved files: their path starts
+#: '[carved]/' (carving.CARVED_PREFIX), and the carve job owns them.
+CARVED_PATHS = '[carved]/%'
 
 
 def make_artifact_ref(start_offset, inode, sequence=None):
@@ -895,13 +899,17 @@ class Case:
 
     def clear_analysis(self, evidence_id):
         """Drop a previous run's findings for one piece of evidence."""
-        self._db.execute("DELETE FROM file_analysis WHERE evidence_id = ?",
-                         (evidence_id,))
+        # Carved files' analysis belongs to the carve that wrote it
+        # (paths '[carved]/...'): the file analysis walks the file systems
+        # and would not put it back.
+        self._db.execute("DELETE FROM file_analysis WHERE evidence_id = ? "
+                         f"AND path NOT LIKE '{CARVED_PATHS}'", (evidence_id,))
         # Modules with jobs of their own keep their findings: re-running
         # the file analysis must not erase a YARA scan or the NTFS read.
         marks = ','.join('?' * len(OWN_JOB_MODULES))
         self._db.execute("DELETE FROM file_findings WHERE evidence_id = ? "
-                         f"AND module NOT IN ({marks})",
+                         f"AND module NOT IN ({marks}) "
+                         f"AND path NOT LIKE '{CARVED_PATHS}'",
                          (evidence_id, *OWN_JOB_MODULES))
         self._db.commit()
 
@@ -981,6 +989,11 @@ class Case:
         return query_user_activity(self._db, evidence_id, category,
                                    limit=limit)
 
+    def located_activity(self, evidence_id=None):
+        """Activity rows whose detail holds a latitude and longitude, for
+        the map (core/geo.py checks the values themselves)."""
+        return query_user_activity(self._db, evidence_id, located=True)
+
     def user_activity_summary(self, evidence_id=None):
         """{category: rows} for the tree and the tab labels."""
         where = " WHERE evidence_id = ?" if evidence_id is not None else ""
@@ -1001,6 +1014,41 @@ class Case:
                 f"user activity {status}",
                 f"evidence id={evidence_id} records={records}"
                 + (f" error={last_error}" if last_error else ''))
+
+    def activity_span(self, evidence_id):
+        """(earliest, latest) UTC time of the evidence's activity records,
+        or (None, None). Local-time records are left out: they have no
+        zone to compare."""
+        row = self._db.execute(
+            "SELECT MIN(time_utc), MAX(time_utc) FROM user_activity WHERE "
+            "evidence_id = ? AND time_utc IS NOT NULL AND time_local = 0",
+            (evidence_id,)).fetchone()
+        return (row[0], row[1]) if row else (None, None)
+
+    def activity_users(self, evidence_id, limit=8):
+        """[(user, records)] -- the accounts activity names, most first."""
+        return [tuple(row) for row in self._db.execute(
+            "SELECT user, COUNT(*) FROM user_activity WHERE evidence_id = ? "
+            "AND user IS NOT NULL AND user != '' GROUP BY user "
+            "ORDER BY COUNT(*) DESC LIMIT ?", (evidence_id, limit))]
+
+    def last_audited(self, action, evidence_id):
+        """When the audit trail last recorded `action` for this evidence
+        (its detail begins 'evidence id=<id> '), or None -- for jobs that
+        leave no state row, so 'ran and found nothing' is told from
+        'never ran'."""
+        row = self._db.execute(
+            "SELECT utc FROM activity WHERE action = ? AND (detail = ? OR "
+            "detail LIKE ?) ORDER BY id DESC LIMIT 1",
+            (action, f"evidence id={evidence_id}",
+             f"evidence id={evidence_id} %")).fetchone()
+        return row[0] if row else None
+
+    def finding_module_counts(self, evidence_id):
+        """{module: findings} for one evidence."""
+        return {row[0]: row[1] for row in self._db.execute(
+            "SELECT module, COUNT(*) FROM file_findings WHERE "
+            "evidence_id = ? GROUP BY module", (evidence_id,))}
 
     def user_activity_state(self, evidence_id):
         row = self._db.execute(
@@ -1346,6 +1394,10 @@ class Case:
         """
         self._db.execute("DELETE FROM carved_files WHERE evidence_id = ?",
                          (evidence_id,))
+        # And what the carve's analysis found in them.
+        for table in ('file_analysis', 'file_findings'):
+            self._db.execute(f"DELETE FROM {table} WHERE evidence_id = ? AND "
+                             f"path LIKE '{CARVED_PATHS}'", (evidence_id,))
         self._db.commit()
 
     def add_carved(self, evidence_id, record):
@@ -1371,6 +1423,13 @@ class Case:
              record.get('md5'), record.get('sha1'), record.get('source'),
              json.dumps(record['origin']) if record.get('origin')
              else None))
+
+    def set_carved_related(self, evidence_id, offset, related):
+        """Record the carve one belongs with (a WAL and its database)."""
+        self._db.execute(
+            "UPDATE carved_files SET related = ? WHERE evidence_id = ? AND "
+            "offset = ?", (json.dumps(related, default=str)
+                           if related else None, evidence_id, offset))
 
     def set_carved_origin(self, evidence_id, offset, origin):
         """Record the file a carve was found to be (core/carve_origin)."""
@@ -1436,6 +1495,11 @@ class Case:
                 row['detail'] = {}
             rows.append(row)
         return rows
+
+    def recycle_origins(self, evidence_id=None):
+        """What deleted $I/$R files were before the Recycle Bin took them
+        (see `recycle_origins`)."""
+        return recycle_origins(self._db, evidence_id)
 
     def deleted_counts(self, evidence_id=None):
         where, params = '', []
@@ -1507,7 +1571,7 @@ class Case:
             if not os.path.isabs(row['path']):
                 row['path'] = os.path.join(self.folder, row['path'])
             for key, empty in (('fragments', 'null'), ('checks', '[]'),
-                               ('origin', 'null')):
+                               ('origin', 'null'), ('related', 'null')):
                 try:
                     row[key] = json.loads(row.get(key) or empty)
                 except ValueError:
@@ -1996,7 +2060,10 @@ class Case:
                 md5            TEXT,
                 sha1           TEXT,
                 source         TEXT,
-                origin         TEXT
+                origin         TEXT,
+                -- The carve it belongs with: a WAL and the database it
+                -- replays onto (carving.pair_wal_files), as JSON.
+                related        TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_carved_evidence
                 ON carved_files(evidence_id, offset);
@@ -2243,6 +2310,15 @@ class Case:
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
 
+        if version < 15:
+            # A carved WAL and its database name each other.
+            try:
+                self._db.execute(
+                    "ALTER TABLE carved_files ADD COLUMN related TEXT")
+            except sqlite3.OperationalError:
+                pass            # already present (created above at v15)
+            self._db.commit()
+
         if version < 14:
             # deleted_files is created unconditionally above.
             self._db.commit()
@@ -2351,7 +2427,7 @@ class Case:
 # --- module helpers -------------------------------------------------------
 
 def query_user_activity(connection, evidence_id=None, category=None,
-                        text='', limit=None):
+                        text='', limit=None, located=False):
     """Activity rows from a case database connection, newest first.
 
     Shared by Case and by the Activity tab's reader thread, which uses a
@@ -2368,6 +2444,9 @@ def query_user_activity(connection, evidence_id=None, category=None,
         clauses.append("(subject LIKE ? OR what LIKE ? OR user LIKE ? "
                        "OR detail LIKE ? OR source_path LIKE ?)")
         params.extend([f'%{text}%'] * 5)
+    if located:
+        clauses.append("detail LIKE '%\"latitude\"%' AND "
+                       "detail LIKE '%\"longitude\"%'")
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
     query = ("SELECT * FROM user_activity" + where
              + " ORDER BY time_utc IS NULL, time_utc DESC, id")
@@ -2384,6 +2463,79 @@ def query_user_activity(connection, evidence_id=None, category=None,
             row['detail'] = {}
         row['artifact_ref'] = row.get('source_ref')
         out.append(row)
+    link_recycle_contents(connection, out)
+    return out
+
+
+def _volume_of(ref):
+    """'p128:' of 'p128:i38:s1' -- which volume a ref is on."""
+    return (ref or '').split(':', 1)[0] + ':'
+
+
+def link_recycle_contents(connection, rows):
+    """Recycle Bin records whose content ($R) is a deleted file: give each
+    its Deleted Files row (`recycle_content`), and say its state in the
+    detail shown. Nothing is stored; the link is made as rows are read."""
+    wanted = [r for r in rows if r.get('category') == 'recycle'
+              and (r.get('detail') or {}).get('content file')]
+    if not wanted:
+        return
+    evidence = sorted({r['evidence_id'] for r in wanted})
+    found = {}
+    try:
+        cursor = connection.execute(
+            "SELECT * FROM deleted_files WHERE evidence_id IN "
+            f"({','.join('?' * len(evidence))}) AND name LIKE '$R%'",
+            evidence)
+        names = [d[0] for d in cursor.description]
+        for values in cursor:
+            item = dict(zip(names, values))
+            found[(item['evidence_id'], _volume_of(item['artifact_ref']),
+                   item['path'].lower())] = item
+    except sqlite3.Error:
+        return                          # a case from before Deleted Files
+    for row in wanted:
+        key = (row['evidence_id'], _volume_of(row.get('source_ref')),
+               row['detail']['content file'].lower())
+        item = found.get(key)
+        if item is None:
+            continue
+        try:
+            item['detail'] = json.loads(item.get('detail') or '{}')
+        except (TypeError, ValueError):
+            item['detail'] = {} if not isinstance(item.get('detail'),
+                                                  dict) else item['detail']
+        row['recycle_content'] = item
+        row['detail']['in Deleted Files'] = item['state']
+
+
+def recycle_origins(connection, evidence_id=None):
+    """{(evidence id, 'p128:', lower path): Recycle Bin record} for each
+    $I record and $R content file the bin's records name -- what a
+    Deleted Files row named $R019S2V.txt was before it was deleted."""
+    clauses, params = ["category = 'recycle'"], []
+    if evidence_id is not None:
+        clauses.append("evidence_id = ?")
+        params.append(evidence_id)
+    out = {}
+    for item in connection.execute(
+            "SELECT evidence_id, time_utc, subject, user, detail, "
+            "source_path, source_ref FROM user_activity WHERE "
+            + " AND ".join(clauses), params):
+        evidence, when, subject, user, detail, source, ref = tuple(item)
+        try:
+            detail = json.loads(detail or '{}')
+        except ValueError:
+            detail = {}
+        origin = {'original': subject, 'deleted': when, 'user': user,
+                  'record': detail.get('record')}
+        volume = _volume_of(ref)
+        if source:
+            out[(evidence, volume, source.lower())] = dict(origin,
+                                                           part='$I record')
+        if detail.get('content file'):
+            out[(evidence, volume, detail['content file'].lower())] = dict(
+                origin, part='content')
     return out
 
 
@@ -2391,6 +2543,8 @@ def query_user_activity(connection, evidence_id=None, category=None,
 NTFS_SECTIONS = {
     'timestomp': ('timestomp',),
     'streams': ('ads', 'motw'),
+    'slack': ('i30slack',),
+    'logfile': ('logfile',),
 }
 
 
@@ -2415,15 +2569,18 @@ def query_ntfs(connection, section, evidence_id=None, text='',
         clauses.append("module = 'ntfs'")
         clauses.append(f"kind IN ({','.join('?' * len(kinds))})")
         params.extend(kinds)
-        if not include_routine:
+        if not include_routine and section != 'logfile':
             clauses.append("grade != 'benign'")
         if text:
             clauses.append("(name LIKE ? OR path LIKE ? OR summary LIKE ? "
                            "OR detail LIKE ?)")
             params.extend([f'%{text}%'] * 4)
+        order = ("CAST(json_extract(detail, '$.lsn') AS INTEGER) DESC"
+                 if section == 'logfile' else
+                 "CASE grade WHEN 'suspicious' THEN 0 WHEN 'notable' THEN 1 "
+                 "ELSE 2 END, path")
         query = ("SELECT * FROM file_findings WHERE " + " AND ".join(clauses)
-                 + " ORDER BY CASE grade WHEN 'suspicious' THEN 0 "
-                 "WHEN 'notable' THEN 1 ELSE 2 END, path")
+                 + " ORDER BY " + order)
     if limit:
         query += f" LIMIT {int(limit)}"
     cursor = connection.execute(query, params)
@@ -2446,13 +2603,16 @@ def ntfs_counts(connection, evidence_id=None):
     where, params = '', []
     if evidence_id is not None:
         where, params = " AND evidence_id = ?", [evidence_id]
-    counts = {'timestomp': 0, 'streams': 0, 'routine_timestomp': 0,
-              'routine_streams': 0}
+    counts = {'timestomp': 0, 'streams': 0, 'slack': 0, 'logfile': 0,
+              'routine_timestomp': 0, 'routine_streams': 0,
+              'routine_slack': 0, 'routine_logfile': 0}
     for kind, grade, count in connection.execute(
             "SELECT kind, grade, COUNT(*) FROM file_findings WHERE "
             "module = 'ntfs'" + where + " GROUP BY kind, grade", params):
-        section = 'timestomp' if kind == 'timestomp' else 'streams'
-        key = section if grade != 'benign' else f'routine_{section}'
+        section = next((s for s, kinds in NTFS_SECTIONS.items()
+                        if kind in kinds), 'streams')
+        key = section if grade != 'benign' or section == 'logfile' \
+            else f'routine_{section}'
         counts[key] += count
     counts['journal'] = connection.execute(
         "SELECT COUNT(*) FROM usn_journal" + where.replace(' AND', ' WHERE'),

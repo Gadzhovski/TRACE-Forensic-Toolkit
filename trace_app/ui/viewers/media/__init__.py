@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolB
 from trace_app.core import document_preview
 from trace_app.core.filetypes import (VIEW_AUDIO, VIEW_DOCUMENT, VIEW_HTML,
                                       VIEW_IMAGE, VIEW_OFFICE, VIEW_VIDEO,
-                                      plan_view)
+                                      not_a_pdf, plan_view)
 from trace_app.core.stream_device import PyTsk3StreamDevice
 from trace_app.infra.paths import resource_path
 from trace_app.ui.viewers.media.audiovideo import AudioVideoPlayer
@@ -313,6 +313,10 @@ class UnifiedViewer(QWidget):
                 return self._showing(viewer, plan.note)
 
             if plan.kind == VIEW_DOCUMENT:
+                if plan.subtype == 'pdf':
+                    problem = not_a_pdf(file_content)
+                    if problem:
+                        return self._unavailable(problem, plan.note)
                 viewer = self.get_pdf_viewer()
                 viewer.display(file_content, plan.subtype)
                 if getattr(viewer, 'pdf', None) is None:

@@ -272,7 +272,9 @@ class CarvedFilesPanel(QWidget):
         self.view_group = QButtonGroup(self)
         for index, (text, tip) in enumerate((
                 ("Table", "List carved files with their details"),
-                ("Thumbnails", "Show carved files as pictures"))):
+                ("Thumbnails", "Show carved files as pictures"),
+                ("Statistics", "What each carve run checked, rejected "
+                               "and kept, by type"))):
             button = QPushButton(text)
             button.setObjectName("carvedViewButton")
             button.setToolTip(tip)
@@ -375,6 +377,10 @@ class CarvedFilesPanel(QWidget):
         self.gallery.setContextMenuPolicy(Qt.CustomContextMenu)
         self.gallery.customContextMenuRequested.connect(self._gallery_menu)
         self.stack.addWidget(self.gallery)
+
+        from trace_app.ui.viewers.carving_stats import CarvingStatsView
+        self.stats_view = CarvingStatsView()
+        self.stack.addWidget(self.stats_view)
 
         self.set_targets([])
         self.refresh()
@@ -554,6 +560,8 @@ class CarvedFilesPanel(QWidget):
             rows = list(self._session)
         self._rows = rows
         self._show(rows)
+        if self.stack.currentIndex() == 2:
+            self._fill_stats()
 
     @property
     def count(self):
@@ -718,6 +726,18 @@ class CarvedFilesPanel(QWidget):
         self.stack.setCurrentIndex(index)
         if index == 1:
             self._rebuild_gallery()
+        elif index == 2:
+            self._fill_stats()
+
+    def _fill_stats(self):
+        """Every run of the images shown, newest first."""
+        if self.case is None:
+            self.stats_view.set_runs([], {})
+            return
+        names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
+                 for r in self.case.evidence()}
+        self.stats_view.set_runs(
+            self.case.carving_runs(self.evidence_filter, limit=500), names)
 
     def _rebuild_gallery(self):
         self._thumb_timer.stop()

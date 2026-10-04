@@ -23,6 +23,12 @@ SHA-256 before it is kept:
 * release binaries of PuTTY, bat and ripgrep -- executables to analyse
 * mkorman90/regipy (MIT): dirty hives with their .LOG1/.LOG2
 * SigmaHQ's rule release and sbousseaden/EVTX-ATTACK-SAMPLES attack logs
+* Microsoft Defender artifacts (DFIRArtifactMuseum, dissect.target)
+* phones: mvt-project/mvt's (Apache 2.0) iPhone backup -- its Manifest.db
+  of 3,721 files and the eleven files it keeps -- into mvt-ios-backup/;
+  plaso's Android contacts2.db and iOS Accounts3.sqlite and Wi-Fi plist;
+  cclgroupltd/android-bits (MIT): Android binary XML files, each with the
+  XML it was written from
 * logical evidence: AD1 images (pyad1, dissect.evidence) and EnCase L01
   files (ggeng2/Logical_Image_DataSet)
 
@@ -66,6 +72,18 @@ _DISSECT_EVIDENCE = ('https://media.githubusercontent.com/media/fox-it/'
 _L01 = ('https://media.githubusercontent.com/media/ggeng2/'
         'Logical_Image_DataSet/7633f6e5442070ee6f21ecc6bcf369b8827cf52e/L01/'
         'L01_list_of_metadata/')
+
+_DISSECT_TARGET_DATA = ('https://media.githubusercontent.com/media/fox-it/'
+                        'dissect.target/'
+                        'b43db371c891fa3f382c5152e16f91b0bcde418c/tests/'
+                        '_data/plugins/os/windows/')
+
+_MVT_BACKUP = ('https://raw.githubusercontent.com/mvt-project/mvt/'
+               'c95eeed825405d5b46c23883ad1336f131b52e2c/tests/artifacts/'
+               'ios_backup/')
+
+_CCL_ABX = ('https://raw.githubusercontent.com/cclgroupltd/android-bits/'
+            '50910571ca81ad3db87ce1dcda9033a79b37ab72/ccl_abx/TEST%20FILES/')
 
 _REGIPY = ('https://raw.githubusercontent.com/mkorman90/regipy/'
            'ce341e7e1b3daca35496b0b21d10d293183aa176/regipy_tests/data/')
@@ -536,6 +554,114 @@ SAMPLES = {
         _ATTACK + 'Credential%20Access/'
         'phish_windows_credentials_powershell_scriptblockLog_4104.evtx',
         '177db8fa70262b4e2eba4e2902c97e82e3c6943fd111bde2ee522d5f1d57e856'),
+    # Microsoft Defender: the Defender folder of an APT-simulator VM and a
+    # Windows 11 Defender event log (DFIRArtifactMuseum, MIT), and
+    # quarantine entries with one quarantined file (dissect.target's test
+    # data, AGPL, downloaded, not copied in).
+    'defender-APTSimulatorVM.zip': (
+        'https://raw.githubusercontent.com/AndrewRathbun/DFIRArtifactMuseum/fdcb1fab0c7b00e89129668d9c30174dd4ea3e5b/Windows/WindowsDefender/APTSimulatorVM/Windows%20Defender/APTSimulatorVM_WindowsDefenderArtifacts.zip',
+        '019d05105d005eb6cae16be94a50df3f70bd904ade9a2b7374c4ede4114eaa63'),
+    'defender-Operational.evtx': (
+        'https://raw.githubusercontent.com/AndrewRathbun/DFIRArtifactMuseum/fdcb1fab0c7b00e89129668d9c30174dd4ea3e5b/Windows/EventLogs/Win11/TheTechHiveScenario/Microsoft-Windows-Windows Defender%4Operational.evtx',
+        '3280513475802ee1a9d29035bbac3597cea112d6174e1392d4e822258927fb69'),
+    'defender-entry-{800362A7-0000-0000-FB11-12639186E0D6}': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/defender/quarantine/Entries/{800362A7-0000-0000-FB11-12639186E0D6}',
+        '4ed594d33e87bb7ed14deaf0bba10833b62f0ab681fac1f50e804044afe6169f'),
+    'defender-entry-{8006A512-0000-0000-2E01-A7D5DA185F14}': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/defender/quarantine/Entries/{8006A512-0000-0000-2E01-A7D5DA185F14}',
+        '039bd66f0e30b3d1d376c54e83b040b2967cff2c13bf8141735cf953f4d91c2c'),
+    'defender-entry-{8006A512-0000-0000-2E11-A7D5DA185F24}': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/defender/quarantine/Entries/{8006A512-0000-0000-2E11-A7D5DA185F24}',
+        '92cc0caf7cb7809f5ea75794b27fe3694f8e67761267b19127532f1f2417020c'),
+    'defender-resource-A6C8322B8A19AEED96EFBD045206966DA4C9619D': (
+        'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/windows/defender/quarantine/ResourceData/A6/A6C8322B8A19AEED96EFBD045206966DA4C9619D',
+        '07e454654a394cf5b27eed2e4268322f860f9eed27bb97a7d443552b34181976'),
+    # macOS FSEvents logs: plaso's version 1 and 2, dfvfs's.
+    'fsevents-0000000002d89b58': (
+        _PLASO + 'fsevents/fsevents-0000000002d89b58',
+        '30a0d8455d4672765e30cd1f9ada5975cbc85a998877e4ac7a28d926abff48c7'),
+    'fsevents-00000000001a0b79': (
+        _PLASO + 'fsevents/fsevents-00000000001a0b79',
+        '63fef94bc2cee7cfef64c198f4c25ed1b8c10ea701eb2ddfc5cffdc1e9f8d698'),
+    'fsevents_000000000000b208': (
+        _DFVFS + 'fsevents_000000000000b208',
+        'a63ec661e18a196ee86137e2044feb5591b282abe92f5bf1adab0449f0ae4ebf'),
+    # RDP bitmap caches: dissect.target's (Windows 7+ .bin, older .bmc).
+    'rdp-Cache0000.bin': (
+        _DISSECT_TARGET_DATA + 'rdpcache/Cache0000.bin',
+        'de60dbe0105c25e9fb8a98ea065cb05358dc70d37c5dd54299a8bdabfa4cd0c6'),
+    'rdp-bcache24.bmc': (
+        _DISSECT_TARGET_DATA + 'rdpcache/bcache24.bmc',
+        'e018309e635a00a6fd047953c600d619c74bcf45c6bb7dc51cf77e5ae8d7148b'),
+    # Phones. MVT's iPhone backup, as a folder (Info.plist, Manifest.db
+    # and the files it keeps under fileID[:2]/fileID); plaso's Android
+    # contacts2.db (calls) and iOS Accounts3.sqlite and known networks.
+    'mvt-ios-backup/Info.plist': (
+        _MVT_BACKUP + 'Info.plist',
+        '01a1b7a5176a575e13686fc0190ed881297324ad3e9345d7bc240bebf277be4a'),
+    'mvt-ios-backup/Manifest.db': (
+        _MVT_BACKUP + 'Manifest.db',
+        '7876f1034a5082d2aaef9f6df2f90ca72168616bb724efd8bd856e0c9d7ecd96'),
+    'mvt-ios-backup/0d/0d609c54856a9bb2d56729df1d68f2958a88426b': (
+        _MVT_BACKUP + '0d/0d609c54856a9bb2d56729df1d68f2958a88426b',
+        '37db93a97e9cafcbb7d7d02ad29c8d995b1322fecf38d23d66fc2468714834e9'),
+    'mvt-ios-backup/0d/0dc926a1810f7aee4e8f38793ed788701f93bf9d': (
+        _MVT_BACKUP + '0d/0dc926a1810f7aee4e8f38793ed788701f93bf9d',
+        'f570f75b4693bcac962257909ae2e493c28191dc3b8089a9c85a5b1cfe7efbf1'),
+    'mvt-ios-backup/1f/1f5a521220a3ad80ebfdc196978df8e7a2e49dee': (
+        _MVT_BACKUP + '1f/1f5a521220a3ad80ebfdc196978df8e7a2e49dee',
+        'ab0a743b74101a5b8c6dae0b2e5d65ac015a1e624b7288d400c8328647afaeca'),
+    'mvt-ios-backup/20/2041457d5fe04d39d0ab481178355df6781e6858': (
+        _MVT_BACKUP + '20/2041457d5fe04d39d0ab481178355df6781e6858',
+        'e1dff4d8350272e24101685d5299338a531b84aed289d3e8ae6a7bef5c7d7df7'),
+    'mvt-ios-backup/3a/3a47b0981ed7c10f3e2800aa66bac96a3b5db28e': (
+        _MVT_BACKUP + '3a/3a47b0981ed7c10f3e2800aa66bac96a3b5db28e',
+        '6e777afea087f4c2a7ea295b02935b6b52c44d8877f37d420bd466673bb68678'),
+    'mvt-ios-backup/3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28': (
+        _MVT_BACKUP + '3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28',
+        '2d7c6e9a504cd54ea8a389ebf27285d06d4a3043c35ec06e458c5a571eaf48d0'),
+    'mvt-ios-backup/64/64d0019cb3d46bfc8cce545a8ba54b93e7ea9347': (
+        _MVT_BACKUP + '64/64d0019cb3d46bfc8cce545a8ba54b93e7ea9347',
+        '8852a5a04c3aa2793878342abeeaf0d12e31219d25f8289b3e5c7d15d35cbce9'),
+    'mvt-ios-backup/6e/6e9d0cb750a70e7fa10943c134a5f021dab327e7': (
+        _MVT_BACKUP + '6e/6e9d0cb750a70e7fa10943c134a5f021dab327e7',
+        '39a1660b9d470a6ae2d19b581b55e026c32c2c308260d260cd92b8e01141d282'),
+    'mvt-ios-backup/7c/7c7fba66680ef796b916b067077cc246adacf01d': (
+        _MVT_BACKUP + '7c/7c7fba66680ef796b916b067077cc246adacf01d',
+        'e30d9669074b3158b20f413735ea614da205ca11e66b8b0e366af1d2e17894f5'),
+    'mvt-ios-backup/b8/b8548dc30aa1030df0ce18ef08b882cf7ab5212f': (
+        _MVT_BACKUP + 'b8/b8548dc30aa1030df0ce18ef08b882cf7ab5212f',
+        '4ef63cf563feedc262715967d6bf6a68d7e12ed995122d3d89086efba46890a0'),
+    'mvt-ios-backup/e7/e794f6ffcc3c222535f47684a63d5178da3c4500': (
+        _MVT_BACKUP + 'e7/e794f6ffcc3c222535f47684a63d5178da3c4500',
+        '50ffb3b23d87ca51a060b4d85ad75381ddba37634884decf3d46dc437b64442a'),
+    'android-contacts2.db': (
+        _PLASO + 'android/contacts2.db',
+        'b37699f86515cff66f71a1a8d9b48c7392a83fc6f9fab35c6abd8f5435221591'),
+    'ios-Accounts3.sqlite': (
+        _PLASO + 'ios/Accounts3.sqlite',
+        'e39142fa65649f2bcea2ae8da94f1388431edfc3afb7dc30e8a296604283ed80'),
+    'ios-com.apple.wifi.known-networks.plist': (
+        _PLASO + 'ios/com.apple.wifi.known-networks.plist',
+        '4051d11cd394bb6d58ec0ca501db387fa0e0609fa54abc62e6fa0e2f7ecaa8e0'),
+    'abx-test-basic.xml': (
+        _CCL_ABX + 'test-basic.xml',
+        'a5289bd4859d165f40703f22c569203f9129447bedd4ed7d79ae471d1fc28d51'),
+    'abx-test-basic.xml.abx': (
+        _CCL_ABX + 'test-basic.xml.abx',
+        'fbcc2b7da77bf3a6c27a3a64f2f625a8d9181d8159cb77ee65092afadc9c5eb4'),
+    'abx-test-typed-attribute.xml': (
+        _CCL_ABX + 'test-typed-attribute.xml',
+        'f1cdfa43d8945c4fe304dbf7dc9fdb716b6be2539ee79e3eb9518a8a0ad32c03'),
+    'abx-test-typed-attribute.xml.abx': (
+        _CCL_ABX + 'test-typed-attribute.xml.abx',
+        'acf2e7f5ba7695897d158a7710d53562768109982da490cbd7ce8e1cddc72a4a'),
+    'abx-test_interned_strings.xml': (
+        _CCL_ABX + 'test_interned_strings.xml',
+        'd873ca4db055979b60701f7ec06ea6431cf736a870aa5aace6f646a550a2a244'),
+    'abx-test_interned_strings.xml.abx': (
+        _CCL_ABX + 'test_interned_strings.xml.abx',
+        '7d6b23ec3339aa171cd6910f8194c4f5166b820add35e37195ddc74b80839d9f'),
     'l01-zip.L01': (
         _L01 + 'NTFS/zip.L01',
         '1306ead913d084f808cd9da09c428928e319cc31bfbafbd5565564d3b60ffe31'),
@@ -571,6 +697,8 @@ def main():
         data = _download(base + '/' + urllib.parse.quote(last))
         if hashlib.sha256(data).hexdigest() != digest:
             raise SystemExit(f"{name}: SHA-256 does not match; not kept")
+        # A name with a folder (a phone backup's layout) keeps it.
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as handle:
             handle.write(data)
         fetched += 1

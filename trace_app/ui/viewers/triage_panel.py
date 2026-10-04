@@ -151,6 +151,9 @@ class TriagePanel(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("triageTabs")
         self.tabs.setDocumentMode(True)
+        # No base line: in document mode Qt rules one along the top of the
+        # tab row, a stray line no other tab strip in TRACE has.
+        self.tabs.tabBar().setDrawBase(False)
         layout.addWidget(self.tabs, 1)
 
         self.mismatch_table = self._make_table(
@@ -299,6 +302,18 @@ class TriagePanel(QWidget):
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['deleted'], f"Deleted files ({count:,})"))
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
+    def add_map_tab(self, panel):
+        """Located evidence on a map (ui/viewers/map_panel.py), following
+        the same image filter."""
+        self._map_panel = panel
+        self._tab_for['map'] = self.tabs.addTab(
+            panel, icons.icon(icons.FINDING_LOCATION), "Map")
+        panel.count_changed.connect(
+            lambda count: self.tabs.setTabText(
+                self._tab_for['map'], f"Map ({count:,})"))
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
 
@@ -454,7 +469,8 @@ class TriagePanel(QWidget):
                 getattr(self, '_persistence_panel', None),
                 getattr(self, '_keywords_panel', None),
                 getattr(self, '_thumbnails_panel', None),
-                getattr(self, '_deleted_panel', None))
+                getattr(self, '_deleted_panel', None),
+                getattr(self, '_map_panel', None))
 
     def refresh(self):
         """Redraw from what the case holds now."""

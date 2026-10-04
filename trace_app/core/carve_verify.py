@@ -503,7 +503,28 @@ def _pe(content):
     return checks, proves and _passed(checks)
 
 
+def _wal(content):
+    """A WAL proves itself whole: every frame's checksum continues the one
+    before it, from the header's, and its salt is the header's."""
+    from trace_app.core.carving_formats import wal_header
+    header = wal_header(content)
+    if header is None:
+        return [[False, "WAL header or its checksum does not hold"]], False
+    page = header[0]
+    frames, extra = divmod(len(content) - 32, 24 + page)
+    commits = sum(1 for at in range(32, 32 + frames * (24 + page),
+                                    24 + page)
+                  if struct.unpack_from('>I', content, at + 4)[0])
+    checks = [[not extra, f"{frames:,} frame(s) of {page:,}-byte pages, "
+                          f"each checksum continuing the last"],
+              [True, f"{commits:,} commit(s); frames after the last commit "
+                     f"were never committed" if commits else
+                     "No committed transaction: nothing here was ever "
+                     "part of the database"]]
+    return checks, _passed(checks)
+
+
 _CHECKERS = {'jpg': _jpeg, 'jpeg': _jpeg, 'png': _png, 'gif': _gif,
              'bmp': _bmp, 'pdf': _pdf, 'zip': _zip, 'gz': _gzip,
-             'sqlite': _sqlite, 'pe': _pe, 'exe': _pe, 'dll': _pe,
+             'sqlite': _sqlite, 'wal': _wal, 'pe': _pe, 'exe': _pe, 'dll': _pe,
              'sys': _pe, 'ole': _ole, 'html': _html}

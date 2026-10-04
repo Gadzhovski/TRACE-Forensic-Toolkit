@@ -172,6 +172,8 @@ class ActivityPanel(QWidget):
     row_activated = Signal(dict)
     row_menu_requested = Signal(dict, object)
     run_requested = Signal()
+    #: A Recycle Bin row's content, to be shown in Triage > Deleted files.
+    deleted_requested = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -399,7 +401,18 @@ class ActivityPanel(QWidget):
         menu.addSeparator()
         source = menu.addAction("Show Source File in Listing")
         source.setEnabled(bool(row.get('source_ref')))
+        content = None
+        if row.get('category') == 'recycle':
+            # The deleted file itself, and how much of it is left.
+            content = menu.addAction("Show Content in Deleted Files")
+            content.setEnabled(bool(row.get('recycle_content')))
+            if not row.get('recycle_content'):
+                content.setToolTip("Run Analysis ▸ Deleted files first, or "
+                                   "the content is still in the bin")
         chosen = menu.exec_(self.table.viewport().mapToGlobal(point))
+        if chosen is not None and chosen == content:
+            self.deleted_requested.emit(row['recycle_content'])
+            return
         if chosen == copy_subject:
             QGuiApplication.clipboard().setText(row.get('subject') or '')
         elif chosen == copy_row:

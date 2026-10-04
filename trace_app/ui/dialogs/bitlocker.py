@@ -48,6 +48,12 @@ _KEYS = {
         ('recovery_password', "Recovery key",
          "The volume's recovery key.", ''),
     ),
+    'ios_backup': (
+        ('password', "Backup password",
+         "The password set for encrypted backups in Finder or iTunes (not "
+         "the phone's passcode). Checking it takes a few seconds: the "
+         "backup is built to make guessing slow.", ''),
+    ),
 }
 
 _KIND_NAMES = {'recovery_password': 'recovery key', 'password': 'password',

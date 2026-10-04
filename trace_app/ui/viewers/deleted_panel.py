@@ -158,6 +158,12 @@ class DeletedFilesPanel(QWidget):
                                            limit=SHOWN_LIMIT)
             if self.files_box.isChecked():
                 rows = [r for r in rows if not r['is_dir']]
+        # A $R file is a deleted file's content, renamed by the Recycle
+        # Bin; its $I record says what it was. Shown with its name.
+        origins = self.case.recycle_origins(self.evidence_id) \
+            if self.case is not None and any(
+                (r.get('name') or '')[:2].upper() in ('$R', '$I')
+                for r in rows) else {}
         table = self.table
         table.setSortingEnabled(False)
         table.setRowCount(len(rows))
@@ -186,9 +192,22 @@ class DeletedFilesPanel(QWidget):
             cells[7].setToolTip("When the entry last changed -- on NTFS and "
                                 "ext, usually its deletion")
             cells[8].setToolTip(row.get('path') or '')
+            origin = origins.get((row['evidence_id'],
+                                  (row.get('artifact_ref') or '')
+                                  .split(':', 1)[0] + ':',
+                                  (row.get('path') or '').lower()))
+            if origin:
+                cells[0].setText(f"{row.get('name') or ''} — was "
+                                 f"{origin['original']}")
+                cells[0].setToolTip(
+                    f"The Recycle Bin's {origin['part']} for "
+                    f"{origin['original']}, deleted "
+                    f"{origin['deleted'] or 'at a time not recorded'}"
+                    + (f" by {origin['user']}" if origin['user'] else '')
+                    + (f"; {origin['record']}" if origin['record'] else ''))
             cells[0].setData(Qt.UserRole, dict(
                 row, artifact_name=row.get('name'),
-                artifact_path=row.get('path')))
+                artifact_path=row.get('path'), recycle_origin=origin))
             for column, cell in enumerate(cells):
                 table.setItem(position, column, cell)
         table.setSortingEnabled(True)
@@ -212,6 +231,26 @@ class DeletedFilesPanel(QWidget):
         self.status_label.setText(text)
         self.status_label.setToolTip(text)
         self.count_changed.emit(self.count)
+
+    def select(self, evidence_id, artifact_ref):
+        """Select the row for one deleted file (from a Recycle Bin record),
+        widening the filters if they hide it. True when it is listed."""
+        def find():
+            for position in range(self.table.rowCount()):
+                row = self.table.item(position, 0).data(Qt.UserRole) or {}
+                if row.get('evidence_id') == evidence_id and \
+                        row.get('artifact_ref') == artifact_ref:
+                    return position
+            return None
+        position = find()
+        if position is None and self.state_combo.currentIndex() != 0:
+            self.state_combo.setCurrentIndex(0)
+            position = find()
+        if position is None:
+            return False
+        self.table.selectRow(position)
+        self.table.scrollToItem(self.table.item(position, 0))
+        return True
 
     def _menu(self, point):
         item = self.table.itemAt(point)

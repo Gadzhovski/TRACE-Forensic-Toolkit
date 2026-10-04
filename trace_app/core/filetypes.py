@@ -207,6 +207,32 @@ def identify(content):
         return ''
 
 
+#: Acrobat accepts '%PDF-' anywhere in a file's first 1,024 bytes.
+PDF_HEADER_WINDOW = 1024
+
+
+def not_a_pdf(content):
+    """Why `content`, named as a PDF, is not one -- or None when it starts
+    like a PDF. A deleted file's name can outlive its data: the clusters
+    of a deleted .pdf may be zeros or another file's bytes by now, and
+    handing those to the PDF reader only produced 'Failed to open
+    stream'."""
+    head = bytes(content[:PDF_HEADER_WINDOW])
+    if b'%PDF-' in head:
+        return None
+    if not head.strip(b'\0'):
+        what = "its content is all zero bytes"
+    else:
+        mime = identify(content)
+        what = ("its content is not recognisable as any format"
+                if mime in ('', 'application/octet-stream') else
+                f"its content is {mime}")
+    return (f"Named as a PDF, but {what}: there is no PDF header in its "
+            f"first {PDF_HEADER_WINDOW:,} bytes. A deleted file's clusters "
+            f"can since hold zeros or another file's data. The Hex tab "
+            f"shows what is there.")
+
+
 def _same_family(a, b):
     """Audio and video are one family: an MP4 or ASF container holds either,
     and libmagic often names the container rather than what is in it."""

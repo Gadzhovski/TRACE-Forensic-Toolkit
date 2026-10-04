@@ -94,6 +94,11 @@ def detect_archive(data):
             thumbnails.is_thumbs_db(data):
         return 'thumbsdb'
 
+    # An RDP bitmap cache: its tiles, as pictures (core/rdpcache.py).
+    from trace_app.core import rdpcache
+    if rdpcache.is_bin(data[:8]):
+        return 'rdpcache'
+
     for magic, kind in _SIGNATURES:
         if kind == 'tar':
             continue
@@ -104,8 +109,17 @@ def detect_archive(data):
     if len(data) > 262 and data[257:262] == b'ustar':
         return 'tar'
 
+    # Defender's quarantined content (Quarantine\ResourceData\..): RC4 of
+    # BackupRead's streams, browsed as the file and its streams.
+    from trace_app.core.activity.defender import is_resource_data
+    if isinstance(data, (bytes, bytearray)) and is_resource_data(data[:20]):
+        return 'defender'
+
     # A saved message or an mbox: text, recognised by its header block
     # (core/mailfiles.py), and browsed like an archive of its parts.
+    if isinstance(data, (bytes, bytearray)) and rdpcache.looks_like_bmc(data):
+        return 'rdpcache'
+
     from trace_app.core.mailfiles import mail_kind
     return mail_kind(data[:4096])
 
@@ -148,8 +162,37 @@ def list_members(data, kind=None, password=None):
         return _mailfile_call('list_members', data, kind)
     if kind in THUMBNAIL_KINDS:
         return _thumbnail_call('list_members', data, kind)
+    if kind == 'rdpcache':
+        return _rdp_call('list_members', data)
+    if kind == 'defender':
+        return [{'name': name, 'size': len(content),
+                 'compressed_size': len(content), 'is_dir': False,
+                 'modified': None, 'encrypted': False, 'crc': None}
+                for name, content in _quarantined(data)]
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
+
+
+def _quarantined(data):
+    """[(member name, bytes)] of a Defender ResourceData file: the
+    quarantined file, its alternate streams (Zone.Identifier says where it
+    came from) and its security descriptor."""
+    from trace_app.core.activity.defender import resource_streams
+    out = []
+    for kind, name, content in resource_streams(bytes(data)):
+        if kind == 'data':
+            label = 'quarantined file'
+        elif kind == 'alternate stream':
+            label = 'stream ' + (name.strip(':').split(':')[0] or 'unnamed')
+        else:
+            label = kind
+        while label in {n for n, _c in out}:
+            label += ' (2)'
+        out.append((label, content))
+    if not out:
+        raise ArchiveError("Not quarantined content Defender can have "
+                           "written")
+    return out
 
 
 #: Mail formats that are text: a saved message, and an mbox of them.
@@ -160,6 +203,14 @@ STREAMED_KINDS = ('pst', 'mbox')
 
 #: Thumbnail caches, browsed as the pictures they hold.
 THUMBNAIL_KINDS = ('thumbcache', 'thumbsdb')
+
+
+def _rdp_call(name, *args):
+    from trace_app.core import rdpcache
+    try:
+        return getattr(rdpcache, name)(bytes(args[0]), *args[1:])
+    except rdpcache.RdpCacheError as exc:
+        raise ArchiveError(str(exc)) from exc
 
 
 def _thumbnail_call(name, *args):
@@ -219,6 +270,13 @@ def read_member(data, member_name=None, kind=None, password=None,
         return _mailfile_call('read_member', data, member_name, limit, kind)
     if kind in THUMBNAIL_KINDS:
         return _thumbnail_call('read_member', data, member_name, kind, limit)
+    if kind == 'rdpcache':
+        return _rdp_call('read_member', data, member_name)
+    if kind == 'defender':
+        for name, content in _quarantined(data):
+            if name == member_name:
+                return content[:limit]
+        raise ArchiveError(f"No member {member_name!r}")
 
     raise ArchiveError(f"Unsupported archive format: {kind}")
 

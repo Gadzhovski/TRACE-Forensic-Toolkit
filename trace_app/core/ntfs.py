@@ -166,13 +166,15 @@ def _apply_fixups(record):
     return True
 
 
-def parse_record(data, index, full=True):
+def parse_record(data, index, full=True, fixups=True):
     """An Entry from one MFT record's bytes, or None for an empty or
-    unreadable record. `full=False` reads only what paths need."""
+    unreadable record. `full=False` reads only what paths need;
+    `fixups=False` for a record as it is in memory ($LogFile carries them
+    so)."""
     if len(data) < 48 or data[:4] != b'FILE':
         return None
     record = bytearray(data)
-    if not _apply_fixups(record):
+    if fixups and not _apply_fixups(record):
         return None
     (sequence, _links, first_attr, flags, used) = struct.unpack_from(
         '<HHHHI', record, 16)
@@ -349,6 +351,14 @@ class PathTable:
         path = prefix + ''.join('/' + part for part in reversed(parts))
         self._cache[key] = path
         return path
+
+    def current(self, index):
+        """The path entry `index` has now, whatever its sequence; None if
+        the $MFT holds no name for it."""
+        known = self._entries.get(index)
+        if known is None or known[1] is None:
+            return None
+        return self.folder(index, known[0])
 
     def path(self, parent_index, parent_sequence, name):
         if parent_index == ROOT_ENTRY and name == '.':
@@ -764,6 +774,9 @@ def analyse_volume(fs, start, sink, progress=None, should_stop=None):
 
     events, findings = [], []
     entries = event_count = 0
+    folders = []
+    #: Every live name in each folder, long and 8.3 alike.
+    listed = {}
     for index, entry in iter_records(
             open_mft(), should_stop=should_stop,
             progress=lambda done, total: report('mft', done, total),
@@ -775,6 +788,12 @@ def analyse_volume(fs, start, sink, progress=None, should_stop=None):
         entries += 1
         path = table.entry_path(entry)
         ref = make_artifact_ref(start, index, ref_sequence(entry))
+        if entry.in_use and entry.is_dir:
+            folders.append((index, entry.sequence, path))
+        if entry.in_use:
+            for name in entry.names:
+                listed.setdefault(name.parent_index, set()).add(
+                    name.name.lower())
         deleted = 0 if entry.in_use else 1
         for when, letters, source in entry_events(entry, path):
             events.append((ref, path, when, letters, source, deleted))
@@ -795,6 +814,15 @@ def analyse_volume(fs, start, sink, progress=None, should_stop=None):
     event_count += len(events)
     sink.events(events)
     sink.findings(findings)
+
+    report('slack', 0, len(folders))
+    slack_events, slack_findings = index_slack(fs, start, folders, listed,
+                                               should_stop)
+    event_count += len(slack_events)
+    sink.events(slack_events)
+    sink.findings(slack_findings)
+
+    sink.findings(logfile_findings(fs, start, table, should_stop))
 
     journal = 0
     try:
@@ -818,6 +846,122 @@ def analyse_volume(fs, start, sink, progress=None, should_stop=None):
         journal += len(rows)
         sink.journal(rows)
     return entries, event_count, journal
+
+
+#: Largest $LogFile read (they are 2-256 MB by default).
+MAX_LOGFILE = 512 * 1024 * 1024
+_LOGFILE_WHAT = {'name added': 'Name added to a folder',
+                 'name removed': 'Name removed from a folder',
+                 'record created': 'MFT record created',
+                 'record freed': 'MFT record freed'}
+
+
+def logfile_findings(fs, start, table, should_stop=None):
+    """Findings rows for what $LogFile shows happening to files by name
+    (core/ntfs_logfile.py): names added to and removed from folders, MFT
+    records created and freed -- in LSN order, with the $FILE_NAME times
+    the log records carry."""
+    from trace_app.core import ntfs_logfile
+    from trace_app.core.case import make_artifact_ref
+    try:
+        handle = fs.open_meta(inode=2)
+        size = int(handle.info.meta.size)
+        if not size or size > MAX_LOGFILE:
+            return []
+        log = ntfs_logfile.LogFile(handle.read_random(0, size))
+        found = ntfs_logfile.events(log, int(fs.info.block_size))
+    except Exception as exc:
+        logger.debug("$LogFile unreadable: %s", exc)
+        return []
+    rows = []
+    for number, event in enumerate(found):
+        if should_stop and number % 1000 == 0 and should_stop():
+            raise NtfsCancelled()
+        parent = event.get('parent')
+        name = event.get('name') or ''
+        basis = None
+        if parent and name:
+            path = table.path(parent[0], parent[1], name)
+        else:
+            path = table.current(event['file'][0]) or \
+                f"<MFT entry {event['file'][0]}>"
+            basis = ("the record carries no name: the path is the one the "
+                     "entry has in $MFT now -- it may have been reused since")
+        own = event['file']
+        ref = make_artifact_ref(start, own[0], own[1] or 0)
+        what = _LOGFILE_WHAT[event['kind']]
+        detail = dict(event['times'] or {}, lsn=event['lsn'],
+                      transaction=event['transaction'],
+                      operation=f"{event['redo']} / {event['undo']}",
+                      kind=event['kind'], size=event.get('size'),
+                      **{'MFT entry': f"{own[0]}-{own[1]}" if own[1]
+                         is not None else str(own[0]),
+                         'basis': "$LogFile keeps no time of its own: the "
+                                  "times are the $FILE_NAME copy's, the "
+                                  "order the LSN's",
+                         'path basis': basis})
+        rows.append((ref, name or path.rsplit('/', 1)[-1], path,
+                     event.get('size'), 'logfile',
+                     'notable' if event['kind'] in ('name removed',
+                                                    'record freed')
+                     else 'benign',
+                     f"{what}: {path or name} (LSN {event['lsn']})",
+                     json.dumps(detail, default=str)))
+    return rows
+
+
+def index_slack(fs, start, folders, listed, should_stop=None):
+    """(fs_events rows, findings rows) for the names left in each folder's
+    $I30 index slack (core/ntfs_index.py). A name the folder still lists is
+    an older copy of a live entry -- routine; one it no longer lists is a
+    file deleted, renamed or moved away -- notable, with its times in the
+    timeline."""
+    from trace_app.core import ntfs_index
+    from trace_app.core.case import make_artifact_ref
+    events, findings = [], []
+    for index, sequence, folder in folders:
+        if should_stop and should_stop():
+            raise NtfsCancelled()
+        try:
+            handle = fs.open_meta(inode=index)
+            items = ntfs_index.folder_slack(ntfs_index.index_data(handle))
+        except Exception as exc:
+            logger.debug("Index of %s unreadable: %s", folder, exc)
+            continue
+        if not items:
+            continue
+        names = listed.get(index, set())
+        folder_ref = make_artifact_ref(start, index, sequence)
+        for item in items:
+            still = item['name'].lower() in names
+            own = item['file']
+            ref = make_artifact_ref(start, own[0], own[1]) if own \
+                else folder_ref
+            path = f"{folder.rstrip('/')}/{item['name']}"
+            created, modified, changed, accessed = (
+                filetime_text(t) for t in item['times'])
+            detail = {'folder': folder, 'still listed': still,
+                      'created': created, 'modified': modified,
+                      'record changed': changed, 'accessed': accessed,
+                      'size': item['size'], 'allocated': item['allocated'],
+                      'namespace': item['namespace'],
+                      'folder entry': folder_ref,
+                      'MFT entry': f"{own[0]}-{own[1]}" if own else None,
+                      'is folder': item['is_dir']}
+            summary = (f"{item['name']} in {folder}'s index slack -- "
+                       + ("an older copy of a name it still lists"
+                          if still else "no longer in the folder"))
+            findings.append((ref, item['name'], path, item['size'],
+                             'i30slack', 'benign' if still else 'notable',
+                             summary, json.dumps(detail, default=str)))
+            if not still:
+                times = (item['times'][0], item['times'][1],
+                         item['times'][2], item['times'][3])
+                for value, letters in macb_rows(times):
+                    text = filetime_text(value)
+                    if text:
+                        events.append((ref, path, text, letters, 'I30', 1))
+    return events, findings
 
 
 def ref_sequence(entry):
@@ -897,7 +1041,8 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
 
     def report(stage, done, total):
         if progress:
-            label = '$MFT' if stage == 'mft' else '$UsnJrnl'
+            label = {'mft': '$MFT', 'slack': 'index slack'}.get(stage,
+                                                              '$UsnJrnl')
             progress(int(done // 1048576), max(1, int(total // 1048576)),
                      label)
     try:

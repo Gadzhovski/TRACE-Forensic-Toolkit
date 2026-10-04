@@ -69,6 +69,9 @@ CATALOG = {
                        'raw', 'beb7795dd6d1a5319f9c20101855ffff9665fcc11c6b23de822d50c0d1e388ee'),
     'dfr-01-xfat.dd': (_NIST + 'dfr-01-xfat.dd.bz2',
                        'bz2', 'bb3755982959e189d7cfc7a4819553406e5c64e67a11d6b875ea1d4f23fa745b'),
+    # Deleted through the Recycle Bin, then the bin emptied (2.2 MB packed).
+    'dfr-01-recycle-ntfs.dd': (_NIST + 'dfr-01-recycle-ntfs.dd.bz2',
+                               'bz2', '6a44af0530812edf1a289c539a3c6c7d6b42e1c93e8f60e53287bddb5fdf7efa'),
 }
 
 _USER_AGENT = ('TRACE-test-images/1.0 '

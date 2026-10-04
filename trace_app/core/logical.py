@@ -269,7 +269,10 @@ def is_logical(fs):
 _WINDOWS_MARKERS = {'windows', 'users', 'documents and settings',
                     'programdata', '$recycle.bin'}
 _UNIX_MARKERS = ({'etc', 'home', 'var', 'usr', 'root', 'opt'},
-                 {'users', 'library', 'private', 'system', 'applications'})
+                 {'users', 'library', 'private', 'system', 'applications'},
+                 # Android: a whole file system, or its data partition.
+                 {'data', 'system', 'vendor', 'apex', 'product'},
+                 {'data', 'system_ce', 'system_de', 'user_de', 'misc'})
 
 
 def system_roots(fs, depth=4):

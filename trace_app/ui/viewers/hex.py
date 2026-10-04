@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayo
                                QToolButton, QComboBox, QSplitter)
 from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
-from trace_app.ui import icons
+from trace_app.ui import fonts, icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
 from trace_app.ui.dialogs import message
@@ -221,7 +221,7 @@ class HexViewer(QWidget):
         self.search_results_widget.setObjectName("search_results_widget")  # Set object name for stylesheet targeting
         self.search_results_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)  # Show scroll bar when needed
         self.search_results_widget.itemClicked.connect(self.search_result_clicked)
-        self.search_results_widget.setFont(QFont("Courier", 9))  # Smaller font
+        self.search_results_widget.setFont(fonts.monospace(9))  # Smaller font
         self.search_results_layout.addWidget(self.search_results_widget)
 
         self.search_results_frame.setLayout(self.search_results_layout)
@@ -380,7 +380,7 @@ class HexViewer(QWidget):
         self.hex_table.verticalHeader().setDefaultSectionSize(20)  # Smaller row height
 
         # Set the font of the hex_table
-        font = QFont("Courier")
+        font = fonts.monospace()
         font.setPointSize(10)  # Default smaller font size
         font.setLetterSpacing(QFont.AbsoluteSpacing, 1)  # Reduce letter spacing
         self.hex_table.setFont(font)

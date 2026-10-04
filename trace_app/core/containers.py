@@ -231,7 +231,8 @@ def open_shadow_copies(window):
 
 #: What an encrypted volume is called, for labels and the audit trail.
 ENCRYPTION_NAMES = {'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
-                    'luks': 'LUKS', 'apfs': 'APFS encryption'}
+                    'luks': 'LUKS', 'apfs': 'APFS encryption',
+                    'ios_backup': 'iOS backup encryption'}
 
 #: Logical volumes and APFS volumes are keyed like shadow copies, each in a
 #: range of its own above any real sector offset.

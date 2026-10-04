@@ -365,3 +365,147 @@ def test_qcow2_description():
     from trace_app.core import containers
     _img, note = containers.open_virtual_disk(sample('usnjrnl.qcow2'))
     assert note == 'QCOW'
+
+
+#: $I30 index slack on the DFTT / NIST images, as dfir_ntfs's ntfs_parser
+#: (--indx) reports it -- name, created, modified (its values round the
+#: last digit; TRACE keeps all seven).
+I30_SLACK = {
+    '7-ntfs-undel.dd': [('SYSTEM~1', '2004-02-29 19:59:10.1897504',
+                         '2004-02-29 19:59:11.1911904')],
+    'ntfs-img-kw-1.dd': [('SYSTEM~1', '2003-10-23 17:15:55.8168032',
+                          '2003-10-23 17:15:55.8168032'),
+                         ('SYSTEM~1', '2003-10-23 17:15:55.8168032',
+                          '2003-10-24 16:26:41.8701008')],
+    'dfr-01-ntfs.dd': [('Castor.txt', '2012-02-03 15:10:01.2683160',
+                        '1999-01-01 06:01:00.0000000')],
+    'dfr-05-nest-ntfs.dd': [('Grumium.txt', '2012-02-02 00:20:16.4773491',
+                             '1999-01-01 06:01:00.0000000')],
+}
+
+
+@pytest.mark.parametrize('name, expected', I30_SLACK.items())
+def test_index_slack_matches_dfir_ntfs(tmp_path, name, expected):
+    """Names left in folders' $I30 slack, read by the NTFS job: the same
+    entries dfir_ntfs carves; each an older copy of a name still listed
+    (SYSTEM~1 is the 8.3 name of System Volume Information), so routine,
+    and none in the timeline as gone."""
+    from tests.conftest import image_path
+    from trace_app.core import ntfs
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    path = image_path(name)
+    case = Case.create(str(tmp_path / 'case'), 'Index slack')
+    evidence = case.add_evidence(path)
+    handler = ImageHandler(path)
+    try:
+        ntfs.analyse_evidence(handler, case, evidence)
+        rows = case.ntfs_rows('slack', evidence, include_routine=True)
+        found = sorted((r['name'], r['detail']['created'],
+                        r['detail']['modified']) for r in rows)
+        assert found == sorted(expected)
+        assert all(r['grade'] == 'benign' and r['detail']['still listed']
+                   for r in rows)
+        assert case.ntfs_counts(evidence)['routine_slack'] == len(expected)
+        assert not case._db.execute(
+            "SELECT 1 FROM fs_events WHERE source = 'I30'").fetchall()
+    finally:
+        handler.close_resources()
+        case.close()
+
+
+def test_index_slack_carving_and_names_gone():
+    """A built index buffer: a live entry, then the stale entry of a file
+    since deleted; the carve finds the stale one, with its MFT reference
+    from the entry header that survived."""
+    from trace_app.core import ntfs_index
+    import struct as st
+
+    def file_name(name, parent=5, times=(132000000000000000,) * 4):
+        raw = name.encode('utf-16-le')
+        return (st.pack('<Q', parent | (5 << 48)) + st.pack('<4Q', *times)
+                + st.pack('<QQIIBB', 4096, 1234, 0x20, 0, len(name), 1)
+                + raw)
+
+    def entry(index, name):
+        body = file_name(name)
+        length = 16 + len(body)
+        length += -length % 8
+        return (st.pack('<QHHI', index | (3 << 48), length, len(body), 0)
+                + body).ljust(length, b'\x00')
+
+    live = entry(70, 'kept.txt') + st.pack('<QHHI', 0, 16, 0, 2)
+    stale = entry(71, 'secret plans.docx')
+    header = bytearray(4096)
+    header[:4] = b'INDX'
+    st.pack_into('<HH', header, 4, 0x28, 9)
+    st.pack_into('<III', header, 0x18, 0x40, 0x28 + len(live), 4096 - 0x18)
+    header[0x18 + 0x28:0x18 + 0x28 + len(live)] = live
+    header[0x18 + 0x28 + len(live):0x18 + 0x28 + len(live) + len(stale)] = \
+        stale
+    for stride in range(1, 9):              # fixups: the check value
+        header[stride * 512 - 2:stride * 512] = b'\x01\x00'
+    header[0x28:0x2a] = b'\x01\x00'
+    (item,) = ntfs_index.folder_slack(bytes(header))
+    assert item['name'] == 'secret plans.docx' and item['file'] == (71, 3)
+    assert item['parent'] == (5, 5) and item['size'] == 1234
+
+
+#: $LogFile records per image: (records, first LSN, last LSN) -- every
+#: record dfir_ntfs reads, by LSN and operation (ntfs1-gen2 also has 27
+#: older records on the oldest page, before dfir_ntfs's first, each
+#: placed where its own LSN says).
+LOGFILE = {
+    '7-ntfs-undel.dd': (984, 1050651, 1088528),
+    'ntfs-img-kw-1.dd': (1049, 1050651, 1095213),
+    'ntfs1-gen2.E01': (24522, 4314124, 6293512),
+}
+
+
+@pytest.mark.parametrize('name, expected', LOGFILE.items())
+def test_logfile_records_match_dfir_ntfs(name, expected):
+    from tests.conftest import image_path
+    from trace_app.core import ntfs_logfile
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(image_path(name))
+    try:
+        fs = handler.get_fs_info(0)
+        handle = fs.open_meta(inode=2)
+        log = ntfs_logfile.LogFile(handle.read_random(0,
+                                                      handle.info.meta.size))
+        records = log.records()
+        assert (len(records), records[0].lsn, records[-1].lsn) == expected
+        assert [r.lsn for r in records] == sorted({r.lsn for r in records})
+    finally:
+        handler.close_resources()
+
+
+def test_logfile_shows_the_planted_deletions(tmp_path):
+    """DFTT #7 deletes files to be undeleted; its $LogFile still records
+    their names leaving their folders and their MFT records being freed."""
+    from tests.conftest import image_path
+    from trace_app.core import ntfs
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    path = image_path('7-ntfs-undel.dd')
+    case = Case.create(str(tmp_path / 'case'), 'LogFile')
+    evidence = case.add_evidence(path)
+    handler = ImageHandler(path)
+    try:
+        ntfs.analyse_evidence(handler, case, evidence)
+        rows = case.ntfs_rows('logfile', evidence)
+        removed = {r['name'] for r in rows
+                   if r['detail']['kind'] == 'name removed'}
+        assert {'sing1.dat', 'sing2.dat', 'mult1.dat', 'mult2.dat',
+                'frag2.dat', 'res1.dat', 'dir3'} <= removed
+        lsns = [r['detail']['lsn'] for r in rows]
+        assert lsns == sorted(lsns, reverse=True)            # newest first
+        res1 = [r for r in rows if r['path'] == '/res1.dat']
+        assert [r['detail']['kind'] for r in res1][:2] == [
+            'record freed', 'name removed']
+        assert res1[1]['detail']['created'].startswith('2004-02-29')
+        assert res1[1]['grade'] == 'notable'
+        assert case.ntfs_counts(evidence)['logfile'] == len(rows) == 87
+    finally:
+        handler.close_resources()
+        case.close()

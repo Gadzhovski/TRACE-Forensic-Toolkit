@@ -45,6 +45,24 @@ EVIDENCE_ADD = "Icons/tabler/file-plus.svg"
 EVIDENCE_REMOVE = "Icons/tabler/file-minus.svg"
 VERIFY = "Icons/tabler/shield-check.svg"
 VERIFY_OK = "Icons/tabler/shield-check-filled.svg"
+EVIDENCE_FOLDER = "Icons/tabler/folder-plus.svg"
+IMAGE_INFO = "Icons/tabler/info-circle.svg"
+
+# --- Menu commands -----------------------------------------------------------
+#: Every command in the menu bar has an icon; only the checkable entries
+#: (themes, panel toggles) do not, since Qt draws their tick in that column.
+EXIT = "Icons/tabler/logout.svg"
+CASE_PROPERTIES = "Icons/tabler/briefcase.svg"
+OPEN_FOLDER = "Icons/tabler/folder-open.svg"
+RUN = "Icons/tabler/player-play.svg"
+CANCEL = "Icons/tabler/player-stop.svg"
+FIND_HASH = "Icons/tabler/hash.svg"
+FULL_SCREEN = "Icons/tabler/maximize.svg"
+NORMAL_SCREEN = "Icons/tabler/minimize.svg"
+RESET_LAYOUT = "Icons/tabler/layout-dashboard.svg"
+API_KEYS = "Icons/tabler/key.svg"
+FEATURES = "Icons/tabler/list-check.svg"
+SETTINGS = "Icons/tabler/settings.svg"
 
 # --- Cases -----------------------------------------------------------------
 #: A case is a folder on disk, and the folder glyph is the honest picture of
@@ -108,6 +126,7 @@ ACTIVITY_CATEGORIES = {
     'system': "Icons/tabler/settings.svg",
     'communication': "Icons/tabler/trace/activity-messages.svg",
     'cloud': "Icons/tabler/trace/activity-cloud.svg",
+    'antivirus': "Icons/tabler/trace/activity-antivirus.svg",
 }
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the
@@ -139,6 +158,13 @@ ZOOM_OUT = "Icons/tabler/zoom-out.svg"
 ZOOM_ACTUAL = "Icons/tabler/zoom-reset.svg"
 FIT_WIDTH = "Icons/tabler/arrows-horizontal.svg"
 FIT_WINDOW = "Icons/tabler/arrows-maximize.svg"
+#: The Listing's view modes, as Windows Explorer names them.
+VIEW_DETAILS = "Icons/tabler/table.svg"
+VIEW_LIST = "Icons/tabler/list.svg"
+VIEW_SMALL_ICONS = "Icons/tabler/grid-dots.svg"
+VIEW_MEDIUM_ICONS = "Icons/tabler/layout-grid.svg"
+VIEW_LARGE_ICONS = "Icons/tabler/layout-2.svg"
+VIEW_EXTRA_LARGE_ICONS = "Icons/tabler/photo.svg"
 ICONS_SMALL = "Icons/tabler/layout-grid.svg"
 ICONS_MEDIUM = "Icons/tabler/layout-grid.svg"
 ICONS_LARGE = "Icons/tabler/layout-board.svg"
@@ -366,8 +392,11 @@ class _TintedSvgEngine(QIconEngine):
         # on a 125% display while the toolbar stayed sharp. Render for the
         # device the painter is actually on.
         scale = painter.device().devicePixelRatioF() if painter.device() else 1.0
-        painter.drawPixmap(rect, self._render(rect.width(), rect.height(),
-                                              scale))
+        pixmap = self._render(rect.width(), rect.height(), scale)
+        # At its own size, not stretched into `rect`: the render is already
+        # rect's size in device pixels (to within rounding), and scaling it
+        # by that last fraction of a pixel blurred every line.
+        painter.drawPixmap(rect.topLeft(), pixmap)
 
     def scaledPixmap(self, size, mode, state, scale):
         """Render for a display scale factor.
@@ -397,44 +426,59 @@ class _TintedSvgEngine(QIconEngine):
         return cached
 
     def _draw(self, logical_width, logical_height, scale, colour):
-        # The pixmap is allocated in device pixels, but once it carries a
-        # device pixel ratio QPainter addresses it in logical ones -- so
-        # everything painted below works in logical units.
-        width = max(1, logical_width)
-        height = max(1, logical_height)
+        """Render in device pixels, snapped to the icon's grid.
 
-        out = QPixmap(max(1, int(round(width * scale))),
-                      max(1, int(round(height * scale))))
-        out.setDevicePixelRatio(scale)
+        Tabler draws on a 24-unit grid with 2-unit strokes, so its lines
+        fall exactly on pixels only when an icon is drawn at a multiple of
+        24 device pixels. An 18 px icon on a 125% display is 22.5 device
+        pixels: every stroke straddled two, and the result was then
+        stretched to fit -- the soft, grey-edged toolbar icons. Here the
+        drawing is snapped down to the nearest multiple of the grid when
+        one is close (25 px -> 24, 50 -> 48), placed on whole pixels in
+        the middle of the box, and never scaled afterwards.
+        """
+        box_w = max(1, int(round(max(1, logical_width) * scale)))
+        box_h = max(1, int(round(max(1, logical_height) * scale)))
+        out = QPixmap(box_w, box_h)
         out.fill(Qt.transparent)
 
         renderer = QSvgRenderer(self._path)
-        if not renderer.isValid():
-            return out
-
-        painter = QPainter(out)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        # Keep the aspect ratio and centre, as QIcon would. width and height
-        # are logical pixels, which is what the painter addresses once the
-        # pixmap carries a device pixel ratio -- do not multiply by `scale`
-        # here as well.
-        bounds = renderer.viewBoxF()
-        if bounds.width() > 0 and bounds.height() > 0:
-            fit = min(width / bounds.width(), height / bounds.height())
-            drawn_w = bounds.width() * fit
-            drawn_h = bounds.height() * fit
-            target = QRectF((width - drawn_w) / 2, (height - drawn_h) / 2,
-                            drawn_w, drawn_h)
-        else:
-            target = QRectF(0, 0, width, height)
-        renderer.render(painter, target)
-
-        if colour:
-            painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-            painter.fillRect(QRectF(0, 0, width, height), QColor(colour))
-        painter.end()
+        if renderer.isValid():
+            bounds = renderer.viewBoxF()
+            painter = QPainter(out)          # device pixels: no DPR yet
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            if bounds.width() > 0 and bounds.height() > 0:
+                fit = min(box_w / bounds.width(), box_h / bounds.height())
+                side = snap_to_grid(min(box_w, box_h),
+                                    max(bounds.width(), bounds.height()))
+                if side < min(box_w, box_h):
+                    fit = side / max(bounds.width(), bounds.height())
+                drawn_w = bounds.width() * fit
+                drawn_h = bounds.height() * fit
+                target = QRectF((box_w - drawn_w) // 2,
+                                (box_h - drawn_h) // 2, drawn_w, drawn_h)
+            else:
+                target = QRectF(0, 0, box_w, box_h)
+            renderer.render(painter, target)
+            if colour:
+                painter.setCompositionMode(
+                    QPainter.CompositionMode_SourceIn)
+                painter.fillRect(QRectF(0, 0, box_w, box_h), QColor(colour))
+            painter.end()
+        out.setDevicePixelRatio(scale)
         return out
+
+
+def snap_to_grid(available, grid=24):
+    """The size (device pixels) to draw a `grid`-unit icon in `available`
+    pixels: the largest whole multiple of the grid -- or of half of it --
+    that is close enough not to look shrunk, else `available` itself."""
+    for unit in (grid, grid / 2):
+        whole = int(available // unit * unit)
+        if whole >= grid / 2 and available - whole <= max(3, available * 0.13):
+            return whole
+    return available
 
 
 #: Hue applied to a disk image's icon once its hashes verify. Green rather

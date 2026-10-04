@@ -407,7 +407,8 @@ def test_carving_into_a_case_is_recorded_per_image(tmp_path):
         assert case.carving_state(evidence)['status'] == 'done'
         assert case.analysis_summary()['carved'] == found
 
-        assert carve_evidence(handler, case, evidence, ['jpg']) ==             len([r for r in rows if r['type'] == 'jpg'])
+        assert carve_evidence(handler, case, evidence, ['jpg']) == \
+            len([r for r in rows if r['type'] == 'jpg'])
         assert {r['type'] for r in case.carved_files(evidence)} == {'jpg'}
         actions = [a['action'] for a in case.activity(10)]
         assert actions.count('carving done') == 2
@@ -547,3 +548,53 @@ def test_an_unavailable_feature_says_why(monkeypatch):
     assert not probe.available
     assert 'Windows on ARM' in probe.reason()
     assert 'yara-x' in probe.reason()
+
+
+def test_evidence_summary_tells_not_run_from_found_nothing(tmp_path):
+    """The Image Information window's Analysis tab: a job that never ran
+    says so; one that ran and found nothing says that, with when; numbers
+    are the case's; times read once as UTC."""
+    import json
+    from trace_app.core import evidence_summary as summary
+    from trace_app.core.case import Case, make_artifact_ref
+    case = Case.create(str(tmp_path / 'case'), 'Summary')
+    try:
+        evidence = case.add_evidence(str(tmp_path / 'disk.dd'))
+        def sections(evidence_id):
+            out, heading = {}, None
+            for row in summary.rows_for(case, evidence_id):
+                if row[0] is None:
+                    heading = row[1]
+                else:
+                    out.setdefault(heading, {})[row[0]] = row[1:]
+            return out
+
+        rows = sections(evidence)
+        assert rows['File analysis']['Status'][0] == summary.NOT_RUN
+        assert rows['Deleted files']['Listed'][0] == summary.NOT_RUN
+        assert rows['Integrity']['Last verification'][0] == \
+            'never verified'
+        case.record_event('deleted files listed',
+                          f"evidence id={evidence} files=0")
+        case.set_analysis_state(evidence, 'done', modules='magic',
+                                files_done=3)
+        case.add_module_findings(evidence, 'yara', [
+            (make_artifact_ref(0, 5, 1), 'a.exe', '/a.exe', 10, 'rule',
+             'suspicious', 'Matched x', json.dumps({}))])
+        case.commit()
+        rows = sections(evidence)
+        listed = rows['Deleted files']['Listed'][0]
+        assert listed.startswith('none found (') and listed.endswith(' UTC)')
+        assert '+00:00' not in listed
+        assert rows['File analysis']['Status'][0].startswith('done, ')
+        assert rows['Carving']['Status'][0] == summary.NOT_RUN
+        assert rows['Rules, hash sets and persistence'][
+            'YARA rule matches'] == ('1', 'warning')
+        # Another evidence's audit line is not this one's.
+        other = case.add_evidence(str(tmp_path / 'other.dd'))
+        assert sections(other)['Deleted files']['Listed'][0] == \
+            summary.NOT_RUN
+        assert summary.when('2026-10-04T23:07:58+00:00') == \
+            '2026-10-04 23:07:58 UTC'
+    finally:
+        case.close()

@@ -688,8 +688,16 @@ def _valid_mbox(data):
                                          or message.get('Received')))
 
 
+def _valid_wal(data):
+    # The checksum chain is the whole proof; walked again over the carve
+    # alone it must account for every byte.
+    from trace_app.core.carving_formats import measure_sqlite_wal
+    return _remeasure(measure_sqlite_wal, data)
+
+
 _VALIDATORS = {
-    'sqlite': _valid_sqlite, 'regf': _valid_regf, 'evtx': _valid_evtx,
+    'sqlite': _valid_sqlite, 'wal': _valid_wal, 'regf': _valid_regf,
+    'evtx': _valid_evtx,
     'pst': _valid_pst, 'ost': _valid_pst,
     'exe': _valid_pe, 'dll': _valid_pe, 'sys': _valid_pe,
     'lnk': _valid_lnk, 'mp3': _valid_mp3, 'ogg': _valid_ogg,

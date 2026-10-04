@@ -18,6 +18,7 @@ from the background job that normally runs it.
 import hashlib
 import logging
 import math
+from collections import Counter
 
 import pytsk3
 
@@ -271,12 +272,14 @@ class Entropy:
         self._offset = 0
 
     def feed(self, block):
-        for byte in block:
-            self.counts[byte] += 1
+        # Counted once, for the whole file's total and this block's score.
+        counts = byte_counts(block)
+        for value in range(256):
+            self.counts[value] += counts[value]
         self.total += len(block)
 
         if len(block) >= MIN_ENTROPY_BYTES:
-            score = shannon(block)
+            score = shannon(block, counts)
             if score > self.peak:
                 self.peak = score
                 self.peak_offset = self._offset
@@ -294,13 +297,23 @@ class Entropy:
         return entropy
 
 
-def shannon(data):
-    """Entropy of one block, in bits per byte."""
+def byte_counts(data):
+    """How many times each byte value occurs, as a list of 256 -- counted
+    in C (collections.Counter), not a Python loop per byte: the loop was
+    most of the time analysis spent on a large file."""
+    counts = [0] * 256
+    for value, count in Counter(data).items():
+        counts[value] = count
+    return counts
+
+
+def shannon(data, counts=None):
+    """Entropy of one block, in bits per byte (`counts` when already
+    counted)."""
     if not data:
         return 0.0
-    counts = [0] * 256
-    for byte in data:
-        counts[byte] += 1
+    if counts is None:
+        counts = byte_counts(data)
     length = len(data)
     entropy = 0.0
     for count in counts:

@@ -40,6 +40,37 @@ def configure_logging():
     # Keep the log readable for someone diagnosing a TRACE problem.
     for noisy in ('PIL', 'matplotlib', 'urllib3'):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+    route_qt_messages()
+
+
+#: Qt categories whose warnings describe the evidence, not TRACE: a damaged
+#: JPEG ("Bogus marker length") is what carved and deleted pictures are.
+EVIDENCE_CATEGORIES = ('qt.gui.imageio',)
+
+
+def route_qt_messages():
+    """Qt's own messages into TRACE's log (logger 'TRACE.Qt').
+
+    They went to stderr, which a packaged build does not have, so they were
+    lost there -- and in a console they arrived without a time, unlike every
+    other line. Warnings about damaged evidence are kept at DEBUG.
+    """
+    from PySide6.QtCore import QtMsgType, qInstallMessageHandler
+    qt_log = logging.getLogger('TRACE.Qt')
+    levels = {QtMsgType.QtDebugMsg: logging.DEBUG,
+              QtMsgType.QtInfoMsg: logging.INFO,
+              QtMsgType.QtWarningMsg: logging.WARNING,
+              QtMsgType.QtCriticalMsg: logging.ERROR,
+              QtMsgType.QtFatalMsg: logging.CRITICAL}
+
+    def handler(kind, context, text):
+        category = getattr(context, 'category', None) or ''
+        level = levels.get(kind, logging.WARNING)
+        if category.startswith(EVIDENCE_CATEGORIES):
+            level = logging.DEBUG
+        qt_log.log(level, "%s%s", f"{category}: " if category else '', text)
+
+    qInstallMessageHandler(handler)
 
 
 #: Windows groups taskbar buttons by this ID, and shows the icon of the
@@ -72,6 +103,9 @@ def main():
         logging.getLogger('TRACE').info("libmagic %s from %s", *magic_id)
 
     app = QApplication(sys.argv)
+    # One scrolling and column behaviour for every view, the launcher's too.
+    from trace_app.ui.widgets import item_views
+    item_views.install(app)
     app.setApplicationName("TRACE")
     app.setApplicationDisplayName("TRACE")
     app.setOrganizationName("TRACE")

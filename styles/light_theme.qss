@@ -1628,3 +1628,49 @@ QToolButton#timelinePivotChip {
     border-radius: 10px;
     padding: 2px 10px;
 }
+
+/* Menu buttons (Views, Range, the Listing's View): the same chevron as a
+   combo box's drop-down, not Qt's default arrow. Marked with the
+   'dropdown' property in code; named rules too, since a button's own
+   #name rule outranks a property-only one. */
+QPushButton[dropdown="true"]::menu-indicator,
+QToolButton[dropdown="true"]::menu-indicator {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 14px;
+    height: 14px;
+    right: 6px;
+}
+QPushButton[dropdown="true"],
+QPushButton#triageRunButton[dropdown="true"] {
+    padding-right: 26px;
+}
+QToolButton[dropdown="true"],
+QToolButton#timelineRangeButton[dropdown="true"],
+QToolButton#listingViewButton[dropdown="true"] {
+    padding-right: 22px;
+}
+/* Qt applies a tool button's padding only once the stylesheet draws its
+   frame: a transparent border hands it over, flat like its neighbours. */
+QToolButton#timelineRangeButton[dropdown="true"] {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 2px 22px 2px 6px;
+}
+/* Icon-only in a toolbar: the icon, then the chevron, in a button wider
+   than the square ones beside it (toolbars.align_controls sizes it). */
+QToolBar QToolButton#listingViewButton[dropdown="true"] {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0px 18px 0px 2px;
+    min-width: 32px;
+    max-width: 50px;
+}
+QToolBar QToolButton#listingViewButton[dropdown="true"]::menu-indicator {
+    right: 4px;
+}
+QToolButton#timelineRangeButton[dropdown="true"]:hover,
+QToolButton#listingViewButton[dropdown="true"]:hover {
+    background-color: #f1f3f5;
+}

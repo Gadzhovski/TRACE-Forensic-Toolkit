@@ -65,6 +65,9 @@ pi-heif>=1.4.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 yara-x>=1.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 # Sigma rules are YAML. No Windows ARM64 wheel before Python 3.12.
 PyYAML>=6.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.12'
+cryptography>=46.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11'
+                         # AES for encrypted iPhone backups (password given
+                         # by the examiner); Windows on ARM wheels from 3.11
 requests>=2.31.0         # VirusTotal API
 
 # --- libmagic (file type from content) ------------------------------------
