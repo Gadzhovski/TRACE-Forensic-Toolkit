@@ -181,10 +181,15 @@ iMessage, Android SMS, Dropbox's sync history, Google Drive's sync log
 client runs. Telegram, WhatsApp, Signal and Teams keep their messages
 encrypted: TRACE lists that they were there, for whom and when their data
 last changed, and reads nothing it would need a key for. A carved SQLite
-database is read the same way, marked carved.
+database is read the same way, marked carved. **Deleted messages come
+back**: a Skype, iMessage or SMS message deleted from its database is still
+in the file until SQLite reuses the space, and TRACE reads it from there
+(see *Deleted database records* below), marked deleted and recovered.
 
 Each record says what its time means — a Shimcache time is the file's, not a
-run's — and opens the file it was read from.
+run's — and opens the file it was read from. Event logs are read by TRACE's
+own EVTX reader, checked record by record against python-evtx and 30–40×
+faster.
 
 **Deleted files** (Triage ▸ Deleted files): every deleted file and folder
 the file systems still list — including those whose names TSK returns
@@ -193,8 +198,18 @@ original path and times and how much is left of it: **recoverable**, its
 data **resident** in the MFT entry, **partly overwritten** or
 **overwritten** by live files (measured cluster by cluster), its entry
 **reused** by another file, or **no data recorded** (ext3/4). A row previews
-the deleted file's content. Event logs are read by TRACE's own
-EVTX reader, checked record by record against python-evtx and 30–40× faster.
+the deleted file's content.
+
+**Deleted database records:** SQLite does not erase a deleted row; it marks
+the space free. TRACE reads every place a row can be left — **freelist
+pages**, **freeblocks** inside live pages (the first four bytes are
+overwritten; what is lost is said, and a value's length is worked out from
+the space the others leave), the **unused gap** of a rewritten page, and the
+older page versions in a **-wal** file — and keeps only what decodes as a
+record of one of the database's own tables, exactly filling its cell. Rows
+still live are left out. On databases written by SQLite itself every deleted
+row still physically in the file comes back, and the real browser and chat
+samples give no noise.
 
 </td>
 <td width="50%" valign="top">
@@ -204,7 +219,8 @@ EVTX reader, checked record by record against python-evtx and 30–40× faster.
 Visits, downloads and searches from **Chrome, Edge, Brave, Opera, Vivaldi,
 Firefox and Safari**, on Windows, macOS and Linux profiles. Firefox's pending
 write-ahead log is applied (checksummed, up to its last commit), so the newest
-visits are not missed. Searches come from Chromium's own record and from the
+visits are not missed, and deleted history entries are recovered from the
+database's free space. Searches come from Chromium's own record and from the
 result-page URLs of Google, Bing, DuckDuckGo and a dozen more. A history
 database the **carver** recovered is read the same way, marked as carved.
 
@@ -492,6 +508,7 @@ Any selected file can be examined through these tabs:
 | **Hex** | Paginated hex and ASCII view with search and an address bar |
 | **Text** | Text extraction with encoding detection; decodes Base64, hex, URL, HTML, octal and binary from a selection |
 | **Application** | Renders the file by what it **is**, not what it is called — see below |
+| **Database** | A SQLite file's tables and rows, and the **deleted records** recovered from it, with where each was found (freelist page, freeblock, unused space, WAL frame); the database's -wal beside it on the image is applied |
 | **File Metadata** | Timestamps, size, MD5 / SHA-256, MIME type, low-level detail (MFT entry, attributes), and — when present — photo EXIF with GPS, document authorship and hidden-data findings |
 | **Case** / **Notes** | The case's evidence and integrity status; notes on the selected file |
 | **VirusTotal** | Appears when a lookup is made; history of every lookup with the full report |

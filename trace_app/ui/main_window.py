@@ -56,7 +56,8 @@ from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
 from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, HexAdapter,
-                                     CaseAdapter, MetadataAdapter,
+                                     CaseAdapter, DatabaseAdapter,
+                                     MetadataAdapter,
                                      NotesAdapter,
                                      TextAdapter)
 from trace_app.ui.viewers.virustotal import (METHOD_HASH, METHOD_UPLOAD,
@@ -1290,10 +1291,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.notes_panel = NotesPanel()
         self.notes_panel.set_case(self.case)
 
+        from trace_app.ui.viewers.database_viewer import DatabaseViewer
+        self.database_viewer = DatabaseViewer()
+        self.database_viewer.wal_reader = self._sibling_wal
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
             ApplicationAdapter(self.application_viewer),
+            DatabaseAdapter(self.database_viewer),
             MetadataAdapter(self.metadata_viewer),
             CaseAdapter(self.case_panel),
             NotesAdapter(self.notes_panel),
@@ -1808,6 +1813,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             or make_span_ref(0, offset, offset + size),
             'image_path': self.current_image_path,
             'sha256': row['sha256']}], METHOD_HASH)
+
+    def _sibling_wal(self, data):
+        """A database's -wal beside it on the volume, if there is one."""
+        path = (data or {}).get('path')
+        offset = (data or {}).get('start_offset')
+        if not path or offset is None or not self.image_handler or \
+                '!/' in path:
+            return None
+        return self.image_handler.read_path(offset, path + '-wal')
 
     def _bookmark_carved(self, row, ref):
         label, ok = QInputDialog.getText(

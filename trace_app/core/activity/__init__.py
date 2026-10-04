@@ -1050,6 +1050,9 @@ def _history(data, wal, user, path, ref, browser, profile='', carved=False):
                           item['terms'],
                           dict(extra, engine=item['engine'], url=item['url']),
                           **common))
+    # History the browser deleted, still in the database's free space.
+    from trace_app.core.activity import recovered
+    out += recovered.deleted_records(data, wal, user, path, ref, carved)
     return out
 
 

@@ -105,6 +105,14 @@ class ApplicationAdapter(ViewerAdapter):
         return 'application/octet-stream'
 
 
+class DatabaseAdapter(ViewerAdapter):
+    """SQLite: tables and recovered deleted records."""
+    label = 'Database'
+
+    def display(self, content, data):
+        self.widget.display(content, data)
+
+
 class MetadataAdapter(ViewerAdapter):
     label = 'File Metadata'
 

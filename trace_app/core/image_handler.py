@@ -886,6 +886,22 @@ class ImageHandler:
             lambda offset, length: entry.read_random(offset, length),
             0, size)
 
+    def read_path(self, start_offset, path, limit=512 * 1024 * 1024):
+        """The bytes of the file at `path` on the volume at
+        `start_offset`, or None -- for a file found by its name beside
+        another (a database's -wal)."""
+        fs = self.get_fs_info(start_offset)
+        if fs is None or not path:
+            return None
+        try:
+            handle = fs.open(path=path)
+            size = int(handle.info.meta.size)
+            if not size or size > limit:
+                return None
+            return handle.read_random(0, size)
+        except (IOError, OSError, AttributeError):
+            return None
+
     def read_file_bytes(self, inode_number, start_offset, length):
         """The first `length` bytes of a file -- enough to recognise it."""
         stream = self.open_file_object(inode_number, start_offset)

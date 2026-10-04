@@ -228,10 +228,16 @@ def read_database(data, wal, user, path, ref, carved=False):
                     if carved:
                         for item in records:
                             item['source'] += ' (carved)'
-                    return records
+                    break
+            else:
+                return []
     except (sqlite3.DatabaseError, ValueError) as exc:
         logger.debug("%s unreadable: %s", path, exc)
-    return []
+        return []
+    # Messages deleted, still in the database's free space.
+    from trace_app.core.activity import recovered
+    return records + recovered.deleted_records(data, wal, user, path, ref,
+                                               carved)
 
 
 # --- Google Drive and OneDrive logs ------------------------------------------------------

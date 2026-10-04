@@ -1563,3 +1563,40 @@ def test_an_interrupted_carve_offers_resume(qapp, window):
     panel.refresh()
     assert not panel.resume_button.isVisibleTo(panel)
     window.triage_panel.set_evidence_filter(None)
+
+
+def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
+                                                         tmp_path):
+    """Neither image holds a SQLite file, so one written and deleted from
+    by SQLite itself goes to the Database tab the way a selected file's
+    bytes do: its tables at once, the deleted rows when recovery ends."""
+    import sqlite3
+    path = str(tmp_path / 'history.db')
+    db = sqlite3.connect(path)
+    db.execute("CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT)")
+    db.executemany("INSERT INTO urls (url) VALUES (?)",
+                   [(f'https://example.org/page/{i}',) for i in range(30)])
+    db.commit()
+    db.execute("DELETE FROM urls WHERE id = 12")
+    db.commit()
+    db.close()
+    with open(path, 'rb') as handle:
+        content = handle.read()
+    viewer = window.database_viewer
+    labels = [window.viewer_tab.tabText(i)
+              for i in range(window.viewer_tab.count())]
+    assert labels.index('Database') == labels.index('Application') + 1
+    window.viewer_tab.setCurrentWidget(viewer)
+    window.update_viewer_with_file_content(content, {
+        'name': 'history.db', 'path': '/history.db', 'start_offset': 0})
+    assert viewer.tables.item(0).text() == 'urls (29 rows)'
+    assert viewer.grid.rowCount() == 29
+    assert pump(qapp, 100, lambda: viewer.tables.count() == 2)
+    assert '1 deleted record(s) recovered' in viewer.info.text()
+    viewer.tables.setCurrentRow(1)
+    headers = [viewer.grid.horizontalHeaderItem(c).text()
+               for c in range(viewer.grid.columnCount())]
+    assert headers == ['Found in', 'Page', 'Note', 'id', 'url']
+    assert viewer.grid.item(0, 4).text() == 'https://example.org/page/11'
+    viewer.display(b'not a database', {})
+    assert viewer.info.text() == 'Not a SQLite database.'
