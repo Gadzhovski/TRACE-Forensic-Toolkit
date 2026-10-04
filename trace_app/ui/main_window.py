@@ -1233,6 +1233,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             lambda row, position: self.open_finding_menu(
                 self._thumbnail_cache_row(row), position))
         self.triage_panel.add_thumbnails_tab(self.thumbnails_panel)
+
+        # Deleted files, and how much of each is left.
+        from trace_app.ui.viewers.deleted_panel import DeletedFilesPanel
+        self.deleted_panel = DeletedFilesPanel()
+        self.deleted_panel.file_selected.connect(self.preview_artifact)
+        self.deleted_panel.file_activated.connect(self.open_finding)
+        self.deleted_panel.file_menu_requested.connect(
+            self.open_finding_menu)
+        self.triage_panel.add_deleted_tab(self.deleted_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage')
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
@@ -2518,6 +2527,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_persistence(chosen)
         if choice.get('thumbnails'):
             self.queue_thumbnails(chosen)
+        if choice.get('deleted'):
+            self.queue_deleted(chosen)
         if choice.get('yara'):
             self.queue_yara(chosen)
         if choice.get('keywords'):
@@ -3007,6 +3018,51 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             logger.error("YARA on %s failed: %s", name, error)
         else:
             self.set_status(f"YARA: {count:,} file(s) in {name} matched")
+        self.refresh_analysis_views()
+
+    # --- deleted files -----------------------------------------------------
+
+    def queue_deleted(self, rows):
+        from trace_app.ui.viewers.deleted_panel import DeletedWorker
+        if not self.case:
+            return 0
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                continue
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+
+            def start(job, row=row, evidence_id=evidence_id, name=name):
+                worker = DeletedWorker(row['path'], self.case.folder,
+                                       evidence_id, self)
+                worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.progressed.connect(
+                    lambda done, total, path: self.job_bar.report(
+                        done, total, os.path.basename(path)))
+                worker.finished_deleted.connect(
+                    lambda count, error: self._deleted_finished(
+                        name, count, error))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            if self.job_bar.submit(Job(
+                    key=f"deleted:{evidence_id}",
+                    title=f"Listing deleted files on {name}", start=start,
+                    stop=lambda worker: worker.stop())):
+                queued += 1
+        return queued
+
+    def _deleted_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Listing deleted files on {name} failed: "
+                            f"{error}")
+            logger.error("Deleted files on %s failed: %s", name, error)
+        else:
+            self.set_status(f"{count:,} deleted file(s) and folder(s) "
+                            f"listed on {name}")
         self.refresh_analysis_views()
 
     # --- thumbnail caches ------------------------------------------------

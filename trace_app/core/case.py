@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -1391,6 +1391,56 @@ class Case:
             groups.setdefault(digest, []).append((evidence, offset))
         return groups
 
+    # --- deleted files -----------------------------------------------------
+
+    def replace_deleted_files(self, evidence_id, rows):
+        """Store core.deleted records for one image, replacing any."""
+        self._db.execute("DELETE FROM deleted_files WHERE evidence_id = ?",
+                         (evidence_id,))
+        self._db.executemany(
+            "INSERT INTO deleted_files (evidence_id, artifact_ref, path, "
+            "name, is_dir, size, state, runs, overwritten, modified_utc, "
+            "accessed_utc, created_utc, changed_utc, detail) VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            [(evidence_id, r['ref'], r['path'], r['name'],
+              1 if r['is_dir'] else 0, r['size'], r['state'],
+              len(r.get('runs') or []), r.get('overwritten') or 0,
+              r.get('modified'), r.get('accessed'), r.get('created'),
+              r.get('changed'),
+              json.dumps({'runs': [list(run) for run in
+                                   (r.get('runs') or [])[:64]],
+                          'inode': r.get('inode')}))
+             for r in rows])
+        self._db.commit()
+
+    def deleted_files(self, evidence_id=None, state=None, limit=200000):
+        query, params = "SELECT * FROM deleted_files WHERE 1 = 1", []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        if state:
+            query += " AND state = ?"
+            params.append(state)
+        query += " ORDER BY evidence_id, path LIMIT ?"
+        params.append(limit)
+        rows = []
+        for row in self._db.execute(query, params):
+            row = dict(row)
+            try:
+                row['detail'] = json.loads(row.get('detail') or '{}')
+            except ValueError:
+                row['detail'] = {}
+            rows.append(row)
+        return rows
+
+    def deleted_counts(self, evidence_id=None):
+        where, params = '', []
+        if evidence_id is not None:
+            where, params = " WHERE evidence_id = ?", [evidence_id]
+        return {row[0]: row[1] for row in self._db.execute(
+            "SELECT state, COUNT(*) FROM deleted_files" + where
+            + " GROUP BY state", params)}
+
     def start_carving_run(self, evidence_id, settings, engine):
         cursor = self._db.execute(
             "INSERT INTO carving_runs (evidence_id, started_utc, status, "
@@ -1944,6 +1994,29 @@ class Case:
             CREATE INDEX IF NOT EXISTS idx_carved_evidence
                 ON carved_files(evidence_id, offset);
 
+            -- Deleted files the file systems still list (core/deleted.py),
+            -- with how much of each is left.
+            CREATE TABLE IF NOT EXISTS deleted_files (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id    INTEGER NOT NULL
+                               REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref   TEXT NOT NULL,
+                path           TEXT NOT NULL,
+                name           TEXT,
+                is_dir         INTEGER DEFAULT 0,
+                size           INTEGER,
+                state          TEXT NOT NULL,
+                runs           INTEGER DEFAULT 0,
+                overwritten    INTEGER DEFAULT 0,
+                modified_utc   TEXT,
+                accessed_utc   TEXT,
+                created_utc    TEXT,
+                changed_utc    TEXT,
+                detail         TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_deleted_files
+                ON deleted_files(evidence_id, state);
+
             -- Every carve run: its settings, engine and what it saw.
             CREATE TABLE IF NOT EXISTS carving_runs (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2162,6 +2235,10 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 14:
+            # deleted_files is created unconditionally above.
+            self._db.commit()
 
         if version < 13:
             # Carved files gain what their structure proved and where they

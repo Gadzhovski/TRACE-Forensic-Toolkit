@@ -184,7 +184,16 @@ last changed, and reads nothing it would need a key for. A carved SQLite
 database is read the same way, marked carved.
 
 Each record says what its time means — a Shimcache time is the file's, not a
-run's — and opens the file it was read from. Event logs are read by TRACE's own
+run's — and opens the file it was read from.
+
+**Deleted files** (Triage ▸ Deleted files): every deleted file and folder
+the file systems still list — including those whose names TSK returns
+without metadata, deleted folders' contents and NTFS orphans — with its
+original path and times and how much is left of it: **recoverable**, its
+data **resident** in the MFT entry, **partly overwritten** or
+**overwritten** by live files (measured cluster by cluster), its entry
+**reused** by another file, or **no data recorded** (ext3/4). A row previews
+the deleted file's content. Event logs are read by TRACE's own
 EVTX reader, checked record by record against python-evtx and 30–40× faster.
 
 </td>

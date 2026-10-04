@@ -1512,3 +1512,32 @@ def test_thumbnails_are_a_job_and_a_grid_read_from_the_image(qapp, window,
     assert captured and captured[-1] == content
     window.case.replace_thumbnails(second, [])
     window.refresh_analysis_views()
+
+
+def test_deleted_files_are_a_job_and_a_triage_tab(qapp, window, truth):
+    """The second image's two deleted JPEGs are listed as recoverable, and
+    a row previews the deleted file's bytes from that image."""
+    from PySide6.QtCore import Qt
+    from trace_app.core.case import parse_artifact_ref
+    panel = window.deleted_panel
+    assert window.queue_deleted(window.case.evidence()) == 2
+    assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    triage = window.triage_panel
+    assert triage.tabs.tabText(triage._tab_for['deleted']).startswith(
+        'Deleted files (')
+    rows = {panel.table.item(r, 8).text(): r
+            for r in range(panel.table.rowCount())}
+    assert {'/del1/file6.jpg', '/del2/file7.hmm'} <= set(rows)
+    position = rows['/del1/file6.jpg']
+    row = panel.table.item(position, 0).data(Qt.UserRole)
+    assert row['state'] == 'recoverable'
+    captured = _capture_viewer(window)
+    window.current_selected_data = None
+    panel.table.clearSelection()
+    panel.table.selectRow(position)
+    pump(qapp, 10, lambda: bool(captured))
+    ref = parse_artifact_ref(row['artifact_ref'])
+    expected, _ = truth[SECOND].get_file_content(ref['inode'],
+                                                 ref['start_offset'])
+    assert captured and captured[-1] == expected
+    assert expected[:3] == b'\xff\xd8\xff'

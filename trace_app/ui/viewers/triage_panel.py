@@ -266,6 +266,18 @@ class TriagePanel(QWidget):
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
 
+    def add_deleted_tab(self, panel):
+        """Deleted files and what is left of each
+        (ui/viewers/deleted_panel.py), following the same image filter."""
+        self._deleted_panel = panel
+        self._tab_for['deleted'] = self.tabs.addTab(
+            panel, icons.icon(icons.DELETED_FILES), "Deleted files")
+        panel.count_changed.connect(
+            lambda count: self.tabs.setTabText(
+                self._tab_for['deleted'], f"Deleted files ({count:,})"))
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
     def add_thumbnails_tab(self, panel):
         """Pictures in thumbnail caches (ui/viewers/thumbnails_panel.py),
         following the same image filter."""
@@ -417,7 +429,8 @@ class TriagePanel(QWidget):
                 getattr(self, '_hash_panel', None),
                 getattr(self, '_persistence_panel', None),
                 getattr(self, '_keywords_panel', None),
-                getattr(self, '_thumbnails_panel', None))
+                getattr(self, '_thumbnails_panel', None),
+                getattr(self, '_deleted_panel', None))
 
     def refresh(self):
         """Redraw from what the case holds now."""

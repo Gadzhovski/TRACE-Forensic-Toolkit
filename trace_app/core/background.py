@@ -281,6 +281,26 @@ def job_keywords(params, progress, item, should_stop):
         _close(case)
 
 
+def job_deleted(params, progress, item, should_stop):
+    """Deleted files and how much of each is left (core/deleted)."""
+    from trace_app.core import deleted
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        try:
+            return deleted.analyse_evidence(
+                handler, case, params['evidence_id'],
+                progress=lambda done, total, path: progress(done, total,
+                                                            path),
+                should_stop=should_stop)
+        except deleted.DeletedCancelled:
+            return 0
+    finally:
+        _close(case, handler)
+
+
 def job_thumbnails(params, progress, item, should_stop):
     """Every thumbnail cache on one image (core/thumbnails)."""
     from trace_app.core import thumbnails, walk
@@ -360,7 +380,8 @@ def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
     from trace_app.core import (activity, analysis, carving,  # noqa: F401
-                                hashsets, indexer, keywords, mailfiles,
+                                deleted, hashsets, indexer, keywords,
+                                mailfiles,
                                 ntfs, persistence, report, thumbnails,
                                 timeline, yara_rules)
     import pytsk3  # noqa: F401
@@ -379,6 +400,7 @@ JOBS = {
     'yara': job_yara,
     'keywords': job_keywords,
     'thumbnails': job_thumbnails,
+    'deleted': job_deleted,
     'persistence': job_persistence,
     'carve': job_carve,
     'ping': job_ping,

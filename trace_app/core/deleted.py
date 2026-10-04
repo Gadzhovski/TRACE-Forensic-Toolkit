@@ -48,6 +48,29 @@ class DeletedCancelled(Exception):
     pass
 
 
+def analyse_evidence(image_handler, case, evidence_id, progress=None,
+                     should_stop=None):
+    """List one image's deleted files into the case, replacing any;
+    returns how many."""
+    from trace_app.core.carving import allocation_map
+    allocated = allocation_map(image_handler)
+    rows = []
+    for record in deleted_files(image_handler, allocated, should_stop):
+        rows.append(record)
+        if progress and len(rows) % 200 == 0:
+            progress(len(rows), 0, record['path'])
+    case.replace_deleted_files(evidence_id, rows)
+    counts = {}
+    for record in rows:
+        counts[record['state']] = counts.get(record['state'], 0) + 1
+    case.record_event(
+        'deleted files listed',
+        f"evidence id={evidence_id} files={len(rows)} "
+        + ' '.join(f"{state.replace(' ', '_')}={count}"
+                   for state, count in sorted(counts.items())))
+    return len(rows)
+
+
 def data_runs(handle, block_size, base):
     """([(byte offset in the image, length)], resident) of a file's unnamed
     data stream."""

@@ -69,6 +69,10 @@ MODULE_KEYWORDS = 'keywords'
 #: by name, then reads only those.
 MODULE_THUMBNAILS = 'thumbnails'
 
+#: Deleted files (core/deleted): lists what the file systems still record,
+#: and measures how much of each is left.
+MODULE_DELETED = 'deleted'
+
 #: What each module is for, in the terms an examiner would use to decide
 #: whether they want it. The cost line matters as much as the description:
 #: the whole point of asking is that these are not free.
@@ -161,6 +165,14 @@ _YARA = (
     "strings it matched.",
     "Slower: reads every file, up to the size set for the case.")
 
+_DELETED = (
+    "Deleted files",
+    "Every deleted file and folder the file systems still list — original "
+    "path and times — and how much of each is left: recoverable, partly or "
+    "wholly overwritten by live files, its entry reused (Triage ▸ Deleted "
+    "files). Carved files are named from the same entries.",
+    "Fast: walks the directories and reads no file content.")
+
 _THUMBNAILS = (
     "Thumbnail caches",
     "The pictures Windows kept in Thumbs.db (XP, network shares) and "
@@ -191,6 +203,7 @@ def default_choice(modules=None):
             'index': bool(modules), 'activity': bool(modules),
             'ntfs': bool(modules), 'hashsets': False,
             'persistence': bool(modules), 'thumbnails': bool(modules),
+            'deleted': bool(modules),
             'carve_types': [], 'unallocated_only': True}
 
 
@@ -294,6 +307,10 @@ class AnalysisModulesDialog(QDialog):
         self.persistence_box = self._module(layout, *_PERSISTENCE)
         self.persistence_box.setChecked(bool(choice.get('persistence')))
         self.boxes[MODULE_PERSISTENCE] = self.persistence_box
+
+        self.deleted_box = self._module(layout, *_DELETED)
+        self.deleted_box.setChecked(bool(choice.get('deleted')))
+        self.boxes[MODULE_DELETED] = self.deleted_box
 
         self.thumbnails_box = self._module(layout, *_THUMBNAILS)
         self.thumbnails_box.setChecked(bool(choice.get('thumbnails')))
@@ -422,7 +439,7 @@ class AnalysisModulesDialog(QDialog):
                                        MODULE_ACTIVITY, MODULE_NTFS,
                                        MODULE_HASHSETS, MODULE_YARA,
                                        MODULE_PERSISTENCE, MODULE_KEYWORDS,
-                                       MODULE_THUMBNAILS)
+                                       MODULE_THUMBNAILS, MODULE_DELETED)
                         and box.isChecked()],
             'evidence_ids': None if target is None else [target],
             'index': self.index_box.isChecked(),
@@ -433,6 +450,7 @@ class AnalysisModulesDialog(QDialog):
             'persistence': self.persistence_box.isChecked(),
             'keywords': self.keywords_box.isChecked(),
             'thumbnails': self.thumbnails_box.isChecked(),
+            'deleted': self.deleted_box.isChecked(),
             'carve_types': ([t.lower() for t in self.carve_types.selected()]
                             if carving else []),
             'unallocated_only': self.unallocated_box.isChecked(),
