@@ -8,9 +8,11 @@ after another rather than through the arrays, so entries of a journal that
 was not closed -- whose arrays were never updated -- are read too.
 
 A DATA object may be compressed: XZ (lzma, in the standard library), LZ4
-(a block format small enough to decode here) or zstd (the standard library
-from Python 3.14; before that the field is reported as not decoded, never
-dropped). Compact journals (systemd 252+) use 32-bit offsets.
+(a block format small enough to decode here) or zstd (core/zstd_decode.py:
+Python 3.14's standard library when present, TRACE's own decoder on every
+other Python). A field that cannot be decompressed -- damaged -- is
+counted under UNDECODED and the entry kept, never dropped. Compact journals
+(systemd 252+) use 32-bit offsets.
 
 Layout: Lennart Poettering's "Journal File Format" and libyal dtformats;
 expected values in the tests are plaso's for the same files.
@@ -20,6 +22,8 @@ import datetime
 import logging
 import lzma
 import struct
+
+from trace_app.core import zstd_decode
 
 logger = logging.getLogger('TRACE.Activity.Journal')
 
@@ -31,9 +35,9 @@ _DATA, _FIELD, _ENTRY, _DATA_HASH, _FIELD_HASH, _ENTRY_ARRAY, _TAG = \
 _XZ, _LZ4, _ZSTD = 1, 2, 4
 _COMPACT = 16
 
-#: The key a field takes when it is zstd-compressed and this Python has
-#: no zstd (before 3.14).
-UNDECODED = '_ZSTD_FIELDS_NOT_DECODED'
+#: The key under which an entry counts its fields that could not be
+#: decompressed (damaged data).
+UNDECODED = '_FIELDS_NOT_DECODED'
 
 #: Most entries read from one file; a journal is at most a few hundred MB.
 MAX_ENTRIES = 2_000_000
@@ -44,10 +48,7 @@ class JournalError(Exception):
 
 
 def zstd_available():
-    try:
-        from compression import zstd  # noqa: F401  (Python 3.14+)
-    except ImportError:
-        return False
+    """Always: TRACE decodes zstd itself where Python cannot."""
     return True
 
 
@@ -126,22 +127,23 @@ class Journal:
             raise JournalError(f"No data object at {offset}")
         start = offset + (72 if self.compact else 64)
         payload = self.data[start:offset + size]
-        if flags & _XZ:
-            payload = lzma.decompress(payload)
-        elif flags & _LZ4:
-            expected = struct.unpack_from('<Q', payload, 0)[0]
-            payload = lz4_block(payload[8:], expected)
-        elif flags & _ZSTD:
-            try:
-                from compression import zstd
-                payload = zstd.decompress(payload)
-            except ImportError:
-                # Said, not dropped: the entry is listed with how many of
-                # its fields could not be read here.
-                self.undecoded += 1
-                result = (UNDECODED, b'')
-                self._fields[offset] = result
-                return result
+        try:
+            if flags & _XZ:
+                payload = lzma.decompress(payload)
+            elif flags & _LZ4:
+                expected = struct.unpack_from('<Q', payload, 0)[0]
+                payload = lz4_block(payload[8:], expected)
+            elif flags & _ZSTD:
+                payload = zstd_decode.decompress(payload)
+        except (lzma.LZMAError, zstd_decode.ZstdError, JournalError,
+                IndexError, struct.error) as exc:
+            # Said, not dropped: the entry is listed with how many of its
+            # fields could not be read.
+            logger.debug("Field at %s not decompressed: %s", offset, exc)
+            self.undecoded += 1
+            result = (UNDECODED, b'')
+            self._fields[offset] = result
+            return result
         key, _sep, value = bytes(payload).partition(b'=')
         result = (key.decode('utf-8', 'backslashreplace'), value)
         if len(self._fields) < 200000:

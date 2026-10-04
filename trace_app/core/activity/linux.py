@@ -409,8 +409,8 @@ def journal_activity(data, path, ref):
     for item in describer.out:
         if reader.undecoded:
             item['detail']['note'] = (
-                f"{reader.undecoded} zstd-compressed field(s) in this file "
-                f"were not decoded (needs Python 3.14)")
+                f"{reader.undecoded} compressed field(s) in this file are "
+                f"damaged and could not be decoded")
     return describer.out, count
 
 

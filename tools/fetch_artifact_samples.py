@@ -44,6 +44,8 @@ _EVTX = ('https://raw.githubusercontent.com/omerbenamram/evtx/'
          '47d63022caa8336ecdd0c42d335e2bb03381b00d/samples/')
 _DFVFS = ('https://raw.githubusercontent.com/log2timeline/dfvfs/'
           '917cefc9426d6ded2687d2b55164ded25b44fcb7/test_data/')
+_ZSTD = ('https://raw.githubusercontent.com/facebook/zstd/'
+         '01b7154f1172432f8abe9b3bb9909e14a1176b7d/tests/')
 _CPYTHON = ('https://raw.githubusercontent.com/python/cpython/'
             'v3.12.0/Lib/test/test_email/data/')
 _DISSECT = ('https://media.githubusercontent.com/media/fox-it/'
@@ -337,6 +339,28 @@ SAMPLES = {
     'recently-used.xbel': (
         'https://media.githubusercontent.com/media/fox-it/dissect.target/b43db371c891fa3f382c5152e16f91b0bcde418c/tests/_data/plugins/os/unix/linux/recently-used.xbel',
         'ca8ca76b9382797ec3563db71d79c9967bf6a0f4f1c8f9a751295c61058a211c'),
+    # Zstandard's own decoder conformance files (facebook/zstd, BSD).
+    'zstd-block-128k.zst': (
+        _ZSTD + 'golden-decompression/block-128k.zst',
+        '6a226ab40e6abcfc4a36baa04bf48f7ee56f166b8a26fbe2adb8fe771dceccba'),
+    'zstd-empty-block.zst': (
+        _ZSTD + 'golden-decompression/empty-block.zst',
+        'ab5463fa31429bf81ced9f05e99b96b2fe88b1da37235a233f6bc96242332fbc'),
+    'zstd-rle-first-block.zst': (
+        _ZSTD + 'golden-decompression/rle-first-block.zst',
+        'dd31b3fa6bb8601710cbde2c625660763bf38adc5255501e3d3a681cc0e4e1a4'),
+    'zstd-zeroSeq_2B.zst': (
+        _ZSTD + 'golden-decompression/zeroSeq_2B.zst',
+        '8505867ac00fb49eb455da1b1e44e7cba5126f03114a72fb195170f7c95f2ca7'),
+    'zstd-off0.bin.zst': (
+        _ZSTD + 'golden-decompression-errors/off0.bin.zst',
+        '144e2f029389c67c361bd3879ac142671592802f01f805a6c0c2b3e564d8022c'),
+    'zstd-truncated_huff_state.zst': (
+        _ZSTD + 'golden-decompression-errors/truncated_huff_state.zst',
+        'c91a09d8824609d0643291803cbfb04b14213c02c890d5637bc3aed18e8a24f8'),
+    'zstd-zeroSeq_extraneous.zst': (
+        _ZSTD + 'golden-decompression-errors/zeroSeq_extraneous.zst',
+        '85d7b2010abde2ff96ab8e6798b422d3cb78f8dd2108f83dbdd488da7056a6db'),
 }
 
 

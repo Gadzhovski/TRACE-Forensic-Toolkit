@@ -130,8 +130,10 @@ GROUPS = ('Evidence images', 'Volumes and encryption', 'File analysis',
 
 
 def _zstd():
-    from compression import zstd  # noqa: F401  (Python 3.14 and later)
-    return 'Python ' + platform.python_version()
+    from trace_app.core import zstd_decode
+    if zstd_decode.standard_library() is not None:
+        return 'Python ' + platform.python_version() + ' standard library'
+    return 'built in'
 
 
 def _built_in(module):
@@ -198,10 +200,7 @@ CAPABILITIES = (
                _built_in('trace_app.core.activity.linux')),
     Capability('zstd', 'Linux, macOS, chat and cloud evidence',
                "systemd journal fields compressed with zstd (systemd 246+)",
-               'Python 3.14+ (compression.zstd)', _zstd,
-               missing_hint="Python 3.14 and later read zstd from their "
-                            "standard library; on this Python those fields "
-                            "are listed as not decoded, never dropped."),
+               'TRACE', _zstd),
     Capability('macos', 'Linux, macOS, chat and cloud evidence',
                "KnowledgeC, quarantine events, recent items (bookmarks), "
                "install history, utmpx", 'TRACE',

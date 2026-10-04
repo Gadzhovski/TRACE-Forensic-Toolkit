@@ -162,8 +162,10 @@ file, so it takes seconds:
 
 **Linux:** commands typed (bash — timed when HISTTIMEFORMAT was set, in
 order when not — zsh and fish), logons, logoffs, boots and failed logons
-(wtmp, btmp), the **systemd journal** read by TRACE itself (plain, XZ and
-LZ4; zstd on Python 3.14+) and auth.log/secure — SSH logons and failures,
+(wtmp, btmp), the **systemd journal** read by TRACE itself (plain, XZ, LZ4 and zstd —
+TRACE carries its own Zstandard decoder, checked against zstd's conformance
+files, so every Python and the packaged app read modern journals in full)
+and auth.log/secure — SSH logons and failures,
 sudo and pkexec commands, su, accounts created, USB devices, boots — and
 the files GNOME remembers opening (recently-used.xbel).
 

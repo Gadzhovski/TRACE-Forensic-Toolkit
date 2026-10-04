@@ -141,8 +141,6 @@ def _run(report, images, sandbox):
         expected_missing = set()
         if sys.platform == 'win32' and platform.machine().upper() == 'ARM64':
             expected_missing = {'yara', 'heic'}
-        if sys.version_info < (3, 14):
-            expected_missing.add('zstd')          # the standard library's
         missing = [c.key for c in capabilities.CAPABILITIES
                    if not c.available and c.key not in expected_missing]
         assert not missing, f"unavailable: {', '.join(missing)}"
