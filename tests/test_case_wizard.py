@@ -413,3 +413,50 @@ def test_verification_is_a_job_that_records_and_catches_a_change(
     finally:
         window.cleanup_resources()
         case.close()
+
+
+def test_a_side_job_runs_beside_the_queue(qapp):
+    """Verification's lane: a side job starts while the main lane is busy,
+    reports and finishes on its own, and the bar hides (all_finished) only
+    once both lanes are empty."""
+    from trace_app.ui.widgets.job_bar import SIDE, Job, JobBar
+    bar = JobBar()
+    started, finished = [], []
+    bar.all_finished.connect(lambda: finished.append(True))
+
+    def job(key):
+        return Job(key, f"Job {key}", lambda j: started.append(j.key) or j)
+    main, side = job('analysis'), job('verify')
+    assert bar.submit(main)
+    assert bar.submit(side, lane=SIDE)
+    assert started == ['analysis', 'verify']           # both running
+    assert not bar.submit(job('verify'), lane=SIDE)    # no duplicate
+    bar.report(5, 10, 'half', job=side)
+    assert bar.side_progress.value() == 5 and 'half' in bar.side_label.text()
+    assert bar.progress.maximum() == 0                 # main untouched
+    bar.job_finished(side)
+    assert bar.busy and bar.main_busy and not finished
+    assert not bar.side_label.isVisibleTo(bar)
+    bar.job_finished()                                  # the main lane's
+    assert not bar.busy and finished == [True]
+    bar.deleteLater()
+
+
+def test_verification_order_follows_the_setting(qapp, monkeypatch):
+    """after analysis: queued behind the modules in the main lane;
+    alongside: its own lane."""
+    from trace_app.core import settings
+    from trace_app.ui.main_window import MainWindow
+    calls = []
+    fake = type('W', (), {})()
+    fake.queue_verification = lambda rows: calls.append('verify')
+    fake.queue_choice = lambda rows, choice: calls.append('modules')
+    fake.set_status = lambda *a: None
+    for order, expected in (('after analysis', ['modules', 'verify']),
+                            ('before analysis', ['verify', 'modules']),
+                            ('alongside analysis', ['verify', 'modules'])):
+        calls.clear()
+        monkeypatch.setattr(settings, 'user', lambda key, o=order: o)
+        MainWindow.queue_setup(fake, [{}], {'verify': True,
+                                            'choice': {'modules': []}})
+        assert calls == expected, order

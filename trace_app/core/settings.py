@@ -49,6 +49,13 @@ USER = {
     'show_system': (True, "Show file system metadata files",
                     "NTFS's $MFT, $LogFile and the like, and other names "
                     "beginning with $."),
+    'verify_order': ('alongside analysis', "Verify evidence hashes",
+                     "alongside analysis: hashing reads the image file in "
+                     "order while analysis reads its files -- best on SSDs "
+                     "and network storage. after analysis: findings first, "
+                     "then hashes -- best on one slow hard disk. before "
+                     "analysis: hashes confirmed before anything else is "
+                     "read."),
     'debug_log': (False, "Detailed log",
                   "Write debug detail to trace.log -- for reporting a "
                   "problem; the log grows quickly."),
@@ -112,6 +119,7 @@ CASE = {
 }
 
 CARVE_SOURCES = ('unallocated', 'slack', 'image')
+VERIFY_ORDERS = ('alongside analysis', 'after analysis', 'before analysis')
 SIZE_UNITS = ('binary', 'decimal')
 
 

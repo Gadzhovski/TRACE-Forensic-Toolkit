@@ -2846,13 +2846,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_setup(rows, setup)
 
     def queue_setup(self, rows, setup):
-        """Queue a wizard's verification and modules over `rows`."""
-        if setup.get('verify'):
+        """Queue a wizard's verification and modules over `rows`, in the
+        order Settings ▸ General asks: hashing alongside the analysis (its
+        own lane), after it, or before it."""
+        order = case_settings.user('verify_order')
+        verify = bool(setup.get('verify'))
+        if verify and order != 'after analysis':
             self.queue_verification(rows)
         if setup.get('choice'):
             self.queue_choice(rows, setup['choice'])
             self.set_status(f"Queued analysis of {len(rows)} piece(s) of "
                             f"evidence")
+        if verify and order == 'after analysis':
+            self.queue_verification(rows)
 
     # --- verification jobs ------------------------------------------------
 
@@ -2865,8 +2871,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         is reported once it ends -- Case > Verify All Evidence.
         """
         from trace_app.ui.dialogs.verification import EvidenceVerifyWorker
+        from trace_app.ui.widgets.job_bar import MAIN, SIDE
         if not self.case:
             return 0
+        # Beside the analysis queue unless Settings ▸ General says otherwise:
+        # hashing a large image held up every finding behind it.
+        lane = SIDE if case_settings.user('verify_order') == \
+            'alongside analysis' else MAIN
         batch = {'pending': 0, 'outcomes': [], 'summary': summary}
         queued = 0
         for row in rows:
@@ -2878,13 +2889,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                 if r['id'] == row['id']), row)
                 worker = EvidenceVerifyWorker(current, self)
                 worker.progressed.connect(
-                    lambda done, total: self.job_bar.report(
+                    lambda done, total, job=job: self.job_bar.report(
                         int(done * 1000 / total) if total else 0, 1000,
                         f"{self._readable(done)} of "
-                        f"{self._readable(total)}"))
+                        f"{self._readable(total)}", job=job))
                 worker.verified.connect(
-                    lambda out, name=name: self._verification_finished(
-                        out, name, batch))
+                    lambda out, name=name, job=job:
+                    self._verification_finished(out, name, batch, job))
                 self._retain_worker(worker)
                 worker.start()
                 return worker
@@ -2893,7 +2904,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                      or row.get('sha256') else f"Hashing {name}")
             if self.job_bar.submit(Job(key=f"verify:{evidence_id}",
                                        title=title, start=start,
-                                       stop=lambda worker: worker.stop())):
+                                       stop=lambda worker: worker.stop()),
+                                   lane=lane):
                 queued += 1
                 batch['pending'] += 1
         if summary and not queued:
@@ -2906,12 +2918,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.infra.utils import FileSystemUtils
         return FileSystemUtils.get_readable_size(size)
 
-    def _verification_finished(self, out, name, batch):
+    def _verification_finished(self, out, name, batch, job=None):
         """Record what a verification job found (on this thread, which owns
-        the case's database), badge the image, move the queue on."""
+        the case's database), badge the image, move its lane on."""
         from trace_app.core.case import (STATUS_MISSING, STATUS_UNHASHED,
                                          STATUS_VERIFIED, hash_verdict)
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(job)
         batch['pending'] -= 1
         row = out['row']
         status, detail = None, ''

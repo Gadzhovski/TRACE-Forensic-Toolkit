@@ -23,7 +23,7 @@ from trace_app.ui import icons
 #: page title -> (scope, keys). Order is the dialog's.
 PAGES = (
     ("General", 'user', ('examiner', 'organisation', 'case_folder',
-                         'size_units', 'debug_log')),
+                         'size_units', 'verify_order', 'debug_log')),
     ("Display", 'mixed', (('user', 'show_deleted'), ('user', 'show_system'),
                           ('case', 'display_zone'))),
     ("Privacy && Network", 'case', ('offline', 'vt_uploads')),
@@ -49,6 +49,7 @@ RANGES = {
 CHOICES = {
     'size_units': settings.SIZE_UNITS,
     'carve_source': settings.CARVE_SOURCES,
+    'verify_order': settings.VERIFY_ORDERS,
 }
 
 FOLDERS = ('case_folder', 'carved_folder', 'export_folder')
