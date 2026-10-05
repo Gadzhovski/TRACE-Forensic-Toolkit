@@ -32,6 +32,7 @@ IMAGE_DIR = os.path.join(ROOT, 'test_images')
 _DFTT = "https://downloads.sourceforge.net/project/dftt/Test%20Images/"
 _NPS = "https://downloads.digitalcorpora.org/corpora/drives/"
 _NIST = "https://cfreds-archive.nist.gov/dfr-images/"
+_COMMONS = "https://upload.wikimedia.org/wikipedia/commons/"
 
 #: name -> (source URL, how it is packed, SHA-256 of the image itself).
 #: Checksums are those in test_images/README.md, taken when each image was
@@ -72,6 +73,15 @@ CATALOG = {
     # Deleted through the Recycle Bin, then the bin emptied (2.2 MB packed).
     'dfr-01-recycle-ntfs.dd': (_NIST + 'dfr-01-recycle-ntfs.dd.bz2',
                                'bz2', '6a44af0530812edf1a289c539a3c6c7d6b42e1c93e8f60e53287bddb5fdf7efa'),
+    # Video for the media player's tests: small, CC0, from Wikimedia
+    # Commons -- VP9 and VP8 WebM, and Theora in an .ogg (a name that says
+    # audio, holding video).
+    'VP9test.webm': (_COMMONS + 'e/e1/VP9test.webm', 'raw',
+                     '2efbc8cbc302ce5ae498fa3f019eeb36447f15372fa92d6a62165f92449c1236'),
+    'ContainerShip.webm': (_COMMONS + 'e/eb/ContainerShip.webm', 'raw',
+                           'dc6f9ed8ea395c91df33f1b7aae0a50e1e4d54434514efffcb32258a1e2f4a3c'),
+    'Wiki.OrientateEdges.ogg': (_COMMONS + '2/28/Wiki.OrientateEdges.ogg',
+                                'raw', '4e583efb3a59d577f5f2a32cd8a6743785fe8f315a2f95c72778eb81635a1375'),
 }
 
 _USER_AGENT = ('TRACE-test-images/1.0 '

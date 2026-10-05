@@ -2056,3 +2056,52 @@ def test_media_says_what_it_is_and_switches_after_playing(qapp):
     finally:
         viewer.shutdown()
         viewer.deleteLater()
+
+
+@pytest.mark.parametrize('name, size, fps', [
+    ('VP9test.webm', (512, 288), 25),
+    ('ContainerShip.webm', (1084, 738), 30),
+    # Named as audio (.ogg), holding Theora video: shown as video.
+    ('Wiki.OrientateEdges.ogg', (480, 480), 30),
+])
+def test_video_shows_its_first_frame_steps_and_saves(qapp, tmp_path, name,
+                                                     size, fps):
+    """Real video (CC0 clips, tools/fetch_test_images.py): the first frame
+    is shown with nothing playing, the line gives size and rate, a frame
+    step moves one frame and stays paused, and Save Frame writes that frame
+    as a PNG named after the file and the moment."""
+    from PySide6.QtGui import QImage
+    from PySide6.QtMultimedia import QMediaPlayer
+    from trace_app.ui.viewers.media import UnifiedViewer
+    with open(image_path(name), 'rb') as handle:
+        content = handle.read()
+    viewer = UnifiedViewer()
+    viewer.resize(800, 300)
+    viewer.show()
+    try:
+        viewer.display_application_content(content, name)
+        player = viewer._audio_video_player
+        assert pump(qapp, 10, lambda: player._first_frame is not None)
+        pump(qapp, 0.3)
+        assert player.media_player.playbackState() == \
+            QMediaPlayer.PausedState
+        assert player.media_player.position() == 0
+        assert player.video_widget.isVisibleTo(viewer)
+        line = player.status_label.text()
+        assert line.startswith('Video') and f"{size[0]}×{size[1]}" in line
+        assert f"{fps} fps" in line and 'ready' in line
+        assert player.frame_next_action.isEnabled()
+
+        player.step_frame(1)
+        step = round(1000 / fps)
+        assert pump(qapp, 5, lambda: player.media_player.position() >= step)
+        assert player.media_player.position() <= step + 1
+        assert not player._is_playing
+
+        saved = player.save_frame(str(tmp_path / player.frame_file_name()))
+        assert saved.endswith(' @ 00m00.0s.png')
+        image = QImage(saved)
+        assert (image.width(), image.height()) == size
+    finally:
+        viewer.shutdown()
+        viewer.deleteLater()

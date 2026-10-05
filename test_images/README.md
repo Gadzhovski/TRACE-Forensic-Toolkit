@@ -137,6 +137,17 @@ What these established, all measured rather than assumed:
 | `BXS-1.E01` | 152 MB | NTFS, E01. The image the I/O constants work was measured against. |
 | `Op Archway AXA-1.E01` | 123 MB | NTFS, E01. |
 
+## Video
+
+For the media player's tests (first frame, frame stepping, Save Frame): small
+clips from Wikimedia Commons, each released under **CC0**.
+
+| File | Size | Video | Source |
+|---|---|---|---|
+| `VP9test.webm` | 175 KB | VP9, 512×288, 25 fps, 9 s | [Commons](https://commons.wikimedia.org/wiki/File:VP9test.webm) |
+| `ContainerShip.webm` | 289 KB | 1084×738, 30 fps, 22 s | [Commons](https://commons.wikimedia.org/wiki/File:ContainerShip.webm) |
+| `Wiki.OrientateEdges.ogg` | 770 KB | Theora, 480×480, 30 fps, 9 s -- an `.ogg` that holds video | [Commons](https://commons.wikimedia.org/wiki/File:Wiki.OrientateEdges.ogg) |
+
 ## Checksums
 
 The two DFRWS images were verified against the MD5s their organisers published,
@@ -179,6 +190,9 @@ c863ccad01804b840a6dfa623a94996ca876e15ded41c6c0d8ae148620eb6493  dfr-01-ntfs.dd
 43f239c3b141a02c20ee2e6adc94e553215a3b35371fa291f7e3d4aa9b562cb7  dfr-05-braid-ntfs.dd
 7da808c9d3da75eb437fd175567dc781f6291547fab37bb704773cb31562669c  dfr-05-nest-ntfs.dd
 6a44af0530812edf1a289c539a3c6c7d6b42e1c93e8f60e53287bddb5fdf7efa  dfr-01-recycle-ntfs.dd
+2efbc8cbc302ce5ae498fa3f019eeb36447f15372fa92d6a62165f92449c1236  VP9test.webm
+dc6f9ed8ea395c91df33f1b7aae0a50e1e4d54434514efffcb32258a1e2f4a3c  ContainerShip.webm
+4e583efb3a59d577f5f2a32cd8a6743785fe8f315a2f95c72778eb81635a1375  Wiki.OrientateEdges.ogg
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01
 a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA-1.E01
