@@ -296,11 +296,18 @@ class UnifiedViewer(QWidget):
             # Close the device after a short delay to let background threads finish
             # This is non-blocking and happens asynchronously
             def delayed_cleanup():
+                # The image's file object is held until the device is
+                # closed: the backend's reader may still be reading through
+                # it, and dropping the last reference at once could free it
+                # mid-read.
+                nonlocal old_file_obj
                 try:
                     if old_stream_device and old_stream_device.isOpen():
                         old_stream_device.close()
                 except Exception as e:
                     logger.error(f"Error in delayed stream device cleanup: {e}")
+                finally:
+                    old_file_obj = None
 
             # Schedule cleanup after 100ms (non-blocking)
             QTimer.singleShot(100, delayed_cleanup)
@@ -472,9 +479,10 @@ class UnifiedViewer(QWidget):
                     self._audio_video_player.safe_stop()
                     QApplication.processEvents()
 
-                    # Release reference
+                    # Release the widget, and with it its QMediaPlayer.
                     player = self._audio_video_player
                     self._audio_video_player = None
+                    player.deleteLater()
                 except Exception as e:
                     logger.error(f"Error during audio/video player shutdown: {e}")
 
