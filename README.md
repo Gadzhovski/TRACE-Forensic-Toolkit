@@ -65,19 +65,24 @@ triage rather than as a replacement for a commercial forensic suite.
 
 ### 📁 Cases across devices
 
-Start with **New Case**, **Open Case** or **Quick Triage** (no case). A case
-remembers its evidence and reopens it; several images — a laptop, a phone, a USB
-stick — live in one case, each kept open and clearly named. Every view says which
-image a file belongs to, and opening anything reads its own image.
+Start with **New Case**, **Open Case** or **Quick Triage** (no case). New Case
+is a guided setup — case details, the evidence (each image opened and checked
+as it is added, its exhibit number and acquisition details filled from the
+E01 header), the analysis modules as a Quick / Standard / Full profile, and a
+review before anything is written. A case remembers its evidence and reopens
+it; several images — a laptop, a phone, a USB stick — live in one case, each
+kept open and clearly named. Every view says which image a file belongs to,
+and opening anything reads its own image.
 
 </td>
 <td width="50%" valign="top">
 
 ### ✅ Evidence integrity
 
-Recomputes MD5 / SHA-1 for E01 images and compares them with the acquisition
-hashes. Verification is kept as a **history**, not a current value, and every
-check, hash sent out and evidence change is written to the case's audit log.
+Hashes every image when it joins a case — in the background — and compares
+E01 and AD1 images with their acquisition hashes. Verification is kept as a
+**history**, not a current value, and every check, hash sent out and
+evidence change is written to the case's audit log.
 
 </td>
 </tr>

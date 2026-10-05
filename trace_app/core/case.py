@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -54,6 +54,30 @@ STATUS_VERIFIED = 'verified'    # present and matching its recorded hash
 STATUS_MISSING = 'missing'      # the file is not where the case says it is
 STATUS_CHANGED = 'changed'      # present, but no longer the same bytes
 STATUS_UNHASHED = 'unhashed'    # present, but nothing to compare against
+
+#: Chain-of-custody details an evidence row can carry (schema v16), with
+#: how each reads. All optional: an image handed over with no paperwork is
+#: still evidence.
+EVIDENCE_DETAILS = {
+    'exhibit_number': "Exhibit number",
+    'description': "Description",
+    'acquired_by': "Acquired by",
+    'acquired_on': "Acquired on",
+}
+
+
+def case_folder_name(name):
+    """A folder name for a case called `name`, valid on every platform:
+    spaces kept (it is read by people), characters Windows refuses and
+    trailing dots and spaces dropped, never empty."""
+    cleaned = ''.join('_' if c in '<>:"/\|?*' or ord(c) < 32 else c
+                      for c in (name or '').strip())
+    cleaned = cleaned.rstrip(' .')[:80].rstrip(' .')
+    reserved = {'CON', 'PRN', 'AUX', 'NUL'} | {f'{p}{n}' for p in ('COM', 'LPT')
+                                                for n in range(1, 10)}
+    if cleaned.split('.')[0].upper() in reserved:
+        cleaned = f'_{cleaned}'
+    return cleaned or 'Case'
 
 
 # --- artifact references --------------------------------------------------
@@ -183,7 +207,8 @@ class Case:
     # --- lifecycle --------------------------------------------------------
 
     @classmethod
-    def create(cls, folder, name, number='', examiner='', description=''):
+    def create(cls, folder, name, number='', examiner='', description='',
+               organisation=''):
         """Make a new case in `folder`, which must not already hold one."""
         db_path = os.path.join(folder, CASE_DB_NAME)
         if os.path.exists(db_path):
@@ -206,6 +231,7 @@ class Case:
             'number': number,
             'examiner': examiner,
             'description': description,
+            'organisation': organisation,
             'created_utc': now,
             'opened_utc': now,
         })
@@ -315,9 +341,13 @@ class Case:
     def description(self):
         return self._get('description', '')
 
+    @property
+    def organisation(self):
+        return self._get('organisation', '')
+
     def update_metadata(self, **fields):
         """Change one or more case_info values."""
-        known = {'name', 'number', 'examiner', 'description'}
+        known = {'name', 'number', 'examiner', 'description', 'organisation'}
         unknown = set(fields) - known
         if unknown:
             raise ValueError(f"Not case metadata: {', '.join(sorted(unknown))}")
@@ -359,12 +389,13 @@ class Case:
 
     # --- evidence ---------------------------------------------------------
 
-    def add_evidence(self, path, display_name=None):
+    def add_evidence(self, path, display_name=None, details=None):
         """Record an image as part of this case. Returns its evidence id.
 
         The file is not hashed here: hashing a multi-gigabyte image takes
         minutes and would block the caller. The row starts as `pending` and
         :meth:`record_hashes` fills it in once verification has run.
+        `details` holds any of EVIDENCE_DETAILS (exhibit number and so on).
         """
         path = os.path.normpath(os.path.abspath(path))
         existing = self._db.execute(
@@ -377,14 +408,50 @@ class Case:
         except OSError:
             size = None
 
+        details = {key: (str(value).strip() or None)
+                   for key, value in (details or {}).items()
+                   if key in EVIDENCE_DETAILS and value is not None}
+        columns = ['path', 'display_name', 'size', 'added_utc',
+                   'last_status'] + list(details)
+        values = [path, display_name or os.path.basename(path), size,
+                  _utc_now(), STATUS_PENDING] + list(details.values())
         cursor = self._db.execute(
-            "INSERT INTO evidence (path, display_name, size, added_utc, "
-            "last_status) VALUES (?, ?, ?, ?, ?)",
-            (path, display_name or os.path.basename(path), size, _utc_now(),
-             STATUS_PENDING))
+            f"INSERT INTO evidence ({', '.join(columns)}) VALUES "
+            f"({', '.join('?' * len(columns))})", values)
         self._db.commit()
-        self._record_activity('evidence added', path)
+        recorded = '; '.join(f"{EVIDENCE_DETAILS[k].lower()} {v}"
+                             for k, v in details.items() if v)
+        self._record_activity('evidence added',
+                              path + (f" ({recorded})" if recorded else ''))
         return cursor.lastrowid
+
+    def update_evidence_details(self, evidence_id, **details):
+        """Change an evidence row's custody details; audited with the old
+        and new values, since these are what a report states."""
+        unknown = set(details) - set(EVIDENCE_DETAILS)
+        if unknown:
+            raise ValueError(f"Not evidence details: "
+                             f"{', '.join(sorted(unknown))}")
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if row is None:
+            return
+        changes = {}
+        for key, value in details.items():
+            value = (str(value).strip() or None) if value is not None else None
+            if (row[key] or None) != value:
+                changes[key] = (row[key], value)
+        if not changes:
+            return
+        for key, (_old, new) in changes.items():
+            self._db.execute(f"UPDATE evidence SET {key} = ? WHERE id = ?",
+                             (new, evidence_id))
+        self._db.commit()
+        self._record_activity(
+            'evidence details edited',
+            f"id={evidence_id} " + '; '.join(
+                f"{EVIDENCE_DETAILS[k].lower()}: {old or '(none)'} -> "
+                f"{new or '(none)'}" for k, (old, new) in changes.items()))
 
     def evidence(self):
         """Every piece of evidence, oldest first, as a list of dicts."""
@@ -529,11 +596,15 @@ class Case:
         self._db.commit()
         self._record_activity('evidence relocated', new_path)
 
-    def record_hashes(self, evidence_id, results):
+    def record_hashes(self, evidence_id, results, status=STATUS_VERIFIED,
+                      detail='Hashes computed and recorded.'):
         """Store the hashes verification computed.
 
         `results` is the dict from ImageHandler.calculate_hashes: the computed
         digests, and for an E01 the ones stored inside the image itself.
+        `status` / `detail` are the verdict (`hash_verdict`): an image whose
+        digests differ from the ones it stores is recorded as changed, with
+        its digests kept -- they are what it is now.
         """
         self._db.execute(
             "UPDATE evidence SET md5 = ?, sha1 = ?, sha256 = ?, "
@@ -541,7 +612,7 @@ class Case:
             "last_status = ? WHERE id = ?",
             (results.get('computed_md5'), results.get('computed_sha1'),
              results.get('computed_sha256'), results.get('stored_md5'),
-             results.get('stored_sha1'), _utc_now(), STATUS_VERIFIED,
+             results.get('stored_sha1'), _utc_now(), status,
              evidence_id))
         self._db.commit()
         # The history is the record: a hash written now does not replace the
@@ -550,10 +621,11 @@ class Case:
             evidence_id, 'md5',
             results.get('stored_md5') or '',
             results.get('computed_md5') or '',
-            STATUS_VERIFIED, 'Hashes computed and recorded.')
+            status, detail)
         self._record_activity(
             'evidence hashed',
-            f"id={evidence_id} md5={results.get('computed_md5') or '-'}")
+            f"id={evidence_id} md5={results.get('computed_md5') or '-'} "
+            f"{status}: {detail}")
 
     def verify_evidence(self, progress=None):
         """Check every piece of evidence is still what the case recorded.
@@ -565,79 +637,22 @@ class Case:
 
         Only the recorded hash is recomputed, so an image added but never
         verified reports UNHASHED rather than pretending to have checked it.
+        The window runs `check_evidence` on a thread and `record_check` here,
+        one row at a time; this is the same, in one call.
         """
         outcomes = []
         for row in self.evidence():
-            path = row['path']
-
-            if not os.path.exists(path):
-                self._note_check(row['id'], '', '', '', STATUS_MISSING,
-                                 'The file is not at its recorded location.')
-                outcomes.append((row, STATUS_MISSING,
-                                 'The file is not at its recorded location.'))
-                continue
-
-            expected = row['md5'] or row['sha1'] or row['sha256']
-            if not expected:
-                self._note_check(row['id'], '', '', '', STATUS_UNHASHED,
-                                 'No hash was recorded, so nothing can be '
-                                 'compared.')
-                outcomes.append((row, STATUS_UNHASHED,
-                                 'No hash was recorded, so nothing can be '
-                                 'compared.'))
-                continue
-
-            # Size is far cheaper than a hash and settles most mismatches --
-            # for a single raw file, whose bytes are what was hashed. An
-            # E01, a virtual disk or logical evidence was hashed by what it
-            # holds, not by its container's size.
-            plain = _is_plain_image(path)
-            try:
-                size = os.path.getsize(path) if plain else None
-            except OSError as exc:
-                self._note_check(row['id'], '', '', '', STATUS_MISSING,
-                                 str(exc))
-                outcomes.append((row, STATUS_MISSING, str(exc)))
-                continue
-
-            if plain and row['size'] is not None and size != row['size']:
-                self._note_check(
-                    row['id'], 'size', str(row['size']), str(size),
-                    STATUS_CHANGED,
-                    f"The file is {size:,} bytes; the case recorded "
-                    f"{row['size']:,}.")
-                outcomes.append((
-                    row, STATUS_CHANGED,
-                    f"The file is {size:,} bytes; the case recorded "
-                    f"{row['size']:,}."))
-                continue
-
-            algorithm = ('md5' if row['md5'] else
-                         'sha1' if row['sha1'] else 'sha256')
-            digest = _hash_file(path, algorithm, progress) if plain else                 _hash_evidence(path, algorithm, progress)
-            if digest is None:
-                self._note_check(row['id'], algorithm, str(expected), '',
-                                 STATUS_MISSING, 'The file could not be read.')
-                outcomes.append((row, STATUS_MISSING,
-                                 'The file could not be read.'))
-            elif digest.lower() == str(expected).lower():
-                self._note_check(row['id'], algorithm, str(expected), digest,
-                                 STATUS_VERIFIED,
-                                 f'{algorithm.upper()} matches.')
-                outcomes.append((row, STATUS_VERIFIED,
-                                 f'{algorithm.upper()} matches.'))
-            else:
-                self._note_check(
-                    row['id'], algorithm, str(expected), digest,
-                    STATUS_CHANGED,
-                    f"{algorithm.upper()} is {digest}; the case recorded "
-                    f"{expected}.")
-                outcomes.append((
-                    row, STATUS_CHANGED,
-                    f"{algorithm.upper()} is {digest}; the case recorded "
-                    f"{expected}."))
-
+            outcome = check_evidence(row, progress)
+            self.record_check(row['id'], outcome)
+            outcomes.append((row, outcome['status'], outcome['detail']))
         return outcomes
+
+    def record_check(self, evidence_id, outcome):
+        """Record what `check_evidence` found."""
+        self._note_check(evidence_id, outcome.get('algorithm', ''),
+                         outcome.get('expected', ''),
+                         outcome.get('computed', ''), outcome['status'],
+                         outcome['detail'])
 
     def _note_check(self, evidence_id, algorithm, expected, computed, status,
                     detail):
@@ -1978,7 +1993,11 @@ class Case:
                 added_utc     TEXT,
                 verified_utc  TEXT,
                 last_status   TEXT,
-                read_only     INTEGER NOT NULL DEFAULT 1
+                read_only     INTEGER NOT NULL DEFAULT 1,
+                exhibit_number TEXT,
+                description   TEXT,
+                acquired_by   TEXT,
+                acquired_on   TEXT
             );
 
             CREATE TABLE IF NOT EXISTS notes (
@@ -2409,6 +2428,18 @@ class Case:
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
 
+        if version < 16:
+            # Chain of custody per item. acquired_on is text as the image
+            # (or the examiner) recorded it: an E01's acquisition date is
+            # the acquiring machine's local time, with no zone to convert.
+            for column in EVIDENCE_DETAILS:
+                try:
+                    self._db.execute(
+                        f"ALTER TABLE evidence ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass        # already present (created above at v16)
+            self._db.commit()
+
         if version < 15:
             # A carved WAL and its database name each other.
             try:
@@ -2800,6 +2831,84 @@ def _utc_now():
         microsecond=0).isoformat()
 
 
+def hash_verdict(results):
+    """(status, detail) for an image hashed for the first time: compared
+    with the hashes it stores itself (an E01's, an AD1's log). Every
+    stored hash must match -- one matching and one not is a damaged or
+    altered image, not a verified one. With none stored, the digests are
+    the baseline later checks compare with."""
+    computed = {a: (results.get(f'computed_{a}') or '').lower()
+                for a in ('md5', 'sha1')}
+    if not computed['md5'] or computed['md5'] == 'error':
+        return STATUS_UNHASHED, ("The image could not be hashed: "
+                                 f"{results.get('error') or 'read failed'}.")
+    stored = {a: (results.get(f'stored_{a}') or '').lower()
+              for a in ('md5', 'sha1')}
+    compared = [a for a in ('md5', 'sha1') if stored[a]]
+    if not compared:
+        return STATUS_VERIFIED, ("Hashes computed and recorded; the image "
+                                 "stores none to compare with, so these are "
+                                 "the baseline.")
+    differ = [a for a in compared if stored[a] != computed[a]]
+    if differ:
+        return STATUS_CHANGED, '; '.join(
+            f"{a.upper()} is {computed[a]}; the image stored {stored[a]}"
+            for a in differ) + '.'
+    if len(compared) == 1:
+        return STATUS_VERIFIED, (f"{compared[0].upper()} matches the hash "
+                                 f"stored in the image.")
+    return STATUS_VERIFIED, "MD5 and SHA-1 match the hashes stored in the image."
+
+
+def check_evidence(row, progress=None):
+    """Re-check one evidence row against its recorded hash, without the
+    case's database: safe on a worker thread. Returns {status, detail,
+    algorithm, expected, computed} for `Case.record_check`."""
+    path = row['path']
+    out = {'algorithm': '', 'expected': '', 'computed': ''}
+    if not os.path.exists(path):
+        return dict(out, status=STATUS_MISSING,
+                    detail='The file is not at its recorded location.')
+
+    expected = row.get('md5') or row.get('sha1') or row.get('sha256')
+    if not expected:
+        return dict(out, status=STATUS_UNHASHED,
+                    detail='No hash was recorded, so nothing can be '
+                           'compared.')
+
+    # Size is far cheaper than a hash and settles most mismatches -- for a
+    # single raw file, whose bytes are what was hashed. An E01, a virtual
+    # disk or logical evidence was hashed by what it holds, not by its
+    # container's size.
+    plain = _is_plain_image(path)
+    try:
+        size = os.path.getsize(path) if plain else None
+    except OSError as exc:
+        return dict(out, status=STATUS_MISSING, detail=str(exc))
+
+    if plain and row.get('size') is not None and size != row['size']:
+        return dict(out, algorithm='size', expected=str(row['size']),
+                    computed=str(size), status=STATUS_CHANGED,
+                    detail=f"The file is {size:,} bytes; the case recorded "
+                           f"{row['size']:,}.")
+
+    algorithm = ('md5' if row.get('md5') else
+                 'sha1' if row.get('sha1') else 'sha256')
+    digest = _hash_file(path, algorithm, progress) if plain else \
+        _hash_evidence(path, algorithm, progress)
+    out.update(algorithm=algorithm, expected=str(expected))
+    if digest is None:
+        return dict(out, status=STATUS_MISSING,
+                    detail='The file could not be read.')
+    out['computed'] = digest
+    if digest.lower() == str(expected).lower():
+        return dict(out, status=STATUS_VERIFIED,
+                    detail=f'{algorithm.upper()} matches.')
+    return dict(out, status=STATUS_CHANGED,
+                detail=f"{algorithm.upper()} is {digest}; the case recorded "
+                       f"{expected}.")
+
+
 def _is_plain_image(path):
     """A single raw file whose own bytes are the evidence (dd, raw, iso
     ...), as opposed to an E01's media, a virtual disk's guest, a split
@@ -2861,3 +2970,42 @@ def _hash_file(path, algorithm='md5', progress=None):
 def is_case_folder(folder):
     """Does this folder hold a case?"""
     return os.path.isfile(os.path.join(folder, CASE_DB_NAME))
+
+
+def read_case_summary(folder):
+    """{name, number, examiner, organisation, created_utc, opened_utc,
+    evidence} for the welcome screen's list, or None if unreadable.
+
+    Read without opening the case: no audit line ("case opened" for a
+    glance at a list would be false), no migration, and nothing written to
+    the folder at all -- immutable=1, because even a read-only connection
+    to a WAL database leaves -wal and -shm files behind. A case open in
+    another window may show slightly stale counts; that is all.
+    """
+    from urllib.request import pathname2url
+    path = os.path.join(folder, CASE_DB_NAME)
+    if not os.path.isfile(path):
+        return None
+    try:
+        connection = sqlite3.connect(
+            f"file:{pathname2url(os.path.abspath(path))}"
+            f"?mode=ro&immutable=1", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        info = dict(connection.execute(
+            "SELECT key, value FROM case_info WHERE key IN ('name', "
+            "'number', 'examiner', 'organisation', 'created_utc', "
+            "'opened_utc')").fetchall())
+        evidence = connection.execute(
+            "SELECT COUNT(*) FROM evidence").fetchone()[0]
+    except sqlite3.Error as exc:
+        logger.debug("Case summary for %s unreadable: %s", folder, exc)
+        return None
+    finally:
+        connection.close()
+    out = {key: info.get(key) or '' for key in
+           ('name', 'number', 'examiner', 'organisation', 'created_utc',
+            'opened_utc')}
+    out['evidence'] = evidence
+    return out

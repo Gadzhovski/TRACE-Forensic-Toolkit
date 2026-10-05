@@ -717,12 +717,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # colour). Checkable entries -- themes, panel toggles -- have none:
         # Qt draws their tick where the icon goes.
         file_menu = QMenu('File', self)
+        # In a case, evidence comes in through the Add Evidence wizard
+        # (checked, described, analysed); quick triage keeps the plain file
+        # pickers, since nothing there is recorded.
         self.add_evidence_action = icons.action(
-            icons.EVIDENCE_ADD, "Add Evidence File...", self)
+            icons.EVIDENCE_ADD,
+            "Add Evidence..." if self.case else "Add Evidence File...", self)
         self.add_evidence_action.triggered.connect(self.load_image_evidence)
         self.add_folder_action = icons.action(
             icons.EVIDENCE_FOLDER, "Add Evidence Folder...", self)
         self.add_folder_action.triggered.connect(self.load_folder_evidence)
+        self.add_folder_action.setVisible(not self.case)
         self.remove_evidence_action = icons.action(
             icons.EVIDENCE_REMOVE, "Remove Evidence File...", self)
         self.remove_evidence_action.triggered.connect(
@@ -2619,6 +2624,34 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self._ask_and_queue(rows, evidence_id)
 
+    def _rule_libraries(self):
+        """The rule and hash-set libraries this window has loaded, for
+        working out which modules can run."""
+        return {'hash': self.hash_library(), 'yara': self.yara_library(),
+                'sigma': self.sigma_library(),
+                'keyword': self.keyword_library()}
+
+    def _module_preselection(self, evidence_id=None):
+        """What the modules dialog starts with: last time's modules (the
+        evidence is not carried over -- an image left over from the last
+        run is how a run reaches the wrong ones), and which modules this
+        case can run."""
+        from trace_app.ui.dialogs.analysis_modules import (
+            MODULE_HASHSETS, MODULE_KEYWORDS, MODULE_SIGMA, MODULE_YARA,
+            availability)
+        preselected = dict(self._last_choice,
+                           evidence_ids=None if evidence_id is None
+                           else [evidence_id])
+        unavailable, in_use = availability(self.case,
+                                           self._rule_libraries())
+        preselected['unavailable'] = unavailable
+        # Rule-driven modules follow the case's own options, not the last
+        # run: ticked when their sets are in use.
+        for key in (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
+                    MODULE_KEYWORDS):
+            preselected[key] = key in in_use
+        return preselected
+
     def _ask_and_queue(self, rows, evidence_id=None):
         """Ask what to run, and against which evidence; queue the jobs.
 
@@ -2629,58 +2662,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         evidence = [(row['id'], row.get('display_name')
                      or os.path.basename(row['path'])) for row in rows]
-        # The modules are remembered from last time; the evidence is not. Which
-        # images to run on is decided where the dialog was opened -- an image
-        # carried over from the last run is how a run reaches the wrong ones.
-        preselected = dict(self._last_choice,
-                           evidence_ids=None if evidence_id is None
-                           else [evidence_id])
-        # Hash sets follow the case's own options, not the last run.
-        options = hashsets.case_options(self.case, self.hash_library())
-        usable = options.get('enabled') and any(
-            hashsets.set_enabled_in(options, entry)
-            for entry in self.hash_library().sets())
-        preselected['hashsets_available'] = bool(usable)
-        from trace_app.core import yara_rules
-        if not yara_rules.available():
-            preselected['yara_available'] = False
-            preselected['yara_reason'] = yara_rules.unavailable_reason()
-        else:
-            yara_options = yara_rules.case_options(self.case,
-                                                   self.yara_library())
-            in_use = yara_options.get('enabled') and any(
-                yara_rules.set_enabled_in(yara_options, entry)
-                for entry in self.yara_library().sets())
-            preselected['yara_available'] = bool(in_use)
-            preselected['yara'] = bool(in_use)
-        from trace_app.core import sigma
-        if not sigma.available():
-            preselected['sigma_available'] = False
-            preselected['sigma_reason'] = sigma.unavailable_reason()
-        else:
-            sigma_options = sigma.case_options(self.case,
-                                               self.sigma_library())
-            in_use = sigma_options.get('enabled') and any(
-                sigma.set_enabled_in(sigma_options, entry)
-                for entry in self.sigma_library().sets())
-            preselected['sigma_available'] = bool(in_use)
-            preselected['sigma'] = bool(in_use)
-        preselected['hashsets'] = bool(usable and options.get('auto_match'))
-        from trace_app.core import keywords
-        keyword_options = keywords.case_options(self.case,
-                                                self.keyword_library())
-        lists_in_use = keyword_options.get('enabled') and any(
-            keywords.list_enabled_in(keyword_options, entry)
-            for entry in self.keyword_library().lists())
-        preselected['keywords_available'] = bool(lists_in_use)
-        preselected['keywords'] = bool(lists_in_use)
-        choice = choose_modules(self, preselected=preselected,
+        choice = choose_modules(self,
+                                preselected=self._module_preselection(
+                                    evidence_id),
                                 evidence=evidence)
         if not choice:
             return
-        self._last_choice = choice
         chosen = [row for row in rows if choice['evidence_ids'] is None
                   or row['id'] in choice['evidence_ids']]
+        self.queue_choice(chosen, choice)
+
+    def queue_choice(self, chosen, choice):
+        """Queue what a modules choice selects, over the `chosen` evidence
+        rows, in the order the jobs depend on each other."""
+        self._last_choice = dict(choice)
         if choice['modules']:
             self.queue_analysis(chosen, choice['modules'])
         if choice.get('index'):
@@ -2710,6 +2705,151 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
                                choice['unallocated_only'])
+
+    # --- case setup (the wizards) -------------------------------------------
+
+    def start_case_setup(self, setup):
+        """What the New Case wizard asked for, once the case's evidence is
+        open: verification first, then the modules."""
+        if not self.case or not setup:
+            return
+        if getattr(self, '_loading_case_evidence', False):
+            # Still opening the evidence: run when that is done.
+            self._pending_setup = setup
+            return
+        rows = [row for row in self.case.evidence()
+                if row['path'] in self._image_handlers]
+        if rows:
+            self.queue_setup(rows, setup)
+
+    def queue_setup(self, rows, setup):
+        """Queue a wizard's verification and modules over `rows`."""
+        if setup.get('verify'):
+            self.queue_verification(rows)
+        if setup.get('choice'):
+            self.queue_choice(rows, setup['choice'])
+            self.set_status(f"Queued analysis of {len(rows)} piece(s) of "
+                            f"evidence")
+
+    # --- verification jobs ------------------------------------------------
+
+    def queue_verification(self, rows, summary=False):
+        """Hash (or re-check) each piece of evidence as a job on the bar.
+
+        Evidence never hashed is hashed and compared with the hashes it
+        stores (core/case.hash_verdict); evidence with a recorded hash is
+        checked against it. With `summary`, the outcome of the whole batch
+        is reported once it ends -- Case > Verify All Evidence.
+        """
+        from trace_app.ui.dialogs.verification import EvidenceVerifyWorker
+        if not self.case:
+            return 0
+        batch = {'pending': 0, 'outcomes': [], 'summary': summary}
+        queued = 0
+        for row in rows:
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+
+            def start(job, row=row, name=name):
+                current = next((r for r in self.case.evidence()
+                                if r['id'] == row['id']), row)
+                worker = EvidenceVerifyWorker(current, self)
+                worker.progressed.connect(
+                    lambda done, total: self.job_bar.report(
+                        int(done * 1000 / total) if total else 0, 1000,
+                        f"{self._readable(done)} of "
+                        f"{self._readable(total)}"))
+                worker.verified.connect(
+                    lambda out, name=name: self._verification_finished(
+                        out, name, batch))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            title = (f"Verifying {name}" if row.get('md5') or row.get('sha1')
+                     or row.get('sha256') else f"Hashing {name}")
+            if self.job_bar.submit(Job(key=f"verify:{evidence_id}",
+                                       title=title, start=start,
+                                       stop=lambda worker: worker.stop())):
+                queued += 1
+                batch['pending'] += 1
+        if summary and not queued:
+            message.information(self, "Verification",
+                                "Every piece of evidence is already being "
+                                "verified.")
+        return queued
+
+    def _readable(self, size):
+        from trace_app.infra.utils import FileSystemUtils
+        return FileSystemUtils.get_readable_size(size)
+
+    def _verification_finished(self, out, name, batch):
+        """Record what a verification job found (on this thread, which owns
+        the case's database), badge the image, move the queue on."""
+        from trace_app.core.case import (STATUS_MISSING, STATUS_UNHASHED,
+                                         STATUS_VERIFIED, hash_verdict)
+        self.job_bar.job_finished()
+        batch['pending'] -= 1
+        row = out['row']
+        status, detail = None, ''
+        if out.get('cancelled'):
+            self.set_status(f"Verification of {name} cancelled; nothing "
+                            f"recorded")
+        elif out.get('error'):
+            status, detail = STATUS_MISSING if not os.path.exists(
+                row['path']) else STATUS_UNHASHED, out['error']
+            self.case.record_check(row['id'], {'status': status,
+                                               'detail': detail})
+        elif out.get('mode') == 'hash':
+            results = out.get('results') or {}
+            status, detail = hash_verdict(results)
+            if status == STATUS_UNHASHED:
+                self.case.record_check(row['id'], {'status': status,
+                                                   'detail': detail})
+            else:
+                self.case.record_hashes(row['id'], results, status, detail)
+                self.verification_results[row['path']] = {
+                    'html': None, 'verified': status == STATUS_VERIFIED,
+                    'hashes': dict(results, path=row['path'])}
+        else:
+            outcome = out.get('outcome') or {}
+            status, detail = outcome.get('status'), outcome.get('detail', '')
+            self.case.record_check(row['id'], outcome)
+            if status == STATUS_VERIFIED and row['path'] in \
+                    self.verification_results:
+                self.verification_results[row['path']]['verified'] = True
+
+        if status is not None:
+            batch['outcomes'].append((row, status, detail))
+            if row['path'] in self._image_handlers:
+                self.mark_image_verified(row['path'],
+                                         status == STATUS_VERIFIED)
+            self.set_status(f"{name}: {detail}")
+            logger.info("Verification of %s: %s (%s)", name, status, detail)
+        if getattr(self, 'case_panel', None):
+            self.case_panel.refresh()
+        if batch['pending'] == 0:
+            self._verification_batch_done(batch)
+
+    def _verification_batch_done(self, batch):
+        from trace_app.core.case import STATUS_CHANGED, STATUS_MISSING
+        trouble = [(row, status, detail) for row, status, detail
+                   in batch['outcomes']
+                   if status in (STATUS_MISSING, STATUS_CHANGED)]
+        if trouble:
+            # Loudly, whether asked for or not: evidence that is not what
+            # it was is the one result an examiner must not miss.
+            lines = [f"{row.get('display_name') or row['path']}: {detail}"
+                     for row, _status, detail in trouble]
+            message.warning(
+                self, "Evidence does not match",
+                "Some evidence is not as it was recorded.",
+                "\n\n".join(lines))
+        elif batch['summary'] and batch['outcomes']:
+            message.information(
+                self, "Evidence verified",
+                f"All {len(batch['outcomes'])} piece(s) of evidence match "
+                f"what was recorded, or now have a recorded baseline.")
 
     def queue_analysis(self, rows, modules):
         """Put one analysis job per piece of evidence on the shared queue."""
@@ -5047,15 +5187,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         missing = []
         opened = 0
-        for row in rows:
-            path = row['path']
-            if not os.path.exists(path):
-                missing.append((row, 'is not where the case recorded it'))
-                continue
-            if self.open_evidence_image(path, record_in_case=False):
-                opened += 1
-            else:
-                missing.append((row, 'could not be opened'))
+        # A New Case wizard's jobs wait for this (start_case_setup).
+        self._loading_case_evidence = True
+        try:
+            for row in rows:
+                path = row['path']
+                if not os.path.exists(path):
+                    missing.append((row, 'is not where the case recorded '
+                                         'it'))
+                    continue
+                if self.open_evidence_image(path, record_in_case=False):
+                    opened += 1
+                else:
+                    missing.append((row, 'could not be opened'))
+        finally:
+            self._loading_case_evidence = False
+        pending, self._pending_setup = getattr(self, '_pending_setup',
+                                               None), None
+        if pending:
+            QTimer.singleShot(0, lambda: self.start_case_setup(pending))
 
         if opened:
             self.set_status(
@@ -5159,33 +5309,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.case_panel.refresh()
 
     def verify_case_evidence(self):
-        """Re-check every piece of evidence against its recorded hash."""
+        """Re-check every piece of evidence against its recorded hash (and
+        hash any never hashed), as jobs on the bar: hashing an image on the
+        UI thread froze the window for as long as it took."""
         if not self.case:
             return
-        outcomes = self.case.verify_evidence()
-        if not outcomes:
+        rows = self.case.evidence()
+        if not rows:
             message.information(self, "No evidence",
                                 "This case has no evidence to check yet.")
             return
-
-        trouble = [(row, status, detail) for row, status, detail in outcomes
-                   if status in ('missing', 'changed')]
-        if getattr(self, 'case_panel', None):
-            self.case_panel.refresh()
-
-        if not trouble:
-            message.information(
-                self, "Evidence verified",
-                f"All {len(outcomes)} piece(s) of evidence match what the "
-                f"case recorded.")
-            return
-
-        lines = [f"{row['display_name'] or row['path']}: {detail}"
-                 for row, _status, detail in trouble]
-        message.warning(
-            self, "Evidence does not match",
-            "Some evidence is not as the case recorded it.",
-            "\n\n".join(lines))
+        self.queue_verification(rows, summary=True)
 
     def open_case_folder(self):
         """Show the case folder in the system file manager."""
@@ -5406,32 +5540,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         gc.collect()  # Encourage garbage collection
 
     def load_image_evidence(self):
-        """Open an image with a specific filter on Kali Linux."""
-        # Define the supported image file extensions, including both lowercase and uppercase variants
-        supported_image_extensions = ["*.e01", "*.E01", "*.s01", "*.S01",
-                                      "*.raw", "*.RAW",
-                                      "*.img", "*.IMG", "*.dd", "*.DD",
-                                      "*.iso", "*.ISO",
-                                      "*.001", "*.s01", "*.ex01", "*.dmg",
-                                      "*.sparse", "*.sparseimage",
-                                      "*.vmdk", "*.VMDK", "*.vhd", "*.VHD",
-                                      "*.vhdx", "*.VHDX", "*.qcow2",
-                                      "*.QCOW2", "*.qcow"]
-        # Logical evidence (core/logical_sources.py): files, not a disk.
-        logical_extensions = ["*.ad1", "*.AD1", "*.l01", "*.L01", "*.lx01",
-                              "*.Lx01", "*.zip", "*.ZIP", "*.tar", "*.tgz",
-                              "*.tar.gz", "*.tar.bz2", "*.tar.xz"]
-
-        file_filter = ";;".join((
-            "All Evidence ({})".format(" ".join(supported_image_extensions
-                                                + logical_extensions)),
-            "Disk Images ({})".format(" ".join(supported_image_extensions)),
-            "Logical Evidence: AD1, L01, ZIP, TAR ({})".format(
-                " ".join(logical_extensions))))
-
-        # Open file dialog with the specified file filter
-        image_path, _ = QFileDialog.getOpenFileName(self, "Select Image", "", file_filter)
-
+        """File > Add Evidence: the Add Evidence wizard in a case; in quick
+        triage, a file picker straight to the image."""
+        if self.case:
+            self.add_evidence_to_case()
+            return
+        from trace_app.ui.widgets.evidence_intake import EVIDENCE_FILE_FILTER
+        image_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "", EVIDENCE_FILE_FILTER)
         if image_path:
             self.open_evidence_image(image_path)
 
@@ -5439,10 +5555,44 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """A folder of collected files as evidence -- a triage collection
         (KAPE, Velociraptor, UAC), a phone's extraction, exported files.
         Read in place, never written to."""
+        if self.case:
+            self.add_evidence_to_case()
+            return
         folder = QFileDialog.getExistingDirectory(self, "Select Evidence "
                                                         "Folder")
         if folder:
             self.open_evidence_image(folder)
+
+    def add_evidence_to_case(self, paths=None):
+        """The Add Evidence wizard: items checked and described, modules
+        chosen; then each is recorded, opened and its jobs queued."""
+        from trace_app.ui.dialogs.case_wizard import AddEvidenceWizard
+        if not self.case:
+            return
+        wizard = AddEvidenceWizard(self.case, self,
+                                   libraries=self._rule_libraries(),
+                                   paths=paths)
+        if wizard.exec() != QDialog.Accepted or not wizard.setup:
+            return
+        setup = wizard.setup
+        rows = []
+        for item in setup['items']:
+            try:
+                evidence_id = self.case.add_evidence(
+                    item['path'], item['display_name'], item['details'])
+            except Exception as exc:
+                logger.error("Could not record %s: %s", item['path'], exc)
+                message.critical(self, "Could not add evidence",
+                                 f"{item['path']} could not be recorded in "
+                                 f"the case: {exc}")
+                continue
+            if self.open_evidence_image(item['path'], record_in_case=False):
+                self.triage_panel.set_case(self.case)
+                self._refresh_carving_targets()
+            rows.append(next(r for r in self.case.evidence()
+                             if r['id'] == evidence_id))
+        if rows:
+            self.queue_setup(rows, setup)
 
     def open_evidence_image(self, image_path, record_in_case=True):
         """Load an image and show it. Returns True when it opened.

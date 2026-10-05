@@ -22,7 +22,8 @@ from PySide6.QtWidgets import (QHeaderView, QLabel, QTableWidget,
                                QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
-from trace_app.core.case import (STATUS_CHANGED, STATUS_MISSING,
+from trace_app.core.case import (EVIDENCE_DETAILS, STATUS_CHANGED,
+                                 STATUS_MISSING,
                                  STATUS_PENDING, STATUS_UNHASHED,
                                  STATUS_VERIFIED)
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
@@ -87,10 +88,10 @@ class CasePanel(QWidget):
 
         self.evidence_table = QTableWidget()
         self.evidence_table.setObjectName("caseEvidenceTable")
-        self.evidence_table.setColumnCount(7)
+        self.evidence_table.setColumnCount(8)
         self.evidence_table.setHorizontalHeaderLabels(
-            ['Name', 'Status', 'Access', 'Last checked', 'MD5', 'Size',
-             'Path'])
+            ['Name', 'Exhibit', 'Status', 'Access', 'Last checked', 'MD5',
+             'Size', 'Path'])
         self.evidence_table.verticalHeader().setVisible(False)
         self.evidence_table.verticalHeader().setDefaultSectionSize(
             TABLE_ROW_HEIGHT)
@@ -154,6 +155,7 @@ class CasePanel(QWidget):
             ("Case name", name),
             ("Case number", number or "—"),
             ("Examiner", metadata.get('examiner') or "—"),
+            ("Organisation", metadata.get('organisation') or "—"),
             ("Description", metadata.get('description') or "—"),
             ("Created", metadata.get('created_utc') or "—"),
             ("Case folder", self.case.folder),
@@ -177,6 +179,7 @@ class CasePanel(QWidget):
             checked = item.get('verified_utc') or '—'
             values = [
                 item.get('display_name') or os.path.basename(item['path']),
+                item.get('exhibit_number') or '—',
                 STATUS_TEXT.get(status, status),
                 # TRACE never writes to evidence; this records what the
                 # examiner declared, which is what a report has to state.
@@ -186,9 +189,15 @@ class CasePanel(QWidget):
                 f"{size:,}" if size is not None else '—',
                 item['path'],
             ]
+            # The custody details a report states, where the row is.
+            custody = '\n'.join(
+                f"{label}: {item[key]}" for key, label in
+                EVIDENCE_DETAILS.items() if item.get(key))
             for column, value in enumerate(values):
                 cell = QTableWidgetItem(str(value))
-                if column == 1 and status in (STATUS_MISSING, STATUS_CHANGED):
+                if column in (0, 1) and custody:
+                    cell.setToolTip(custody)
+                if column == 2 and status in (STATUS_MISSING, STATUS_CHANGED):
                     # Flagged in the text as well as any styling, so the
                     # meaning survives a screenshot or a colour-blind reader.
                     cell.setToolTip(
@@ -196,7 +205,7 @@ class CasePanel(QWidget):
                         "recorded. Investigate before relying on it.")
                 self.evidence_table.setItem(row, column, cell)
 
-        fit_columns(self.evidence_table, {6: 380})
+        fit_columns(self.evidence_table, {7: 380})
 
     @staticmethod
     def _make_table(object_name, headers):

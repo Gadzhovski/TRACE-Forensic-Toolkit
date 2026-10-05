@@ -269,3 +269,69 @@ class VerificationWidget(QWidget):
         return {'html': self._results_html, 'verified': self._verified,
                 'hashes': self._hash_results}
 
+
+
+class EvidenceVerifyWorker(QThread):
+    """Hash or re-check one piece of evidence for the job bar.
+
+    Evidence never hashed is hashed (ImageHandler.calculate_hashes) and
+    compared with what it stores itself; evidence with a recorded hash is
+    re-checked against it (case.check_evidence). Only the reading happens
+    here -- the case is written on the UI thread, which owns its database
+    connection. Cancel is cooperative: the next progress report stops it.
+    """
+
+    #: (bytes done, bytes total) -- objects, as images pass 2**31 bytes.
+    progressed = Signal(object, object)
+    #: {'row', 'mode': 'hash' | 'check', 'results' | 'outcome',
+    #:  'cancelled', 'error'}
+    verified = Signal(dict)
+
+    def __init__(self, row, parent=None):
+        super().__init__(parent)
+        self.row = dict(row)
+        self._stop = False
+        self._last = -1
+
+    def stop(self):
+        self._stop = True
+
+    def _progress(self, done, total):
+        from trace_app.core.image_handler import HashingCancelled
+        if self._stop:
+            raise HashingCancelled()
+        if total:
+            percent = int(done * 100 / total)
+            if percent != self._last:
+                self._last = percent
+                self.progressed.emit(done, total)
+
+    def run(self):
+        from trace_app.core.case import check_evidence
+        from trace_app.core.image_handler import (HashingCancelled,
+                                                  ImageHandler)
+        out = {'row': self.row, 'cancelled': False, 'error': ''}
+        recorded = (self.row.get('md5') or self.row.get('sha1')
+                    or self.row.get('sha256'))
+        try:
+            if recorded:
+                out['mode'] = 'check'
+                out['outcome'] = check_evidence(self.row, self._progress)
+            else:
+                out['mode'] = 'hash'
+                handler = ImageHandler(self.row['path'])
+                try:
+                    if not handler.loaded:
+                        out['error'] = (handler.load_error or
+                                        'The evidence could not be opened.')
+                    else:
+                        out['results'] = handler.calculate_hashes(
+                            self._progress)
+                finally:
+                    handler.close_resources()
+        except HashingCancelled:
+            out['cancelled'] = True
+        except Exception as exc:
+            logger.exception("Verifying %s failed", self.row.get('path'))
+            out['error'] = str(exc)
+        self.verified.emit(out)

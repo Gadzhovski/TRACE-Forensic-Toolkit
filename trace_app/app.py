@@ -138,7 +138,7 @@ def main():
     # handed a USB stick who wants to know what is on it should not have to
     # name an investigation first, so quick triage leads to exactly the
     # application TRACE was before cases existed.
-    case = choose_case()
+    case, setup = choose_case()
     if case is None:
         logging.getLogger('TRACE').info("Launcher dismissed; not starting")
         return 0
@@ -146,10 +146,13 @@ def main():
     window = MainWindow(case=None if case is TRIAGE else case)
     window.show_on_start()
 
-    # Once the window is up and the case's evidence has been reopened, ask
-    # what to examine. Deferred by a beat so the offer lands on a drawn
-    # window rather than over a half-built one.
-    if case is not TRIAGE:
+    # A new case from the wizard: queue what it asked for (verification,
+    # then the modules) once its evidence is open. A reopened case: offer
+    # the modules if its evidence was never analysed. Deferred by a beat so
+    # either lands on a drawn window rather than a half-built one.
+    if setup is not None:
+        QTimer.singleShot(0, lambda: window.start_case_setup(setup))
+    elif case is not TRIAGE:
         QTimer.singleShot(0, window.offer_analysis_modules)
 
     return app.exec()

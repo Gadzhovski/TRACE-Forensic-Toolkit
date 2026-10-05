@@ -95,7 +95,7 @@ def default_options(case=None):
         'case_name': case.name if case is not None else '',
         'case_number': case.number if case is not None else '',
         'examiner': case.examiner if case is not None else '',
-        'organisation': '',
+        'organisation': case.organisation if case is not None else '',
         'classification': '',
         'summary': '',
         'conclusions': '',
@@ -323,6 +323,12 @@ class _Builder:
             anchor = f"evidence-{row['id']}"
             out.append(self.heading(2, anchor, self.names[row['id']]))
             out.append(_facts([
+                ("Exhibit number", e(row.get('exhibit_number'))),
+                ("Description", e(row.get('description'))),
+                ("Acquired by", e(row.get('acquired_by'))),
+                # As recorded: an E01's date is the acquiring machine's
+                # local time, with no zone to state.
+                ("Acquired on", e(row.get('acquired_on'))),
                 ("File", _mono(row['path'])),
                 ("Size", e(_size(row.get('size')))),
                 ("Added to the case", e(row.get('added_utc'))),

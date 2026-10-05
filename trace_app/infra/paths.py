@@ -158,12 +158,14 @@ def recent_cases_file():
     return config_file('recent_cases.json')
 
 
-def read_recent_cases(limit=10):
+def read_recent_cases(limit=15, include_missing=False):
     """Recently opened case folders, most recent first.
 
-    Folders that no longer exist are dropped on read rather than offered and
-    then failing: a launcher listing a case that cannot be opened is worse than
-    a shorter list.
+    A folder that is not there is left out unless `include_missing`: the
+    welcome screen lists it greyed, "folder not found" -- a case on an
+    unplugged drive is still the examiner's case, and dropping it from the
+    list (as this once did, permanently, on the next remember_case) made it
+    look deleted. Each entry has 'missing' saying which.
     """
     import json
 
@@ -181,37 +183,47 @@ def read_recent_cases(limit=10):
         folder = entry.get('folder') if isinstance(entry, dict) else entry
         if not folder or folder in [e['folder'] for e in seen]:
             continue
-        if not os.path.isdir(folder):
+        missing = not os.path.isdir(folder)
+        if missing and not include_missing:
             continue
         seen.append({
             'folder': folder,
             'name': (entry.get('name') if isinstance(entry, dict) else '')
                     or os.path.basename(folder),
             'opened': entry.get('opened', '') if isinstance(entry, dict) else '',
+            'missing': missing,
         })
         if len(seen) >= limit:
             break
     return seen
 
 
-def remember_case(folder, name='', limit=10):
-    """Put a case at the top of the recent list."""
+def _write_recent_cases(entries):
     import json
+    try:
+        with open(recent_cases_file(), 'w', encoding='utf-8') as handle:
+            json.dump([{k: e[k] for k in ('folder', 'name', 'opened')}
+                       for e in entries], handle, indent=2)
+    except OSError:
+        pass        # a missing recent list must not stop a case opening
 
-    entries = [e for e in read_recent_cases(limit=limit)
+
+def remember_case(folder, name='', limit=15):
+    """Put a case at the top of the recent list."""
+    entries = [e for e in read_recent_cases(limit=limit, include_missing=True)
                if e['folder'] != folder]
     entries.insert(0, {
         'folder': folder,
         'name': name or os.path.basename(folder),
         'opened': _now_iso(),
     })
+    _write_recent_cases(entries[:limit])
 
-    try:
-        with open(recent_cases_file(), 'w', encoding='utf-8') as handle:
-            json.dump(entries[:limit], handle, indent=2)
-    except OSError:
-        pass        # a missing recent list must not stop a case opening
 
+def forget_case(folder):
+    """Take a case off the recent list. The case itself is not touched."""
+    entries = read_recent_cases(limit=1000, include_missing=True)
+    _write_recent_cases([e for e in entries if e['folder'] != folder])
 
 
 def _now_iso():

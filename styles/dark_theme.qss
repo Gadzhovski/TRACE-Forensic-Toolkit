@@ -1200,8 +1200,6 @@ QTableWidget#bookmarksTable {
 /* No background of their own: they take the dialog colour the rest of
    the application uses, so a new dialog cannot introduce a second opinion
    about what a dialog looks like. */
-QDialog#caseLauncher,
-QDialog#newCaseDialog,
 QDialog#casePropertiesDialog {
     background-color: #2B2B2B;
 }
@@ -1224,17 +1222,6 @@ QLabel#caseSectionHeading {
     font-weight: 600;
     color: #9aa4b0;
     padding-top: 4px;
-}
-
-QPushButton#launcherButton {
-    font-size: 14px;
-    text-align: left;
-    padding-left: 14px;
-}
-
-QListWidget#recentCaseList {
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
 }
 
 QLabel#caseFolderHint,
@@ -1678,4 +1665,156 @@ QLabel#settingsHint {
 QLabel#settingsScopeNote {
     color: #E0E0E0;
     padding-top: 8px;
+}
+
+
+/* ============ Welcome screen, case wizard, evidence intake ============ */
+/* In the application's own idiom: the standard buttons, plain surfaces,
+   bold labels for headings, small grey help text. No accent colour -- the
+   main window has none. */
+
+QDialog#caseLauncher,
+QDialog#caseWizard {
+    background-color: #2E2E2E;
+}
+
+QFrame#launcherSide {
+    border-right: 1px solid #5A5A5A;
+}
+
+QLabel#launcherVersion,
+QLabel#launcherPath {
+    font-size: 11px;
+    color: #9aa4b0;
+}
+
+/* A start-screen action: drawn like every other button, but two lines tall
+   -- so the global 26px height is lifted for it alone. */
+QPushButton#launcherAction {
+    min-height: 0px;
+    max-height: 200px;
+    min-width: 0px;
+    margin: 0px;
+    padding: 0px;
+    text-align: left;
+}
+QPushButton#launcherAction QLabel {
+    background-color: transparent;
+}
+QLabel#launcherActionTitle {
+    font-weight: 600;
+}
+QLabel#launcherActionText {
+    font-size: 11px;
+    color: #9aa4b0;
+}
+
+QLabel#launcherEmpty,
+QLabel#intakeEmpty {
+    color: #9aa4b0;
+    border: 1px solid #5A5A5A;
+    border-radius: 4px;
+    padding: 24px;
+}
+
+QTableWidget#recentCaseTable::item:disabled {
+    color: #9aa4b0;
+}
+
+/* --- wizard frame --- */
+
+QFrame#wizardHeader {
+    border-bottom: 1px solid #5A5A5A;
+}
+QFrame#wizardFooter {
+    border-top: 1px solid #5A5A5A;
+}
+
+QLabel#wizardStep {
+    color: #9aa4b0;
+    padding: 2px 0px;
+}
+QLabel#wizardStep[state="current"] {
+    color: #E0E0E0;
+    font-weight: 600;
+}
+QLabel#wizardStep[state="done"] {
+    color: #E0E0E0;
+}
+QFrame#wizardStepRule {
+    color: #5A5A5A;
+}
+
+QLabel#wizardTitle {
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#wizardSubtitle,
+QLabel#wizardProblem,
+QLabel#wizardFieldNote,
+QLabel#wizardTargetPath,
+QLabel#intakeHint,
+QLabel#intakeFieldHint,
+QLabel#intakeDetailsPath,
+QLabel#wizardBanner,
+QLabel#wizardMessage,
+QLabel#moduleProfileNote,
+QLabel#moduleSummary,
+QLabel#moduleCost,
+QLabel#moduleUnavailable {
+    color: #9aa4b0;
+}
+QLabel#wizardFieldNote,
+QLabel#wizardTargetPath,
+QLabel#intakeHint,
+QLabel#intakeFieldHint,
+QLabel#intakeDetailsPath,
+QLabel#moduleCost,
+QLabel#moduleUnavailable {
+    font-size: 11px;
+}
+QLabel#intakeFieldHint,
+QLabel#moduleUnavailable {
+    font-style: italic;
+}
+
+QLabel#wizardFieldError,
+QLabel#wizardError,
+QLabel#intakeDetailsNotes[state="error"] {
+    color: #F85149;
+}
+
+QPlainTextEdit#wizardField {
+    border: 1px solid #5A5A5A;
+    border-radius: 4px;
+    background-color: #3C3C3C;
+}
+
+QTextBrowser#wizardReview,
+QFrame#intakeDetails {
+    border: 1px solid #5A5A5A;
+    border-radius: 4px;
+    background-color: #2E2E2E;
+}
+QFrame#intakeDetails QLabel,
+QFrame#intakeDetails QWidget#intakeDetailsForm {
+    background-color: transparent;
+}
+
+QLabel#intakeDetailsTitle,
+QLabel#moduleProfileLabel {
+    font-weight: 600;
+}
+
+/* --- analysis modules --- */
+
+QLabel#moduleGroupHeading {
+    font-weight: 600;
+    padding-top: 10px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #5A5A5A;
+}
+QLabel#moduleSummary {
+    padding-top: 4px;
+    border-top: 1px solid #5A5A5A;
 }

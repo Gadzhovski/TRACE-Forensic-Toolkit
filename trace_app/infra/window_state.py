@@ -94,3 +94,30 @@ def save_listing_view(mode):
             parser.write(handle)
     except OSError as exc:
         logger.warning("Could not save the listing view: %s", exc)
+
+
+def read_value(section, key, default=''):
+    """One remembered value from config.ini (strings only)."""
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(config_file())
+        return parser.get(section, key, fallback=default)
+    except (configparser.Error, OSError):
+        return default
+
+
+def save_value(section, key, value):
+    """Remember one value in config.ini, keeping everything else there."""
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(config_file())
+    except (configparser.Error, OSError):
+        pass
+    if not parser.has_section(section):
+        parser.add_section(section)
+    parser.set(section, key, str(value))
+    try:
+        with open(config_file(), 'w', encoding='utf-8') as handle:
+            parser.write(handle)
+    except OSError as exc:
+        logger.warning("Could not save %s.%s: %s", section, key, exc)

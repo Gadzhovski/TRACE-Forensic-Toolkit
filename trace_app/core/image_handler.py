@@ -34,6 +34,16 @@ _UFS2_MAGIC_BE = (0x19540119).to_bytes(4, 'big')
 
 
 
+class HashingCancelled(BaseException):
+    """Raised from a hashing progress callback to stop the hash.
+
+    A BaseException, like KeyboardInterrupt, on purpose: hashing reports
+    progress from inside several `except Exception` blocks that keep a
+    damaged chunk or a failing callback from ending the run, and a cancel
+    must pass through all of them rather than be logged and ignored.
+    """
+
+
 def _safe(thing, attribute, default):
     """A libyal property that may raise when the format omits it."""
     try:
@@ -474,6 +484,7 @@ class ImageHandler:
         slice_size = total_size // workers
         queues = [queue.Queue(maxsize=2) for _ in range(workers)]
         errors = []
+        stop = threading.Event()
 
         def read_slice(index):
             start = index * slice_size
@@ -484,7 +495,7 @@ class ImageHandler:
                 handle.open(filenames)
                 handle.seek(start)
                 remaining = end - start
-                while remaining > 0:
+                while remaining > 0 and not stop.is_set():
                     chunk = handle.read(min(CHUNK_SIZE, remaining))
                     if not chunk:
                         break
@@ -522,8 +533,19 @@ class ImageHandler:
                         except Exception as e:
                             logger.error(f"Progress callback error: {e}")
         finally:
+            # Cancelled (or failed) part-way: the workers stop at their next
+            # chunk, and their queues are emptied so none stays blocked on a
+            # put that nothing will ever take.
+            stop.set()
             for thread in threads:
-                thread.join(timeout=5)
+                while thread.is_alive():
+                    for pending in queues:
+                        try:
+                            while True:
+                                pending.get_nowait()
+                        except queue.Empty:
+                            pass
+                    thread.join(timeout=0.05)
 
         if errors:
             raise errors[0]
