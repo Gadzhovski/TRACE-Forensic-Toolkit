@@ -5452,6 +5452,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         implementation of image loading would drift from this one, and this is
         what decides whether an image opens at all.
         """
+        progress = None
         try:
             image_path = os.path.normpath(image_path)
 
@@ -5510,11 +5511,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return True
 
         except Exception as e:
+            if progress is not None:
+                progress.close()
             message.critical(self, "Error Loading Image", f"Failed to load image: {str(e)}")
             # Remove the image from evidence files if it was added but failed to load
             if image_path in self.evidence_files:
                 self.evidence_files.remove(image_path)
             return False
+        finally:
+            # Closed however loading ended. Left open (an error, an early
+            # return), its own timer showed it later, stuck part-way --
+            # over the next dialog, as if the window had hung.
+            if progress is not None:
+                progress.close()
+                progress.deleteLater()
 
     def _close_image_handlers(self):
         for path, handler in list(self._image_handlers.items()):
@@ -5710,49 +5720,133 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if self._listing_image else True
 
     def remove_image_evidence(self):
+        """File > Remove Evidence: take an image out of the session -- and,
+        in a case, out of the case with everything recorded against it
+        (Case.remove_evidence). The image file itself is never touched."""
         if not self.evidence_files:
-            message.warning(self, "Remove Evidence", "No evidence is currently loaded.")
-            return
+            message.warning(self, "Remove Evidence",
+                            "No evidence is currently loaded.")
+            return False
+        if self.job_bar.busy:
+            # A job reads the image and writes rows against it: removing
+            # either under it fails the job or leaves rows with no evidence.
+            message.information(
+                self, "Remove Evidence",
+                "Background work is running. Wait for it to finish, or "
+                "cancel it in the status bar, then remove the evidence.")
+            return False
 
-        # Prepare the options for the dialog
-        options = self.evidence_files + ["Remove All"]
-        selected_option, ok = QInputDialog.getItem(self, "Remove Evidence File",
-                                                   "Select an evidence file to remove or 'Remove All':",
-                                                   options, 0, False)
+        names = {}
+        for path in self.evidence_files:
+            row = self.case.evidence_for_path(path) if self.case else None
+            label = (row or {}).get('display_name') or os.path.basename(path)
+            names[f"{label}   ({path})"] = path
+        everything = "All evidence"
+        if len(names) == 1:
+            chosen = [next(iter(names.values()))]
+        else:
+            picked, ok = QInputDialog.getItem(
+                self, "Remove Evidence", "Evidence to remove:",
+                list(names) + [everything], 0, False)
+            if not ok:
+                return False
+            chosen = list(names.values()) if picked == everything \
+                else [names[picked]]
 
-        if ok:
-            if selected_option == "Remove All":
-                # Remove all evidence files
-                self._close_image_handlers()
-                self.tree_viewer.invisibleRootItem().takeChildren()  # Remove all children from the tree viewer
-                self.clear_ui()  # Clear the UI
-                message.information(self, "Remove Evidence", "All evidence files have been removed.")
-            else:
-                # Remove the selected evidence file
-                self.evidence_files.remove(selected_option)
-                self._release_auxiliary_handler(selected_option)
-                removed = self._image_handlers.pop(
-                    os.path.normpath(selected_option), None)
-                self._refresh_registry_evidence()
-                if removed is not None:
-                    if removed is self.image_handler:
-                        self.image_handler = None
-                    removed.close_resources()
-                self.remove_from_tree_viewer(selected_option)
-                remaining = list(self.evidence_files)
-                self.clear_ui()
-                # clear_ui forgets the open images; the others are still open.
-                self.evidence_files.extend(remaining)
-                if remaining:
-                    self.activate_image(remaining[-1])
-                message.information(self, "Remove Evidence", f"{selected_option} has been removed.")
-        # clear all tabs if there are no evidence files loaded
-        if not self.evidence_files:
-            self.clear_ui()
-            # disable all tabs
+        if not message.question(self, "Remove Evidence",
+                                self._removal_question(chosen),
+                                informative=self._removal_details(chosen)):
+            return False
+
+        for path in chosen:
+            self._remove_evidence(path)
+        self._after_evidence_removed()
+        self.set_status(
+            f"Removed {len(chosen)} piece{'s' if len(chosen) != 1 else ''} "
+            f"of evidence", 6000)
+        return True
+
+    def _removal_question(self, paths):
+        what = os.path.basename(paths[0]) if len(paths) == 1 \
+            else f"these {len(paths)} pieces of evidence"
+        if self.case is None:
+            return f"Close {what}?"
+        return f"Remove {what} from the case?"
+
+    def _removal_details(self, paths):
+        """What removing `paths` deletes, said before it is done."""
+        if self.case is None:
+            return ("It is closed for this session. Nothing on disk is "
+                    "changed.")
+        lines = []
+        for path in paths:
+            row = self.case.evidence_for_path(path)
+            if row is None:
+                continue
+            footprint = self.case.evidence_footprint(row['id'])
+            notes = self.case.notes_for_evidence(row['id'])
+            recorded = ', '.join(f"{count:,} {what}"
+                                 for what, count in footprint)
+            lines.append(f"{os.path.basename(path)}: "
+                         f"{recorded or 'nothing recorded yet'}"
+                         + (f"; {notes} note(s) kept" if notes else ''))
+        return ("Deleted from the case: " + '\n'.join(lines) + "\n\n"
+                "Its carved copies and search index entries go too. Notes "
+                "are kept, and the audit trail records the removal. The "
+                "image file itself is not touched -- add it again to "
+                "re-examine it.")
+
+    def _remove_evidence(self, path):
+        """Close one image and, in a case, remove it from the case."""
+        path = os.path.normpath(path)
+        evidence_id = self.evidence_id_for_path(path)
+        self._release_auxiliary_handler(path)
+        handler = self._image_handlers.pop(path, None)
+        if handler is not None:
+            if handler is self.image_handler:
+                self.image_handler = None
+                self.current_image_path = None
+            try:
+                handler.close_resources()
+            except Exception as exc:
+                logger.error("Error closing %s: %s", path, exc)
+        if path in self.evidence_files:
+            self.evidence_files.remove(path)
+        # Keys given for its volumes are forgotten with it.
+        self._bitlocker_keys.pop(path, None)
+        self.remove_from_tree_viewer(path)
+        if self.case is not None and evidence_id is not None:
+            try:
+                self.case.remove_evidence(evidence_id)
+            except Exception as exc:
+                logger.error("Could not remove %s from the case: %s",
+                             path, exc)
+                message.critical(self, "Remove Evidence",
+                                 f"{os.path.basename(path)} was closed but "
+                                 f"could not be removed from the case: "
+                                 f"{exc}")
+
+    def _after_evidence_removed(self):
+        """Redraw everything that showed the removed evidence's data."""
+        remaining = list(self.evidence_files)
+        self.clear_ui()
+        # clear_ui forgets the open images; the others are still open.
+        self.evidence_files.extend(remaining)
+        self._refresh_registry_evidence()
+        self._refresh_carving_targets()
+        if remaining:
+            self.activate_image(remaining[-1])
+        else:
             self.enable_tabs(False)
-            # The toolbar icon no longer tracks verification -- that is shown
-            # per image in the tree -- so there is nothing to reset here.
+        if self.case is not None:
+            for panel in ('case_panel', 'carved_panel', 'notes_panel'):
+                widget = getattr(self, panel, None)
+                if widget is not None and hasattr(widget, 'refresh'):
+                    widget.refresh()
+            if getattr(self, 'search_panel', None) is not None:
+                self.search_panel.reload_index()
+            self.refresh_analysis_views()
+            self.refresh_bookmarks()
 
     def remove_from_tree_viewer(self, evidence_name):
         root = self.tree_viewer.invisibleRootItem()

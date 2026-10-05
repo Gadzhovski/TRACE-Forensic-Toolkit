@@ -403,15 +403,113 @@ class Case:
             "SELECT * FROM evidence WHERE path = ?", (path,)).fetchone()
         return dict(row) if row else None
 
+    #: What a piece of evidence has recorded against it, for the examiner
+    #: to see before removing it: table -> how it is described. Every one
+    #: of these goes with the evidence row (ON DELETE CASCADE).
+    EVIDENCE_RECORDS = (
+        ('file_analysis', 'file analysis results'),
+        ('file_findings', 'findings'),
+        ('carved_files', 'carved files'),
+        ('deleted_files', 'deleted-file records'),
+        ('user_activity', 'activity records'),
+        ('fs_events', 'NTFS events'),
+        ('usn_journal', 'USN journal records'),
+        ('persistence', 'persistence entries'),
+        ('thumbnails', 'thumbnail cache entries'),
+        ('hash_matches', 'hash set matches'),
+        ('vt_results', 'VirusTotal results'),
+        ('bookmarks', 'bookmarks'),
+        ('artifact_tags', 'tags'),
+        ('report_items', 'report picks'),
+        ('verifications', 'verification records'),
+    )
+
+    def evidence_footprint(self, evidence_id):
+        """[(description, count)] of what is recorded against a piece of
+        evidence, non-empty ones only; notes are counted separately
+        (`notes_for_evidence`) because they are kept."""
+        out = []
+        for table, description in self.EVIDENCE_RECORDS:
+            try:
+                count = self._db.execute(
+                    f"SELECT COUNT(*) FROM {table} WHERE evidence_id = ?",
+                    (evidence_id,)).fetchone()[0]
+            except sqlite3.Error:
+                continue
+            if count:
+                out.append((description, count))
+        return out
+
+    def notes_for_evidence(self, evidence_id):
+        return self._db.execute(
+            "SELECT COUNT(*) FROM notes WHERE evidence_id = ?",
+            (evidence_id,)).fetchone()[0]
+
     def remove_evidence(self, evidence_id):
-        """Drop a piece of evidence, and everything recorded against it."""
-        row = self._db.execute(
-            "SELECT path FROM evidence WHERE id = ?",
-            (evidence_id,)).fetchone()
+        """Take a piece of evidence out of the case, and everything recorded
+        against it: analysis, findings, carves (rows and the files written),
+        activity, its search index entries, bookmarks. The image itself is
+        never touched -- the case only ever referred to it.
+
+        Notes outlive what they describe: they are kept, detached, with the
+        image's name added to where they pointed. The audit trail keeps a
+        line saying what was removed, with the evidence's recorded hashes.
+        Returns the footprint that was removed, or None if there was no
+        such evidence."""
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if row is None:
+            return None
+        row = dict(row)
+        name = row.get('display_name') or os.path.basename(row['path'])
+        footprint = self.evidence_footprint(evidence_id)
+        notes = self.notes_for_evidence(evidence_id)
+        carved_folder = self._carved_folder_path(evidence_id)
+
+        # Notes first: the evidence row's cascade would take them too.
+        self._db.execute(
+            "UPDATE notes SET evidence_id = NULL, artifact_path = "
+            "'[' || ? || ' -- removed from the case] ' || "
+            "COALESCE(artifact_path, '') WHERE evidence_id = ?",
+            (name, evidence_id))
         self._db.execute("DELETE FROM evidence WHERE id = ?", (evidence_id,))
         self._db.commit()
-        if row:
-            self._record_activity('evidence removed', row['path'])
+
+        # The search index is its own database (search.db): a cache, but
+        # its hits would name evidence that is no longer in the case.
+        index_path = os.path.join(self.folder, 'search.db')
+        if os.path.exists(index_path):
+            try:
+                from trace_app.core.search_index import SearchIndex
+                index = SearchIndex(self.folder)
+                try:
+                    index.clear_evidence(evidence_id)
+                    index.commit()
+                finally:
+                    index.close()
+            except Exception as exc:
+                logger.warning("Search index entries for %s not removed: %s",
+                               name, exc)
+
+        # The carved copies TRACE wrote for this evidence (never anything
+        # the examiner exported).
+        if carved_folder and os.path.isdir(carved_folder):
+            import shutil
+            shutil.rmtree(carved_folder, ignore_errors=True)
+            if os.path.exists(carved_folder):
+                logger.warning("Carved files for %s not all removed: %s",
+                               name, carved_folder)
+
+        hashes = ', '.join(f"{k.upper()} {row[k]}" for k in
+                           ('md5', 'sha1', 'sha256') if row.get(k))
+        removed = '; '.join(f"{count:,} {what}" for what, count in footprint)
+        self._record_activity(
+            'evidence removed',
+            f"id={evidence_id} {row['path']}"
+            + (f" ({hashes})" if hashes else '')
+            + f"; removed: {removed or 'nothing recorded'}"
+            + (f"; {notes} note(s) kept" if notes else ''))
+        return footprint
 
     def relocate_evidence(self, evidence_id, new_path):
         """Point a piece of evidence at a file that has moved.
@@ -1382,6 +1480,12 @@ class Case:
         so two images sharing one folder overwrite each other wherever both
         hold the same type at the same offset.
         """
+        folder = self._carved_folder_path(evidence_id)
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def _carved_folder_path(self, evidence_id):
+        """carved_dir_for's folder, without creating it."""
         row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
                                (evidence_id,)).fetchone()
         label = ''
@@ -1390,11 +1494,9 @@ class Case:
             label = row.get('display_name') or os.path.basename(row['path'])
         safe = ''.join(c if c.isalnum() or c in '-_.' else '_'
                        for c in label)[:60].strip('._')
-        folder = os.path.join(self.carved_dir,
-                              f"{evidence_id}-{safe}" if safe else
-                              str(evidence_id))
-        os.makedirs(folder, exist_ok=True)
-        return folder
+        return os.path.join(self.carved_dir,
+                            f"{evidence_id}-{safe}" if safe else
+                            str(evidence_id))
 
     def clear_carved(self, evidence_id):
         """Forget a previous carve of one piece of evidence.
