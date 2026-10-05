@@ -557,7 +557,16 @@ _UDIF_COMPRESSION = {0x80000004: 'ADC', 0x80000005: 'zlib',
 def _open_modi(path):
     """A Mac disk image -- UDIF (.dmg, compressed with zlib, bzip2,
     LZFSE, LZMA or ADC, or not), a sparse image or a sparse bundle --
-    through libmodi, which decompresses as it reads."""
+    through libmodi, which decompresses as it reads; or, for a UDIF image
+    with bzip2 chunks or one libmodi refuses, through core/udif.py."""
+    lowered = path.lower().rstrip('/\\')
+    is_udif = os.path.isfile(path) and not lowered.endswith('.sparseimage')
+    if is_udif and 'bzip2' in _udif_methods(path):
+        # libmodi's bzip2 decoder fails on ordinary chunks (hdiutil's
+        # UDBZ read as a volume with no files).
+        opened = _open_udif(path)
+        if opened is not None:
+            return opened
     import pymodi
     handle = pymodi.handle()
     try:
@@ -569,9 +578,12 @@ def _open_modi(path):
             handle.close()
         except Exception:
             pass
+        # hdiutil's read-only UDRO images, for one, are refused.
+        opened = _open_udif(path) if is_udif else None
+        if opened is not None:
+            return opened
         raise ContainerError(f"Could not open {os.path.basename(path)}: "
                              f"{exc}") from exc
-    lowered = path.lower().rstrip('/\\')
     if lowered.endswith('.sparsebundle'):
         note = 'Sparse bundle'
     elif lowered.endswith('.sparseimage'):
@@ -581,6 +593,22 @@ def _open_modi(path):
         note = 'DMG (UDIF' + (f", {', '.join(methods)}" if methods else
                               ', uncompressed') + ')'
     return LibyalImgInfo(handle, handle.get_media_size()), note
+
+
+def _open_udif(path):
+    """(LibyalImgInfo, note) through core/udif.py, or None when it cannot
+    read the image either."""
+    from trace_app.core import udif
+    try:
+        image = udif.UdifImage(path)
+    except (udif.UdifError, OSError, ValueError) as exc:
+        logger.info("%s not read as UDIF in Python: %s",
+                    os.path.basename(path), exc)
+        return None
+    methods = _udif_methods(path)
+    note = 'DMG (UDIF' + (f", {', '.join(methods)}" if methods else
+                          ', uncompressed') + ')'
+    return LibyalImgInfo(image, image.get_media_size()), note
 
 
 def _udif_methods(path):

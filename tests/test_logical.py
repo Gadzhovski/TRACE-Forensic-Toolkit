@@ -360,3 +360,87 @@ def test_every_dmg_compression_hdiutil_writes(tmp_path, form):
         assert files['/pageant.exe'] == content
     finally:
         handler.close_resources()
+
+
+def _udif(raw, kind, chunk_sectors=2048):
+    """A UDIF image of `raw` (whole sectors), its chunks of `kind`
+    (1 raw, 0x80000005 zlib, 0x80000006 bzip2); all-zero chunks stored as
+    'ignore', as hdiutil does."""
+    import bz2
+    import plistlib
+    import struct
+    import zlib
+    data, chunks = bytearray(), []
+    sectors = len(raw) // 512
+    for first in range(0, sectors, chunk_sectors):
+        count = min(chunk_sectors, sectors - first)
+        piece = raw[first * 512:(first + count) * 512]
+        if not piece.strip(b'\0'):
+            chunks.append((2, first, count, len(data), 0))
+            continue
+        stored = {1: bytes, 0x80000005: zlib.compress,
+                  0x80000006: bz2.compress}[kind](piece)
+        chunks.append((kind, first, count, len(data), len(stored)))
+        data += stored
+    chunks.append((0xFFFFFFFF, sectors, 0, len(data), 0))
+    mish = bytearray(b'mish' + struct.pack('>IQQQII', 1, 0, sectors, 0, 0, 0))
+    mish += bytes(24) + bytes(136) + struct.pack('>I', len(chunks))
+    for kind_, first, count, offset, length in chunks:
+        mish += struct.pack('>IIQQQQ', kind_, 0, first, count, offset, length)
+    plist = plistlib.dumps({'resource-fork': {'blkx': [
+        {'Data': bytes(mish), 'ID': '0', 'Name': 'whole disk'}]}})
+    koly = bytearray(512)
+    koly[:4] = b'koly'
+    struct.pack_into('>III', koly, 4, 4, 512, 1)
+    struct.pack_into('>QQ', koly, 0xd8, len(data), len(plist))
+    struct.pack_into('>Q', koly, 492, sectors)
+    return bytes(data) + plist + bytes(koly)
+
+
+@pytest.mark.parametrize('kind', [0x80000006, 0x80000005, 1],
+                         ids=['bzip2', 'zlib', 'raw'])
+def test_a_dmg_reads_back_byte_for_byte(tmp_path, kind):
+    """libmodi's own bzip2 decoder fails on ordinary chunks ("block data
+    index value out of bounds": hdiutil's UDBZ read as a volume with no
+    files); bzip2 images are read by core/udif.py. 1 MB chunks of text-like
+    data, so each bzip2 stream spans blocks, and a run of zeros stored as
+    nothing."""
+    import random
+    from trace_app.core.image_handler import ImageHandler
+    rng = random.Random(7)
+    words = [bytes(rng.choice(b'abcdefghij ') for _ in range(7))
+             for _ in range(400)]
+    text = b''.join(rng.choice(words) for _ in range(600_000))
+    raw = (text[:3 * 1024 * 1024] + bytes(1024 * 1024)
+           + text[:512 * 1024])
+    image = tmp_path / 'disk.dmg'
+    image.write_bytes(_udif(raw, kind))
+    handler = ImageHandler(str(image))
+    try:
+        assert handler.loaded, handler.load_error
+        assert handler.get_size() == len(raw)
+        assert handler.read(0, len(raw)) == raw
+        # Reads across chunk boundaries, and inside the zero run.
+        for offset in (1024 * 1024 - 100, 3 * 1024 * 1024 + 5, 4 * 1024 * 1024 - 7):
+            assert handler.read(offset, 300) == raw[offset:offset + 300]
+    finally:
+        handler.close_resources()
+
+
+def test_the_python_udif_reader_agrees_with_libmodi():
+    """core/udif.py against libmodi on dfvfs's zlib DMG, sector for
+    sector -- the reader libmodi is replaced by must read what it reads."""
+    import pymodi
+    from trace_app.core.udif import UdifImage
+    path = sample('hfsplus_zlib.dmg')
+    ours = UdifImage(path)
+    theirs = pymodi.handle()
+    theirs.open(path)
+    try:
+        assert ours.get_media_size() == theirs.get_media_size()
+        size = ours.get_media_size()
+        assert ours.read_buffer_at_offset(size, 0) == \
+            theirs.read_buffer_at_offset(size, 0)
+    finally:
+        ours.close()
+        theirs.close()
