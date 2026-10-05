@@ -634,10 +634,10 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 
 /* AudioVideoPlayer Audio-Only Label - "Playing Audio" message */
 #audioOnlyLabel {
-    background-color: #4C4C4C;  /* Slightly lighter dark gray */
-    font-size: 19px;
-    color: #B0B0B0;  /* Light gray text */
-    padding: 20px;
+    background-color: #2E2E2E;
+    font-size: 15px;
+    color: #9aa4b0;
+    padding: 16px;
 }
 
 /* Toolbar Compact Styles - for PictureViewer and PDFViewer */
@@ -1824,4 +1824,76 @@ QLabel#mediaStatusLine {
     color: #9aa4b0;
     font-size: 11px;
     padding: 4px 6px 0px 6px;
+}
+
+/* The media player: a black picture area, times that do not jiggle as they count. */
+QVideoWidget#mediaVideo {
+    background-color: #000000;
+}
+QLabel#mediaTime {
+    font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
+    font-size: 12px;
+    padding: 0px 4px;
+}
+
+/* --- Media player sliders: a slim track, the played part filled in the
+   icons' grey, a round handle ringed in the background colour. Neutral like
+   the rest of the application -- no accent colour. --- */
+QSlider#mediaPosition,
+QSlider#mediaVolume {
+    min-height: 18px;
+    background: transparent;
+}
+QSlider#mediaPosition::groove:horizontal,
+QSlider#mediaVolume::groove:horizontal {
+    height: 4px;
+    margin: 0px;
+    border: none;
+    border-radius: 2px;
+    background: #4A4D52;
+}
+QSlider#mediaPosition::groove:horizontal:hover {
+    height: 6px;
+    border-radius: 3px;
+}
+QSlider#mediaPosition::sub-page:horizontal,
+QSlider#mediaVolume::sub-page:horizontal {
+    border: none;
+    border-radius: 2px;
+    background: #B8BCC2;
+}
+QSlider#mediaPosition::add-page:horizontal,
+QSlider#mediaVolume::add-page:horizontal {
+    border: none;
+    border-radius: 2px;
+    background: #4A4D52;
+}
+QSlider#mediaPosition::handle:horizontal {
+    width: 10px;
+    margin: -5px 0px;
+    border: 2px solid #2E2E2E;
+    border-radius: 7px;
+    background: #B8BCC2;
+}
+QSlider#mediaVolume::handle:horizontal {
+    width: 8px;
+    margin: -4px 0px;
+    border: 2px solid #2E2E2E;
+    border-radius: 6px;
+    background: #B8BCC2;
+}
+QSlider#mediaPosition::handle:horizontal:hover,
+QSlider#mediaVolume::handle:horizontal:hover,
+QSlider#mediaPosition::handle:horizontal:pressed,
+QSlider#mediaVolume::handle:horizontal:pressed {
+    background: #F0F0F0;
+}
+QSlider#mediaPosition::sub-page:horizontal:disabled,
+QSlider#mediaPosition::add-page:horizontal:disabled,
+QSlider#mediaPosition::groove:horizontal:disabled {
+    background: #3A3C40;
+}
+QSlider#mediaPosition::handle:horizontal:disabled {
+    background: transparent;
+    border-color: transparent;
 }

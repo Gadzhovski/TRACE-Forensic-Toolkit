@@ -150,6 +150,12 @@ PAUSE = "Icons/tabler/player-pause.svg"
 STOP = "Icons/tabler/player-stop.svg"
 VOLUME = "Icons/tabler/volume.svg"
 MUTE = "Icons/tabler/volume-off.svg"
+SEEK_BACK = "Icons/tabler/rewind-backward-5.svg"
+SEEK_FORWARD = "Icons/tabler/rewind-forward-5.svg"
+FRAME_BACK = "Icons/tabler/player-track-prev.svg"
+FRAME_FORWARD = "Icons/tabler/player-track-next.svg"
+LOOP = "Icons/tabler/repeat.svg"
+SNAPSHOT = "Icons/tabler/camera.svg"
 AUDIO = "Icons/tabler/music.svg"
 
 # --- View / zoom -----------------------------------------------------------
@@ -210,6 +216,14 @@ _cache = {}
 _THEME_TINTS = {
     'light': '#3C3C3C',
     'dark': '#D0D0D0',
+}
+#: A disabled command's glyph: faded, so a button that cannot be pressed
+#: looks it. The engine used to ignore the mode, and every disabled toolbar
+#: button -- case commands in quick triage, a player with nothing loaded --
+#: looked as pressable as the rest.
+_DISABLED_TINTS = {
+    'light': '#B4B8BE',
+    'dark': '#6C7076',
 }
 _theme = 'light'
 
@@ -392,7 +406,7 @@ class _TintedSvgEngine(QIconEngine):
         # on a 125% display while the toolbar stayed sharp. Render for the
         # device the painter is actually on.
         scale = painter.device().devicePixelRatioF() if painter.device() else 1.0
-        pixmap = self._render(rect.width(), rect.height(), scale)
+        pixmap = self._render(rect.width(), rect.height(), scale, mode)
         # At its own size, not stretched into `rect`: the render is already
         # rect's size in device pixels (to within rounding), and scaling it
         # by that last fraction of a pixel blurred every line.
@@ -409,13 +423,22 @@ class _TintedSvgEngine(QIconEngine):
         device resolution and labels the pixmap so Qt draws it at the right
         logical size.
         """
-        return self._render(size.width(), size.height(), scale)
+        return self._render(size.width(), size.height(), scale, mode)
 
     def pixmap(self, size, mode, state):
-        return self._render(size.width(), size.height(), 1.0)
+        return self._render(size.width(), size.height(), 1.0, mode)
 
-    def _render(self, logical_width, logical_height, scale):
+    def _render(self, logical_width, logical_height, scale, mode=None):
         colour = self._colour or foreground()
+        if mode == QIcon.Disabled:
+            # A fixed colour (a verified badge) fades to 40%; theme art takes
+            # the theme's disabled grey.
+            if self._colour:
+                faded = QColor(self._colour)
+                faded.setAlpha(102)
+                colour = faded.name(QColor.HexArgb)
+            else:
+                colour = _DISABLED_TINTS[_theme]
         key = (logical_width, logical_height, scale, colour)
         cached = self._renders.get(key)
         if cached is None:

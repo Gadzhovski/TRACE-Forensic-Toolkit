@@ -1999,18 +1999,51 @@ def test_media_says_what_it_is_and_switches_after_playing(qapp):
         audio.setframerate(8000)
         audio.writeframes(bytes(range(256)) * 100)        # 3.2 s
     tone = buffer.getvalue()
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    from trace_app.ui.viewers.media.audiovideo import AudioVideoPlayer
     viewer = UnifiedViewer()
-    viewer.resize(600, 400)
+    viewer.resize(900, 200)             # a short Utils dock
+    viewer.show()
     try:
         viewer.display_application_content(tone, 'tone.wav')
         player = viewer._audio_video_player
         assert pump(qapp, 10, lambda: 'ready' in player.status_label.text())
         assert player.status_label.text().startswith('Audio · 00:03')
         assert not player._is_playing
-        player.toggle_play()
+        # The controls fit, whatever the dock's height (the picture used to
+        # insist on 400x300 and push them out of sight).
+        pump(qapp, 0.2)
+        assert player.control_widget.isVisible()
+        assert player.control_widget.geometry().bottom() <= viewer.height()
+        # Audio has no frames to step or save.
+        assert player.play_action.isEnabled()
+        assert not player.frame_next_action.isEnabled()
+        assert not player.snapshot_action.isEnabled()
+        assert player.save_frame('unused.png') == ''
+
+        player.jump(1000)
+        assert pump(qapp, 3, lambda: player.media_player.position() >= 1000)
+        assert player.current_time_label.text() == '00:01.0'
+        player.jump(60000)                           # held at the end
+        assert pump(qapp, 3,
+                    lambda: player.media_player.position() < 3300)
+        player.speed_combo.setCurrentIndex(player.speed_combo.findData(2.0))
+        assert player.media_player.playbackRate() == 2.0
+        player.loop_action.trigger()
+        assert player.media_player.loops() == -1     # QMediaPlayer.Infinite
+        player.loop_action.trigger()
+        assert player.media_player.loops() == 1
+        player.set_position(0)
+
+        space = QKeyEvent(QEvent.KeyPress, Qt.Key_Space, Qt.NoModifier, ' ')
+        player.keyPressEvent(space)                  # Space plays
         assert pump(qapp, 5, lambda: player.media_player.position() > 0)
-        player.toggle_play()
+        assert player._is_playing and player.play_action.text() == 'Pause'
+        player.keyPressEvent(space)
         pump(qapp, 0.3)
+        assert not player._is_playing
+        assert AudioVideoPlayer.format_time(3_725_400) == '1:02:05.4'
 
         viewer.display_application_content(tone, 'again.wav')   # no hang
         assert pump(qapp, 10, lambda: 'ready' in player.status_label.text())

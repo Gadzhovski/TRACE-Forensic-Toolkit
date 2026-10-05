@@ -151,6 +151,7 @@ class UnifiedViewer(QWidget):
             # Process audio and video - use streaming if file_obj provided, otherwise QBuffer
             elif mime_type.startswith(('audio/', 'video/')):
                 player = self.get_audio_video_player()
+                player.source_name = path or ''
 
                 # Create a hint URL with the mime type to help the media backend
                 # identify the format correctly
