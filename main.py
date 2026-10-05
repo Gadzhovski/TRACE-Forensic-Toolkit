@@ -25,5 +25,11 @@ if __name__ == '__main__':
         from trace_app.selftest import main as self_test
         sys.exit(self_test(sys.argv[2:]))
 
+    if sys.argv[1:2] == ['--live-reader']:
+        # The read-only helper for a live disk, started elevated by TRACE
+        # (trace_app/core/live_disk.py): no window, nothing else imported.
+        from trace_app.core.live_disk import serve
+        sys.exit(serve(*sys.argv[2:5]))
+
     from trace_app.app import main
     sys.exit(main())

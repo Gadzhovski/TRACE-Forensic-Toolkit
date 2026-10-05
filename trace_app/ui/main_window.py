@@ -727,12 +727,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             icons.EVIDENCE_FOLDER, "Add Evidence Folder...", self)
         self.add_folder_action.triggered.connect(self.load_folder_evidence)
         self.add_folder_action.setVisible(not self.case)
+        self.add_disk_action = icons.action(
+            icons.EVIDENCE_ADD, "Add Live Disk...", self)
+        self.add_disk_action.setToolTip(
+            "Read a disk attached to this computer, read-only, without "
+            "imaging it (asks for administrator rights)")
+        self.add_disk_action.triggered.connect(self.add_live_disk)
         self.remove_evidence_action = icons.action(
             icons.EVIDENCE_REMOVE, "Remove Evidence File...", self)
         self.remove_evidence_action.triggered.connect(
             self.remove_image_evidence)
         for action in (self.add_evidence_action, self.add_folder_action,
-                       self.remove_evidence_action):
+                       self.add_disk_action, self.remove_evidence_action):
             file_menu.addAction(action)
         file_menu.addSeparator()
         exit_action = icons.action(icons.EXIT, "Exit", self)
@@ -5350,12 +5356,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         missing = []
         opened = 0
+        from trace_app.core.live_disk import is_device_path
         # A New Case wizard's jobs wait for this (start_case_setup).
         self._loading_case_evidence = True
         try:
             for row in rows:
                 path = row['path']
-                if not os.path.exists(path):
+                # A live disk has no file to find: it is reconnected (the
+                # administrator prompt again).
+                if not is_device_path(path) and not os.path.exists(path):
                     missing.append((row, 'is not where the case recorded '
                                          'it'))
                     continue
@@ -5725,6 +5734,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                         "Folder")
         if folder:
             self.open_evidence_image(folder)
+
+    def add_live_disk(self):
+        """File > Add Live Disk: choose a disk; in a case it goes through
+        the Add Evidence wizard (described, analysed), in quick triage it
+        opens at once."""
+        from trace_app.ui.dialogs.live_disk import choose_live_disk
+        device = choose_live_disk(self)
+        if not device:
+            return
+        if self.case:
+            self.add_evidence_to_case(paths=[device])
+        else:
+            self.open_evidence_image(device)
 
     def add_evidence_to_case(self, paths=None):
         """The Add Evidence wizard: items checked and described, modules

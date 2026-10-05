@@ -42,6 +42,7 @@ STATUS_TEXT = {
     STATUS_UNHASHED: "No hash recorded",
     STATUS_MISSING: "MISSING from its recorded location",
     STATUS_CHANGED: "CHANGED since it was added",
+    'live': "Read live (not verifiable)",
 }
 
 

@@ -54,6 +54,7 @@ STATUS_VERIFIED = 'verified'    # present and matching its recorded hash
 STATUS_MISSING = 'missing'      # the file is not where the case says it is
 STATUS_CHANGED = 'changed'      # present, but no longer the same bytes
 STATUS_UNHASHED = 'unhashed'    # present, but nothing to compare against
+STATUS_LIVE = 'live'            # a live disk: hashed as read, not verified
 
 #: Chain-of-custody details an evidence row can carry (schema v16), with
 #: how each reads. All optional: an image handed over with no paperwork is
@@ -403,8 +404,10 @@ class Case:
         if existing:
             return existing['id']
 
+        from trace_app.core.live_disk import is_device_path
+        live = is_device_path(path)
         try:
-            size = os.path.getsize(path)
+            size = None if live else os.path.getsize(path)
         except OSError:
             size = None
 
@@ -421,6 +424,10 @@ class Case:
         self._db.commit()
         recorded = '; '.join(f"{EVIDENCE_DETAILS[k].lower()} {v}"
                              for k, v in details.items() if v)
+        if live:
+            recorded = '; '.join(filter(None, (
+                'live disk, read-only through an administrator helper; '
+                'not an image, and not verifiable', recorded)))
         self._record_activity('evidence added',
                               path + (f" ({recorded})" if recorded else ''))
         return cursor.lastrowid
@@ -2894,6 +2901,12 @@ def hash_verdict(results):
     check = results.get('container_check')
     if check and check[0] is False:
         return STATUS_CHANGED, check[1]
+    if results.get('live') and computed['md5'] and \
+            computed['md5'] != 'error':
+        return STATUS_LIVE, ("Read live: these are the hashes of what was "
+                             "read, when. A disk in use changes as it is "
+                             "read, so they verify nothing; for evidence, "
+                             "image it behind a write blocker.")
     if not computed['md5'] or computed['md5'] == 'error':
         return STATUS_UNHASHED, ("The image could not be hashed: "
                                  f"{results.get('error') or 'read failed'}.")
@@ -2926,6 +2939,11 @@ def check_evidence(row, progress=None):
     algorithm, expected, computed} for `Case.record_check`."""
     path = row['path']
     out = {'algorithm': '', 'expected': '', 'computed': ''}
+    from trace_app.core.live_disk import is_device_path
+    if is_device_path(path):
+        return dict(out, status=STATUS_LIVE,
+                    detail='A live disk is not re-checked: in use, it '
+                           'changes, so a new hash would prove nothing.')
     if not os.path.exists(path):
         return dict(out, status=STATUS_MISSING,
                     detail='The file is not at its recorded location.')

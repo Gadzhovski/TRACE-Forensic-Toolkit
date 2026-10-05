@@ -155,4 +155,9 @@ def main():
     elif case is not TRIAGE:
         QTimer.singleShot(0, window.offer_analysis_modules)
 
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        # Live disks' helpers stop when their connection closes.
+        from trace_app.core.live_disk import close_all
+        close_all()

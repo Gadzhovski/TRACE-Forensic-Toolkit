@@ -166,6 +166,12 @@ CAPABILITIES = (
     Capability('aff4', 'Evidence images', "AFF4 images (Snappy, LZ4, "
                "deflate; maps, unread and unreadable regions)",
                'TRACE (Python)', lambda: 'built in'),
+    Capability('live', 'Evidence images', "Live disks, read-only "
+               "(an administrator helper streams sectors)", 'TRACE',
+               lambda: __import__('trace_app.core.live_disk', fromlist=['x'])
+               .elevation_method(),
+               missing_hint="Install polkit (pkexec), or run TRACE as "
+                            "root."),
     Capability('bde', 'Volumes and encryption', "BitLocker volumes",
                'libbde', _module_version('pybde')),
     Capability('fvde', 'Volumes and encryption', "FileVault 2 (Core "

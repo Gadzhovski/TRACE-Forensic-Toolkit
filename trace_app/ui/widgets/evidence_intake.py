@@ -136,11 +136,17 @@ class EvidenceIntake(QWidget):
             "extraction or an iPhone backup: read in place, never written "
             "to.")
         self.add_folder_button.clicked.connect(self.choose_folder)
+        self.disk_button = QPushButton("Add Disk...")
+        self.disk_button.setObjectName("intakeButton")
+        self.disk_button.setToolTip(
+            "A disk attached to this computer, read live and read-only "
+            "(asks for administrator rights). A preview, not an image.")
+        self.disk_button.clicked.connect(self.choose_disk)
         self.remove_button = QPushButton("Remove")
         self.remove_button.setObjectName("intakeButton")
         self.remove_button.clicked.connect(self.remove_selected)
         for button in (self.add_file_button, self.add_folder_button,
-                       self.remove_button):
+                       self.disk_button, self.remove_button):
             buttons.addWidget(button)
         buttons.addStretch(1)
         hint = QLabel("or drop files and folders on the list")
@@ -286,12 +292,20 @@ class EvidenceIntake(QWidget):
         if folder:
             self.add_paths([folder])
 
+    def choose_disk(self):
+        from trace_app.ui.dialogs.live_disk import choose_live_disk
+        device = choose_live_disk(self)
+        if device:
+            self.add_paths([device])
+
     def add_paths(self, paths):
         """Add items and start checking each. Duplicates and later segments
         of an image are skipped, and the message says so."""
         skipped, segments = [], []
+        from trace_app.core.live_disk import is_device_path
         for path in paths:
-            path = os.path.normpath(path)
+            if not is_device_path(path):
+                path = os.path.normpath(path)
             key = _key(path)
             if key in self._existing:
                 skipped.append(f"{os.path.basename(path)} is already in the "

@@ -447,7 +447,9 @@ class ImageHandler:
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
-        from trace_app.core import logical_sources
+        from trace_app.core import live_disk, logical_sources
+        if live_disk.is_device_path(self.image_path):
+            return "live"
         if logical_sources.kind_of(self.image_path):
             return "logical"
         _, extension = os.path.splitext(self.image_path.rstrip('/\\'))
@@ -617,7 +619,7 @@ class ImageHandler:
                 finally:
                     ewf_handle.close()
 
-            elif image_type in ("virtual", "aff4") or (
+            elif image_type in ("virtual", "aff4", "live") or (
                     image_type == "raw" and
                     self.image_path.lower().endswith('.001')):
                 # A split raw image (x.001, x.002...) is read by TSK as one
@@ -681,6 +683,9 @@ class ImageHandler:
             }
             if image_type == "aff4":
                 hashes['container_check'] = self._aff4_check()
+            if image_type == "live":
+                # What was read, when: a disk in use changes as it is read.
+                hashes['live'] = True
 
             return hashes
         except Exception as e:
@@ -857,6 +862,12 @@ class ImageHandler:
                 self.img_info = EWFImgInfo(ewf_handle)
             elif image_type == "raw":
                 self.img_info = pytsk3.Img_Info(self.image_path)
+            elif image_type == "live":
+                # A physical disk, read-only, through the administrator
+                # helper (core/live_disk.py).
+                from trace_app.core.live_disk import open_live_disk
+                self.img_info, self.container_note = open_live_disk(
+                    self.image_path)
             elif image_type == "aff4":
                 # Read in Python (core/aff4.py): pyaff4 cannot be installed
                 # without a compiler.

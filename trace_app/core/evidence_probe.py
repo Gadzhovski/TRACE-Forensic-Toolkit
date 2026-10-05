@@ -74,12 +74,14 @@ def probe(path):
     ({field: value} from the image's own header) and stored_hashes (bool).
     Never raises: an item that cannot be read is an answer, not a crash.
     """
-    path = os.path.normpath(path)
+    from trace_app.core.live_disk import is_device_path
+    live = is_device_path(path)
+    path = path if live else os.path.normpath(path)
     result = {'path': path, 'name': os.path.basename(path.rstrip('/\\'))
               or path, 'format': format_name(path), 'size': None,
               'contents': '', 'notes': [], 'error': '', 'custody': {},
               'stored_hashes': False, 'status': ERROR}
-    if not os.path.exists(path):
+    if not live and not os.path.exists(path):
         result['error'] = 'The file or folder does not exist.'
         return result
 
@@ -114,6 +116,13 @@ def probe(path):
         except Exception:
             pass
 
+    if live:
+        result['format'] = 'Live disk (read-only)'
+        result['notes'].insert(0, (
+            "A live disk, read through the administrator helper: if it is "
+            "in use it changes as it is read, and TRACE does not stop the "
+            "system writing to it. For evidence, image it behind a write "
+            "blocker."))
     result['status'] = NOTES if result['notes'] else OK
     return result
 
