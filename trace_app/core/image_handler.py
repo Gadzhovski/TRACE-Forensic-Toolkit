@@ -1412,6 +1412,13 @@ class ImageHandler:
                 pytsk3.TSK_FS_TYPE_FAT16: "FAT16",
                 pytsk3.TSK_FS_TYPE_FAT32: "FAT32",
                 pytsk3.TSK_FS_TYPE_EXFAT: "ExFAT",
+                # UFS (TSK's names: FFS1 = UFS1 of the BSDs, FFS1B = Solaris's
+                # UFS1, FFS2 = UFS2) and YAFFS2: TSK reads them, and they
+                # showed as "Unknown".
+                pytsk3.TSK_FS_TYPE_FFS1: "UFS1",
+                pytsk3.TSK_FS_TYPE_FFS1B: "UFS1 (Solaris)",
+                pytsk3.TSK_FS_TYPE_FFS2: "UFS2",
+                pytsk3.TSK_FS_TYPE_YAFFS2: "YAFFS2",
                 pytsk3.TSK_FS_TYPE_EXT2: "Ext2",
                 pytsk3.TSK_FS_TYPE_EXT3: "Ext3",
                 pytsk3.TSK_FS_TYPE_EXT4: "Ext4",

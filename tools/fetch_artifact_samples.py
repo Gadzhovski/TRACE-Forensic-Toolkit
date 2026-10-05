@@ -253,6 +253,14 @@ SAMPLES = {
     'luks1.raw': (
         _DFVFS + 'luks1.raw',
         '62d74398519015912e3216766912a2a4d1afc7dc4f7378f676943aaf5e0828f1'),
+    # UFS1 and UFS2 (FreeBSD), each with a file, a folder and a link --
+    # what TSK reads and TRACE used to label 'Unknown'.
+    'ufs1.raw': (
+        _DFVFS + 'ufs1.raw',
+        '0b809d5ef3623cca96ff1b9db67ccc8f833b4d27e1413751481c5fcad237bcc2'),
+    'ufs2.raw': (
+        _DFVFS + 'ufs2.raw',
+        'ee5d99e5e60aa566b9e4dd0a5341c1e2b433cbbfcebffbdbf0ad2a3e2153cd67'),
     'lvm.raw': (
         _DFVFS + 'lvm.raw',
         '565f564cd35e6ee304ea810631d52223e1ee3bb61d92ff1cd035c5a25f59e43e'),

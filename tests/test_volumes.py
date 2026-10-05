@@ -155,6 +155,8 @@ def test_a_background_job_gets_the_keys_with_their_kind():
 @pytest.mark.parametrize('image, unlock', [
     ('apfs.raw', None),
     ('lvm.raw', None),
+    ('ufs1.raw', None),
+    ('ufs2.raw', None),
     ('luks1.raw', {0: {'_kind': 'luks', 'password': 'luksde-TEST'}}),
 ])
 def test_analysis_reaches_the_files_inside(image, unlock):
@@ -172,3 +174,23 @@ def test_analysis_reaches_the_files_inside(image, unlock):
     finally:
         case.close()
         handler.close_resources()
+
+
+@pytest.mark.parametrize('image, label', [('ufs1.raw', 'UFS1'),
+                                          ('ufs2.raw', 'UFS2')])
+def test_ufs_is_named_and_read(image, label):
+    """TSK reads UFS1 and UFS2, and TRACE called them "Unknown" (its type
+    map had no FFS entries): named now, in the tree and on the Evidence
+    page alike."""
+    from trace_app.core.evidence_probe import probe
+    handler = handler_for(image)
+    try:
+        start = next(p[2] for p in handler.get_partitions()
+                     if handler.get_fs_info(p[2]) is not None)
+        assert handler.get_fs_type(start) == label
+        names = {e['name'] for e in handler.get_directory_contents(
+            start, handler.get_root_inode(start))}
+        assert {'passwords.txt', 'a_directory', 'a_link'} <= names
+    finally:
+        handler.close_resources()
+    assert label in probe(sample(image))['contents']
