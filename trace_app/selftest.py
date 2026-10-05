@@ -274,8 +274,6 @@ def _run(report, images, sandbox):
         assert chardet.detect('Привет мир'.encode('cp1251'))['encoding']
         db = sqlite3.connect(':memory:')
         db.execute("CREATE VIRTUAL TABLE t USING fts5(body)")
-        if sys.platform == 'win32':
-            import pycaw  # noqa: F401
         return f"SQLite {sqlite3.sqlite_version} with FTS5"
 
     if images:

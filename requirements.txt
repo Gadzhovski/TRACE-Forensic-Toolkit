@@ -2,8 +2,9 @@
 #
 # One file for every platform: the Windows-only packages carry environment
 # markers, so `pip install -r requirements.txt` is correct on Windows, macOS
-# and Linux alike. (Previously pycaw, comtypes and python-magic-bin were
-# declared unconditionally, which made this file fail outright on Linux.)
+# and Linux alike. (python-magic-bin, and once pycaw and comtypes, used to be
+# declared unconditionally, which made this file fail outright on Linux. The
+# media player no longer sets Windows' master volume, so those two are gone.)
 #
 # Lower bounds rather than exact pins, so the tool keeps working on newer
 # Python versions as wheels appear. Python 3.10 or newer is required: every
@@ -85,10 +86,6 @@ pylibmagic==0.5.0 ; sys_platform == 'darwin'
 # Windows has no system zone database; zoneinfo reads this one there. Pure
 # Python, so every platform takes it.
 tzdata>=2024.1
-
-# --- Windows-only audio endpoint volume control ----------------------------
-pycaw>=20230407 ; sys_platform == 'win32'
-comtypes>=1.2.0 ; sys_platform == 'win32'
 
 # --- Tests (python -m pytest) -----------------------------------------------
 # Image handling and the UI are tested on Windows, macOS and Linux in CI; the
