@@ -167,6 +167,164 @@ def measure_sqlite_wal(src, start):
     return at - start, 'wal'
 
 
+# --- TIFF and the camera raw formats built on it ----------------------------
+
+#: Signatures of the TIFF family: plain TIFF (and CR2, NEF, ARW, DNG, PEF,
+#: which are TIFF), Panasonic RW2 ('IIU'), Olympus ORF ('IIRO', 'IIRS',
+#: 'MMOR').
+TIFF_FAMILY_HEADERS = (b'II*\x00', b'MM\x00*', b'IIU\x00', b'IIRO', b'IIRS',
+                       b'MMOR')
+_TIFF_WIDTH = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8,
+               11: 4, 12: 8, 13: 4}
+#: Tags whose values are IFDs to walk too: SubIFDs (where DNG, NEF and ARW
+#: keep their raw image), EXIF, GPS, interoperability.
+_TIFF_IFD_TAGS = (330, 34665, 34853, 40965)
+#: (offsets tag, byte counts tag): strips, tiles, an embedded JPEG.
+_TIFF_DATA_PAIRS = ((273, 279), (324, 325), (513, 514))
+_TIFF_MAKE, _DNG_VERSION = 271, 50706
+#: Camera makers whose TIFF-based raw has its own extension.
+_RAW_MAKERS = (('NIKON', 'nef'), ('SONY', 'arw'), ('PENTAX', 'pef'),
+               ('RICOH', 'pef'))
+#: Panasonic RW2: the raw data's offset, and what sizes it.
+_RW2_RAW_OFFSET, _RW2_WIDTH, _RW2_HEIGHT, _RW2_COMPRESSION = \
+    0x118, 0x2, 0x3, 0xb
+
+
+def _tiff_values(src, start, order, kind, count, value_at):
+    """A tag's SHORT/LONG values (offsets, counts), or []."""
+    width = {3: 2, 4: 4, 13: 4}.get(kind)
+    if not width or not 0 < count <= 65536:
+        return []
+    raw = src.get(value_at, width * count)
+    if len(raw) < width * count:
+        return []
+    return list(struct.unpack(f"{order}{count}{'H' if width == 2 else 'I'}",
+                              raw))
+
+
+def measure_tiff_family(src, start):
+    """A TIFF, or a camera raw built on it, sized by its own structure.
+
+    Every IFD is walked -- the chain, and the SubIFDs, EXIF, GPS and
+    interoperability IFDs they point to -- and the file ends at the
+    furthest byte anything in them accounts for: an IFD, a value array, a
+    strip, a tile or an embedded JPEG. (The raw image of a DNG, NEF or
+    ARW is in a SubIFD; a walk of the chain alone stopped short of it.)
+
+    The extension: CR2 by the 'CR' mark after the header, RW2 and ORF by
+    their magic, DNG by its version tag, NEF / ARW / PEF by the camera
+    make; anything else is TIFF. A Panasonic RW2 does not record its raw
+    data's length, only its start: for its packed format (compression
+    34316, 16 bytes per 14 pixels in 16 KB blocks) the length follows from
+    the sensor size; another compression is not carved.
+    """
+    head = src.get(start, 16)
+    if len(head) < 16 or head[:4] not in TIFF_FAMILY_HEADERS:
+        return None
+    order = '<' if head[:2] == b'II' else '>'
+    first = struct.unpack_from(order + 'I', head, 4)[0]
+    if first < 8:
+        return None
+    kind = {b'IIU\x00': 'rw2', b'IIRO': 'orf', b'IIRS': 'orf',
+            b'MMOR': 'orf'}.get(head[:4])
+    if kind is None and head[8:10] == b'CR':
+        kind = 'cr2'
+    furthest, queue, seen = 8, [first], set()
+    tags0 = {}
+    while queue and len(seen) < 64:
+        ifd = queue.pop(0)
+        if ifd in seen or ifd < 8:
+            continue
+        seen.add(ifd)
+        count_raw = src.get(start + ifd, 2)
+        if len(count_raw) < 2:
+            return None
+        count = struct.unpack(order + 'H', count_raw)[0]
+        if not 0 < count <= 1024:
+            return None
+        table = src.get(start + ifd + 2, count * 12 + 4)
+        if len(table) < count * 12 + 4:
+            return None
+        furthest = max(furthest, ifd + 2 + count * 12 + 4)
+        values = {}
+        for n in range(count):
+            tag, kind_, length, value = struct.unpack_from(
+                order + 'HHII', table, n * 12)
+            size = _TIFF_WIDTH.get(kind_, 0) * length
+            value_at = start + ifd + 2 + n * 12 + 8
+            if size > 4:
+                furthest = max(furthest, value + size)
+                value_at = start + value
+            if tag in _TIFF_IFD_TAGS or any(tag in pair for pair in
+                                            _TIFF_DATA_PAIRS):
+                values[tag] = _tiff_values(src, start, order, kind_, length,
+                                           value_at)
+            elif len(seen) == 1:
+                values[tag] = (kind_, length, value, value_at)
+        if len(seen) == 1:
+            tags0 = values
+        for offsets, counts in _TIFF_DATA_PAIRS:
+            for at, size in zip(values.get(offsets) or [],
+                                values.get(counts) or []):
+                if at != 0xFFFFFFFF and size != 0xFFFFFFFF:
+                    furthest = max(furthest, at + size)
+        for tag in _TIFF_IFD_TAGS:
+            queue.extend(values.get(tag) or [])
+        following = struct.unpack_from(order + 'I', table, count * 12)[0]
+        if following:
+            queue.append(following)
+    if kind == 'rw2':
+        raw = _rw2_raw_end(tags0)
+        if raw is None:
+            return None
+        furthest = max(furthest, raw)
+    if kind is None:
+        kind = 'dng' if _DNG_VERSION in tags0 else 'tiff'
+    if kind == 'tiff':
+        make = tags0.get(_TIFF_MAKE)
+        if make and make[0] == 2:
+            text = (src.get(make[3], make[1]) if make[1] <= 4 else
+                    src.get(start + make[2], make[1]))
+            name = text.split(b'\x00')[0].decode('latin-1').upper()
+            kind = next((ext for maker, ext in _RAW_MAKERS
+                         if name.startswith(maker)), 'tiff')
+    return furthest, kind
+
+
+def _rw2_raw_end(tags):
+    """Where a Panasonic RW2's raw data ends, or None if its format does
+    not say."""
+    def short(tag):
+        entry = tags.get(tag)
+        return entry[2] if entry else None
+    offset = (tags.get(_RW2_RAW_OFFSET) or (None, None, None))[2]
+    width, height = short(_RW2_WIDTH), short(_RW2_HEIGHT)
+    if not offset or not width or not height:
+        return None
+    if short(_RW2_COMPRESSION) == 34316:
+        packed = -(-width * height // 14) * 16
+        return offset + -(-packed // 0x4000) * 0x4000
+    return None
+
+
+#: Fujifilm RAF: a fixed header, then (offset, length) pairs for the
+#: embedded JPEG, the CFA header and the CFA (raw) data.
+RAF_MAGIC = b'FUJIFILMCCD-RAW '
+
+
+def measure_raf(src, start):
+    """A Fujifilm RAF: the end of the furthest block its header lists."""
+    head = src.get(start, 0x6C)
+    if len(head) < 0x6C or head[:16] != RAF_MAGIC:
+        return None
+    pairs = struct.unpack_from('>6I', head, 0x54)
+    ends = [offset + length for offset, length in zip(pairs[::2], pairs[1::2])
+            if offset and length]
+    if not ends or pairs[0] < 0x6C:
+        return None
+    return max(ends), 'raf'
+
+
 def measure_regf(src, start):
     """4096-byte base block plus the hive-bins data size it records."""
     h = src.get(start, 4096 + 32)
@@ -1013,8 +1171,12 @@ def measure_psd(src, start):
     """Header, then three length-prefixed sections, then the image data,
     whose length follows from its compression."""
     h = src.get(start, 26)
-    if len(h) < 26 or h[:4] != b'8BPS' or _u16be(h, 4) != 1:
+    if len(h) < 26 or h[:4] != b'8BPS' or _u16be(h, 4) not in (1, 2):
         return None
+    # Version 2 is PSB, Photoshop's large document: the layer section's
+    # length and each RLE row count are twice as wide, and the canvas may
+    # be up to 300,000 pixels a side.
+    big = _u16be(h, 4) == 2
     channels = _u16be(h, 12)
     height, width = _u32be(h, 14), _u32be(h, 18)
     depth = _u16be(h, 22)
@@ -1022,11 +1184,13 @@ def measure_psd(src, start):
             not height or not width:
         return None
     pos = start + 26
-    for _ in range(3):                                  # colour, resources, layers
-        length = src.get(pos, 4)
-        if len(length) < 4:
+    for section in range(3):                        # colour, resources, layers
+        wide = big and section == 2
+        length = src.get(pos, 8 if wide else 4)
+        if len(length) < (8 if wide else 4):
             return None
-        pos += 4 + _u32be(length, 0)
+        pos += (8 + struct.unpack('>Q', length)[0]) if wide else \
+            (4 + _u32be(length, 0))
     compression = src.get(pos, 2)
     if len(compression) < 2:
         return None
@@ -1036,13 +1200,15 @@ def measure_psd(src, start):
         pos += channels * height * ((width * depth + 7) // 8)
     elif mode == 1:
         rows = channels * height
-        counts = src.get(pos, rows * 2)
-        if len(counts) < rows * 2:
+        width_of = 4 if big else 2
+        counts = src.get(pos, rows * width_of)
+        if len(counts) < rows * width_of:
             return None
-        pos += rows * 2 + sum(struct.unpack(f'>{rows}H', counts))
+        pos += rows * width_of + sum(struct.unpack(
+            f">{rows}{'I' if big else 'H'}", counts))
     else:
         return None
-    return pos - start, 'psd'
+    return pos - start, 'psb' if big else 'psd'
 
 
 _MBOX_FROM = re.compile(
@@ -1203,6 +1369,7 @@ ISOBMFF_BRANDS = {
     b'avif': 'avif', b'avis': 'avif',
     b'M4A ': 'm4a', b'M4B ': 'm4a', b'M4P ': 'm4a',
     b'M4V ': 'm4v', b'M4VH': 'm4v', b'M4VP': 'm4v',
+    b'crx ': 'cr3',                    # Canon CR3 raw (CRX)
     b'3gp4': '3gp', b'3gp5': '3gp', b'3gp6': '3gp', b'3gp7': '3gp',
     b'3gs7': '3gp', b'3ge6': '3gp', b'3ge7': '3gp', b'3g2a': '3gp',
 }

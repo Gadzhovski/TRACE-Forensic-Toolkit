@@ -47,8 +47,9 @@ BASELINE = {
     # two fragments, in order, raised it to 78.
     'dfrws-2007-challenge.img': 78,
     # Real published files of 40+ formats (tools/carve_corpus.py): every one,
-    # byte-exact, and none of its 21 signature decoys.
-    'carve-corpus.dd': 51,
+    # byte-exact, and none of its signature decoys. 63 since the camera raws
+    # (CR2, CR3, NEF x2, ARW, DNG, RAF, RW2, ORF, PEF) and two PSBs.
+    'carve-corpus.dd': 63,
 }
 
 #: Files rebuilt from fragments, byte-exact against the key. Gated like
@@ -83,16 +84,25 @@ def carve_image(path):
                     reader=lambda offset, length: data[offset:offset + length],
                     image_size=len(data))
 
+    # As the engine runs them (carving._carve_image): containers first, in
+    # its order, and each read owning only its own chunk -- the read-ahead
+    # belongs to the next read. The scorer used to run the carvers in
+    # dictionary order, which is not what an examiner's carve does.
+    from trace_app.core.carving import _CARVE_ORDER
+    order = [name for name in _CARVE_ORDER if name in Carver.CARVERS] + \
+        [name for name in Carver.CARVERS if name not in _CARVE_ORDER]
     offset = 0
     while offset < len(data):
         chunk = data[offset:offset + CHUNK_SIZE + CARVE_OVERLAP]
         if not chunk:
             break
-        for name, function in Carver.CARVERS.items():
+        carver.own_end = offset + CHUNK_SIZE
+        for name in order:
             try:
-                function(carver, chunk, offset)
+                Carver.CARVERS[name](carver, chunk, offset)
             except Exception as exc:
                 print(f"    !! {name} raised {type(exc).__name__}: {exc}")
+        carver.own_end = None
         carver.note_unfinished(chunk, offset, Carver.REASSEMBLERS,
                                limit=CHUNK_SIZE)
         offset += CHUNK_SIZE

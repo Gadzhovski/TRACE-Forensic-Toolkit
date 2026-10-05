@@ -61,7 +61,13 @@ def size_in_bytes(value):
         return None
     number, _space, unit = text.partition(' ')
     try:
-        return int(float(number) * _UNITS.get(unit.upper() or 'B', 1))
+        multiplier = _UNITS.get(unit.upper() or 'B', 1)
+        from trace_app.infra import utils
+        if utils.SIZE_UNITS == 'decimal' and multiplier > 1:
+            # Shown in decimal units (the examiner's setting): 1 kB = 1,000.
+            multiplier = 1000 ** {'KB': 1, 'MB': 2, 'GB': 3, 'TB': 4,
+                                  'PB': 5}[unit.upper()]
+        return int(float(number) * multiplier)
     except ValueError:
         return None
 

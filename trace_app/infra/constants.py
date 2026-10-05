@@ -38,7 +38,13 @@ CARVE_MAX_SIZE = {
     'png': 32 * 1024 * 1024,
     'gif': 16 * 1024 * 1024,
     'bmp': 32 * 1024 * 1024,
-    'tiff': 32 * 1024 * 1024,
+    # TIFF is now sized by its structure and read from the image in full,
+    # like the camera raws built on it.
+    'tiff': 256 * 1024 * 1024,
+    **{ext: 256 * 1024 * 1024 for ext in ('cr2', 'nef', 'arw', 'dng', 'pef',
+                                          'orf', 'rw2', 'raf')},
+    # CR3 is ISO-BMFF, walked within the read-ahead like MP4.
+    'cr3': 32 * 1024 * 1024,
     'pdf': 32 * 1024 * 1024,
     'zip': 32 * 1024 * 1024,
     'gz': 32 * 1024 * 1024,
@@ -87,6 +93,7 @@ CARVE_MAX_SIZE = {
     'elf': 256 * 1024 * 1024,
     'macho': 256 * 1024 * 1024,
     'psd': 256 * 1024 * 1024,
+    'psb': 1024 * 1024 * 1024,         # Photoshop's large document
     # The one heuristic extent: kept small, since it is where text stops.
     'mbox': 64 * 1024 * 1024,
     'eml': 64 * 1024 * 1024,

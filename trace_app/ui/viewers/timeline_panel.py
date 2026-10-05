@@ -146,7 +146,10 @@ class TimelineModel(QAbstractTableModel):
 
     def cell(self, row, column):
         if column == 0:
-            return f"{row['time']} (local)" if row['local'] else row['time']
+            if row['local']:
+                return f"{row['time']} (local)"
+            from trace_app.core.settings import alongside
+            return alongside(row['time'])
         if column == 1:
             return timeline.SOURCE_LABELS.get(row['source'], row['source'])
         if column == 2:
@@ -1222,8 +1225,9 @@ class TimelinePanel(QWidget):
         # Only a real path: a button's `checked` flag once arrived here as
         # False, and open(False) is the console.
         if not isinstance(path, str) or not path:
-            default = os.path.join(self.case.folder, 'exports',
-                                   'timeline.csv')
+            # The case's export folder -- its exports/, or the one its
+            # settings name (Options > Settings > Carving & exports).
+            default = os.path.join(self.case.exports_dir, 'timeline.csv')
             os.makedirs(os.path.dirname(default), exist_ok=True)
             path, _ = QFileDialog.getSaveFileName(
                 self, "Export Timeline", default, "CSV (*.csv)")

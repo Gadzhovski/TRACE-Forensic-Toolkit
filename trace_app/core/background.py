@@ -80,6 +80,7 @@ def child_main(kind, params, queue, stop):
 
     count, error = 0, ''
     try:
+        _apply_settings(params)
         job = JOBS[kind]
         count = job(params, progress, item, stop.is_set)
     except Exception as exc:      # reported, not raised: the parent decides
@@ -89,6 +90,16 @@ def child_main(kind, params, queue, stop):
     queue.put(('done', int(count or 0), error))
     queue.close()
     queue.join_thread()
+
+
+def _apply_settings(params):
+    """The examiner's settings and the case's (core/settings.py), in this
+    process -- which starts fresh, with the modules' defaults -- before the
+    job reads anything."""
+    from trace_app.core import settings
+    settings.apply_user()
+    if params.get('case_folder'):
+        settings.apply_case(settings.StoredCase(params['case_folder']))
 
 
 class _LogChannel:

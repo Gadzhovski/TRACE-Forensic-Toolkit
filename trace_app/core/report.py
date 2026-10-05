@@ -884,6 +884,15 @@ class _Builder:
                    "and nothing was extracted to disk to be examined. Times "
                    "are UTC unless marked local (the source stored no time "
                    "zone).</p>")
+        # The case's settings that shaped what was found and sent
+        # (core/settings.py) -- a reader needs them to judge the results.
+        from trace_app.core import settings
+        out.append(self.heading(2, 'methods-settings',
+                                "Settings that shaped these results"))
+        out.append('<ul>' + ''.join(
+            f"<li>{e(line)}</li>"
+            for line in settings.statement(settings.for_case(self.case)))
+            + '</ul>')
         out.append(self.heading(2, 'methods-tools', "Software"))
         out.append(_table(['Component', 'Version'],
                           [[e(name), _mono(version)]

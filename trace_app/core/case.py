@@ -269,11 +269,27 @@ class Case:
 
     @property
     def carved_dir(self):
-        return self.subdir('carved')
+        """The case's carved/ folder -- or, when the case's settings name
+        one (a larger drive, say), a folder for this case inside that."""
+        return self._chosen_dir('carved_folder') or self.subdir('carved')
 
     @property
     def exports_dir(self):
-        return self.subdir('exports')
+        return self._chosen_dir('export_folder') or self.subdir('exports')
+
+    def _chosen_dir(self, key):
+        from trace_app.core.settings import chosen_dir
+        chosen = (self.setting('settings') or {}).get(key)
+        path = chosen_dir(chosen, self.name)
+        if path is None:
+            return None
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as exc:
+            logger.warning("%s unusable (%s); using the case folder",
+                           path, exc)
+            return None
+        return path
 
     # --- metadata ---------------------------------------------------------
 

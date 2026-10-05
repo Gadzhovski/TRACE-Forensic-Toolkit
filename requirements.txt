@@ -81,6 +81,11 @@ python-magic-bin>=0.4.14 ; sys_platform == 'win32'
 python-magic>=0.4.27 ; sys_platform != 'win32'
 pylibmagic==0.5.0 ; sys_platform == 'darwin'
 
+# --- Time zones for display (Options > Settings > Display) ------------------
+# Windows has no system zone database; zoneinfo reads this one there. Pure
+# Python, so every platform takes it.
+tzdata>=2024.1
+
 # --- Windows-only audio endpoint volume control ----------------------------
 pycaw>=20230407 ; sys_platform == 'win32'
 comtypes>=1.2.0 ; sys_platform == 'win32'

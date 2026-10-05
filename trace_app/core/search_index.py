@@ -192,6 +192,11 @@ def _valid_phone(text):
 _ENTITY_CHECKS = {'card': _valid_card, 'iban': _valid_iban,
                   'phone': _valid_phone}
 
+#: The kinds indexing extracts -- all, unless the case's settings narrow
+#: them (core/settings.py; phone numbers can be noise in some cases).
+ENABLED_INDICATORS = frozenset(('email', 'url', 'domain', 'ip', 'ipv6',
+                                'phone', 'card', 'iban', 'btc', 'hash'))
+
 #: What each indicator kind is called, singular and plural, for the
 #: Indicators tab and the Findings tree.
 INDICATOR_KINDS = {
@@ -373,6 +378,8 @@ class SearchIndex:
                     elif kind == 'email' and '@' in value:
                         found.add(('domain', value.rsplit('@', 1)[1].lower()))
 
+        found = {(kind, value) for kind, value in found
+                 if kind in ENABLED_INDICATORS}
         if found:
             self._db.executemany(
                 "INSERT INTO entities (item_id, evidence_id, kind, value) "

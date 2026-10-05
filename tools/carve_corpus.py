@@ -54,6 +54,21 @@ CATALOG = [
     ('hopper.avif', 'avif', f'{_GH}/python-pillow/Pillow/main/Tests/images/avif/hopper.avif', 'd4327b7ab11ed8f11d86978258fc04e5505bcfe511ca2c4efa4838c85d226fd2', None),
     ('L_exif_xmp_iptc.heic', 'heic', f'{_GH}/bigcat88/pillow_heif/v1.1.0/tests/images/heif_other/L_exif_xmp_iptc.heic', '0083645511ffdee8acf04973237272678d3eb2554d77bde2adeeca102c220d51', None),
     ('example.heic', 'heic', f'{_GH}/strukturag/libheif/master/examples/example.heic', '7f8b363e4936c0666a25f64f3a92fda10bd8e5453be4592530b65a55dd98f3f2', None),
+    # Camera raw: raw.pixls.us samples, each CC0 (public domain) -- the
+    # smallest of each format, so the corpus stays small.
+    ('Canon-EOS-40D-sRAW2.CR2', 'cr2', 'https://raw.pixls.us/getfile.php/2102/nice/Canon%20-%20EOS%2040D%20-%20sRAW2%20%28sRAW%29%20%283%3A2%29.CR2', 'ba644e7dd2abe74eca260e67f0206ff113bf0f62e710f8130611e964d6be5bf1', None),
+    ('Canon-EOS-R6.CR3', 'cr3', 'https://raw.pixls.us/getfile.php/4659/nice/Canon%20-%20EOS%20R6%20-%203%3A2.CR3', '74abb0a113d075ad9887a058082f40dd2a938c4813a08474d82356f11a027778', None),
+    ('Nikon-D2H-12bit-lossy.NEF', 'nef', 'https://raw.pixls.us/getfile.php/5227/nice/Nikon%20-%20D2H%20-%2012bit%2012bit%20compressed%20%28Lossy%20%28type%201%29%29%20%283%3A2%29.NEF', '155edb938f884ea7372ce98d4ff5f965c3e413b43b95bc9923da6e92082cf914', None),
+    ('Nikon-COOLSCAN-IV-ED.nef', 'nef', 'https://raw.pixls.us/getfile.php/4282/nice/Nikon%20-%20Nikon%20COOLSCAN%20IV%20ED%20-%20uncompressed%20%284%3A3%29.nef', '268d9a98920a9f3ea3ebf6a2b9ff68b956df74ac0e46b980bee69e7ef3ebc172', None),
+    ('Sony-ILCE-7S-14bit.ARW', 'arw', 'https://raw.pixls.us/getfile.php/1582/nice/Sony%20-%20ILCE-7S%20-%2014bit%2014bit%20compressed%20%283%3A2%29.ARW', 'a35ebb2fbec929daa5beb20d1ce5c15a8aac7b1a7a231455387f3df8a7442e07', None),
+    ('Blackmagic-Micro-Cinema-12bit.dng', 'dng', 'https://raw.pixls.us/getfile.php/7317/nice/Blackmagic%20-%20Micro%20Cinema%20Camera%20-%2012bit%20%2816%3A9%29.dng', '4c65b8cda205087cfb94d8931811e53e15eb4df538ad67c1b4a3e76c1185b277', None),
+    ('Fujifilm-FinePix-S5000.RAF', 'raf', 'https://raw.pixls.us/getfile.php/2726/nice/Fujifilm%20-%20FinePix%20S5000%20-%204%3A3.RAF', 'dabd5e74521a6980156be9fd4b88d0c37b0fe4d0e0e6f5c12db8cffff1b76297', None),
+    ('Panasonic-DMC-LX7.RW2', 'rw2', 'https://raw.pixls.us/getfile.php/7008/nice/Panasonic%20-%20DMC-LX7%20-%201%3A1.RW2', 'd142a23aca836053ed53e9ce3cb3ed2d434541d734d71a94a6eefadcd08bd31b', None),
+    ('Olympus-E-10-16bit.ORF', 'orf', 'https://raw.pixls.us/getfile.php/5424/nice/Olympus%20-%20E-10%20-%2016bit%20%284%3A3%29.ORF', '2bfdade72439017a60a47aad1e5bbcb1aca36f2be7a21e94a4257a678fb6f4da', None),
+    ('Pentax-K10D-12bit.PEF', 'pef', 'https://raw.pixls.us/getfile.php/2239/nice/Pentax%20-%20K10D%20-%2012bit%2012bit%20compressed%20%283%3A2%29.PEF', 'e35ae4154a468be3154f5f462e884ba5941f010d3e8f23d347fbec14809f44d3', None),
+    # Photoshop large documents (PSB) from psd-tools' tests (MIT).
+    ('2layers.psb', 'psb', f'{_GH}/psd-tools/psd-tools/9e706d6ba3b5e5c91a1d0c423ff783ce3e9c363c/tests/psd_files/2layers.psb', '863c51eb4d4e72214a3cbdf06a0594c485e4262d899318b1ba914d4c848382ab', None),
+    ('0layers.psb', 'psb', f'{_GH}/psd-tools/psd-tools/9e706d6ba3b5e5c91a1d0c423ff783ce3e9c363c/tests/psd_files/0layers.psb', '3ae85219dadb3028dab6f4f8f72e6e1a6ca4b5d40aeede8abf87ec24020150fa', None),
     # Documents
     ('test.docx', 'docx', f'{_GH}/python-openxml/python-docx/master/tests/test_files/test.docx', 'fba1c76b66ff30982e5281941ca1111eaeaeb092abb6dfbe1730bed3774f40b6', None),
     ('test.pptx', 'pptx', f'{_GH}/scanny/python-pptx/master/tests/test_files/test.pptx', '8765677cdf43181ef41657cedf28485b5f2cbf166667218c217af07f8336c96f', None),
@@ -112,6 +127,10 @@ CATALOG = [
 #: file holds: the bytes the format accounts for. (name -> reason). The
 #: scorer compares against that prefix, and says so.
 LOGICAL_ONLY = {
+    'Sony-ILCE-7S-14bit.ARW': "7,680 zero bytes the camera wrote after the "
+                              "last block its IFDs record",
+    'Blackmagic-Micro-Cinema-12bit.dng': "52 bytes after the last tile its "
+                                         "IFDs record",
     'StringValuesHive': "hive slack after the last hbin has no recorded length",
     'BigDataHive': "hive slack after the last hbin has no recorded length",
     'security.evtx': "the zero-filled space preallocated after the last chunk "
@@ -152,6 +171,10 @@ DECOYS = [
     b'{\\rtf1', b'\x7fELF', b'\xcf\xfa\xed\xfe', b'8BPS\x00\x01',
     b'From someone@example.com Mon Jan  1 00:00:00 2007\n', b'PK\x03\x04',
     b'RIFF\x00\x10\x00\x00WEBP', b'\x00\x00\x00\x18ftypheic',
+    # The camera raws' and PSB's signatures.
+    b'II*\x00\x10\x00\x00\x00CR\x02\x00', b'IIU\x00\x18\x00\x00\x00',
+    b'IIRO\x08\x00\x00\x00', b'FUJIFILMCCD-RAW 0201', b'8BPS\x00\x02',
+    b'\x00\x00\x00\x18ftypcrx ',
 ]
 
 
@@ -252,7 +275,9 @@ def build(files):
 
     entries = []
     from trace_app.core import carving_formats as formats
-    measures = {'regf': formats.measure_regf, 'evtx': formats.measure_evtx}
+    measures = {'regf': formats.measure_regf, 'evtx': formats.measure_evtx,
+                'arw': formats.measure_tiff_family,
+                'dng': formats.measure_tiff_family}
     for name, kind, offset, data in layout:
         expected = data
         note = "contiguous"

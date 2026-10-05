@@ -86,8 +86,10 @@ class ExportButton(QToolButton):
             'pdf': "PDF Files (*.pdf)",
             'html': "HTML Files (*.html)",
         }
+        from trace_app.core.settings import export_dir
         path, _ = QFileDialog.getSaveFileName(
-            self, f"Export as {suffix.upper()}", "", filters[suffix])
+            self, f"Export as {suffix.upper()}", export_dir(),
+            filters[suffix])
         if not path:
             return  # cancelled
 

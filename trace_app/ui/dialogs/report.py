@@ -69,6 +69,12 @@ class ReportDialog(QDialog):
         self.setMinimumSize(820, 620)
         self.case = case
         self.options = report_core.default_options(case)
+        # Who the examiner is (Options > Settings), where the report has
+        # not been given one yet.
+        from trace_app.core import settings
+        for key in ('examiner', 'organisation'):
+            if not self.options.get(key):
+                self.options[key] = settings.user(key)
         stored = case.setting('report_options') if case else None
         if stored:
             self._merge(stored)

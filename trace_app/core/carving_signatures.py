@@ -671,6 +671,36 @@ def _valid_psd(data):
     return True
 
 
+def _valid_tiff_raw(data):
+    """A camera raw built on TIFF: no library here decodes them all, so the
+    structure is the check -- walked again over the carved bytes alone, it
+    must account for every one of them and name the same format."""
+    from trace_app.core.carving_formats import Source, measure_tiff_family
+    measured = measure_tiff_family(Source(data, 0), 0)
+    return bool(measured) and measured[0] == len(data) and \
+        measured[1] != 'tiff'
+
+
+def _valid_raf(data):
+    from trace_app.core.carving_formats import measure_raf
+    if not _remeasure(measure_raf, data):
+        return False
+    # Its embedded JPEG preview must be one.
+    offset, length = struct.unpack_from('>2I', data, 0x54)
+    return data[offset:offset + 3] == b'\xFF\xD8\xFF' and \
+        data[offset + length - 2:offset + length] == b'\xFF\xD9'
+
+
+def _valid_psb(data):
+    from trace_app.core.carving_formats import measure_psd
+    return _remeasure(measure_psd, data)
+
+
+def _valid_cr3(data):
+    from trace_app.core.carving_formats import isobmff_kind
+    return isobmff_kind(data) == 'cr3' and _valid_isobmff(data)
+
+
 def _valid_eml(data):
     message = email.message_from_bytes(data[:1 << 16])
     return bool(message.get('From') and (message.get('Date')
@@ -707,6 +737,9 @@ _VALIDATORS = {
     'elf': _valid_elf, 'macho': _valid_macho, 'psd': _valid_psd,
     'mbox': _valid_mbox, 'eml': _valid_eml,
     'rar': _valid_rar, '7z': _valid_7z,
+    'raf': _valid_raf, 'psb': _valid_psb, 'cr3': _valid_cr3,
+    **{kind: _valid_tiff_raw for kind in ('cr2', 'nef', 'arw', 'dng', 'pef',
+                                          'orf', 'rw2')},
 }
 
 

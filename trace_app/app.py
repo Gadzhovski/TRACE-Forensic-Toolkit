@@ -94,6 +94,9 @@ def set_taskbar_identity():
 
 def main():
     configure_logging()
+    # The examiner's own settings: size units, the log's detail.
+    from trace_app.core import settings
+    settings.apply_user()
     set_taskbar_identity()
     logging.getLogger('TRACE').info("Starting TRACE %s on %s", __version__, sys.platform)
     from trace_app.infra.capabilities import log_unavailable

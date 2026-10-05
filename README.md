@@ -442,9 +442,11 @@ unrar tool, and evidence is never handed to an outside program.
 
 ### 🔍 File carving
 
-Recovers deleted files by signature — **60 types** in nine groups:
+Recovers deleted files by signature — **70 types** in ten groups:
 
-- **Pictures:** JPG, PNG, GIF, BMP, TIFF, WEBP, HEIC, AVIF, PSD
+- **Pictures:** JPG, PNG, GIF, BMP, TIFF, WEBP, HEIC, AVIF, PSD, PSB
+- **Camera raw:** CR2, CR3, NEF, ARW, DNG, RAF, RW2, ORF, PEF -- sized
+  by their own structure, each raw's preview kept as part of it
 - **Documents:** PDF, DOCX/XLSX/PPTX/VSDX, ODT/ODS/ODP/ODG, EPUB, OLE
   (doc/xls/ppt/msg), RTF, HTML
 - **Email:** PST, OST, mbox, EML

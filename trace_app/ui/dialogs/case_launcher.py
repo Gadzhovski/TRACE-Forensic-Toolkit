@@ -55,7 +55,9 @@ class NewCaseDialog(QDialog):
         self.number_input.setPlaceholderText("2026-014")
         layout.addRow("Case number:", self.number_input)
 
-        self.examiner_input = QLineEdit()
+        from trace_app.core import settings
+        # The examiner's name from Options > Settings, so it is typed once.
+        self.examiner_input = QLineEdit(settings.user('examiner'))
         self.examiner_input.setPlaceholderText("Your name")
         layout.addRow("Examiner:", self.examiner_input)
 
@@ -93,7 +95,9 @@ class NewCaseDialog(QDialog):
         layout.addRow(buttons)
 
     def _choose_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Choose a case folder")
+        from trace_app.core import settings
+        folder = QFileDialog.getExistingDirectory(
+            self, "Choose a case folder", settings.user('case_folder'))
         if folder:
             self.folder_input.setText(os.path.normpath(folder))
 
@@ -212,7 +216,9 @@ class CaseLauncher(QDialog):
             self.accept()
 
     def _open_case(self):
-        folder = QFileDialog.getExistingDirectory(self, "Open a case folder")
+        from trace_app.core import settings
+        folder = QFileDialog.getExistingDirectory(
+            self, "Open a case folder", settings.user('case_folder'))
         if folder:
             self._load(os.path.normpath(folder))
 

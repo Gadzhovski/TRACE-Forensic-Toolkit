@@ -166,7 +166,8 @@ class PictureViewer(QWidget):
             return
 
         # Ask the user where to save the exported image
-        file_name, _ = QFileDialog.getSaveFileName(self, "Export Image", "",
+        from trace_app.core.settings import export_dir
+        file_name, _ = QFileDialog.getSaveFileName(self, "Export Image", export_dir(),
                                                    "PNG (*.png);;JPEG (*.jpg *.jpeg);;All Files (*)")
 
         # If a location is chosen, save the image

@@ -238,12 +238,16 @@ def _mailbox_call(name, *args):
 
 
 def read_member(data, member_name=None, kind=None, password=None,
-                limit=MAX_MEMBER_BYTES):
+                limit=None):
     """The bytes of one member, without unpacking the rest.
 
     `member_name` may be omitted for gzip, bzip2 and xz, which hold a single
-    stream rather than a directory of members.
+    stream rather than a directory of members. `limit` defaults to
+    MAX_MEMBER_BYTES as it is now -- a case's setting (core/settings.py) --
+    not as it was when this module loaded.
     """
+    if limit is None:
+        limit = MAX_MEMBER_BYTES
     kind = kind or detect_archive(data)
     if kind is None:
         raise ArchiveError("Not a recognised archive format.")

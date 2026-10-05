@@ -1666,3 +1666,16 @@ QToolButton#timelineRangeButton[dropdown="true"]:hover,
 QToolButton#listingViewButton[dropdown="true"]:hover {
     background-color: #3a3a3a;
 }
+
+/* --- Settings dialog ---------------------------------------------------- */
+
+QLabel#settingsHint {
+    color: #A0A0A0;
+    font-size: 11px;
+    padding-bottom: 4px;
+}
+
+QLabel#settingsScopeNote {
+    color: #E0E0E0;
+    padding-top: 8px;
+}

@@ -51,6 +51,7 @@ from trace_app.ui.viewers.metadata import MetadataViewer
 from trace_app.infra.paths import config_file, resource_path
 from trace_app.ui import icons
 from trace_app.ui.widgets import item_views
+from trace_app.core import settings as case_settings
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.viewers.registry_hive import RegistryExtractor
 from trace_app.ui.viewers.text import TextViewer
@@ -137,6 +138,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: checks this rather than a separate mode flag: there is one source
         #: of truth for whether findings have anywhere to be kept.
         self.case = case
+        # This case's settings in effect before anything reads them -- the
+        # defaults for quick triage (core/settings.py).
+        case_settings.apply_case(case)
 
         # Create a database manager for icon lookup
         self.db_manager = DatabaseManager()
@@ -907,6 +911,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
+        settings_action = QAction("Settings...", self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self.show_settings)
+        options_menu.addAction(settings_action)
         api_key_action = QAction("API Keys", self)
         api_key_action.triggered.connect(self.show_api_key_dialog)
         options_menu.addAction(api_key_action)
@@ -943,6 +951,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 (yara_action, icons.FINDING_YARA),
                 (sigma_action, icons.SIGMA),
                 (keywords_action, icons.KEYWORDS),
+                (settings_action, icons.SETTINGS),
                 (api_key_action, icons.API_KEYS),
                 (features_action, icons.FEATURES),
                 (about_action, icons.HELP)):
@@ -2905,6 +2914,28 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished()
         self.refresh_analysis_views()
 
+    def show_settings(self):
+        """Options > Settings: the examiner's preferences and this case's
+        settings (core/settings.py); what they change is redrawn."""
+        from trace_app.ui.dialogs.settings import SettingsDialog
+        dialog = SettingsDialog(self.case, self)
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        self.apply_settings()
+        return True
+
+    def apply_settings(self):
+        """Redraw what the settings shape: the listing (sizes, filters,
+        times), the time columns elsewhere, carving's default source."""
+        item = self.tree_viewer.currentItem()
+        if item is not None:
+            self.on_item_clicked(item, 0)
+        if self.case is not None:
+            self.refresh_analysis_views()
+        panel = getattr(self, 'carved_panel', None)
+        if panel is not None and hasattr(panel, 'use_settings'):
+            panel.use_settings()
+
     def show_supported_features(self):
         from trace_app.ui.dialogs.supported_features import (
             SupportedFeaturesDialog)
@@ -4188,6 +4219,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """Queue `targets` for a lookup or an upload."""
         targets = [t for t in targets if t]
         if not targets:
+            return
+        # The case's network policy (Options > Settings > Privacy) is
+        # checked here, where every VirusTotal request passes.
+        refusal = case_settings.network_refusal(
+            'upload' if method == METHOD_UPLOAD else 'network')
+        if refusal:
+            message.information(self, "VirusTotal", refusal)
             return
         if not self.vt_api_key():
             self.show_api_key_dialog()
@@ -6796,6 +6834,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setColumnHidden(10, False)  # Show Seq
         self.listing_table.setColumnHidden(11, False)  # Show Attributes
 
+        # The examiner's listing filters (Options > Settings > Display):
+        # deleted entries, and the file system's own $-named metadata files.
+        if not case_settings.user('show_deleted'):
+            entries = [e for e in entries if not e.get('is_deleted')]
+        if not case_settings.user('show_system'):
+            entries = [e for e in entries
+                       if not str(e.get('name') or '').startswith('$')]
+
         if not entries:
             return
 
@@ -6889,10 +6935,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))
             self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
             self.listing_table.setItem(row_position, 3, QTableWidgetItem(str(size)))
-            self.listing_table.setItem(row_position, 4, QTableWidgetItem(str(created)))
-            self.listing_table.setItem(row_position, 5, QTableWidgetItem(str(accessed)))
-            self.listing_table.setItem(row_position, 6, QTableWidgetItem(str(modified)))
-            self.listing_table.setItem(row_position, 7, QTableWidgetItem(str(changed)))
+            self.listing_table.setItem(row_position, 4, QTableWidgetItem(
+                case_settings.alongside(str(created))))
+            self.listing_table.setItem(row_position, 5, QTableWidgetItem(
+                case_settings.alongside(str(accessed))))
+            self.listing_table.setItem(row_position, 6, QTableWidgetItem(
+                case_settings.alongside(str(modified))))
+            self.listing_table.setItem(row_position, 7, QTableWidgetItem(
+                case_settings.alongside(str(changed))))
             self.listing_table.setItem(row_position, 8, QTableWidgetItem(file_path))
             self.listing_table.setItem(row_position, 9, QTableWidgetItem(""))  # Empty Info column for files/folders
 
@@ -7082,8 +7132,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             # Add the 'Export' option for any file or folder
             export_action = menu.addAction("Export")
-            export_action.triggered.connect(lambda: self.handle_export(data, QFileDialog.getExistingDirectory(self,
-                                                                                                              "Select Destination Directory")))
+            export_action.triggered.connect(lambda: self.handle_export(data, QFileDialog.getExistingDirectory(
+                self, "Select Destination Directory", case_settings.export_dir())))
 
             menu.exec_(self.listing_table.viewport().mapToGlobal(position))
 
@@ -7226,7 +7276,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             export_action = menu.addAction("Export")
             export_action.triggered.connect(
                 lambda: self.handle_export(self.tree_viewer.itemFromIndex(indexes[0]).data(0, Qt.UserRole),
-                                           QFileDialog.getExistingDirectory(self, "Select Destination Directory")))
+                                           QFileDialog.getExistingDirectory(
+                                               self, "Select Destination Directory",
+                                               case_settings.export_dir())))
 
             menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
 

@@ -96,8 +96,10 @@ class ActivityModel(QAbstractTableModel):
     def _cell(self, row, column):
         if column == 0:
             time = row.get('time_utc') or ''
-            return f'{time} (local)' if time and row.get('time_local') \
-                else time
+            if time and row.get('time_local'):
+                return f'{time} (local)'
+            from trace_app.core.settings import alongside
+            return alongside(time)
         if column == 1:
             return row.get('what') or ''
         if column == 2:

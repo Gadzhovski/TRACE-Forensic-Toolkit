@@ -26,18 +26,28 @@ def safe_datetime(timestamp, timezone_known=True):
     return f"{stamp} UTC" if timezone_known else f"{stamp} (local, no zone)"
 
 
+#: 'binary' (1 KB = 1,024 bytes) or 'decimal' (1 kB = 1,000): the examiner's
+#: setting, applied by core/settings.apply_user.
+SIZE_UNITS = 'binary'
+
+
 # Utility class for common operations
 class FileSystemUtils:
     @staticmethod
     def get_readable_size(size_in_bytes):
-        """Convert bytes to a human-readable string (e.g., KB, MB, GB, TB)."""
+        """Bytes as a readable size: binary (1 KB = 1,024 bytes, as Windows
+        shows them) or decimal (1 kB = 1,000 bytes), per the examiner's
+        setting (SIZE_UNITS, set by core/settings.py)."""
         if size_in_bytes is None:
             return "0 B"
-
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size_in_bytes < 1024.0:
+        if SIZE_UNITS == 'decimal':
+            step, units = 1000.0, ['B', 'kB', 'MB', 'GB', 'TB']
+        else:
+            step, units = 1024.0, ['B', 'KB', 'MB', 'GB', 'TB']
+        for unit in units:
+            if size_in_bytes < step:
                 return f"{size_in_bytes:.2f} {unit}"
-            size_in_bytes /= 1024.0
+            size_in_bytes /= step
         return f"{size_in_bytes:.2f} PB"
 
     @staticmethod

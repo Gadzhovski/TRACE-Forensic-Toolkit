@@ -614,7 +614,8 @@ class PDFViewer(QWidget):
             return
 
         options = QFileDialog.Options()
-        filePath, _ = QFileDialog.getSaveFileName(self, "Save PDF", "", "PDF Files (*.pdf);;All Files (*)",
+        from trace_app.core.settings import export_dir
+        filePath, _ = QFileDialog.getSaveFileName(self, "Save PDF", export_dir(), "PDF Files (*.pdf);;All Files (*)",
                                                   options=options)
 
         if not filePath:

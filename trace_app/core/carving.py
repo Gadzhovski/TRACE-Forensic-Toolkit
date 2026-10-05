@@ -55,7 +55,9 @@ logger = logging.getLogger('TRACE.Carving')
 #: compound-document container and cannot be told apart from the header.
 CARVE_CATEGORIES = {
     "Pictures": ["JPG", "PNG", "GIF", "BMP", "TIFF", "WEBP", "HEIC", "AVIF",
-                 "PSD"],
+                 "PSD", "PSB"],
+    "Camera raw": ["CR2", "CR3", "NEF", "ARW", "DNG", "RAF", "RW2", "ORF",
+                   "PEF"],
     "Documents": ["PDF", "DOCX", "XLSX", "PPTX", "VSDX", "ODT", "ODS", "ODP",
                   "ODG", "EPUB", "OLE", "RTF", "HTML"],
     "Email": ["PST", "OST", "MBOX", "EML"],
@@ -68,6 +70,12 @@ CARVE_CATEGORIES = {
               "WEBM"],
 }
 
+#: Camera raw extensions. Their carves are also recorded under
+#: CAMERA_RAW_SPANS, so the JPEG previews inside them -- part of the raw,
+#: on sector boundaries -- are not carved again as photos of their own.
+CAMERA_RAW = frozenset(t.lower() for t in CARVE_CATEGORIES["Camera raw"])
+CAMERA_RAW_SPANS = 'camera-raw'
+
 #: Every carvable extension, in menu order.
 CARVABLE_TYPES = [t for types in CARVE_CATEGORIES.values() for t in types]
 
@@ -75,13 +83,18 @@ CARVABLE_TYPES = [t for types in CARVE_CATEGORIES.values() for t in types]
 #: precisely than the selector that ran it: the ZIP carver recovers a .docx,
 #: the MP4 atom walk a .heic. Only the selected extensions are kept.
 EXTENSION_CARVER = {
-    'jpg': 'jpg', 'png': 'png', 'gif': 'gif', 'bmp': 'bmp', 'tiff': 'tiff',
+    'jpg': 'jpg', 'png': 'png', 'gif': 'gif', 'bmp': 'bmp',
+    # TIFF, and the camera raws built on it: one structure walk finds all
+    # and names each (carving_formats.measure_tiff_family).
+    **{ext: 'tiff' for ext in ('tiff', 'cr2', 'nef', 'arw', 'dng', 'pef',
+                               'orf', 'rw2')},
+    'raf': 'raf',
     'pdf': 'pdf', 'ole': 'ole', 'html': 'html', 'rar': 'rar', '7z': '7z',
     'gz': 'gz', 'wmv': 'wmv',
     **{ext: 'zip' for ext in ('zip', 'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
                               'ods', 'odp', 'odg', 'epub', 'apk', 'jar')},
     **{ext: 'isobmff' for ext in ('mov', 'mp4', 'm4v', '3gp', 'heic', 'avif',
-                                  'm4a')},
+                                  'm4a', 'cr3')},
     **{ext: 'riff' for ext in ('wav', 'webp', 'avi')},
     'sqlite': 'sqlite', 'wal': 'wal', 'regf': 'regf', 'evtx': 'evtx',
     'pst': 'pst', 'ost': 'pst',
@@ -89,6 +102,7 @@ EXTENSION_CARVER = {
     'lnk': 'lnk', 'mp3': 'mp3', 'ogg': 'ogg', 'opus': 'ogg', 'flv': 'flv',
     'mpg': 'mpg', 'mkv': 'mkv', 'webm': 'mkv', 'tar': 'tar', 'bz2': 'bz2',
     'xz': 'xz', 'rtf': 'rtf', 'elf': 'elf', 'macho': 'macho', 'psd': 'psd',
+    'psb': 'psd',
     'mbox': 'mbox', 'eml': 'eml',
 }
 
@@ -98,10 +112,6 @@ EXTENSION_CARVER = {
 #: what stops the walk reading arbitrary bytes as a chain of tiny atoms.
 _ATOM_NAME_RE = re.compile(rb'[A-Za-z0-9 _\-]{4}')
 
-#: Bytes per value for each TIFF field type, used to work out how far an IFD's
-#: out-of-line values push the end of the file.
-_TIFF_TYPE_WIDTH = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1,
-                    8: 2, 9: 4, 10: 8, 11: 4, 12: 8}
 
 #: Ceiling on what one gzip member may expand to while we look for its end.
 #: A carved stream is unverified input; decompressing it without a limit is how
@@ -126,7 +136,6 @@ OLE_HEADER = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
 GZIP_HEADER = b'\x1F\x8B\x08'
 RAR_HEADER = b'Rar!\x1A\x07'
 SEVENZIP_HEADER = b'7z\xBC\xAF\x27\x1C'
-TIFF_HEADERS = (b'II\x2A\x00', b'MM\x00\x2A')
 #: ASF Header Object GUID: the first 16 bytes of every WMV file.
 ASF_HEADER_GUID = bytes.fromhex('3026B2758E66CF11A6D900AA0062CE6C')
 #: ASF File Properties Object, which carries the declared file size.
@@ -164,6 +173,9 @@ class Carver:
         #: the image keeps other files, so skipping everything inside it
         #: loses them (two real files on DFRWS 2007 when this was global).
         self._spans = {}
+        #: Absolute end of the current read's own range; past it is the
+        #: read-ahead, which the next read owns. None: no read-ahead.
+        self.own_end = None
         #: Sector-aligned headers of formats that can be reassembled, by
         #: family -- tried again after the scan if nothing was carved there.
         self._unfinished = {}
@@ -198,6 +210,9 @@ class Carver:
         for begin, length in fragments or [(offset, len(file_content))]:
             bisect.insort(self._spans.setdefault(family, []),
                           (begin, begin + length))
+            if file_type in CAMERA_RAW:
+                bisect.insort(self._spans.setdefault(CAMERA_RAW_SPANS, []),
+                              (begin, begin + length))
         self.found += 1
         if fragments:
             self._sink(file_content, file_type, offset, fragments=fragments)
@@ -464,6 +479,20 @@ class Carver:
             if not self._starts_a_file(base_offset + start_index):
                 # Mid-sector: embedded in something else, not a file of its
                 # own. See _starts_a_file.
+                cursor = start_index + len(header)
+                continue
+            if file_type == 'jpg' and self.own_end is not None and \
+                    base_offset + start_index >= self.own_end:
+                # In the read-ahead: the next read owns this offset and
+                # carves it there -- after any camera raw that holds it as
+                # its preview has been carved (the raw may not fit this
+                # read yet; the preview, smaller, would).
+                cursor = start_index + len(header)
+                continue
+            if file_type == 'jpg' and self.inside_carved(
+                    base_offset + start_index, family=CAMERA_RAW_SPANS):
+                # A camera raw's preview: part of the raw, whose extent its
+                # structure proved -- not a photo of its own.
                 cursor = start_index + len(header)
                 continue
 
@@ -903,89 +932,17 @@ class Carver:
         return size
 
     def carve_tiff_files(self, chunk, base_offset):
-        """Recover TIFF by walking its IFD chain to the last entry."""
-        cap = CARVE_MAX_SIZE.get('tiff')
-        for header in TIFF_HEADERS:
-            cursor = 0
-            big_endian = header.startswith(b'MM')
-            while cursor < len(chunk):
-                start_index = chunk.find(header, cursor)
-                if start_index == -1:
-                    break
+        """TIFF and the camera raws built on it -- CR2, NEF, ARW, DNG, PEF,
+        ORF, RW2 -- sized by a walk of every IFD and the data they point
+        to (carving_formats.measure_tiff_family), which also names each.
+        The walk used to follow the IFD chain alone and stopped short of
+        the strips, and of a raw's image in its SubIFDs."""
+        self._carve_sized(chunk, base_offset, formats.TIFF_FAMILY_HEADERS,
+                          formats.measure_tiff_family)
 
-                size = self._tiff_size(chunk, start_index, big_endian, cap)
-                if size is None:
-                    cursor = start_index + len(header)
-                    continue
-
-                content = chunk[start_index:start_index + size]
-                if is_valid_file(content, 'tiff'):
-                    self.save_file(content, 'tiff', base_offset + start_index)
-                    cursor = start_index + size
-                else:
-                    cursor = start_index + len(header)
-
-    @staticmethod
-    def _tiff_size(chunk, start_index, big_endian, cap):
-        """Extent of the TIFF at `start_index`, from its IFD chain."""
-        order = '>' if big_endian else '<'
-        try:
-            offset = struct.unpack(
-                order + 'I', chunk[start_index + 4:start_index + 8])[0]
-        except struct.error:
-            return None
-
-        furthest = 8
-        for _ in range(16):             # bounded: a chain can be circular
-            ifd = start_index + offset
-            if offset < 8 or ifd + 2 > len(chunk):
-                return None
-            try:
-                count = struct.unpack(order + 'H', chunk[ifd:ifd + 2])[0]
-            except struct.error:
-                return None
-            if count == 0 or count > 512:
-                return None
-
-            end_of_ifd = ifd + 2 + count * 12 + 4
-            if end_of_ifd > len(chunk):
-                return None
-            furthest = max(furthest, end_of_ifd - start_index)
-
-            # Every entry whose value does not fit inline points outward; the
-            # file has to extend past the furthest of those.
-            for n in range(count):
-                entry = ifd + 2 + n * 12
-                try:
-                    kind, length = struct.unpack(
-                        order + 'HI', chunk[entry + 2:entry + 8])
-                except struct.error:
-                    return None
-                width = _TIFF_TYPE_WIDTH.get(kind, 0)
-                total = width * length
-                if total > 4:
-                    try:
-                        at = struct.unpack(
-                            order + 'I', chunk[entry + 8:entry + 12])[0]
-                    except struct.error:
-                        return None
-                    furthest = max(furthest, at + total)
-
-            try:
-                offset = struct.unpack(
-                    order + 'I', chunk[end_of_ifd - 4:end_of_ifd])[0]
-            except struct.error:
-                return None
-            if offset == 0:
-                break
-
-        if furthest < CARVE_MIN_SIZE:
-            return None
-        if cap and furthest > cap:
-            return None
-        if start_index + furthest > len(chunk):
-            return None
-        return furthest
+    def carve_raf_files(self, chunk, base_offset):
+        self._carve_sized(chunk, base_offset, (formats.RAF_MAGIC,),
+                          formats.measure_raf)
 
     def carve_gz_files(self, chunk, base_offset):
         """Recover gzip streams by decompressing until the stream ends.
@@ -1284,7 +1241,8 @@ class Carver:
                            b'\xca\xfe\xba\xbe'), formats.measure_macho)
 
     def carve_psd_files(self, chunk, base_offset):
-        self._carve_sized(chunk, base_offset, (b'8BPS\x00\x01',),
+        self._carve_sized(chunk, base_offset, (b'8BPS\x00\x01',
+                                               b'8BPS\x00\x02'),
                           formats.measure_psd)
 
     def carve_mbox_files(self, chunk, base_offset):
@@ -1303,6 +1261,7 @@ class Carver:
         'gif': carve_gif_files,
         'bmp': carve_bmp_files,
         'tiff': carve_tiff_files,
+        'raf': carve_raf_files,
         'riff': carve_riff_files,
         'isobmff': carve_mov_files,
         'wmv': carve_wmv_files,
@@ -1346,7 +1305,8 @@ _CARVE_ORDER = [
     'pst', 'sqlite', 'wal', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
     'ogg', 'wmv', 'zip', 'tar', 'tar_v7', 'gz', 'bz2', 'xz', '7z', 'rar',
     'ole', 'pdf',
-    'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'tiff',
+    'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'raf',
+    'tiff',
     'png',
     'gif', 'bmp', 'jpg', 'mp3',
 ]
@@ -1507,6 +1467,9 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
             chunk = image_handler.read(begin, read_end - begin)
             if not chunk:
                 continue
+            # Where this read's own range ends and the read-ahead begins
+            # (see _carve_by_footer).
+            carver.own_end = end
             for family in families:
                 try:
                     Carver.CARVERS[family](carver, chunk, begin)
@@ -1514,6 +1477,7 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
                     # One malformed span must not end the scan.
                     logger.warning("%s carver failed at offset %d: %s: %s",
                                    family, begin, type(exc).__name__, exc)
+            carver.own_end = None
             carver.note_unfinished(chunk, begin, families,
                                    limit=end - begin)
         run['bytes_skipped'] += (chunk_end - offset) - sum(
@@ -1947,6 +1911,12 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     analysed = []
     from trace_app.core.analysis import magic_reader
     magic = magic_reader()
+    # The case's settings (core/settings.py): read from the case itself,
+    # so a carve in its own process uses what the examiner chose.
+    from trace_app.core import settings as case_settings
+    chosen = case_settings.for_case(case)
+    smallest = int(chosen['carve_min_kb']) * 1024
+    analyse_carves = bool(chosen['analyse_carves'])
     import time as _time
     checkpoint = {'at': _time.monotonic(), 'position': start_offset}
 
@@ -1961,6 +1931,11 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             progress(position, total, count)
 
     def sink(content, file_type, offset, fragments=None):
+        if len(content) < smallest:
+            # Below the case's minimum (Settings ▸ Carving): counted, so the
+            # run's statistics say how many were left out, not kept.
+            tally['too_small'] = tally.get('too_small', 0) + 1
+            return
         origin = carve_origin.match(starts, offset, len(content))
         if source == 'slack':
             owner = slack_owner(offset)
@@ -1973,7 +1948,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
         case.add_carved(evidence_id, record)
         # Judged like a file on disk, while its bytes are in hand: a carved
         # executable, encrypted blob or located photo becomes a finding.
-        analysed.append(analyse_carve(record, content, magic))
+        if analyse_carves:
+            analysed.append(analyse_carve(record, content, magic))
         if len(analysed) >= 50:
             case.add_analysis_batch(evidence_id, analysed)
             analysed.clear()
@@ -2001,6 +1977,9 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             paired = 0
         summary = dict(stats, kept=tally['kept'], status=tally['status'],
                        named=tally['named'], wal_pairs=paired,
+                       too_small=tally.get('too_small', 0),
+                       settings={'min_kb': chosen['carve_min_kb'],
+                                 'analysed': analyse_carves},
                        duplicates=sum(len(v) - 1 for v in
                                       case.carved_duplicates(
                                           evidence_id).values()))

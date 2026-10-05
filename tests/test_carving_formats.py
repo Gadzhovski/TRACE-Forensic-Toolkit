@@ -299,3 +299,102 @@ def test_the_real_file_corpus_matches_its_answer_key():
         assert hashlib.md5(content).hexdigest() == entry['md5'], entry['name']
     extra = sorted(set(found) - set(expected))
     assert not extra, f"unaccounted carves at {[hex(o) for o in extra]}"
+
+
+# --- camera raw and PSB --------------------------------------------------------------
+
+CARVE_SAMPLES = os.path.join(ROOT, 'test_images', 'carve_samples')
+
+#: (sample, extension, bytes the format's structure records). The samples are
+#: raw.pixls.us's (CC0) and psd-tools' (MIT), fetched by tools/carve_corpus.py.
+#: ARW and DNG end with bytes nothing in them records (zero padding after the
+#: last block; 52 trailing bytes after the last tile): carved to what is
+#: recorded, like a registry hive or an EVTX log.
+RAW_SAMPLES = (
+    ('Canon-EOS-40D-sRAW2.CR2', 'cr2', 5805950),
+    ('Canon-EOS-R6.CR3', 'cr3', 5273174),
+    ('Nikon-D2H-12bit-lossy.NEF', 'nef', 3236017),
+    ('Nikon-COOLSCAN-IV-ED.nef', 'nef', 2201849),
+    ('Sony-ILCE-7S-14bit.ARW', 'arw', 6152704),
+    ('Blackmagic-Micro-Cinema-12bit.dng', 'dng', 1228044),
+    ('Fujifilm-FinePix-S5000.RAF', 'raf', 6851240),
+    ('Panasonic-DMC-LX7.RW2', 'rw2', 3249664),
+    ('Olympus-E-10-16bit.ORF', 'orf', 7614592),
+    ('Pentax-K10D-12bit.PEF', 'pef', 9561139),
+    ('2layers.psb', 'psb', 34781),
+    ('0layers.psb', 'psb', 139682),
+)
+
+
+def _raw_sample(name):
+    path = os.path.join(CARVE_SAMPLES, name)
+    if not os.path.exists(path):
+        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
+            pytest.fail(f"{name} missing")
+        pytest.skip("run tools/carve_corpus.py")
+    with open(path, 'rb') as handle:
+        return handle.read()
+
+
+@pytest.mark.parametrize('name, kind, size', RAW_SAMPLES,
+                         ids=[s[0] for s in RAW_SAMPLES])
+def test_camera_raw_measured_and_named(name, kind, size):
+    """Each format's own structure gives its extent and its name: every
+    IFD and the data it points to for the TIFF family (the raw image is in
+    a SubIFD for NEF/ARW/DNG), RW2's raw length from its sensor size and
+    packing, RAF's offset table, CR3's ISO-BMFF boxes, PSB's 64-bit layer
+    section and 32-bit row counts."""
+    from trace_app.core import carving_formats as formats
+    from trace_app.core.carving_signatures import is_valid_file
+    data = _raw_sample(name)
+    if kind == 'cr3':
+        assert formats.isobmff_kind(data) == 'cr3'
+    elif kind == 'psb':
+        assert formats.measure_psd(formats.Source(data, 0), 0) == \
+            (size, 'psb')
+    elif kind == 'raf':
+        assert formats.measure_raf(formats.Source(data, 0), 0) == \
+            (size, 'raf')
+    else:
+        assert formats.measure_tiff_family(formats.Source(data, 0), 0) == \
+            (size, kind)
+    assert is_valid_file(data[:size], kind)
+    # Cut short, it is not that format any more.
+    assert not is_valid_file(data[:size - 1000], kind)
+
+
+def test_camera_raws_carved_without_their_previews():
+    """Each raw at a sector boundary between random bytes is carved under
+    its own extension -- and the JPEG preview inside a raw is part of it,
+    not a photo of its own."""
+    import random
+    rng = random.Random(7)
+    image, where = bytearray(), {}
+    for name, kind, size in RAW_SAMPLES:
+        image.extend(rng.randbytes(16 * 1024))
+        image.extend(b'\0' * (-len(image) % SECTOR))
+        where[len(image)] = (name, kind, size)
+        image.extend(_raw_sample(name))
+        image.extend(b'\0' * (-len(image) % SECTOR))
+    image.extend(rng.randbytes(16 * 1024))
+    found = _carve(image, ['cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2',
+                           'orf', 'pef', 'psb', 'tiff', 'jpg'])
+    carved = {offset: (kind, len(content))
+              for kind, offset, content in found}
+    for offset, (_name, kind, size) in where.items():
+        assert carved.get(offset) == (kind, size), _name
+    assert set(carved) == set(where)        # no preview carved on its own
+
+
+def test_raw_signatures_alone_are_not_carved():
+    """The signatures with junk after them: nothing."""
+    import random
+    rng = random.Random(9)
+    image = bytearray()
+    for signature in (b'II*\x00\x10\x00\x00\x00CR\x02\x00',
+                      b'IIU\x00\x18\x00\x00\x00', b'IIRO\x08\x00\x00\x00',
+                      b'FUJIFILMCCD-RAW 0201', b'8BPS\x00\x02',
+                      b'\x00\x00\x00\x18ftypcrx '):
+        image.extend(signature + rng.randbytes(SECTOR * 8 - len(signature)))
+    assert _carve(image, ['cr2', 'cr3', 'nef', 'arw', 'dng', 'raf', 'rw2',
+                          'orf', 'pef', 'psb', 'tiff']) == []

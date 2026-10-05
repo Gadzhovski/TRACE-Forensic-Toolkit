@@ -79,7 +79,7 @@ def test_statuses_agree_with_the_dfrws_2006_answer_key():
 
 def test_every_corpus_file_is_complete():
     found, _stats = carve_all('carve-corpus.dd')
-    assert len(found) == 51
+    assert len(found) == 63      # 51, then the camera raws and two PSBs
     statuses = {file_type: verdict['status']
                 for file_type, verdict in found.values()}
     assert set(statuses.values()) <= {'complete', 'valid'}

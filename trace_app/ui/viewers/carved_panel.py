@@ -451,7 +451,15 @@ class CarvedFilesPanel(QWidget):
 
     def set_case(self, case):
         self.case = case
+        self.use_settings()
         self.refresh()
+
+    def use_settings(self):
+        """Start from the case's default source (Options > Settings)."""
+        from trace_app.core.settings import current
+        index = self.source_combo.findData(current('carve_source'))
+        if index >= 0:
+            self.source_combo.setCurrentIndex(index)
 
     def set_evidence_filter(self, evidence_id):
         """Show one image's carved files, or all; and carve that image.

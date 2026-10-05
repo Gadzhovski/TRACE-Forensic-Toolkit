@@ -123,6 +123,16 @@ def _run(report, images, sandbox):
                          (pyfvde, pyfsapfs, pyluksde, pyvslvm, pyesedb,
                           pymsiecf))
 
+    @check('time zones for display (zoneinfo + tzdata)')
+    def _():
+        # Windows has no system zone database: without tzdata in the
+        # package, Options > Settings' display zone would find nothing.
+        from trace_app.core import settings
+        names = settings.zones()
+        assert 'Europe/Sofia' in names, f"{len(names)} zones"
+        assert settings.valid_zone('America/New_York')
+        return f"{len(names)} zones"
+
     @check('YARA rules compile and match (yara-x)')
     def _():
         import platform

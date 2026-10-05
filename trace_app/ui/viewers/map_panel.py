@@ -649,6 +649,12 @@ class MapPanel(QWidget):
     def _agreed(self, style):
         """Whether tiles may come from `style`'s server: asked once per
         server per session, a yes written to the audit trail."""
+        from trace_app.core.settings import network_refusal
+        refusal = network_refusal()
+        if refusal:
+            from trace_app.ui.dialogs import message
+            message.information(self, "Map tiles", refusal)
+            return False
         host = geo.TILE_STYLES[style]['host']
         if host in self.allowed_hosts:
             return True

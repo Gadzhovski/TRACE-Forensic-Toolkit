@@ -67,6 +67,11 @@ BLOCK_BYTES = 64 * 1024
 #: purpose is to say where to look first.
 MAX_ANALYSIS_BYTES = 2 * 1024 * 1024 * 1024
 
+#: The file hashes computed: SHA-256 always, MD5 and SHA-1 when the case's
+#: settings ask (core/settings.py). One unchosen is left NULL -- "not
+#: computed", never a value.
+HASH_ALGORITHMS = ('md5', 'sha1', 'sha256')
+
 #: Directory recursion limit, matching the indexer: a filesystem loop is a real
 #: thing on damaged evidence, and a visited-set alone does not stop one that
 #: runs through different inodes.
@@ -371,9 +376,8 @@ def analyse_bytes(name, data, modules, magic=None, size=None):
                                                result.get('entropy'))
 
     if MODULE_HASH in modules and data:
-        result['md5'] = hashlib.md5(data).hexdigest()
-        result['sha1'] = hashlib.sha1(data).hexdigest()
-        result['sha256'] = hashlib.sha256(data).hexdigest()
+        for algorithm in HASH_ALGORITHMS:
+            result[algorithm] = hashlib.new(algorithm, data).hexdigest()
 
     _add_findings(result, name, data, modules,
                   size if size is not None else len(data or b''))
@@ -443,9 +447,8 @@ def _analyse_stream(file_object, size, name, modules, magic):
         return result
 
     meter = Entropy() if wants_entropy else None
-    md5 = hashlib.md5() if wants_hash else None
-    sha1 = hashlib.sha1() if wants_hash else None
-    sha256 = hashlib.sha256() if wants_hash else None
+    hashers = {name: hashlib.new(name) for name in HASH_ALGORITHMS} \
+        if wants_hash else {}
     kept = [] if wants_content else None
 
     offset = 0
@@ -456,10 +459,8 @@ def _analyse_stream(file_object, size, name, modules, magic):
             break
         if meter is not None:
             meter.feed(block)
-        if md5 is not None:
-            md5.update(block)
-            sha1.update(block)
-            sha256.update(block)
+        for hasher in hashers.values():
+            hasher.update(block)
         if kept is not None:
             kept.append(block)
         offset += len(block)
@@ -471,10 +472,8 @@ def _analyse_stream(file_object, size, name, modules, magic):
         if 'mime' in result:
             result['mismatch'] = classify_mismatch(extension, mime,
                                                    result['entropy'])
-    if md5 is not None:
-        result['md5'] = md5.hexdigest()
-        result['sha1'] = sha1.hexdigest()
-        result['sha256'] = sha256.hexdigest()
+    for name, hasher in hashers.items():
+        result[name] = hasher.hexdigest()
     _add_findings(result, name, b''.join(kept) if kept is not None else None,
                   modules, size)
     return result
