@@ -31,7 +31,8 @@ PAGES = (
                           'max_inspect_mb', 'high_entropy', 'archive_depth',
                           'archive_member_mb', 'indicators')),
     ("Carving && Exports", 'case', ('carve_source', 'carve_min_kb',
-                                    'analyse_carves', 'carved_folder',
+                                    'analyse_carves', 'carve_write_copies',
+                                    'carved_folder',
                                     'export_folder')),
 )
 

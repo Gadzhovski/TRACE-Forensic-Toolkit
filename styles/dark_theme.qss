@@ -1818,3 +1818,10 @@ QLabel#moduleSummary {
     padding-top: 4px;
     border-top: 1px solid #5A5A5A;
 }
+
+/* What the media player has loaded: 'Video · 00:58 · 352×240 · ready'. */
+QLabel#mediaStatusLine {
+    color: #9aa4b0;
+    font-size: 11px;
+    padding: 4px 6px 0px 6px;
+}

@@ -416,7 +416,8 @@ def job_carve(params, progress, item, should_stop):
     """Into the case when there is one (carve_evidence); otherwise into the
     session folder `params['folder']`, as quick triage does."""
     from trace_app.core.carving import (CarvingCancelled, carve_evidence,
-                                        carve_image, write_carved)
+                                        carve_image, describe_carved,
+                                        write_carved)
     from trace_app.core.case import Case
     megabyte = 1024 * 1024
     case = handler = None
@@ -441,8 +442,13 @@ def job_carve(params, progress, item, should_stop):
             'unallocated' if params['unallocated_only'] else 'image')
 
         def sink(content, file_type, offset, fragments=None):
-            item(write_carved(params['folder'], content, file_type, offset,
-                              fragments, source=source))
+            # Quick triage keeps references too; copies only when asked.
+            if params.get('folder') and params.get('write_copies'):
+                item(write_carved(params['folder'], content, file_type,
+                                  offset, fragments, source=source))
+            else:
+                item(describe_carved(content, file_type, offset, fragments,
+                                     source=source))
             found[0] += 1
         ranges = None
         if source == 'slack':

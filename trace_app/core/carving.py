@@ -1622,41 +1622,30 @@ def analyse_carve(record, content, magic=None):
             carved_path(record['name'], record.get('origin')), True, facts)
 
 
-def write_carved(folder, content, file_type, offset, fragments=None,
-                 source='unallocated', origin=None):
-    """Write one carved file into `folder`; return what is known about it.
+def describe_carved(content, file_type, offset, fragments=None,
+                    source='unallocated', origin=None):
+    """What is known about one carved file, without writing it anywhere.
 
-    `fragments` -- [(offset, length), ...] -- for a file rebuilt from pieces
-    the file system had split; it stays with the record, since a rebuilt file
-    is a conclusion the examiner may need to show working for.
+    A carve is a *reference*: its offset (and, for a file rebuilt from
+    pieces, `fragments` -- [(offset, length), ...]) in the image, with its
+    hashes, so its bytes are read from the evidence whenever they are
+    needed (`read_carved`) -- as X-Ways and Autopsy keep theirs. A copy is
+    written only when asked for (`write_carved`, `export_carved`).
+    `path` is '' until there is one.
 
     Only a date the file carries in its own bytes means anything: a carved
     file has no directory entry, so its file-system times are gone, and
     stamping it with the time of recovery would present our own clock as
-    evidence. When there is one, the written file is given it too, so the
-    copy still reads correctly outside TRACE.
+    evidence.
     """
-    os.makedirs(folder, exist_ok=True)
     name = carved_name(offset, file_type, origin, content)
-    path = os.path.join(folder, name)
-    with open(path, 'wb') as handle:
-        handle.write(content)
-
-    carve_source = source
     stamp, date_source = extract_original_timestamp(content, file_type)
-    if stamp:
-        seconds = time.mktime(stamp.timetuple())
-        try:
-            os.utime(path, (seconds, seconds))
-        except (OSError, OverflowError):
-            pass
-        embedded = stamp.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        embedded = UNKNOWN_DATE
+    embedded = stamp.strftime("%Y-%m-%d %H:%M:%S") if stamp \
+        else UNKNOWN_DATE
     assessment = carve_verify.assess(content, file_type, fragments)
     return {
         'name': name,
-        'path': path,
+        'path': '',
         'offset': offset,
         'size': len(content),
         'type': file_type,
@@ -1669,9 +1658,115 @@ def write_carved(folder, content, file_type, offset, fragments=None,
         else None,
         'status': assessment['status'],
         'checks': assessment['checks'],
-        'source': carve_source,
+        'source': source,
         'origin': origin,
     }
+
+
+def _save_copy(path, content, file_type):
+    """Write a carved file's bytes, dated from its own content when it
+    carries a date -- so the copy still reads correctly outside TRACE."""
+    with open(path, 'wb') as handle:
+        handle.write(content)
+    stamp, _source = extract_original_timestamp(content, file_type)
+    if stamp:
+        seconds = time.mktime(stamp.timetuple())
+        try:
+            os.utime(path, (seconds, seconds))
+        except (OSError, OverflowError):
+            pass
+
+
+def write_carved(folder, content, file_type, offset, fragments=None,
+                 source='unallocated', origin=None):
+    """`describe_carved`, and a copy written into `folder` (the case's
+    "Also write carved files to disk" setting)."""
+    record = describe_carved(content, file_type, offset, fragments,
+                             source=source, origin=origin)
+    os.makedirs(folder, exist_ok=True)
+    record['path'] = os.path.join(folder, record['name'])
+    _save_copy(record['path'], content, file_type)
+    return record
+
+
+#: The columns of an export's manifest, in order.
+MANIFEST_COLUMNS = ('file', 'evidence', 'offset', 'size', 'fragments',
+                    'type', 'status', 'was', 'md5', 'sha1', 'sha256',
+                    'verified')
+
+
+def export_carved(rows, folder, reader, progress=None, should_stop=None):
+    """Write carved files into `folder`, read from their images now, with a
+    manifest.csv saying where each came from.
+
+    `rows` are carved_files rows (`evidence_label` is used when present);
+    `reader(row)` returns the read(offset, size) of the row's image. Each
+    file is checked against the SHA-256 recorded when it was carved: the
+    bytes read now are the bytes found then, or the manifest says they are
+    not ('verified' no) -- the image changed, or the wrong one is open.
+    Returns [{'row', 'path', 'verified', 'error'}]. `should_stop()` ends it
+    between files; what was written stays, and is in the manifest.
+    """
+    import csv
+    os.makedirs(folder, exist_ok=True)
+    results, used = [], set()
+    for done, row in enumerate(rows):
+        if should_stop is not None and should_stop():
+            break
+        if progress is not None:
+            progress(done, len(rows))
+        result = {'row': row, 'path': '', 'verified': False, 'error': ''}
+        results.append(result)
+        try:
+            content = read_carved(reader(row), int(row['offset']),
+                                  int(row['size']), row.get('fragments'))
+        except Exception as exc:
+            result['error'] = f"could not be read: {exc}"
+            continue
+        if not content:
+            result['error'] = 'could not be read from the image'
+            continue
+        result['verified'] = bool(row.get('sha256')) and \
+            hashlib.sha256(content).hexdigest() == row['sha256']
+        name = safe_name(row.get('name') or
+                         f"{int(row['offset']):x}.{row.get('type') or 'bin'}")
+        base, extension = os.path.splitext(name)
+        label = row.get('evidence_label')
+        if label and len({r.get('evidence_id') for r in rows}) > 1:
+            # Several images: their carves can share offsets and names.
+            base = f"{safe_name(str(label))}-{base}"
+        candidate, copy = base + extension, 1
+        while candidate.lower() in used:
+            copy += 1
+            candidate = f"{base} ({copy}){extension}"
+        used.add(candidate.lower())
+        result['path'] = os.path.join(folder, candidate)
+        try:
+            _save_copy(result['path'], content, row.get('type') or '')
+        except OSError as exc:
+            result['error'] = f"could not be written: {exc}"
+            result['path'] = ''
+    if progress is not None:
+        progress(len(rows), len(rows))
+
+    with open(os.path.join(folder, 'manifest.csv'), 'w', newline='',
+              encoding='utf-8') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(MANIFEST_COLUMNS)
+        for result in results:
+            row = result['row']
+            writer.writerow([
+                os.path.basename(result['path']) or f"(not written: "
+                                                    f"{result['error']})",
+                row.get('evidence_label') or row.get('evidence_id') or '',
+                row['offset'], row['size'],
+                ' '.join(f"{o}+{n}" for o, n in row.get('fragments') or ()),
+                row.get('type') or '', row.get('status') or '',
+                (row.get('origin') or {}).get('path') or '',
+                row.get('md5') or '', row.get('sha1') or '',
+                row.get('sha256') or '',
+                'yes' if result['verified'] else 'no'])
+    return results
 
 
 #: Databases larger than this are not replayed for pairing.
@@ -1809,7 +1904,6 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     """
     from trace_app.core import carve_origin
     types = [t.lower() for t in file_types]
-    folder = case.carved_dir_for(evidence_id)
     size = image_handler.get_size()
     source = source or ('unallocated' if unallocated_only else 'image')
     previous = case.carving_state(evidence_id) if resume else None
@@ -1870,6 +1964,9 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     chosen = case_settings.for_case(case)
     smallest = int(chosen['carve_min_kb']) * 1024
     analyse_carves = bool(chosen['analyse_carves'])
+    # References by default; copies too only when the case asks for them.
+    folder = case.carved_dir_for(evidence_id) \
+        if chosen['carve_write_copies'] else None
     import time as _time
     checkpoint = {'at': _time.monotonic(), 'position': start_offset}
 
@@ -1896,8 +1993,12 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
                                  'basis': f"found in the slack of the live "
                                           f"file {owner[0]}"}
                                 if owner else None)
-        record = write_carved(folder, content, file_type, offset, fragments,
-                              source=source, origin=origin)
+        if folder:
+            record = write_carved(folder, content, file_type, offset,
+                                  fragments, source=source, origin=origin)
+        else:
+            record = describe_carved(content, file_type, offset, fragments,
+                                     source=source, origin=origin)
         case.add_carved(evidence_id, record)
         # Judged like a file on disk, while its bytes are in hand: a carved
         # executable, encrypted blob or located photo becomes a finding.
@@ -1932,7 +2033,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
                        named=tally['named'], wal_pairs=paired,
                        too_small=tally.get('too_small', 0),
                        settings={'min_kb': chosen['carve_min_kb'],
-                                 'analysed': analyse_carves},
+                                 'analysed': analyse_carves,
+                                 'copies_written': bool(folder)},
                        duplicates=sum(len(v) - 1 for v in
                                       case.carved_duplicates(
                                           evidence_id).values()))

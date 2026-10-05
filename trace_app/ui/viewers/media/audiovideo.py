@@ -2,20 +2,26 @@
 
 Plays either from a QBuffer or straight from the disk image via
 PyTsk3StreamDevice, so large media does not have to be read into memory first.
+
+Nothing plays until asked, but a loaded video shows its first frame --
+paused at the start, which the FFmpeg backend draws -- and a line above the controls says what is loaded ("Video · 00:58 ·
+352×240 · ready"). Before, a video opened as a black panel and an audio
+file announced "Playing Audio" while nothing played; carved media, opened
+one after another, looked broken. A file that will not decode says so in
+the player, not in a dialog per file.
 """
 
 import logging
 import platform
 
-from PySide6.QtCore import QSize, Qt, QUrl
-from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                                QLabel, QPushButton, QSlider)
 
 from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
-from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Viewer.Media')
 
@@ -34,6 +40,11 @@ class AudioVideoPlayer(QWidget):
         self._volume_interface = None
         self._is_audio_only = False  # Flag to track if we're playing audio-only content
         self._shutting_down = False  # Flag to indicate shutdown in progress
+        #: The first frame has been asked for (paused at the start).
+        self._primed = False
+        self._has_video = False
+        self._first_frame = None
+        self._failed = ""
 
         # Now initialize UI and connections
         self.initialize_ui()
@@ -56,11 +67,22 @@ class AudioVideoPlayer(QWidget):
         self.media_player.setVideoOutput(self.video_widget)
         self.media_player.setAudioOutput(self.audio_output)
 
-        # Create label to display when playing audio-only content
-        self.audio_label = QLabel("Playing Audio", self)
+        # Shown instead of the video for audio, and for a file that will
+        # not decode.
+        self.audio_label = QLabel("", self)
         self.audio_label.setObjectName("audioOnlyLabel")  # For stylesheet targeting
         self.audio_label.setAlignment(Qt.AlignCenter)
+        self.audio_label.setWordWrap(True)
         self.audio_label.setVisible(False)
+
+        # What is loaded, and whether it is playing.
+        self.status_label = QLabel("", self)
+        self.status_label.setObjectName("mediaStatusLine")
+        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
+        # The first frame of a video, caught as it is primed.
+        self.video_widget.videoSink().videoFrameChanged.connect(
+            self._frame_arrived)
 
         # Set default volume
         self.audio_output.setVolume(self._current_volume / 100.0)
@@ -69,8 +91,9 @@ class AudioVideoPlayer(QWidget):
         self.create_controls()
 
         # Add widgets to layout
-        self.layout.addWidget(self.video_widget)
-        self.layout.addWidget(self.audio_label)
+        self.layout.addWidget(self.video_widget, 1)
+        self.layout.addWidget(self.audio_label, 1)
+        self.layout.addWidget(self.status_label)
         self.layout.addWidget(self.control_widget)
 
     def set_audio_only_mode(self, is_audio_only=True):
@@ -94,20 +117,86 @@ class AudioVideoPlayer(QWidget):
             logger.error(f"Warning: Could not set audio-only mode options: {e}")
 
     def handle_media_status_change(self, status):
-        """Handle media status changes"""
-        # If this is an audio file and we see no video streams, switch to audio-only mode
+        """A new source loading resets; once loaded, say what it is and,
+        for a video, show its first frame."""
         try:
-            if status == QMediaPlayer.LoadedMedia:
-                # Check if we can detect if this is audio-only content
-                has_video = False
-
-                if hasattr(self.media_player, 'hasVideo'):
-                    has_video = self.media_player.hasVideo()
-
-                # Set the appropriate mode
-                self.set_audio_only_mode(not has_video)
+            if status in (QMediaPlayer.LoadingMedia, QMediaPlayer.NoMedia):
+                self._primed = False
+                self._first_frame = None
+                self._failed = ""
+                if status == QMediaPlayer.LoadingMedia:
+                    self.status_label.setText("Loading…")
+            elif status == QMediaPlayer.LoadedMedia:
+                self._has_video = bool(self.media_player.hasVideo())
+                self.set_audio_only_mode(not self._has_video)
+                self._describe()
+                if self._has_video and not self._primed:
+                    QTimer.singleShot(0, self._show_first_frame)
+            elif status == QMediaPlayer.InvalidMedia:
+                self._show_failure(self.media_player.errorString()
+                                   or "the data is not playable media")
+            elif status == QMediaPlayer.EndOfMedia:
+                self._describe()
         except Exception as e:
             logger.error(f"Warning: Error detecting audio/video mode: {e}")
+
+    # --- the first frame ---------------------------------------------
+
+    def _show_first_frame(self):
+        """Paused at the start, which the FFmpeg backend draws: the first
+        frame shows and nothing plays or sounds. Called on the next turn of
+        the loop, never from inside the player's own signal -- the backend
+        holds its lock there, and controlling the player waited for ever."""
+        self._primed = True
+        if self.media_player.playbackState() == QMediaPlayer.StoppedState:
+            self.media_player.pause()
+
+    def _frame_arrived(self, frame):
+        # Only noted: the picture's size, for the line above the controls.
+        if frame.isValid() and self._first_frame is None:
+            self._first_frame = frame.size()
+            QTimer.singleShot(0, lambda: self._describe(self._first_frame))
+
+    # --- what the line says --------------------------------------------
+
+    def _describe(self, size=None):
+        if self._failed:
+            return
+        duration = self.media_player.duration()
+        parts = ["Video" if self._has_video else "Audio"]
+        if duration > 0:
+            parts.append(self.format_time(duration))
+        if self._has_video:
+            if size is None or not size.isValid():
+                try:
+                    size = self.media_player.metaData().value(
+                        QMediaMetaData.Resolution)
+                except Exception:
+                    size = None
+            if size is not None and getattr(size, 'isValid',
+                                            lambda: False)():
+                parts.append(f"{size.width()}×{size.height()}")
+        state = self.media_player.playbackState()
+        parts.append("playing" if state == QMediaPlayer.PlayingState
+                     else
+                     "paused" if state == QMediaPlayer.PausedState and
+                     self.media_player.position() > 0 else
+                     "ready — press Play")
+        self.status_label.setText(" · ".join(parts))
+        if not self._has_video:
+            self.audio_label.setText(
+                "Audio" + (f" · {self.format_time(duration)}"
+                           if duration > 0 else ''))
+
+    def _show_failure(self, reason):
+        self._failed = reason
+        self.video_widget.setVisible(False)
+        self.audio_label.setText(
+            f"This file could not be played: {reason}.\n\nA damaged or "
+            "partly overwritten file often cannot be decoded; the Hex tab "
+            "shows its bytes.")
+        self.audio_label.setVisible(True)
+        self.status_label.setText("Not playable")
 
     def setup_connections(self):
         # Media player signals (updated for newer API)
@@ -173,6 +262,7 @@ class AudioVideoPlayer(QWidget):
         # Updated for newer API
         self._is_playing = (state == QMediaPlayer.PlayingState)
         self.update_controls()
+        self._describe()
 
     def update_controls(self):
         if self._is_playing:
@@ -236,8 +326,11 @@ class AudioVideoPlayer(QWidget):
         self.set_os_volume(volume)
 
     def handle_error(self, error, error_string):
+        """In the player, not a dialog: clicking through carved files, a
+        pop-up per damaged one would be a dialog per click."""
         if error != QMediaPlayer.NoError:
-            message.warning(self, "Media Error", f"Error: {error_string}")
+            logger.info("Media not playable: %s", error_string)
+            self._show_failure(error_string or "unknown error")
 
     def closeEvent(self, event):
         # Clean up resources

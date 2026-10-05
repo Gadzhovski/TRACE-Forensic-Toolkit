@@ -21,7 +21,6 @@ double-click goes to it. Queries run on a thread with their own read-only
 connection: a case with NTFS times is millions of rows.
 """
 
-import html
 import json
 import logging
 import os
@@ -1116,22 +1115,13 @@ class TimelinePanel(QWidget):
             self.row_activated.emit(self._payload(row))
 
     def _show_detail(self, row):
-        e = html.escape
-        lines = [f"<h3>{e(timeline.describe_kind(row))}</h3>",
-                 "<table cellspacing='2'>"]
-
-        def add(label, value):
-            if value not in (None, ''):
-                lines.append(f"<tr><td><b>{e(label)}</b></td>"
-                             f"<td>{e(str(value))}</td></tr>")
-        add("Time", row['time'] + (" (local, no zone)" if row['local']
-                                    else " UTC"))
-        add("Source", timeline.SOURCE_LABELS.get(row['source']))
-        add("Description", _description(row))
-        add("Path / subject", row['subject'])
-        add("User", row['user'])
-        add("Evidence", self._names.get(row['evidence_id']))
-        add("Deleted", "yes" if row['deleted'] else None)
+        from trace_app.ui.widgets import detail_html as d
+        pairs = [("Source", timeline.SOURCE_LABELS.get(row['source'])),
+                 ("Description", _description(row)),
+                 ("Path", row['subject'], 'path'),
+                 ("User", row['user']),
+                 ("Evidence", self._names.get(row['evidence_id'])),
+                 ("Deleted", "yes" if row['deleted'] else None)]
         try:
             extra = json.loads(row['extra'] or '{}')
         except (TypeError, ValueError):
@@ -1149,18 +1139,22 @@ class TimelinePanel(QWidget):
                            'usn', 'entry', 'sequence', 'parent', 'flags',
                            'offset', 'size', 'type', 'source',
                            'source_path'):
-                    add(key.replace('_', ' ').capitalize(), value)
+                    pairs.append((key.replace('_', ' ').capitalize(), value,
+                                  'path' if key == 'source_path' else ''))
             if isinstance(detail, dict):
                 for key, value in detail.items():
-                    add(key, value)
-        add("Reference", row['artifact_ref'])
-        lines.append("</table>")
+                    pairs.append((key, value))
+        pairs.append(("Reference", row['artifact_ref'], 'mono'))
+        time = row['time'] + (" (local, no zone)" if row['local']
+                              else " UTC")
+        parts = [d.STYLE, d.heading(timeline.describe_kind(row), time),
+                 d.facts(pairs)]
         if self.detail_extender is not None:
             try:
-                lines.append(self.detail_extender(row) or '')
+                parts.append(self.detail_extender(row) or '')
             except Exception as exc:
                 logger.debug("Detail for %s: %s", row['artifact_ref'], exc)
-        self.detail.setHtml(''.join(lines))
+        self.detail.setHtml(''.join(parts))
 
     def _menu(self, point):
         index = self.table.indexAt(point)

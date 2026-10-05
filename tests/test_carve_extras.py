@@ -266,7 +266,7 @@ def test_deleted_entries_name_the_copies(tmp_path):
         rows = case.carved_files(evidence)
         assert sorted(r['name'] for r in rows) == [
             '85400-file7.hmm.jpg', 'd5200-file6.jpg']
-        assert all(os.path.exists(r['path']) for r in rows)
+        assert all(r['path'] == '' for r in rows)    # references only
         judged = dict(case._db.execute(
             "SELECT name, extension FROM file_analysis").fetchall())
         assert judged['85400-file7.hmm.jpg'] == 'hmm'

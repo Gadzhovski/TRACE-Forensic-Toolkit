@@ -21,7 +21,7 @@ not the copy on disk -- what is examined is the evidence.
 import logging
 import os
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSize, QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QImageReader, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
                                QComboBox, QHeaderView, QLabel,
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
 
 from trace_app.core.carving import (CARVABLE_TYPES, CARVE_CATEGORIES,
                                     SOURCE_LABELS, SOURCES)
+from trace_app.core import settings as case_settings
 from trace_app.infra.constants import TABLE_ROW_HEIGHT, UNKNOWN_DATE
 from trace_app.infra.paths import carved_files_dir
 from trace_app.infra.utils import FileSystemUtils
@@ -128,6 +129,37 @@ def session_folder(label):
     return os.path.join(carved_files_dir(), safe)
 
 
+class CarvedExportWorker(QThread):
+    """Writes carved files out (carving.export_carved) off the UI thread:
+    reading them back from the image is I/O, and an E01 decompresses."""
+
+    #: Files done so far.
+    progressed = Signal(int)
+    #: export_carved's results.
+    exported = Signal(list)
+
+    def __init__(self, rows, folder, reader, parent=None):
+        super().__init__(parent)
+        self.rows, self.folder, self.reader = list(rows), folder, reader
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        from trace_app.core.carving import export_carved
+        try:
+            results = export_carved(
+                self.rows, self.folder, self.reader,
+                progress=lambda done, _total: self.progressed.emit(done),
+                should_stop=lambda: self._stop)
+        except Exception as exc:
+            logger.exception("Export of carved files failed")
+            results = [{'row': row, 'path': '', 'verified': False,
+                        'error': str(exc)} for row in self.rows]
+        self.exported.emit(results)
+
+
 class CarvingWorker(ProcessWorker):
     """Carves one image in a child process (core/background.py)."""
 
@@ -155,6 +187,9 @@ class CarvingWorker(ProcessWorker):
             'evidence_id': evidence_id,
             # Decided here: the per-user folder is the window's to choose.
             'folder': None if case_folder else session_folder(self.label),
+            # Quick triage keeps references too (the defaults); a case
+            # reads its own setting in carve_evidence.
+            'write_copies': bool(case_settings.current('carve_write_copies')),
         }, parent)
 
     def on_progress(self, done, total, found):
@@ -210,6 +245,10 @@ class CarvedFilesPanel(QWidget):
         self.case = None
         self.evidence_filter = None
         self.icon_resolver = None
+        #: `reader(row)` -> a carve's bytes, read from its image without
+        #: changing the window's active one; set by the window. Thumbnails
+        #: come from the evidence, as previews do -- there may be no copy.
+        self.content_reader = None
         #: Quick triage's results, which live only as long as the window.
         self._session = []
         self._rows = []
@@ -369,6 +408,7 @@ class CarvedFilesPanel(QWidget):
         self.gallery.setResizeMode(QListWidget.Adjust)
         self.gallery.setMovement(QListWidget.Static)
         self.gallery.setUniformItemSizes(True)
+        self.gallery.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.gallery.currentItemChanged.connect(
             lambda item, _old: item and self.file_selected.emit(
                 item.data(Qt.UserRole)))
@@ -682,7 +722,8 @@ class CarvedFilesPanel(QWidget):
             QTableWidgetItem(pieces),
             QTableWidgetItem((row.get('sha256') or '')[:16] + '…'
                              if row.get('sha256') else ''),
-            QTableWidgetItem(self._shown_path(row.get('path') or '')),
+            QTableWidgetItem(self._shown_path(row.get('path') or '')
+                             or 'Not saved'),
         ]
         values[_STATUS].setToolTip(checks_text(row))
         tone = _STATUS_TONE.get(row.get('status'))
@@ -707,7 +748,10 @@ class CarvedFilesPanel(QWidget):
                 "read one from.")
         values[_PIECES].setToolTip(pieces_tip)
         values[_DIGEST].setToolTip(checks_text(row))
-        values[_SAVED].setToolTip(row.get('path') or '')
+        values[_SAVED].setToolTip(
+            row.get('path') or "Kept as a reference: read from the image at "
+            "its offset whenever it is shown. Right-click ▸ Export writes "
+            "a copy, checked against its SHA-256.")
         for column, item in enumerate(values):
             self.table.setItem(position, column, item)
         self.table.setSortingEnabled(sorting)
@@ -781,9 +825,31 @@ class CarvedFilesPanel(QWidget):
                 return
             item = self._thumb_queue.pop(0)
             row = item.data(Qt.UserRole) or {}
-            pixmap = _thumbnail(row.get('path') or '', row.get('type') or '')
+            if self.content_reader is None or \
+                    int(row.get('size') or 0) > THUMBNAIL_MAX_BYTES:
+                continue
+            try:
+                content = self.content_reader(row)
+            except Exception as exc:
+                logger.debug("Thumbnail read failed: %s", exc)
+                content = None
+            pixmap = _thumbnail(content, row.get('type') or '')
             if not pixmap.isNull():
                 item.setIcon(QIcon(pixmap))
+
+    def selected_rows(self):
+        """The carves selected in the table (or the gallery), in order."""
+        if self.stack.currentWidget() is self.gallery:
+            return [item.data(Qt.UserRole)
+                    for item in self.gallery.selectedItems()]
+        rows = sorted({index.row() for index in
+                       self.table.selectionModel().selectedRows()})
+        return [self.table.item(r, 0).data(Qt.UserRole) for r in rows
+                if self.table.item(r, 0) is not None]
+
+    def shown_rows(self):
+        """Every carve the filters leave showing."""
+        return list(getattr(self, '_visible', self._rows))
 
     # --- menus -------------------------------------------------------
 
@@ -804,11 +870,17 @@ class CarvedFilesPanel(QWidget):
                 self.gallery.viewport().mapToGlobal(point))
 
 
-def _pillow_thumbnail(path):
+#: Larger carves are not read for a thumbnail: the gallery reads from the
+#: image as it scrolls, on the UI thread.
+THUMBNAIL_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _pillow_thumbnail(content):
     """What Qt cannot decode -- AVIF, PSD -- through Pillow."""
+    import io
     from PIL import Image
     from PySide6.QtGui import QImage
-    with Image.open(path) as image:
+    with Image.open(io.BytesIO(content)) as image:
         image.thumbnail((_THUMB * 2, _THUMB * 2))
         image = image.convert('RGBA')
         data = image.tobytes('raw', 'RGBA')
@@ -816,24 +888,31 @@ def _pillow_thumbnail(path):
         return QPixmap.fromImage(qimage.copy())
 
 
-def _thumbnail(path, file_type):
-    """A thumbnail of a carved picture or PDF, or a null pixmap.
+def _thumbnail(content, file_type):
+    """A thumbnail of a carved picture or PDF, from its bytes (read from
+    the image, not a copy), or a null pixmap.
 
     Scaled to fit, never cropped: a thumbnail that trims the edges of a
     picture hides part of the evidence.
     """
     pixmap = QPixmap()
+    if not content:
+        return pixmap
     try:
         if file_type == 'pdf':
             from pymupdf import Matrix, open as open_pdf
-            with open_pdf(path) as document:
+            with open_pdf(stream=bytes(content), filetype='pdf') as document:
                 if document.page_count:
                     page = document.load_page(0)
                     scale = _THUMB / max(page.rect.width, page.rect.height, 1)
                     image = page.get_pixmap(matrix=Matrix(scale * 2, scale * 2))
                     pixmap.loadFromData(image.tobytes('png'), 'PNG')
         elif file_type in _PICTURE_TYPES:
-            reader = QImageReader(path)
+            from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+            buffer = QBuffer()
+            buffer.setData(QByteArray(bytes(content)))
+            buffer.open(QIODevice.ReadOnly)
+            reader = QImageReader(buffer)
             reader.setAutoTransform(True)
             size = reader.size()
             if size.isValid() and size.width() and size.height():
@@ -841,12 +920,13 @@ def _thumbnail(path, file_type):
                 if factor < 1:
                     reader.setScaledSize(size * factor)
             image = reader.read()
+            buffer.close()
             if not image.isNull():
                 pixmap = QPixmap.fromImage(image)
             else:
-                pixmap = _pillow_thumbnail(path)
+                pixmap = _pillow_thumbnail(content)
     except Exception as exc:
-        logger.debug("No thumbnail for %s: %s", path, exc)
+        logger.debug("No thumbnail for a carved %s: %s", file_type, exc)
         return QPixmap()
     if pixmap.isNull():
         return pixmap

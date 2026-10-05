@@ -490,6 +490,13 @@ SHA-1 and SHA-256, identical carves are counted as copies, a carved file's
 hash can be looked up on VirusTotal, and each run records its settings,
 engine, signature hits checked and rejected, by type — in the audit trail
 and the report.
+**Carved files are references, not copies** — as X-Ways and Autopsy keep
+theirs: each is its offset (and fragments) in the image with its hashes, read
+from the evidence whenever it is shown, so a carve of a large drive does not
+fill the case folder. **Export** writes the ones you need, read from the
+image and checked against the SHA-256 recorded when they were carved, with a
+`manifest.csv` of where each came from; a case setting writes every carve to
+disk as well, if you prefer.
 Carve one image or all of them, from unallocated space (every free stretch
 between live files), **file slack** (the unused end of each live file's
 last cluster, where older data survives — never reading on into live data)

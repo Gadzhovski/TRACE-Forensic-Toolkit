@@ -19,9 +19,10 @@ from PySide6.QtCore import Qt, QUrl, QTimer, QBuffer, QByteArray, QIODevice
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QApplication)
 
 from trace_app.core import document_preview
-from trace_app.core.filetypes import (VIEW_AUDIO, VIEW_DOCUMENT, VIEW_HTML,
-                                      VIEW_IMAGE, VIEW_OFFICE, VIEW_VIDEO,
-                                      not_a_pdf, plan_view)
+from trace_app.core.filetypes import (VIEW_AUDIO, VIEW_DATABASE,
+                                      VIEW_DOCUMENT, VIEW_HTML, VIEW_IMAGE,
+                                      VIEW_OFFICE, VIEW_VIDEO, not_a_pdf,
+                                      plan_view)
 from trace_app.core.stream_device import PyTsk3StreamDevice
 from trace_app.ui.viewers.media.audiovideo import AudioVideoPlayer
 from trace_app.ui.viewers.media.html import SafeHtmlViewer
@@ -65,6 +66,10 @@ class UnifiedViewer(QWidget):
         self._picture_viewer = None
         self._audio_video_player = None
         self._html_viewer = None
+        self._database_viewer = None
+        #: `reader(data)` -> the bytes of a database's -wal beside it, or
+        #: None; set by the window, which knows the image.
+        self.database_wal_reader = None
 
         # Store media buffer for in-memory playback (keeps buffer alive during playback)
         self._media_buffer = None
@@ -96,6 +101,16 @@ class UnifiedViewer(QWidget):
             self._html_viewer.setVisible(False)
             self.layout.addWidget(self._html_viewer, 1)
         return self._html_viewer
+
+    def get_database_viewer(self):
+        """Lazy initialization of the SQLite viewer."""
+        if self._database_viewer is None:
+            from trace_app.ui.viewers.database_viewer import DatabaseViewer
+            self._database_viewer = DatabaseViewer(self)
+            self._database_viewer.setVisible(False)
+            self.layout.addWidget(self._database_viewer, 1)
+        self._database_viewer.wal_reader = self.database_wal_reader
+        return self._database_viewer
 
     def get_audio_video_player(self):
         """Lazy initialization of audio/video player"""
@@ -235,26 +250,37 @@ class UnifiedViewer(QWidget):
             self._html_viewer.clear()
             self._html_viewer.setVisible(False)
 
+        if self._database_viewer:
+            self._database_viewer.clear()
+            self._database_viewer.setVisible(False)
+
         self.notice.clear()
         self.notice.setVisible(False)
 
         # Clean up media player
         if self._audio_video_player:
             try:
-                # Stop playback
+                # Stop playback, then let go of the source: the FFmpeg
+                # backend's reader holds the device until it is replaced.
                 self._audio_video_player.stop()
+                self._audio_video_player.media_player.setSource(QUrl())
             except Exception as e:
                 logger.error(f"Error stopping media player: {e}")
             self._audio_video_player.setVisible(False)
 
-        # Clean up media buffer
+        # Clean up media buffer -- closed a beat later, like the stream
+        # device below. Closed at once, under a player that had played and
+        # paused, the next file's setSourceDevice waited for ever.
         if self._media_buffer:
-            try:
-                if self._media_buffer.isOpen():
-                    self._media_buffer.close()
-                self._media_buffer = None
-            except Exception as e:
-                logger.error(f"Error closing media buffer: {e}")
+            old_buffer, self._media_buffer = self._media_buffer, None
+
+            def close_buffer():
+                try:
+                    if old_buffer.isOpen():
+                        old_buffer.close()
+                except Exception as e:
+                    logger.error(f"Error closing media buffer: {e}")
+            QTimer.singleShot(100, close_buffer)
 
         # Clean up stream device - with safety delay
         if self._media_stream_device:
@@ -286,8 +312,11 @@ class UnifiedViewer(QWidget):
         self.placeholder.setVisible(True)
         self.current_path = None
 
-    def display_application_content(self, file_content, full_file_path):
-        """Show a file, choosing the viewer from its name and its content."""
+    def display_application_content(self, file_content, full_file_path,
+                                    data=None):
+        """Show a file, choosing the viewer from its name and its content.
+        `data` is the selection (path, volume): a database's -wal beside it
+        is found from it."""
         self.clear()
         self.current_path = full_file_path
         if not file_content:
@@ -325,6 +354,11 @@ class UnifiedViewer(QWidget):
                 loaded = self.load(file_content, mime, full_file_path)
                 self._set_notice(plan.note)
                 return loaded
+
+            if plan.kind == VIEW_DATABASE:
+                viewer = self.get_database_viewer()
+                viewer.display(file_content, data or {})
+                return self._showing(viewer, plan.note)
 
             if plan.kind == VIEW_HTML:
                 text, _encoding = document_preview.decode_html(file_content)

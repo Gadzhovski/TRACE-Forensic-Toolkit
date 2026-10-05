@@ -80,7 +80,8 @@ class ApplicationAdapter(ViewerAdapter):
     label = 'Application'
 
     def display(self, content, data):
-        self.widget.display_application_content(content, data.get('name', ''))
+        self.widget.display_application_content(content, data.get('name', ''),
+                                                data)
 
     def wants_stream(self, data):
         plan = plan_from_name(data.get('name', ''))
@@ -103,14 +104,6 @@ class ApplicationAdapter(ViewerAdapter):
         if plan is not None and plan.mime:
             return plan.mime
         return 'application/octet-stream'
-
-
-class DatabaseAdapter(ViewerAdapter):
-    """SQLite: tables and recovered deleted records."""
-    label = 'Database'
-
-    def display(self, content, data):
-        self.widget.display(content, data)
 
 
 class MetadataAdapter(ViewerAdapter):

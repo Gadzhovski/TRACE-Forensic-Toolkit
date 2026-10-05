@@ -57,8 +57,13 @@ def case_folder(tmp_path):
         if name == REMOVE:
             # Its files are all in unallocated space: carved, then indexed
             # as the carve job does.
+            from trace_app.core import settings
             from trace_app.core.indexer import index_carved
+            # With copies written, so removing the evidence has a carved
+            # folder to take away too.
+            settings.save_case(case, {'carve_write_copies': True})
             carve_evidence(handler, case, ids[name], CARVABLE_TYPES)
+            settings.apply_case(None)
             index = SearchIndex(folder)
             index_carved(handler.read, case, index, ids[name])
             index.commit()

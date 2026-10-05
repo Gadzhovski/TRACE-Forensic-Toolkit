@@ -31,6 +31,7 @@ VIEW_AUDIO = 'audio'
 VIEW_VIDEO = 'video'
 VIEW_HTML = 'html'
 VIEW_OFFICE = 'office'          # read into structured, static HTML
+VIEW_DATABASE = 'database'      # SQLite: tables and recovered records
 
 #: Read from the head of a file to identify it.
 HEAD_BYTES = 8192
@@ -93,6 +94,16 @@ _MIME_OFFICE = {
     'application/vnd.ms-powerpoint': 'legacy',
 }
 _MIME_HTML = {'text/html', 'application/xhtml+xml'}
+#: libmagic 5.35+ says vnd.sqlite3; 5.32 (Windows' python-magic-bin) x-sqlite3.
+_MIME_DATABASE = {'application/vnd.sqlite3', 'application/x-sqlite3'}
+
+#: SQLite's file header: a signature, so it settles what the file is.
+SQLITE_HEADER = b'SQLite format 3\x00'
+
+#: Names a SQLite database usually goes by -- only to say nothing about the
+#: name. A database is never recognised *by* its name: Thumbs.db is OLE.
+DATABASE_EXTENSIONS = {'db', 'sqlite', 'sqlite3', 'db3', 'sqlitedb', 'sdb',
+                       'storedata', 'localstorage'}
 
 #: What each plan is called in the viewer's notice.
 _LABELS = {
@@ -107,6 +118,7 @@ _LABELS = {
     ('office', 'odp'): 'OpenDocument presentation',
     ('office', 'legacy'): 'legacy Office document',
     ('html', ''): 'HTML page',
+    ('database', 'sqlite'): 'SQLite database',
 }
 
 
@@ -185,6 +197,8 @@ def plan_from_mime(mime):
         return ViewPlan(VIEW_OFFICE, _MIME_OFFICE[mime], mime)
     if mime in _MIME_HTML:
         return ViewPlan(VIEW_HTML, '', mime)
+    if mime in _MIME_DATABASE:
+        return ViewPlan(VIEW_DATABASE, 'sqlite', mime)
     if mime.startswith('audio/'):
         return ViewPlan(VIEW_AUDIO, mime.split('/', 1)[1], mime)
     if mime.startswith('video/'):
@@ -256,11 +270,24 @@ def plan_view(name, content=None, mime=None):
     `mime` may be passed when it is already known (analysis stored it);
     otherwise it is read from `content`.
     """
+    extension = extension_of(name)
+    if content and bytes(content[:len(SQLITE_HEADER)]) == SQLITE_HEADER:
+        # Browser history, chat and app databases mostly have no extension
+        # (Chrome's 'History') or a .db one: say so only when the name
+        # suggests something else.
+        plan = ViewPlan(VIEW_DATABASE, 'sqlite', 'application/vnd.sqlite3')
+        named = plan_from_name(name)
+        if named is not None or (extension and
+                                 extension not in DATABASE_EXTENSIONS
+                                 and len(extension) <= 5):
+            plan.note = (f"Shown as a SQLite database: identified from its "
+                         f"content, which a .{extension} file would not "
+                         f"normally hold.")
+        return plan
     by_name = plan_from_name(name)
     if mime is None:
         mime = identify(content) if content else ''
     by_content = plan_from_mime(mime)
-    extension = extension_of(name)
 
     if by_content is None:
         return by_name

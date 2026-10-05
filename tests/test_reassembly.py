@@ -281,8 +281,7 @@ def test_a_rebuilt_file_keeps_its_fragments_in_the_case(tmp_path):
         # Read back from the evidence through its fragments, not the span.
         assert read_carved(_Image(image).read, row['offset'], row['size'],
                            row['fragments']) == content
-        with open(row['path'], 'rb') as handle:
-            assert handle.read() == content
+        assert row['path'] == ''        # a reference: no copy is kept
     finally:
         case.close()
 

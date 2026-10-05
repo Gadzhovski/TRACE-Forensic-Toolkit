@@ -90,9 +90,19 @@ CASE = {
     'analyse_carves': (True, "Analyse carved files",
                        "Type, entropy, hidden data, photo metadata, authors "
                        "and executables for every carve."),
+    'carve_write_copies': (False, "Also write carved files to disk",
+                           "Off: a carved file is a reference -- its offset "
+                           "(and fragments) in the image, with its hashes -- "
+                           "read from the evidence when viewed, as X-Ways "
+                           "and Autopsy keep theirs; export the ones you "
+                           "need (Carved files ▸ Export). On: every carve is "
+                           "also copied into the folder below as it is "
+                           "found."),
     'carved_folder': ('', "Write carved files to",
-                      "Empty: the case's carved/ folder. A folder on "
-                      "another drive keeps large carves off the case's."),
+                      "Where copies go when they are written while "
+                      "carving. Empty: the case's carved/ folder. A folder "
+                      "on another drive keeps large carves off the "
+                      "case's."),
     'export_folder': ('', "Export to",
                       "Where exports and saved files are offered; empty: "
                       "the case's exports/ folder."),
@@ -279,6 +289,12 @@ def statement(values):
     lines.append(f"High entropy from {values['high_entropy']} bits/byte; "
                  f"archives opened {values['archive_depth']} deep, members up "
                  f"to {values['archive_member_mb']:,} MB")
+    lines.append("Carved files: " + (
+        "written to disk as found, and referenced in the image"
+        if values.get('carve_write_copies') else
+        "kept as references into the image (offset, fragments, hashes) and "
+        "read from it; exported copies checked against the recorded "
+        "SHA-256"))
     lines.append("Network: " + ("offline -- nothing sent" if
                                 values.get('offline') else
                                 ("lookups and uploads allowed" if

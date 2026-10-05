@@ -1,7 +1,10 @@
-"""The Database tab: a SQLite file's tables, and the records it deleted.
+"""A SQLite file's tables, and the records it deleted.
 
-Any SQLite database -- a live file, a deleted one, a carved one, a member
-of an archive -- opens here from its bytes (nothing is written out). The
+The Application tab's view of a SQLite database (core/filetypes recognises
+one by its header, whatever it is called): a live file, a deleted one, a
+carved one, a member of an archive -- opened from its bytes (nothing is
+written out). It was a tab of its own, empty for every other file and easy
+to miss for a database. The
 left lists its tables with their row counts and, under each, the records
 recovered from where SQLite left them after deleting them
 (core/sqlite_recover.py): freelist pages, freeblocks, unused space in

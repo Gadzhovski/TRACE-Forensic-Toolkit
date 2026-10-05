@@ -411,9 +411,9 @@ def test_analysis_records_findings_in_one_pass():
 # --- carving ------------------------------------------------------------------------------
 
 def test_carving_into_a_case_is_recorded_per_image(tmp_path):
-    """Every carved file is a row addressed by its byte span, written under
-    its own image's folder, hashed, and audited; a second carve replaces
-    the first rather than doubling it."""
+    """Every carved file is a row addressed by its byte span -- a reference
+    into the image, nothing written to disk -- hashed, and audited; a second
+    carve replaces the first rather than doubling it."""
     import hashlib
     from trace_app.core.carving import CARVABLE_TYPES, carve_evidence
     from trace_app.core.case import Case, parse_artifact_ref
@@ -433,12 +433,11 @@ def test_carving_into_a_case_is_recorded_per_image(tmp_path):
             assert span['kind'] == 'span'
             assert span['begin'] == row['offset']
             assert span['end'] - span['begin'] == row['size']
-            assert os.path.dirname(row['path']) == case.carved_dir_for(evidence)
-            with open(row['path'], 'rb') as handle:
-                content = handle.read()
+            assert row['path'] == ''                # no copy
+            # The recorded hash is of the evidence's bytes at that offset.
+            content = handler.read(row['offset'], row['size'])
             assert hashlib.sha256(content).hexdigest() == row['sha256']
-            # The copy is the evidence's own bytes at that offset.
-            assert handler.read(row['offset'], row['size']) == content
+        assert not os.listdir(case.carved_dir)
         assert case.carving_state(evidence)['status'] == 'done'
         assert case.analysis_summary()['carved'] == found
 
@@ -632,4 +631,99 @@ def test_evidence_summary_tells_not_run_from_found_nothing(tmp_path):
         assert summary.when('2026-10-04T23:07:58+00:00') == \
             '2026-10-04 23:07:58 UTC'
     finally:
+        case.close()
+
+
+
+def test_a_sqlite_database_is_recognised_by_its_header_not_its_name():
+    from trace_app.core.filetypes import VIEW_DATABASE, plan_view
+    head = b'SQLite format 3\x00' + b'\x10\x00' + b'\0' * 200
+    for name in ('History', 'msgstore.db', 'places.sqlite', 'carved.bin'):
+        plan = plan_view(name, head)
+        assert plan.kind == VIEW_DATABASE, name
+    assert plan_view('History', head).note == ''
+    assert plan_view('msgstore.db', head).note == ''
+    assert 'SQLite database' in plan_view('photo.jpg', head).note
+    # Thumbs.db is OLE: a .db name makes nothing a database.
+    ole = bytes.fromhex('d0cf11e0a1b11ae1') + b'\0' * 504
+    plan = plan_view('Thumbs.db', ole)
+    assert plan is None or plan.kind != VIEW_DATABASE
+
+
+
+def test_carving_writes_copies_only_when_the_case_asks(tmp_path):
+    """'Also write carved files to disk': each carve copied into the
+    image's folder as it is found, and still a reference."""
+    import hashlib
+    from trace_app.core import settings
+    from trace_app.core.carving import carve_evidence
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    path = image_path('11-carve-fat.dd')
+    case = Case.create(str(tmp_path / 'case'), 'Copies')
+    evidence = case.add_evidence(path)
+    settings.save_case(case, {'carve_write_copies': True})
+    handler = ImageHandler(path)
+    try:
+        assert carve_evidence(handler, case, evidence, ['jpg']) > 0
+        for row in case.carved_files(evidence):
+            assert os.path.dirname(row['path']) == \
+                case.carved_dir_for(evidence)
+            with open(row['path'], 'rb') as handle:
+                content = handle.read()
+            assert hashlib.sha256(content).hexdigest() == row['sha256']
+            assert handler.read(row['offset'], row['size']) == content
+        run = case.carving_runs(evidence, limit=1)[0]
+        assert run['stats']['settings']['copies_written'] is True
+    finally:
+        handler.close_resources()
+        settings.apply_case(None)
+        case.close()
+
+
+def test_an_export_is_read_from_the_image_checked_and_audited(tmp_path):
+    """Exported carves are the image's bytes, checked against the SHA-256
+    recorded when carved, listed in manifest.csv, and become the rows'
+    saved copies; one whose bytes no longer match says so."""
+    import csv
+    import hashlib
+    from trace_app.core.carving import carve_evidence, export_carved
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    path = image_path('11-carve-fat.dd')
+    case = Case.create(str(tmp_path / 'case'), 'Export')
+    evidence = case.add_evidence(path)
+    handler = ImageHandler(path)
+    try:
+        carve_evidence(handler, case, evidence, ['jpg', 'pdf'])
+        rows = case.carved_files(evidence)
+        rows[1] = dict(rows[1], sha256='0' * 64)       # as if it changed
+        folder = str(tmp_path / 'out')
+        results = export_carved(rows, folder, lambda row: handler.read)
+        assert [r['verified'] for r in results] == \
+            [index != 1 for index in range(len(rows))]
+        for result in results:
+            with open(result['path'], 'rb') as handle:
+                content = handle.read()
+            row = result['row']
+            assert content == handler.read(row['offset'], row['size'])
+            assert os.path.basename(result['path']) == row['name']
+        with open(os.path.join(folder, 'manifest.csv'), newline='',
+                  encoding='utf-8') as handle:
+            manifest = list(csv.DictReader(handle))
+        assert [m['file'] for m in manifest] == [r['name'] for r in rows]
+        assert manifest[1]['verified'] == 'no' and \
+            manifest[0]['verified'] == 'yes'
+        assert manifest[0]['sha256'] == hashlib.sha256(open(
+            results[0]['path'], 'rb').read()).hexdigest()
+
+        case.record_carved_export(results, folder)
+        saved = case.carved_files(evidence)
+        assert all(os.path.dirname(r['path']) == folder for r in saved)
+        line = next(a for a in case.activity(5)
+                    if a['action'] == 'carved files exported')
+        assert f"{len(rows)} file(s) to {folder}" in line['detail']
+        assert '1 not matching their recorded SHA-256' in line['detail']
+    finally:
+        handler.close_resources()
         case.close()

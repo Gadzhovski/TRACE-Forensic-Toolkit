@@ -70,7 +70,7 @@ def case_folder_name(name):
     """A folder name for a case called `name`, valid on every platform:
     spaces kept (it is read by people), characters Windows refuses and
     trailing dots and spaces dropped, never empty."""
-    cleaned = ''.join('_' if c in '<>:"/\|?*' or ord(c) < 32 else c
+    cleaned = ''.join('_' if c in '<>:"/\\|?*' or ord(c) < 32 else c
                       for c in (name or '').strip())
     cleaned = cleaned.rstrip(' .')[:80].rstrip(' .')
     reserved = {'CON', 'PRN', 'AUX', 'NUL'} | {f'{p}{n}' for p in ('COM', 'LPT')
@@ -1516,8 +1516,8 @@ class Case:
     def clear_carved(self, evidence_id):
         """Forget a previous carve of one piece of evidence.
 
-        The rows only: the files already written stay where they are, and a
-        new carve writes the same names over them.
+        The rows only: copies already written or exported stay where they
+        are.
         """
         self._db.execute("DELETE FROM carved_files WHERE evidence_id = ?",
                          (evidence_id,))
@@ -1528,13 +1528,15 @@ class Case:
         self._db.commit()
 
     def add_carved(self, evidence_id, record):
-        """Record one carved file (a record from carving.write_carved)."""
+        """Record one carved file (carving.describe_carved / write_carved).
+        `path` is '' for a carve kept as a reference only."""
         offset, size = int(record['offset']), int(record['size'])
-        path = record['path']
-        try:
-            path = os.path.relpath(path, self.folder)
-        except ValueError:
-            pass            # another drive: keep it absolute
+        path = record.get('path') or ''
+        if path:
+            try:
+                path = os.path.relpath(path, self.folder)
+            except ValueError:
+                pass        # another drive: keep it absolute
         self._db.execute(
             "INSERT INTO carved_files (evidence_id, artifact_ref, name, path, "
             "offset, size, type, sha256, embedded_date, date_source, "
@@ -1550,6 +1552,28 @@ class Case:
              record.get('md5'), record.get('sha1'), record.get('source'),
              json.dumps(record['origin']) if record.get('origin')
              else None))
+
+    def record_carved_export(self, results, folder):
+        """Note where exported carves were written (their 'Saved to'), and
+        audit the export: how many, where, and any whose bytes no longer
+        match the SHA-256 recorded when they were carved."""
+        written = [r for r in results if r.get('path')]
+        for result in written:
+            row = result['row']
+            self._db.execute(
+                "UPDATE carved_files SET path = ? WHERE evidence_id = ? AND "
+                "offset = ?", (result['path'], row['evidence_id'],
+                               row['offset']))
+        self._db.commit()
+        mismatched = [r for r in written if not r.get('verified')]
+        failed = [r for r in results if not r.get('path')]
+        self._record_activity(
+            'carved files exported',
+            f"{len(written)} file(s) to {folder}"
+            + (f"; {len(mismatched)} not matching their recorded SHA-256: "
+               + ', '.join(r['row']['name'] for r in mismatched[:20])
+               if mismatched else '; all match their recorded SHA-256')
+            + (f"; {len(failed)} not written" if failed else ''))
 
     def set_carved_related(self, evidence_id, offset, related):
         """Record the carve one belongs with (a WAL and its database)."""
@@ -1689,7 +1713,7 @@ class Case:
         rows = []
         for row in self._db.execute(query, params):
             row = dict(row)
-            if not os.path.isabs(row['path']):
+            if row['path'] and not os.path.isabs(row['path']):
                 row['path'] = os.path.join(self.folder, row['path'])
             for key, empty in (('fragments', 'null'), ('checks', '[]'),
                                ('origin', 'null'), ('related', 'null')):

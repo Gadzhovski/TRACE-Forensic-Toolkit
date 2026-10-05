@@ -704,9 +704,10 @@ def test_carving_is_a_triage_tab_with_its_findings(qapp, window, truth):
                                                        finding['size'])
 
 
-def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs):
-    """Without a case, carving still works -- for the session, in the
-    per-user folder, one folder per image."""
+def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs,
+                                                      tmp_path):
+    """Without a case, carving still works -- for the session, as
+    references into the image, like a case's."""
     from trace_app.core.carving import CARVABLE_TYPES
     from trace_app.ui.main_window import MainWindow
     window = MainWindow()
@@ -719,11 +720,29 @@ def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs):
         assert window.case is None
         assert window.carved_panel.count == 16
         row = window.carved_panel._rows[0]
-        assert os.path.basename(os.path.dirname(row['path'])) == '11-carve-fat.dd'
-        assert os.path.isfile(row['path'])
+        assert row['path'] == ''
+        assert window._carved_bytes(row) == window.image_handler.read(
+            row['offset'], row['size'])
         window.preview_carved(row)
         pump(qapp, 0.5)
         assert (window.current_selected_data or {}).get('is_carved')
+
+        # Thumbnails come from the image too: there is no copy to read.
+        from trace_app.ui.viewers.carved_panel import _thumbnail
+        picture = next(r for r in window.carved_panel._rows
+                       if r['type'] == 'jpg' and r['status'] != 'partial')
+        assert not _thumbnail(window._carved_bytes(picture), 'jpg').isNull()
+
+        # Export: copies read from the image, each matching its hash.
+        rows = window.carved_panel._rows[:3]
+        out = tmp_path / 'export'
+        worker = window.export_carved_rows(rows, folder=str(out))
+        assert pump(qapp, 60, lambda: worker.isFinished())
+        pump(qapp, 0.3)
+        written = sorted(p.name for p in out.iterdir())
+        assert written == sorted([r['name'] for r in rows] + ['manifest.csv'])
+        manifest = (out / 'manifest.csv').read_text(encoding='utf-8')
+        assert manifest.count(',yes') == 3
     finally:
         window.cleanup_resources()
 
@@ -1339,7 +1358,8 @@ def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
     panel.table.clicked.emit(panel.model.index(position, 0))
     pump(qapp, 10, lambda: bool(shown))
     assert shown and window.result_viewer.currentWidget() is panel
-    assert 'NTFS times of this file' in panel.detail.toHtml()
+    detail = panel.detail.toPlainText()
+    assert 'NTFS times (UTC)' in detail and '$SI' in detail
 
     panel._focus_file(row)
     assert pump(qapp, 30, lambda: not panel.loading)
@@ -1804,8 +1824,10 @@ def test_an_interrupted_carve_offers_resume(qapp, window):
 def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
                                                          tmp_path):
     """Neither image holds a SQLite file, so one written and deleted from
-    by SQLite itself goes to the Database tab the way a selected file's
-    bytes do: its tables at once, the deleted rows when recovery ends."""
+    by SQLite itself goes to the Application tab the way a selected file's
+    bytes do: its tables at once, the deleted rows when recovery ends. There
+    is no Database tab of its own any more -- it stood empty for every
+    other file."""
     import sqlite3
     path = str(tmp_path / 'history.db')
     db = sqlite3.connect(path)
@@ -1820,20 +1842,24 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
     db.close()
     with open(path, 'rb') as handle:
         content = handle.read()
-    viewer = window.database_viewer
     labels = [window.viewer_tab.tabText(i)
               for i in range(window.viewer_tab.count())]
-    assert labels.index('Database') == labels.index('Application') + 1
+    assert 'Database' not in labels
+    application = window.application_viewer
     # Nothing selected, and no read from an earlier test still to land:
     # either would show another file in this tab, over this database.
     window.current_selected_data = None
     window._cancel_worker('file_worker')
     window._cancel_worker('media_worker')
     pump(qapp, 2)
-    window.viewer_tab.setCurrentWidget(viewer)
+    window.viewer_tab.setCurrentWidget(application)
     pump(qapp, 1)
+    # Named as nothing in particular: recognised by its header.
     window.update_viewer_with_file_content(content, {
-        'name': 'history.db', 'path': '/history.db', 'start_offset': 0})
+        'name': 'History', 'path': '/History', 'start_offset': 0})
+    viewer = application.get_database_viewer()
+    assert viewer.isVisibleTo(application)
+    assert not application.notice.isVisibleTo(application)
     assert viewer.tables.item(0).text() == 'urls (29 rows)'
     assert viewer.grid.rowCount() == 29
     assert pump(qapp, 100, lambda: viewer.tables.count() == 2),         viewer.info.text()
@@ -1843,8 +1869,15 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
                for c in range(viewer.grid.columnCount())]
     assert headers == ['Found in', 'Page', 'Note', 'id', 'url']
     assert viewer.grid.item(0, 4).text() == 'https://example.org/page/11'
-    viewer.display(b'not a database', {})
-    assert viewer.info.text() == 'Not a SQLite database.'
+
+    # A misleading name is said so; another file hides the database view.
+    window.update_viewer_with_file_content(content, {
+        'name': 'notes.txt', 'path': '/notes.txt', 'start_offset': 0})
+    assert viewer.isVisibleTo(application)
+    assert 'SQLite database' in application.notice.text()
+    window.update_viewer_with_file_content(b'plain words', {
+        'name': 'Thumbs.db', 'path': '/Thumbs.db', 'start_offset': 0})
+    assert not viewer.isVisibleTo(application)
 
 
 def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
@@ -1948,3 +1981,45 @@ def test_sigma_detections_are_a_triage_tab_and_findings(qapp, window):
     finally:
         window.case.clear_findings(evidence, 'sigma')
         window.refresh_analysis_views()
+
+
+def test_media_says_what_it_is_and_switches_after_playing(qapp):
+    """A loaded file says what it is and waits for Play ('Audio · 00:03 ·
+    ready'), not "Playing Audio" over a black panel; one that will not
+    decode says so in the player, with no dialog; and a file played, paused
+    and left for the next one does not hang the switch -- its buffer was
+    closed under the decoder."""
+    import io
+    import wave
+    from trace_app.ui.viewers.media import UnifiedViewer
+    buffer = io.BytesIO()
+    with wave.open(buffer, 'wb') as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(1)
+        audio.setframerate(8000)
+        audio.writeframes(bytes(range(256)) * 100)        # 3.2 s
+    tone = buffer.getvalue()
+    viewer = UnifiedViewer()
+    viewer.resize(600, 400)
+    try:
+        viewer.display_application_content(tone, 'tone.wav')
+        player = viewer._audio_video_player
+        assert pump(qapp, 10, lambda: 'ready' in player.status_label.text())
+        assert player.status_label.text().startswith('Audio · 00:03')
+        assert not player._is_playing
+        player.toggle_play()
+        assert pump(qapp, 5, lambda: player.media_player.position() > 0)
+        player.toggle_play()
+        pump(qapp, 0.3)
+
+        viewer.display_application_content(tone, 'again.wav')   # no hang
+        assert pump(qapp, 10, lambda: 'ready' in player.status_label.text())
+
+        viewer.display_application_content(
+            b'\x30\x26\xb2\x75' + bytes(4000), 'damaged.wmv')
+        assert pump(qapp, 10,
+                    lambda: player.status_label.text() == 'Not playable')
+        assert 'could not be played' in player.audio_label.text()
+    finally:
+        viewer.shutdown()
+        viewer.deleteLater()

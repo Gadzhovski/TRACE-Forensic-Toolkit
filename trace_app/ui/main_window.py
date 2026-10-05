@@ -53,8 +53,7 @@ from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
 from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, HexAdapter,
-                                     CaseAdapter, DatabaseAdapter,
-                                     MetadataAdapter,
+                                     CaseAdapter, MetadataAdapter,
                                      NotesAdapter,
                                      TextAdapter)
 from trace_app.ui.viewers.virustotal import (METHOD_HASH, METHOD_UPLOAD,
@@ -1268,6 +1267,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # other finding, and with a case it runs as an analysis job.
         self.carved_panel = CarvedFilesPanel()
         self.carved_panel.icon_resolver = self._get_file_icon
+        self.carved_panel.content_reader = self._carved_bytes
         self.carved_panel.carve_requested.connect(self.start_carving)
         self.carved_panel.resume_requested.connect(self.resume_carving)
         self.carved_panel.file_selected.connect(self.preview_carved)
@@ -1407,14 +1407,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.notes_panel = NotesPanel()
         self.notes_panel.set_case(self.case)
 
-        from trace_app.ui.viewers.database_viewer import DatabaseViewer
-        self.database_viewer = DatabaseViewer()
-        self.database_viewer.wal_reader = self._sibling_wal
+        # A SQLite database shows in the Application tab like any other
+        # format; its -wal is read from beside it on the image.
+        self.application_viewer.database_wal_reader = self._sibling_wal
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
             ApplicationAdapter(self.application_viewer),
-            DatabaseAdapter(self.database_viewer),
             MetadataAdapter(self.metadata_viewer),
             CaseAdapter(self.case_panel),
             NotesAdapter(self.notes_panel),
@@ -1862,10 +1861,31 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         menu = QMenu(self)
         path = row.get('path') or ''
+        selected = [r for r in self.carved_panel.selected_rows() if r] \
+            if self.sender() is self.carved_panel else []
+        if row not in selected:
+            selected = [row]
+        export_action = menu.addAction(
+            icons.icon(icons.SAVE_AS),
+            f"Export {len(selected)} Files..." if len(selected) > 1
+            else "Export...")
+        export_action.setToolTip("Write a copy read from the image, checked "
+                                 "against its recorded SHA-256, with a "
+                                 "manifest of where it came from.")
+        shown = self.carved_panel.shown_rows()
+        export_all = menu.addAction(f"Export All Shown ({len(shown):,})...")
+        export_all.setEnabled(len(shown) > len(selected))
+        menu.addSeparator()
         open_action = menu.addAction("Open Externally")
         location_action = menu.addAction("Show in Folder")
-        open_action.setEnabled(os.path.isfile(path))
-        location_action.setEnabled(os.path.isfile(path))
+        has_copy = os.path.isfile(path)
+        open_action.setEnabled(has_copy)
+        location_action.setEnabled(has_copy)
+        if not has_copy:
+            for action in (open_action, location_action):
+                action.setToolTip("Kept as a reference into the image: "
+                                  "export it first.")
+        menu.setToolTipsVisible(True)
         browse = None
         kind = (row.get('type') or '').lower()
         if kind in CARVED_ARCHIVE_TYPES | CARVED_BROWSABLE_DOCUMENTS:
@@ -1898,7 +1918,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     lambda: self._bookmark_carved(row, ref))
 
         chosen = menu.exec_(position)
-        if browse is not None and chosen == browse:
+        if chosen == export_action:
+            self.export_carved_rows(selected)
+        elif chosen == export_all:
+            self.export_carved_rows(shown)
+        elif browse is not None and chosen == browse:
             if not self.browse_carved_archive(row):
                 self.set_status(f"{row.get('name')} could not be opened as an "
                                 f"archive.", 5000)
@@ -2070,6 +2094,105 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # The job indexed what it carved, through its own connection.
             self.search_panel.reload_index()
             self.refresh_analysis_views()
+
+    def _carved_reader(self, row):
+        """The read(offset, size) of a carve's own image, without changing
+        the window's active image (thumbnails and exports read while the
+        examiner looks at something else)."""
+        path = row.get('image_path')
+        if not path and self.case is not None and \
+                row.get('evidence_id') is not None:
+            evidence = next((r for r in self.case.evidence()
+                             if r['id'] == row['evidence_id']), None)
+            path = evidence['path'] if evidence else None
+        handler = self.handler_for(path) if path else self.image_handler
+        if handler is None:
+            raise OSError("the image is not open")
+        return handler.read
+
+    def _carved_bytes(self, row):
+        """A carve's bytes from its image (fragments followed), quietly:
+        None if it cannot be read."""
+        try:
+            fragments = row.get('fragments')
+            if fragments is None and self.case is not None and \
+                    row.get('evidence_id') is not None:
+                fragments = self.case.carved_fragments(row['evidence_id'],
+                                                       int(row['offset']))
+            return read_carved(self._carved_reader(row), int(row['offset']),
+                               int(row['size']), fragments)
+        except Exception as exc:
+            logger.debug("Carve at %s not read: %s", row.get('offset'), exc)
+            return None
+
+    def export_carved_rows(self, rows, folder=None):
+        """Write carved files out, read from their images, into a new
+        'Carved files <time>' folder with manifest.csv; checked against the
+        SHA-256 recorded when each was carved, and audited. `folder` skips
+        the folder dialog (tests). Returns the export worker."""
+        from trace_app.ui.viewers.carved_panel import CarvedExportWorker
+        rows = [r for r in rows if r]
+        if not rows:
+            return None
+        if folder is None:
+            base = QFileDialog.getExistingDirectory(
+                self, "Export carved files to", case_settings.export_dir())
+            if not base:
+                return None
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+                '%Y-%m-%d %H%M%S UTC')
+            folder = os.path.join(base, f"Carved files {stamp}")
+        readers = {}
+        try:
+            for row in rows:
+                key = row.get('evidence_id') if row.get('evidence_id') \
+                    is not None else row.get('image_path')
+                if key not in readers:
+                    readers[key] = self._carved_reader(row)
+        except OSError as exc:
+            message.warning(self, "Export", "The image could not be read.",
+                            str(exc))
+            return None
+        worker = CarvedExportWorker(
+            rows, folder,
+            lambda row: readers[row.get('evidence_id') if row.get(
+                'evidence_id') is not None else row.get('image_path')],
+            self)
+        progress = QProgressDialog("Exporting carved files...", "Cancel", 0,
+                                   len(rows), self)
+        progress.setWindowTitle("Export")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(PROGRESS_MIN_DURATION)
+        progress.canceled.connect(worker.stop)
+        worker.progressed.connect(progress.setValue)
+        worker.exported.connect(
+            lambda results: self._carved_export_done(results, folder,
+                                                     progress))
+        self._retain_worker(worker)
+        worker.start()
+        return worker
+
+    def _carved_export_done(self, results, folder, progress):
+        progress.close()
+        progress.deleteLater()
+        if self.case is not None:
+            self.case.record_carved_export(results, folder)
+            self.carved_panel.refresh()
+        written = [r for r in results if r['path']]
+        mismatched = [r for r in written if not r['verified']]
+        failed = [r for r in results if not r['path']]
+        self.set_status(f"{len(written):,} carved file(s) exported to "
+                        f"{folder}", 8000)
+        if mismatched or failed:
+            lines = [f"{r['row'].get('name')}: does not match the SHA-256 "
+                     f"recorded when it was carved" for r in mismatched]
+            lines += [f"{r['row'].get('name')}: {r['error']}"
+                      for r in failed]
+            message.warning(
+                self, "Export",
+                f"{len(written):,} of {len(results):,} file(s) exported; "
+                f"some need attention. manifest.csv lists every file.",
+                '\n'.join(lines[:30]))
 
     def _read_carved(self, row):
         """A carved file's bytes, read back from its image at its offset --
@@ -3160,46 +3283,65 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _timeline_detail(self, row):
         """For an event on a file: both sets of NTFS times, and what
         Triage found about the file."""
-        import html as _html
+        from trace_app.ui.widgets import detail_html as d
         if not self.case or not row.get('artifact_ref') \
                 or row.get('evidence_id') is None \
                 or row['source'] == 'activity':
             return ''
-        e = _html.escape
         parts = []
         events = self.case.fs_events_for(row['evidence_id'],
                                          row['artifact_ref'])
         if events:
-            parts.append("<h4>NTFS times of this file</h4><table "
-                         "cellspacing='2'><tr><th></th><th>$SI</th>"
-                         "<th>$FN</th></tr>")
             sets = {'SI': {}, 'FN': {}}
             for event in events:
                 for letter in event['macb'].replace('.', ''):
                     sets[event['source']][letter] = event['time_utc']
+            rows, earlier = [], False
             for letter, word in (('B', 'Created'), ('M', 'Modified'),
                                  ('C', 'Changed'), ('A', 'Accessed')):
                 si, fn = sets['SI'].get(letter, ''), sets['FN'].get(letter,
                                                                     '')
-                mark = ' style="color:#d9822b"' if si and fn and si < fn \
-                    and letter == 'B' else ''
-                parts.append(f"<tr><td><b>{word}</b></td><td{mark}>{e(si)}"
-                             f"</td><td>{e(fn)}</td></tr>")
-            parts.append("</table>")
+                marked = letter == 'B' and si and fn and si < fn
+                earlier = earlier or marked
+                rows.append(
+                    f"<tr><td class='k'>{word}</td>"
+                    f"<td class='mono{' mark' if marked else ''}'>"
+                    f"{d.e(si) or '—'}</td>"
+                    f"<td class='mono'>{d.e(fn) or '—'}</td></tr>")
+            parts.append(
+                d.section("NTFS times (UTC)")
+                + "<table cellspacing='0' cellpadding='0'><tr><th></th>"
+                  "<th>$SI</th><th>$FN</th></tr>"
+                + ''.join(rows) + "</table>")
+            if earlier:
+                # Stated, not judged: SI before FN alone is what installers
+                # leave too; the NTFS module grades it (Triage > NTFS).
+                parts.append(
+                    "<p class='note'><span class='mark'>$SI created</span> "
+                    "($STANDARD_INFORMATION) is earlier than $FN created "
+                    "($FILE_NAME). Installers leave this too; Triage ▸ NTFS "
+                    "grades it with the file's other times.</p>")
         findings = self.case.findings_map(row['evidence_id'],
                                           [row['artifact_ref']])
-        notes = [f"{(f.get('grade') or '').capitalize()}: "
-                 f"{f.get('summary') or ''}"
+        notes = [((f.get('grade') or '').lower(), f.get('summary') or '')
                  for f in findings.get(row['artifact_ref'], ())
                  if f.get('grade') != 'benign']
         matches = self.case.hash_match_map(row['evidence_id'],
                                            [row['artifact_ref']])
-        notes += [f"Hash set {m['set_name']} "
-                  f"({hashsets.CATEGORIES.get(m['category'])})"
+        notes += [('', f"Hash set {m['set_name']} "
+                       f"({hashsets.CATEGORIES.get(m['category'])})")
                   for m in matches.get(row['artifact_ref'], ())]
         if notes:
-            parts.append("<h4>Findings</h4><ul>" + ''.join(
-                f"<li>{e(n)}</li>" for n in notes) + "</ul>")
+            lines = []
+            for grade, text in notes:
+                colour = d.GRADE_COLOURS.get(grade)
+                label = (f"<td class='k'><span style='color:{colour}'>"
+                         f"{d.e(grade.capitalize())}</span></td>"
+                         if grade else "<td class='k'>Hash set</td>")
+                lines.append(f"<tr>{label}<td>{d.breakable(text)}</td></tr>")
+            parts.append(d.section("Findings")
+                         + "<table cellspacing='0' cellpadding='0'>"
+                         + ''.join(lines) + "</table>")
         return ''.join(parts)
 
     def add_timeline_to_report(self, rows):

@@ -228,7 +228,8 @@ def test_carving_minimum_size_and_analysis_switch(case):
         run = case.carving_runs(evidence, limit=1)[0]
         assert run['stats']['too_small'] == everything - kept
         assert run['stats']['settings'] == {'min_kb': threshold_kb,
-                                            'analysed': False}
+                                            'analysed': False,
+                                            'copies_written': False}
         refs = [row['artifact_ref'] for row in case.carved_files(evidence)]
         analysed = case._db.execute(
             "SELECT COUNT(*) FROM file_analysis WHERE artifact_ref IN (%s)"
