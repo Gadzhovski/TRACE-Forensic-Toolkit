@@ -652,14 +652,6 @@ class SearchIndex:
                     break
         return results
 
-    def entity_values(self, kind, limit=1000):
-        """Every distinct value of one entity kind, most common first."""
-        rows = self._db.execute(
-            "SELECT value, count(*) AS hits FROM entities WHERE kind = ? "
-            "GROUP BY value ORDER BY hits DESC LIMIT ?",
-            (kind, limit)).fetchall()
-        return [dict(row) for row in rows]
-
 
 def _excerpt(text, start, end):
     """`text` around [start, end), cut at word boundaries so the context

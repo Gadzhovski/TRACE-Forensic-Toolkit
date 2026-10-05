@@ -5,28 +5,19 @@ PyTsk3StreamDevice, so large media does not have to be read into memory first.
 """
 
 import logging
-import os
 import platform
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-                               QLabel, QPushButton, QSlider, QSizePolicy)
+                               QLabel, QPushButton, QSlider)
 
-from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import CONTROL_HEIGHT, TOOLBAR_ICON_SIZE
+from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 
 logger = logging.getLogger('TRACE.Viewer.Media')
-
-if os.name == "nt":  # Windows
-    # cast/POINTER are only used by the pycaw volume interface below, so they
-    # belong inside the Windows guard alongside it.
-    from ctypes import cast, POINTER
-    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-    from comtypes import CLSCTX_ALL
 
 
 class AudioVideoPlayer(QWidget):
@@ -140,6 +131,9 @@ class AudioVideoPlayer(QWidget):
         """Set up OS-specific volume control (Windows only)"""
         if platform.system() == "Windows":
             try:
+                # Imported here, on Windows only: a failure is the volume
+                # control's, not the whole media viewer's.
+                from ctypes import POINTER, cast
                 from comtypes import CLSCTX_ALL
                 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 

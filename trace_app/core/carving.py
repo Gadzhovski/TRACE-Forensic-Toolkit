@@ -134,8 +134,6 @@ ZIP_LOCAL_HEADER = b'PK\x03\x04'
 ZIP_EOCD = b'PK\x05\x06'
 OLE_HEADER = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
 GZIP_HEADER = b'\x1F\x8B\x08'
-RAR_HEADER = b'Rar!\x1A\x07'
-SEVENZIP_HEADER = b'7z\xBC\xAF\x27\x1C'
 #: ASF Header Object GUID: the first 16 bytes of every WMV file.
 ASF_HEADER_GUID = bytes.fromhex('3026B2758E66CF11A6D900AA0062CE6C')
 #: ASF File Properties Object, which carries the declared file size.
@@ -589,23 +587,6 @@ class Carver:
                 self.save_file(content, file_type, base_offset + anchor)
                 cursor = end
 
-    @staticmethod
-    def _next_atom_start(chunk, cursor):
-        """Offset of the next plausible container-opening atom."""
-        best = None
-        for name in (b'ftyp', b'moov', b'mdat', b'free', b'skip', b'wide',
-                     b'pnot'):
-            # The type sits 4 bytes into the atom, after its size.
-            found = chunk.find(name, cursor + 4)
-            while found != -1:
-                start = found - 4
-                size = int.from_bytes(chunk[start:start + 4], 'big')
-                if size == 0 or size == 1 or size >= 8:
-                    if best is None or start < best:
-                        best = start
-                    break
-                found = chunk.find(name, found + 1)
-        return best
 
     @staticmethod
     def _walk_atoms(chunk, start, cap, more_follows=False):
@@ -983,40 +964,12 @@ class Carver:
                                                formats.RAR3_SIGNATURE),
                           formats.measure_rar)
 
-    def _carve_rar_files_by_marker(self, chunk, base_offset):
-        self._carve_by_marker(chunk, base_offset, 'rar', RAR_HEADER)
 
     def carve_7z_files(self, chunk, base_offset):
         """7z, sized by the end-header pointer in its signature header."""
         self._carve_sized(chunk, base_offset, (formats.SEVENZIP_SIGNATURE,),
                           formats.measure_7z)
 
-    def _carve_7z_files_by_marker(self, chunk, base_offset):
-        self._carve_by_marker(chunk, base_offset, '7z', SEVENZIP_HEADER)
-
-    def _carve_by_marker(self, chunk, base_offset, file_type, header):
-        """Carve an archive that runs to the next signature or the cap.
-
-        RAR and 7z encode their extents inside structures this carver does not
-        parse, so the recovered span runs to the next header of the same type.
-        That is an upper bound, and the file is written only if it validates.
-        """
-        cap = CARVE_MAX_SIZE.get(file_type)
-        cursor = 0
-        while cursor < len(chunk):
-            start_index = chunk.find(header, cursor)
-            if start_index == -1:
-                break
-
-            following = chunk.find(header, start_index + len(header))
-            end = following if following != -1 else len(chunk)
-            if cap:
-                end = min(end, start_index + cap)
-
-            content = chunk[start_index:end]
-            if is_valid_file(content, file_type):
-                self.save_file(content, file_type, base_offset + start_index)
-            cursor = start_index + len(header)
 
     def carve_html_files(self, chunk, base_offset):
         """Recover HTML documents, starting at the DOCTYPE where there is one.

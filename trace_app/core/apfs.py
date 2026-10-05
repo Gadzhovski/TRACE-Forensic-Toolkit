@@ -125,18 +125,6 @@ class ApfsFile:
         # are not data streams TRACE lists.
         return iter(())
 
-    @holding_libyal
-    def extended_attributes(self):
-        """[(name, size)] of the file's extended attributes."""
-        out = []
-        try:
-            for index in range(self._entry.number_of_extended_attributes):
-                attribute = self._entry.get_extended_attribute(index)
-                out.append((attribute.name, attribute.size))
-        except (AttributeError, OSError, IOError):
-            pass
-        return out
-
 
 class ApfsDirectory:
     def __init__(self, fs, entry):

@@ -2,19 +2,17 @@
 
 import logging
 
-from PySide6.QtCore import Qt, QSize, QPoint
-from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QPageLayout, QPainter
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QPixmap, QImage, QAction, QPageLayout
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
-                               QLineEdit, QMenu, QMessageBox, QPushButton,
-                               QScrollArea, QSizePolicy, QToolBar, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFileDialog, QLabel, QLineEdit, QMenu,
+                               QScrollArea, QToolBar, QToolButton, QVBoxLayout,
+                               QWidget)
 
 from pymupdf import open as fitz_open, Matrix
 
 from trace_app.ui.dialogs import message
-from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import CONTROL_HEIGHT, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
+from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch

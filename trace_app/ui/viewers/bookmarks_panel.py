@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QHeaderView, QLabel, QMenu,
 
 from trace_app.core.case import parse_artifact_ref
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
-from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 

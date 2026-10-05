@@ -13,7 +13,7 @@ progress area that is empty most of the time is a strip of wasted window.
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QWidget)
 

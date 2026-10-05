@@ -586,7 +586,10 @@ def test_virustotal_lookup_and_upload_are_recorded_and_audited(
                 'sha256': digest, 'last_analysis_stats': {
                     'malicious': 1, 'undetected': 70}}}})
 
-    monkeypatch.setattr(vt.requests, 'Session', Session)
+    # The client imports requests when it first needs it, so the library
+    # itself is patched.
+    import requests
+    monkeypatch.setattr(requests, 'Session', Session)
     monkeypatch.setattr(vt, 'POLL_INTERVAL', 0.05)
     vt._limiters['test-key'] = vt.RateLimiter(per_minute=10000,
                                               per_day=100000)

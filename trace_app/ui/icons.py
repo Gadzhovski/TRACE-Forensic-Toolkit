@@ -15,7 +15,7 @@ Two practical consequences:
 import logging
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import (QAction, QColor, QIcon, QIconEngine, QImage,
                            QPainter, QPixmap)
 from PySide6.QtSvg import QSvgRenderer

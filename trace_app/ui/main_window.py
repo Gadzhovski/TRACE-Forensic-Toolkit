@@ -5,35 +5,30 @@ import logging
 import os
 import re
 import tempfile
-import time
 import uuid
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-import pytsk3
-from Registry import Registry
 from PySide6.QtCore import QByteArray, Qt, QSize, QThread, Signal, QTimer, QUrl
-from PySide6.QtGui import (QIcon, QPalette, QBrush, QAction, QActionGroup, QPixmap,
-                           QColor, QCursor, QDesktopServices)
-from PySide6.QtCharts import QChart
-from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTreeWidget, QTabWidget,
-                               QFileDialog, QTreeWidgetItem, QTableWidget, QMessageBox, QTableWidgetItem,
-                               QDialog, QVBoxLayout, QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit,
-                               QFormLayout, QApplication, QWidget, QProgressDialog, QSizePolicy,
-                               QTabBar, QToolButton, QStackedWidget)
+from PySide6.QtGui import (QIcon, QPalette, QAction, QActionGroup, QColor, QCursor,
+                           QDesktopServices)
+from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTabWidget, QFileDialog,
+                               QTreeWidgetItem, QTableWidget, QTableWidgetItem, QDialog, QVBoxLayout,
+                               QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit, QFormLayout, QApplication,
+                               QWidget, QProgressDialog, QSizePolicy, QTabBar, QToolButton,
+                               QStackedWidget)
 
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.dialogs.about import AboutDialog
-from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, CONTROL_HEIGHT,
-                                       GROUP_SPACING, UNKNOWN_DATE,
-                                       TABLE_ROW_HEIGHT,
-                                       CONTROL_SPACING, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH,
-                                       DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, INPUT_FIELD_MIN_WIDTH,
-                                       PANEL_ICON_SIZE, PROGRESS_MIN_DURATION, QT_MAX_SIZE,
-                                       TABLE_BATCH_SIZE, TABLE_ICON_SIZE,
-                                       TREE_ICON_SIZE, TREE_INDENTATION, VIEWER_DOCK_MAX_WIDTH, VIEWER_DOCK_MIN_HEIGHT)
+from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, GROUP_SPACING,
+                                       UNKNOWN_DATE, TABLE_ROW_HEIGHT,
+                                       DEFAULT_WINDOW_HEIGHT,
+                                       DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
+                                       INPUT_FIELD_MIN_WIDTH, PANEL_ICON_SIZE, PROGRESS_MIN_DURATION,
+                                       TABLE_BATCH_SIZE, TABLE_ICON_SIZE, TREE_ICON_SIZE,
+                                       TREE_INDENTATION, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
 from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.carved_panel import (CarvedFilesPanel,
@@ -327,7 +322,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if entry.get("type") == "archive-member":
             description = ("Encrypted in archive"
                            if entry.get("archive_encrypted")
-                           else f"In archive")
+                           else "In archive")
         size_in_bytes = entry.get("size", 0)
         # The static utility rather than the handler's wrapper around it: an
         # archive member is listed from bytes already in memory and may have no
@@ -4472,7 +4467,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not rows:
             message.information(
                 self, "No match",
-                f"Nothing in this case has that hash.",
+                "Nothing in this case has that hash.",
                 "Only files covered by a hash analysis run can be found this "
                 "way \u2014 run Analysis \u25b8 Run Analysis Modules with "
                 "hashing selected.")
@@ -5229,16 +5224,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.registry_extractor_widget.setEnabled(state)
         self.search_panel.setEnabled(state)
 
-    def create_menu(self, menu_bar, menu_name, actions):
-        menu = QMenu(menu_name, self)
-        for action_name, action_function in actions.items():
-            if action_name == 'separator':
-                menu.addSeparator()
-            else:
-                action = menu.addAction(action_name)
-                action.triggered.connect(action_function)
-        menu_bar.addMenu(menu)
-        return menu
 
     @staticmethod
     def create_tree_item(parent, text, icon_path, data):
@@ -5248,15 +5233,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         item.setData(0, Qt.UserRole, data)
         return item
 
-    def on_viewer_dock_focus(self, visible):
-        """Kept for the visibilityChanged connection; no longer resizes.
-
-        This used to strip the dock's size constraints when it became visible
-        and re-pin them when it did not, which is how a large image in the
-        Application tab ended up resizing the whole dock. The dock now keeps a
-        simple minimum height and is otherwise the user's to size.
-        """
-        return
 
     def clear_ui(self):
         self.listing_table.clearContents()
@@ -5411,7 +5387,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Clean up temp files
         temp_dir = tempfile.gettempdir()
-        pattern = "trace_temp_*"
         try:
             for item in os.listdir(temp_dir):
                 if item.startswith("trace_temp_"):

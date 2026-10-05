@@ -15,7 +15,6 @@ Vista+ .evtx logs go through evtx.py; XP .evt logs are read here, with
 their events' numbers and string positions.
 """
 
-import datetime
 import re
 import struct
 
@@ -316,6 +315,3 @@ def _xp_describe(event_id, what, source, strings):
     return None
 
 
-def to_utc_naive(stamp):
-    return stamp.astimezone(times.UTC) if isinstance(
-        stamp, datetime.datetime) else stamp

@@ -15,7 +15,7 @@ import os
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QPageLayout, QPageSize, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
-from PySide6.QtWidgets import QFileDialog, QMessageBox, QMenu, QToolButton
+from PySide6.QtWidgets import QFileDialog, QMenu, QToolButton
 
 from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons

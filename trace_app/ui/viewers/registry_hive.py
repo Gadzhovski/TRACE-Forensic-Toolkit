@@ -2,12 +2,10 @@ import io
 import logging
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QTextEdit, QToolBar, QLabel, \
-    QSplitter, QTableWidget, QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidgetItem, QToolBar, QLabel, QSplitter, QTableWidget, \
+    QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
-from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import (PANEL_ICON_SIZE, SPLITTER_HANDLE_WIDTH,
                                        TREE_ICON_SIZE, TREE_INDENTATION)
 from trace_app.ui import icons

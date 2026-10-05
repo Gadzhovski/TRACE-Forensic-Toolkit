@@ -11,7 +11,6 @@ import threading
 import logging
 import os
 import re
-import time
 from functools import lru_cache
 
 import pyewf
@@ -901,29 +900,6 @@ class ImageHandler:
                 found.append(name)
         return found
 
-    def describe_filesystem(self, start_offset):
-        """What to tell the examiner about this partition.
-
-        Prefers what TSK actually opened. Falls back to the signatures when it
-        opened nothing, so a partition holding an unmountable filesystem is
-        never described as empty.
-        """
-        fs_type = self.get_fs_type(start_offset)
-        signatures = self.detect_filesystems(start_offset)
-
-        if fs_type not in ("N/A", "Unknown"):
-            others = [s for s in signatures if not s.startswith(fs_type[:3])]
-            if others:
-                return (f"{fs_type} (also found: {', '.join(others)} -- "
-                        f"reformatted, earlier data may survive)")
-            return fs_type
-
-        if len(signatures) > 1:
-            return (f"{' + '.join(signatures)} -- two file systems present, "
-                    f"neither can be opened")
-        if signatures:
-            return f"{signatures[0]} (present but not readable)"
-        return fs_type
 
     def is_wiped(self):
         # Image is considered wiped if no volume info, no filesystem detected
@@ -1034,7 +1010,7 @@ class ImageHandler:
                     fs_info = pytsk3.FS_Info(
                         self.img_info, offset=start_offset * self.sector_size)
                 self.fs_info_cache[start_offset] = fs_info
-            except Exception as e:
+            except Exception:
                 return None
         return self.fs_info_cache[start_offset]
 
@@ -1423,7 +1399,7 @@ class ImageHandler:
             }
 
             return fs_type_map.get(fs_type, "Unknown")
-        except Exception as e:
+        except Exception:
             return "N/A"
 
     def check_partition_contents(self, partition_start_offset):
@@ -1448,23 +1424,6 @@ class ImageHandler:
                            partition_start_offset, e)
             return False
 
-    @staticmethod
-    def recovery_note(entry):
-        """Why a deleted entry cannot be opened, or None when it can.
-
-        `entry` is a dict from get_directory_contents.
-        """
-        if not entry.get('is_deleted'):
-            return None
-        if entry.get('is_recoverable'):
-            return None
-        if not entry.get('inode_number'):
-            return ('The directory entry no longer points at any metadata, so '
-                    'only the file name survives. Carving unallocated space is '
-                    'the remaining option.')
-        return ('The metadata record survives but records no content: the file '
-                'system cleared its size and block pointers on delete. Carving '
-                'unallocated space is the remaining option.')
 
     @staticmethod
     def _meta_for_orphan(fs, inode):
@@ -1677,50 +1636,6 @@ class ImageHandler:
                 logger.debug("No %s on this volume: %s", hive_path, e)
             return None
 
-    def get_windows_version(self, start_offset):
-        """Get the Windows version from the SOFTWARE registry hive."""
-        fs_info = self.get_fs_info(start_offset)
-        if not fs_info:
-            return None
-
-        # if file system is not ntfs, return unknown OS and exit the function
-        if self.get_fs_type(start_offset) != "NTFS":
-            return None
-
-        software_hive_data = self.get_registry_hive(fs_info, "/Windows/System32/config/SOFTWARE")
-
-        if not software_hive_data:
-            return None
-
-        # Use a context manager to handle the temporary file
-        with FileSystemUtils.temp_file() as temp_hive_path:
-            try:
-                with open(temp_hive_path, 'wb') as temp_hive:
-                    temp_hive.write(software_hive_data)
-
-                reg = Registry.Registry(temp_hive_path)
-                key = reg.open("Microsoft\\Windows NT\\CurrentVersion")
-
-                # Helper function to safely get registry values
-                def get_reg_value(reg_key, value_name):
-                    try:
-                        return reg_key.value(value_name).value()
-                    except Registry.RegistryValueNotFoundException:
-                        return "N/A"
-
-                # Fetching registry values
-                product_name = get_reg_value(key, "ProductName")
-                current_version = get_reg_value(key, "CurrentVersion")
-                current_build = get_reg_value(key, "CurrentBuild")
-                registered_owner = get_reg_value(key, "RegisteredOwner")
-                csd_version = get_reg_value(key, "CSDVersion")
-                product_id = get_reg_value(key, "ProductId")
-
-                return f"{product_name} Version {current_version}\nBuild {current_build} {csd_version}\nOwner: {registered_owner}\nProduct ID: {product_id}"
-
-            except Exception as e:
-                logger.error(f"Error parsing SOFTWARE hive: {e}")
-                return "Error in parsing OS version"
 
     def get_os_info(self, start_offset):
         """Operating system details for the volume at `start_offset`.
@@ -2000,30 +1915,7 @@ class ImageHandler:
         else:
             return pytsk3.Img_Info(self.image_path)
 
-    def list_files(self, extensions=None):
-        """Get a list of all files with given extensions."""
-        files_list = []
-        img_info = self.open_image()
 
-        try:
-            volume_info = pytsk3.Volume_Info(img_info)
-            for partition in volume_info:
-                if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
-                    # Store offset in SECTORS (not bytes)
-                    self.process_partition(img_info, partition.start, files_list, extensions)
-        except IOError:
-            self.process_partition(img_info, 0, files_list, extensions)
-
-        return files_list
-
-    def process_partition(self, img_info, offset_sectors, files_list, extensions):
-        """Process partition listing - offset_sectors is in sectors, not bytes."""
-        try:
-            fs_info = pytsk3.FS_Info(img_info,
-                                     offset=offset_sectors * self.sector_size)
-            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, extensions, None, offset_sectors)
-        except IOError as e:
-            logger.error(f"Unable to open filesystem at offset {offset_sectors}: {e}")
 
     def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None, start_offset=0):
         """Recursively search for files in a directory."""

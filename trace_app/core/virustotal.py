@@ -21,7 +21,6 @@ import threading
 import time
 from datetime import date, datetime, timezone
 
-import requests
 
 logger = logging.getLogger('TRACE.VirusTotal')
 
@@ -226,7 +225,12 @@ class VirusTotalClient:
         if not api_key:
             raise AuthError("No VirusTotal API key is set.")
         self.api_key = api_key
-        self.session = session or requests.Session()
+        if session is None:
+            # Imported on first use: requests costs ~0.1 s of startup,
+            # and most sessions never reach VirusTotal.
+            import requests
+            session = requests.Session()
+        self.session = session
         self.limiter = limiter or limiter_for(api_key)
         self.should_stop = should_stop or (lambda: False)
         self.on_wait = on_wait
@@ -238,6 +242,7 @@ class VirusTotalClient:
     def _request(self, method, url, timeout=60, **kwargs):
         if not url.startswith('http'):
             url = API + url
+        import requests
         headers = {'x-apikey': self.api_key, 'Accept': 'application/json'}
         for attempt in range(3):
             self.limiter.acquire(self.should_stop, self.on_wait)

@@ -17,7 +17,6 @@ import gzip
 import io
 import logging
 import lzma
-import os
 import tarfile
 import zipfile
 
@@ -123,9 +122,6 @@ def detect_archive(data):
     from trace_app.core.mailfiles import mail_kind
     return mail_kind(data[:4096])
 
-
-def is_archive(data):
-    return detect_archive(data) is not None
 
 
 def list_members(data, kind=None, password=None):
@@ -642,21 +638,3 @@ def _epoch_to_text(seconds):
         return ''
 
 
-def archive_summary(data):
-    """A one-line description of an archive, for a listing or a viewer."""
-    kind = detect_archive(data)
-    if kind is None:
-        return ''
-    try:
-        members = list_members(data, kind)
-    except EncryptedArchive:
-        return f"{kind.upper()} archive, encrypted"
-    except ArchiveError as exc:
-        return f"{kind.upper()} archive ({exc})"
-
-    files = [m for m in members if not m['is_dir']]
-    locked = sum(1 for m in files if m['encrypted'])
-    text = f"{kind.upper()} archive, {len(files)} file(s)"
-    if locked:
-        text += f", {locked} encrypted"
-    return text

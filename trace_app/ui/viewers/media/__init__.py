@@ -14,20 +14,15 @@ picture.
 import logging
 import mimetypes
 import os
-import time
 
-from PySide6.QtCore import Qt, QUrl, QSize, QTimer, QBuffer, QByteArray, QIODevice
-from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QColor, QPen, QPainter
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolBar,
-                               QPushButton, QMessageBox, QFileDialog, QSizePolicy,
-                               QApplication)
+from PySide6.QtCore import Qt, QUrl, QTimer, QBuffer, QByteArray, QIODevice
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QApplication)
 
 from trace_app.core import document_preview
 from trace_app.core.filetypes import (VIEW_AUDIO, VIEW_DOCUMENT, VIEW_HTML,
                                       VIEW_IMAGE, VIEW_OFFICE, VIEW_VIDEO,
                                       not_a_pdf, plan_view)
 from trace_app.core.stream_device import PyTsk3StreamDevice
-from trace_app.infra.paths import resource_path
 from trace_app.ui.viewers.media.audiovideo import AudioVideoPlayer
 from trace_app.ui.viewers.media.html import SafeHtmlViewer
 from trace_app.ui.viewers.media.pdf import PDFViewer

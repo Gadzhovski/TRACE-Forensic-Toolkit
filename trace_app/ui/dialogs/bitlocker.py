@@ -189,9 +189,3 @@ class UnlockVolumeDialog(QDialog):
         self.error.setVisible(True)
 
 
-class BitLockerDialog(UnlockVolumeDialog):
-    """The BitLocker case, under the name the window has always used."""
-
-    def __init__(self, handler, start_sector, volume_label, parent=None):
-        super().__init__(handler, start_sector, volume_label, parent,
-                         'bitlocker')

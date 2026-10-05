@@ -11,10 +11,10 @@ So the outer geometry is set here, in Python, from one constant.
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtWidgets import (QComboBox, QLabel, QLineEdit, QPushButton, QSizePolicy,
-                               QToolBar, QToolButton, QWidget)
+                               QToolButton, QWidget)
 
-from trace_app.infra.constants import (CONTROL_HEIGHT, CONTROL_SPACING, GROUP_SPACING,
-                                       TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE)
+from trace_app.infra.constants import (CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT,
+                                       TOOLBAR_ICON_SIZE)
 
 #: Room an icon-only dropdown button adds for its chevron (the themes'
 #: menu-indicator rule draws a 14 px arrow 4 px from the right).

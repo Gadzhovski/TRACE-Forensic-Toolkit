@@ -1,15 +1,12 @@
 import logging
-import os
 from functools import lru_cache
 
 from PySide6.QtCore import Qt, QObject, Signal, QThread, QSize
-from PySide6.QtGui import QAction, QIcon, QFont, QResizeEvent
-from PySide6.QtWidgets import (QToolBar, QLabel, QMessageBox, QWidget, QVBoxLayout,
-                               QLineEdit, QTableWidget, QHeaderView, QTableWidgetItem, QListWidget,
-                               QSizePolicy, QFrame, QApplication, QMenu, QAbstractItemView, QFileDialog,
-                               QToolButton, QComboBox, QSplitter)
-from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
+from PySide6.QtGui import QAction, QFont, QResizeEvent
+from PySide6.QtWidgets import (QToolBar, QLabel, QWidget, QVBoxLayout, QLineEdit,
+                               QTableWidget, QHeaderView, QTableWidgetItem, QListWidget, QSizePolicy,
+                               QFrame, QApplication, QMenu, QAbstractItemView, QComboBox, QSplitter)
+from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import fonts, icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
@@ -242,7 +239,6 @@ class HexViewer(QWidget):
         """Handle window resizing to update layout."""
         # Adjust splitter sizes dynamically based on new window dimensions
         total_width = event.size().width()
-        total_height = event.size().height()
 
         # Set sizes for horizontal splitter: 75% for hex_table and 25% for search_results_frame
         self.splitter.setSizes([int(total_width * 0.75), int(total_width * 0.25)])

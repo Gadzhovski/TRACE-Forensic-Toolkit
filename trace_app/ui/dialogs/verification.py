@@ -1,9 +1,7 @@
 import logging
-from PySide6.QtGui import QIcon, QFont
 from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
                                QTextEdit)
 from PySide6.QtCore import QThread, Signal, Qt
-from trace_app.infra.paths import resource_path
 from trace_app.infra.constants import BUTTON_WIDTH
 from trace_app.ui import fonts
 from trace_app.ui import icons
@@ -271,7 +269,3 @@ class VerificationWidget(QWidget):
         return {'html': self._results_html, 'verified': self._verified,
                 'hashes': self._hash_results}
 
-    @property
-    def is_verified(self):
-        # Return the verification status property
-        return self._verified

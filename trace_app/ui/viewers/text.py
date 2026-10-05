@@ -8,11 +8,9 @@ from functools import partial
 
 import chardet
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QAction, QIcon, QTextCursor, QTextCharFormat, QColor
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QSizePolicy, QComboBox, QLabel, \
-    QMessageBox, QToolTip, QToolButton
-from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QToolBar, QLineEdit, QComboBox, QLabel, QToolTip
+from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
@@ -377,7 +375,7 @@ class CustomTextEdit(QTextEdit):
 
 
 
-        except Exception as e:
+        except Exception:
             QToolTip.showText(self.mapToGlobal(self.cursorRect().topLeft()), f"Invalid {encoding_type.upper()}")
 
     def getDecodedText(self, selected_text):

@@ -31,10 +31,6 @@ _PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _PROJECT_ROOT = os.path.dirname(_PACKAGE_ROOT)
 
 
-def is_frozen():
-    """True when running from a PyInstaller bundle."""
-    return getattr(sys, 'frozen', False)
-
 
 def base_path():
     """Directory that bundled resources are read from.
@@ -216,17 +212,6 @@ def remember_case(folder, name='', limit=10):
     except OSError:
         pass        # a missing recent list must not stop a case opening
 
-
-def forget_case(folder):
-    """Drop a case from the recent list."""
-    import json
-
-    entries = [e for e in read_recent_cases() if e['folder'] != folder]
-    try:
-        with open(recent_cases_file(), 'w', encoding='utf-8') as handle:
-            json.dump(entries, handle, indent=2)
-    except OSError:
-        pass
 
 
 def _now_iso():

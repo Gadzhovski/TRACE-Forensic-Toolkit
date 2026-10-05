@@ -15,7 +15,6 @@ import logging
 import os
 
 import pytsk3
-from PySide6.QtCharts import QChart, QChartView, QPieSeries
 from PySide6.QtCore import Qt, QMargins, QSize
 from PySide6.QtGui import QBrush, QColor, QFontMetrics, QIcon, QPainter
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
@@ -32,18 +31,6 @@ logger = logging.getLogger('TRACE.VolumeInfo')
 class VolumeInfoMixin:
     """Builds the image/volume information dialog."""
 
-    def view_os_information(self, index):
-        """Show the image information dialog for the tree's selected image.
-
-        Kept for the tree's context menu, which hands over a model index. The
-        dialog itself is built by show_image_information, so the Tools menu can
-        open it without a tree item.
-        """
-        item = self.tree_viewer.itemFromIndex(index)
-        if item is None or item.parent() is not None:
-            # Ensure that only the root item triggers the information display
-            return
-        self.show_image_information()
 
     def show_image_information(self):
         """Display comprehensive disk image information with space allocation pie chart."""
@@ -663,10 +650,6 @@ class VolumeInfoMixin:
                 found.append((start, info))
         return found
 
-    def _installed_system_summary(self):
-        """The first installed system, kept for callers wanting just one."""
-        systems = self._installed_systems()
-        return systems[0][1] if systems else {}
 
     @staticmethod
     def _format_volume_serial(fs_info_struct):
@@ -767,6 +750,8 @@ class VolumeInfoMixin:
 
     def _create_space_allocation_chart(self):
         """Create a pie chart showing allocated vs unallocated space."""
+        # QtCharts is imported when a chart is drawn, not at startup (0.2 s).
+        from PySide6.QtCharts import QChart, QChartView, QPieSeries
         # Create pie series
         series = QPieSeries()
         legend_items = []  # Track items for legend

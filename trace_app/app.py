@@ -4,7 +4,7 @@ import logging
 import sys
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtWidgets import QApplication
 
 from trace_app import __version__
 from trace_app.infra.paths import log_file

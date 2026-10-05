@@ -43,10 +43,6 @@ class UdifError(Exception):
     """Not a UDIF image this module can read; the message says why."""
 
 
-def chunk_types(path):
-    """Every chunk type in a UDIF image's tables ([] if it has none)."""
-    return sorted({c[2] for c in _chunks(path)[0]})
-
 
 def _koly(handle):
     handle.seek(0, os.SEEK_END)

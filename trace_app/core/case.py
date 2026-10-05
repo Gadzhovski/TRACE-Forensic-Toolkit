@@ -804,12 +804,6 @@ class Case:
         sql += " ORDER BY id DESC"
         return [dict(row) for row in self._db.execute(sql, params).fetchall()]
 
-    def case_notes(self):
-        """Notes not attached to any artifact -- the case's own record."""
-        rows = self._db.execute(
-            "SELECT * FROM notes WHERE artifact_ref IS NULL "
-            "ORDER BY id DESC").fetchall()
-        return [dict(row) for row in rows]
 
     def update_note(self, note_id, body):
         """Rewrite a note's body, stamping when it changed."""
@@ -1447,12 +1441,6 @@ class Case:
             "offset = ?", (json.dumps(related, default=str)
                            if related else None, evidence_id, offset))
 
-    def set_carved_origin(self, evidence_id, offset, origin):
-        """Record the file a carve was found to be (core/carve_origin)."""
-        self._db.execute(
-            "UPDATE carved_files SET origin = ? WHERE evidence_id = ? AND "
-            "offset = ?", (json.dumps(origin, default=str), evidence_id,
-                           offset))
 
     def carved_duplicates(self, evidence_id=None):
         """{sha256: [(evidence_id, offset), ...]} for every digest carved
@@ -1633,13 +1621,6 @@ class Case:
             (evidence_id,)).fetchone()
         return dict(row) if row else None
 
-    def analysis_for_artifact(self, evidence_id, artifact_ref):
-        """What is known about one file, for the listing to show."""
-        row = self._db.execute(
-            "SELECT * FROM file_analysis "
-            "WHERE evidence_id = ? AND artifact_ref = ?",
-            (evidence_id, artifact_ref)).fetchone()
-        return dict(row) if row else None
 
     def analysis_map(self, evidence_id, refs=None):
         """artifact_ref -> analysis, for a whole directory at once.

@@ -18,9 +18,9 @@ from the background job that normally runs it.
 import hashlib
 import logging
 import math
-from collections import Counter
 
 import pytsk3
+from PIL import Image
 
 from trace_app.core import content_checks
 from trace_app.core.case import make_artifact_ref
@@ -330,13 +330,27 @@ class Entropy:
         return entropy
 
 
+#: Bytes counted per histogram: bounds the 1-pixel-high image's width.
+_HISTOGRAM_SPAN = 16 * 1024 * 1024
+
+
 def byte_counts(data):
-    """How many times each byte value occurs, as a list of 256 -- counted
-    in C (collections.Counter), not a Python loop per byte: the loop was
-    most of the time analysis spent on a large file."""
+    """How many times each byte value occurs, as a list of 256.
+
+    Counted by Pillow (a required dependency, wheels everywhere): the bytes
+    viewed in place as a one-row greyscale image, whose histogram is the
+    count of each value, in C. collections.Counter took 39% of an analysis
+    run on the XP image (36 MB/s); this is ~1 GB/s, and the same numbers
+    (tests.test_core checks them against Counter)."""
     counts = [0] * 256
-    for value, count in Counter(data).items():
-        counts[value] = count
+    view = memoryview(data).cast('B') if not isinstance(data, bytes) \
+        else data
+    for start in range(0, len(view), _HISTOGRAM_SPAN):
+        piece = view[start:start + _HISTOGRAM_SPAN]
+        histogram = Image.frombuffer('L', (len(piece), 1), piece, 'raw',
+                                     'L', 0, 1).histogram()
+        for value in range(256):
+            counts[value] += histogram[value]
     return counts
 
 

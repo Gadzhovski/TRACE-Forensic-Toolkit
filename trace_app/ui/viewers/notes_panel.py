@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView,
                                QWidget)
 
 from trace_app.infra.constants import BUTTON_WIDTH, CONTROL_HEIGHT, TABLE_ROW_HEIGHT
-from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.table_columns import fit_columns
 
 logger = logging.getLogger('TRACE.Notes')

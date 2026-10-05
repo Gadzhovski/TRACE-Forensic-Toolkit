@@ -201,6 +201,25 @@ def test_disguised_png_is_shown_as_an_image_with_a_note():
     assert plan.kind == 'image' and '.txt' in plan.note
 
 
+def test_byte_counts_equal_a_plain_count():
+    """Entropy's byte counts come from Pillow's histogram (fast); they must
+    be exactly what counting each byte gives -- empty, short, odd types,
+    and past the 16 MB a single histogram covers."""
+    import collections
+    from trace_app.core.analysis import _HISTOGRAM_SPAN, byte_counts, shannon
+
+    def plain(data):
+        counted = collections.Counter(bytes(data))
+        return [counted.get(value, 0) for value in range(256)]
+    big = bytes(range(256)) * (_HISTOGRAM_SPAN // 256) + b'\xff\x00\x07'
+    for data in (b'', b'\x00', b'abc', os.urandom(65536), bytearray(b'xyz' * 99),
+                 memoryview(b'0123456789')[2:7], big):
+        assert byte_counts(data) == plain(data), len(data)
+    assert byte_counts(b'') == [0] * 256
+    assert shannon(bytes(range(256)) * 4) == 8.0
+    assert shannon(b'a' * 1000) == 0.0
+
+
 def test_a_guessed_targa_never_overrules_the_name():
     """TGA has no signature: libmagic 5.41+ (macOS, Linux) calls almost any
     bytes beginning 00 01 02 a Targa image. Passed as the MIME here, so

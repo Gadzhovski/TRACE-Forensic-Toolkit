@@ -9,12 +9,11 @@ import io
 import logging
 
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QPixmap, QImage, QAction, QTransform
+from PySide6.QtGui import QPixmap, QImage, QAction, QTransform
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QToolBar, QScrollArea,
-                               QFileDialog, QMessageBox, QSizePolicy)
+                               QFileDialog)
 
-from trace_app.infra.paths import resource_path
-from trace_app.infra.constants import TOOLBAR_HEIGHT, TOOLBAR_ICON_SIZE
+from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar, stretch
