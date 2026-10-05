@@ -57,7 +57,7 @@ DOCUMENT_EXTENSIONS = {
 AUDIO_EXTENSIONS = {'mp3', 'wav', 'ogg', 'oga', 'opus', 'aac', 'm4a', 'flac',
                     'wma'}
 VIDEO_EXTENSIONS = {'mp4', 'm4v', 'mkv', 'webm', 'avi', 'mov', 'wmv', 'flv',
-                    'mpg', 'mpeg', '3gp'}
+                    'mpg', 'mpeg', '3gp', 'ogv'}
 HTML_EXTENSIONS = {'html', 'htm', 'xhtml', 'xht'}
 
 #: Office formats, by extension -> the reader in document_preview.

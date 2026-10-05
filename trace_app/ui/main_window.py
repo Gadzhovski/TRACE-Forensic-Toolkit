@@ -1155,8 +1155,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Below the toolbar: the table (Details) or the list/icon view over
         # the same model and selection (ui/widgets/listing_views.py).
         from trace_app.ui.widgets.listing_views import ListingIconView
-        self.listing_icon_view = ListingIconView(self.listing_table,
-                                                 self._listing_picture_bytes)
+        self.listing_icon_view = ListingIconView(
+            self.listing_table, self._listing_picture_bytes,
+            open_video=self._listing_video_device)
         self.listing_icon_view.clicked.connect(
             lambda index: self._listing_view_activated(index, False))
         self.listing_icon_view.doubleClicked.connect(
@@ -6017,6 +6018,28 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         content, _meta = handler.get_file_content(data['inode_number'],
                                                   data['start_offset'])
         return content
+
+    def _listing_video_device(self, data):
+        """A stream over a listing row's video, for its thumbnail: read on
+        demand from the image the listing was filled from, never whole."""
+        from trace_app.core.stream_device import PyTsk3StreamDevice
+        from PySide6.QtCore import QIODevice
+        path = os.path.normpath(self._listing_image)             if self._listing_image else None
+        handler = self._image_handlers.get(path) if path else None
+        handler = handler or self.image_handler
+        if handler is None or data.get('inode_number') is None:
+            return None
+        fs = handler.get_fs_info(data.get('start_offset'))
+        if fs is None:
+            return None
+        entry = fs.open_meta(inode=data['inode_number'])
+        size = int(entry.info.meta.size)
+        if size <= 0:
+            return None
+        device = PyTsk3StreamDevice(entry, size)
+        if not device.open(QIODevice.ReadOnly):
+            return None
+        return device
 
     def activate_listing_image(self):
         """Activate the image the listing was filled from."""

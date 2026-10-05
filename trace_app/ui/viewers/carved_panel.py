@@ -795,6 +795,9 @@ class CarvedFilesPanel(QWidget):
         self._thumb_timer.stop()
         self.gallery.clear()
         self._thumb_queue = []
+        self._video_items = {}
+        if getattr(self, '_videos', None) is not None:
+            self._videos.clear()
         for row in getattr(self, '_visible', self._rows):
             self._add_gallery_item(row)
 
@@ -807,7 +810,13 @@ class CarvedFilesPanel(QWidget):
         kind = row.get('type') or 'unknown'
         glyph = _ICON_FOR_TYPE.get(kind)
         fallback = self.icon_resolver(kind) if self.icon_resolver else None
-        if glyph is not None:
+        if kind in _VIDEO and self.content_reader is not None and \
+                0 < int(row.get('size') or 0) <= THUMBNAIL_MAX_BYTES:
+            # The video's icon until a frame from it is drawn (with a play
+            # badge), read from the image like a picture's.
+            item.setIcon(icons.icon(glyph))
+            self._queue_video(item, row)
+        elif glyph is not None:
             item.setIcon(icons.icon(glyph))
         else:
             # The file type's own icon -- until, for a picture, its thumbnail
@@ -817,6 +826,34 @@ class CarvedFilesPanel(QWidget):
                 self._thumb_queue.append(item)
                 self._thumb_timer.start()
         self.gallery.addItem(item)
+
+    def _queue_video(self, item, row):
+        from trace_app.ui.viewers.media.video_thumbnails import (
+            VideoThumbnailer, buffer_opener)
+        if getattr(self, '_videos', None) is None:
+            self._videos = VideoThumbnailer(self)
+            self._videos.ready.connect(self._video_ready)
+        if not hasattr(self, '_video_items'):
+            self._video_items = {}
+        key = (row.get('evidence_id') if row.get('evidence_id') is not None
+               else row.get('image_path'), row.get('offset'), row.get('type'))
+        self._video_items[key] = item
+
+        def opener(row=row):
+            return buffer_opener(self.content_reader(row))()
+        self._videos.request(key, opener, row.get('name') or '')
+
+    def _video_ready(self, key, image):
+        from trace_app.ui.viewers.media.video_thumbnails import with_play_badge
+        item = getattr(self, '_video_items', {}).pop(key, None)
+        if item is None or image.isNull():
+            return
+        try:
+            item.setIcon(QIcon(with_play_badge(QPixmap.fromImage(
+                image.scaled(_THUMB, _THUMB, Qt.KeepAspectRatio,
+                             Qt.SmoothTransformation)))))
+        except RuntimeError:
+            pass        # the gallery was rebuilt meanwhile
 
     def _draw_some_thumbnails(self):
         for _ in range(_THUMBS_PER_TICK):

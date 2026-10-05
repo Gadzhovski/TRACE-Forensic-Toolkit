@@ -2105,3 +2105,88 @@ def test_video_shows_its_first_frame_steps_and_saves(qapp, tmp_path, name,
     finally:
         viewer.shutdown()
         viewer.deleteLater()
+
+
+def test_videos_get_thumbnails_in_the_listing_and_the_gallery(qapp,
+                                                               tmp_path):
+    """A video in the Listing's icon views shows a frame from it, play-
+    badged, streamed from the file (never read whole); one that will not
+    decode keeps its icon. The window's opener streams a listed file from
+    its image. The carved-files gallery gives a carved video a frame too."""
+    import shutil
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+    from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.main_window import MainWindow
+    from trace_app.ui.viewers.carved_panel import CarvedFilesPanel
+    from trace_app.ui.widgets.listing_views import ListingIconView
+    clip = image_path('VP9test.webm')
+    with open(clip, 'rb') as handle:
+        video = handle.read()
+
+    def opener(data):
+        buffer = QBuffer()
+        buffer.setData(QByteArray(video if data['name'] != 'broken.mp4'
+                                  else bytes(2000)))
+        buffer.open(QIODevice.ReadOnly)
+        return buffer
+
+    table = QTableWidget(2, 1)
+    for row, name in enumerate(('clip.webm', 'broken.mp4')):
+        cell = QTableWidgetItem(name)
+        cell.setData(Qt.UserRole, {'type': 'file', 'name': name,
+                                   'size': str(len(video)),
+                                   'inode_number': row + 10,
+                                   'start_offset': 0, 'image_path': 'x'})
+        table.setItem(row, 0, cell)
+    view = ListingIconView(table, lambda data: None, open_video=opener)
+    view.resize(600, 300)
+    view.set_mode('large')
+    view.show()
+    try:
+        keys = [view._key(table.item(r, 0).data(Qt.UserRole))
+                for r in range(2)]
+        assert pump(qapp, 15, lambda: all(k in view._thumbs for k in keys))
+        good, broken = (view._thumbs[k] for k in keys)
+        assert good and not good.isNull() and max(good.width(),
+                                                  good.height()) == 96
+        assert broken is False                     # stays the file's icon
+        assert view.thumbnail_for(view.model().index(0, 0)) is good
+    finally:
+        view.deleteLater()
+
+    # The window's opener: a stream over the file, from its own image.
+    folder = tmp_path / 'collection'
+    folder.mkdir()
+    shutil.copyfile(clip, folder / 'clip.webm')
+    handler = ImageHandler(str(folder))
+    try:
+        root = handler.get_root_inode(0)
+        entry = next(e for e in handler.get_directory_contents(0, root)
+                     if e['name'] == 'clip.webm')
+        stub = type('W', (), {'_listing_image': str(folder),
+                              '_image_handlers': {}, 'image_handler':
+                              handler})()
+        device = MainWindow._listing_video_device(
+            stub, {'inode_number': entry['inode_number'], 'start_offset': 0})
+        assert device.isOpen() and device.size() == len(video)
+        assert bytes(device.read(64)) == video[:64]
+        device.close()
+    finally:
+        handler.close_resources()
+
+    panel = CarvedFilesPanel()
+    panel.content_reader = lambda row: video
+    panel.resize(700, 400)
+    try:
+        panel.view_group.button(1).setChecked(True)       # Thumbnails
+        panel.add_record({'name': '1a00.webm', 'type': 'webm',
+                          'offset': 0x1a00, 'size': len(video),
+                          'evidence_id': None, 'image_path': 'x',
+                          'evidence_label': 'x', 'status': 'valid'})
+        item = panel.gallery.item(0)
+        assert pump(qapp, 15, lambda: not panel._video_items)
+        # A frame now, not the video glyph: a pixmap icon has its size.
+        assert item.icon().availableSizes()
+    finally:
+        panel.deleteLater()

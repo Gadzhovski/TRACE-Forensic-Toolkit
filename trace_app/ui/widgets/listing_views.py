@@ -11,7 +11,9 @@ hidden here too.
 From Medium icons up, a picture shows its own thumbnail, read from the
 evidence for the items on screen only, a few at a time, and scaled to fit
 -- never cropped, a cropped thumbnail hides evidence. The file stays
-unchanged; the table keeps its file-type icons.
+unchanged; the table keeps its file-type icons. A video shows a frame from
+a little way in, marked with a play badge, decoded from a stream over the
+file on the image (ui/viewers/media/video_thumbnails.py) -- never read whole.
 """
 
 import logging
@@ -77,6 +79,21 @@ def is_picture(name):
         name.rsplit('.', 1)[-1].lower() in PICTURE_EXTENSIONS
 
 
+def is_video(name):
+    from trace_app.core.filetypes import VIDEO_EXTENSIONS
+    return '.' in (name or '') and \
+        name.rsplit('.', 1)[-1].lower() in VIDEO_EXTENSIONS
+
+
+def video_thumbnail(image, size):
+    """A video frame scaled to fit `size` x `size`, play-badged."""
+    from trace_app.ui.viewers.media.video_thumbnails import with_play_badge
+    if image.isNull():
+        return QPixmap()
+    return with_play_badge(QPixmap.fromImage(image.scaled(
+        size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+
+
 def thumbnail(data, size):
     """A picture scaled to fit `size` x `size`, or a null pixmap."""
     from PySide6.QtCore import QBuffer, QByteArray
@@ -129,9 +146,10 @@ class _ThumbnailDelegate(QStyledItemDelegate):
 class ListingIconView(QListView):
     """The Listing in a list or icon view, over the table's model."""
 
-    def __init__(self, table, read_picture, parent=None):
+    def __init__(self, table, read_picture, parent=None, open_video=None):
         """`read_picture(data)` -> the bytes of the file a row's data
-        names, or None."""
+        names, or None; `open_video(data)` -> an open QIODevice streaming
+        it, or None."""
         super().__init__(parent)
         self.setObjectName("listingIconView")
         self.table = table
@@ -148,6 +166,8 @@ class ListingIconView(QListView):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.setItemDelegate(_ThumbnailDelegate(self))
         self.mode = 'list'
+        self.open_video = open_video
+        self._videos = None             # the thumbnailer, made when needed
         self._thumbs = {}
         self._queue = []
         self._timer = QTimer(self)
@@ -204,7 +224,23 @@ class ListingIconView(QListView):
     def _model_changed(self):
         self._thumbs.clear()
         self._queue = []
+        if self._videos is not None:
+            self._videos.clear()
         self._rows_changed()
+
+    def _video_thumbnailer(self):
+        if self._videos is None:
+            from trace_app.ui.viewers.media.video_thumbnails import \
+                VideoThumbnailer
+            self._videos = VideoThumbnailer(self)
+            self._videos.ready.connect(self._video_ready)
+        return self._videos
+
+    def _video_ready(self, key, image):
+        size = max(self.iconSize().width(), 96)
+        pixmap = video_thumbnail(image, size)
+        self._thumbs[key] = pixmap if not pixmap.isNull() else False
+        self.viewport().update()
 
     def _rows_changed(self, *_args):
         if self.isVisible():
@@ -237,6 +273,15 @@ class ListingIconView(QListView):
             if key is None or key in self._thumbs or key in queued:
                 continue
             size = size_in_bytes(data.get('size'))
+            if data.get('type') == 'file' and self.open_video is not None \
+                    and is_video(data.get('name')) and size:
+                # Streamed, so any size: only what the decoder asks for is
+                # read.
+                videos = self._video_thumbnailer()
+                if not videos.pending(key):
+                    videos.request(key, lambda data=data:
+                                   self.open_video(data), data.get('name'))
+                continue
             # A size that cannot be read is not risked: the file could be
             # anything, and it would be read whole for one icon.
             if data.get('type') != 'file' or \
