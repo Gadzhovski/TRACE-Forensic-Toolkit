@@ -2888,13 +2888,24 @@ def hash_verdict(results):
     the baseline later checks compare with."""
     computed = {a: (results.get(f'computed_{a}') or '').lower()
                 for a in ('md5', 'sha1')}
+    # A container's own check of what it stores (an AFF4 image's stream
+    # hashes) failing is the stronger finding: the data is not what was
+    # acquired, whether or not the disk could be hashed.
+    check = results.get('container_check')
+    if check and check[0] is False:
+        return STATUS_CHANGED, check[1]
     if not computed['md5'] or computed['md5'] == 'error':
         return STATUS_UNHASHED, ("The image could not be hashed: "
                                  f"{results.get('error') or 'read failed'}.")
     stored = {a: (results.get(f'stored_{a}') or '').lower()
               for a in ('md5', 'sha1')}
     compared = [a for a in ('md5', 'sha1') if stored[a]]
+    # That check is of the stored data, not the disk, so it stands beside
+    # the disk's hashes rather than being compared with them.
     if not compared:
+        if check and check[0]:
+            return STATUS_VERIFIED, (f"{check[1]} The disk's hashes are "
+                                     f"recorded as the baseline.")
         return STATUS_VERIFIED, ("Hashes computed and recorded; the image "
                                  "stores none to compare with, so these are "
                                  "the baseline.")

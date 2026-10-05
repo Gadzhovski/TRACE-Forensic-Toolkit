@@ -636,6 +636,7 @@ does not match.
 <table>
 <tr><th align="left">Format</th><th align="left">Extensions</th><th align="left">Notes</th></tr>
 <tr><td>EnCase / Expert Witness</td><td><code>.E01</code> <code>.Ex01</code> <code>.s01</code></td><td>Split segments supported</td></tr>
+<tr><td>AFF4</td><td><code>.aff4</code></td><td>Standard v1.0 (Evimetry, pmem), read in Python: Snappy, LZ4 and deflate chunks, maps, and the regions an acquisition could not read. The stream hashes recorded at acquisition are verified, and case notes, the disk's make, model and serial fill the custody fields. Striped (multi-part) and logical AFF4-L images are not read</td></tr>
 <tr><td>Raw / dd</td><td><code>.dd</code> <code>.raw</code> <code>.img</code> <code>.001</code></td><td>Split images (<code>.001</code>, <code>.002</code>…) read and hashed as one</td></tr>
 <tr><td>ISO</td><td><code>.iso</code></td><td></td></tr>
 <tr><td>Apple Disk Image</td><td><code>.dmg</code> <code>.sparseimage</code> <code>.sparsebundle</code></td><td>Through libmodi: UDIF compressed with zlib, bzip2, LZFSE, LZMA or ADC, decompressed as it is read; sparse images and sparse bundles (a folder of bands)</td></tr>

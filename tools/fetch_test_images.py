@@ -33,6 +33,8 @@ _DFTT = "https://downloads.sourceforge.net/project/dftt/Test%20Images/"
 _NPS = "https://downloads.digitalcorpora.org/corpora/drives/"
 _NIST = "https://cfreds-archive.nist.gov/dfr-images/"
 _COMMONS = "https://upload.wikimedia.org/wikipedia/commons/"
+_AFF4 = ("https://raw.githubusercontent.com/aff4/ReferenceImages/"
+         "84773b088bf6cce551a515d8ebb486bad69b58b8/AFF4Std/")
 
 #: name -> (source URL, how it is packed, SHA-256 of the image itself).
 #: Checksums are those in test_images/README.md, taken when each image was
@@ -82,6 +84,15 @@ CATALOG = {
                            'dc6f9ed8ea395c91df33f1b7aae0a50e1e4d54434514efffcb32258a1e2f4a3c'),
     'Wiki.OrientateEdges.ogg': (_COMMONS + '2/28/Wiki.OrientateEdges.ogg',
                                 'raw', '4e583efb3a59d577f5f2a32cd8a6743785fe8f315a2f95c72778eb81635a1375'),
+    # The AFF4 Standard v1.0 canonical reference images (Evimetry): a
+    # linear image, one of allocated blocks only (UnknownData between),
+    # and one with a read error (UnreadableData).
+    'Base-Linear.aff4': (_AFF4 + 'Base-Linear.aff4', 'raw',
+                         'bcde3297ae95cd9df214bfb79821334628dad08f21ef38374a2c091481e391c0'),
+    'Base-Allocated.aff4': (_AFF4 + 'Base-Allocated.aff4', 'raw',
+                            'df6c705c15339a53cf86b221858f2cd6b85c56f7078287ae99273145efe567c1'),
+    'Base-Linear-ReadError.aff4': (_AFF4 + 'Base-Linear-ReadError.aff4', 'raw',
+                                   '0b1c2edd6bdf37f2efe9c6fa274dd3c100de3fc5152d8a1fd82fb61f41c68e12'),
 }
 
 _USER_AGENT = ('TRACE-test-images/1.0 '

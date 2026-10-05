@@ -163,6 +163,9 @@ CAPABILITIES = (
     Capability('modi', 'Evidence images', "Mac disk images (.dmg -- zlib, "
                "bzip2, LZFSE, LZMA, ADC -- .sparseimage, .sparsebundle)",
                'libmodi', _module_version('pymodi')),
+    Capability('aff4', 'Evidence images', "AFF4 images (Snappy, LZ4, "
+               "deflate; maps, unread and unreadable regions)",
+               'TRACE (Python)', lambda: 'built in'),
     Capability('bde', 'Volumes and encryption', "BitLocker volumes",
                'libbde', _module_version('pybde')),
     Capability('fvde', 'Volumes and encryption', "FileVault 2 (Core "

@@ -46,6 +46,7 @@ _FORMATS = {
     '.qcow': 'QEMU disk (QCOW)', '.dmg': 'Apple disk image (DMG)',
     '.sparseimage': 'Apple sparse image', '.sparse': 'Raw image',
     '.sparsebundle': 'Apple sparse bundle', '.ad1': 'FTK logical image (AD1)',
+    '.aff4': 'AFF4 image',
     '.l01': 'EnCase logical evidence (L01)',
     '.lx01': 'EnCase logical evidence (Lx01)', '.zip': 'ZIP archive',
     '.tar': 'TAR archive',
@@ -154,6 +155,8 @@ def _describe(handler, result):
             result['custody'][field] = str(value).strip()
         if str(label).lower().startswith('stored ') and value:
             result['stored_hashes'] = True
+    if result['format'].startswith('AFF4'):
+        result['stored_hashes'] = True      # each stream records its own
     if result['stored_hashes']:
         result['notes'].append("Stores its acquisition hashes: verification "
                                "will check them.")

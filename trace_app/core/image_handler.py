@@ -377,6 +377,13 @@ class ImageHandler:
         if self.logical_fs is not None:
             return {k: v for k, v in self.logical_fs.facts.items()
                     if not k.startswith('_')}
+        if self.get_image_type() == 'aff4':
+            source = getattr(self.img_info, '_source', None)
+            try:
+                return source.facts() if source is not None else {}
+            except Exception as exc:
+                logger.warning("AFF4 facts unreadable: %s", exc)
+                return {}
         if self.get_image_type() != 'ewf':
             return {}
 
@@ -450,6 +457,8 @@ class ImageHandler:
         raw = [".raw", ".img", ".dd", ".iso",
                ".001", ".sparse"]
 
+        if extension == '.aff4':
+            return "aff4"
         if extension in ewf:
             return "ewf"
         elif extension in raw:
@@ -608,7 +617,7 @@ class ImageHandler:
                 finally:
                     ewf_handle.close()
 
-            elif image_type == "virtual" or (
+            elif image_type in ("virtual", "aff4") or (
                     image_type == "raw" and
                     self.image_path.lower().endswith('.001')):
                 # A split raw image (x.001, x.002...) is read by TSK as one
@@ -670,11 +679,13 @@ class ImageHandler:
                 'stored_md5': stored_md5,
                 'stored_sha1': stored_sha1
             }
+            if image_type == "aff4":
+                hashes['container_check'] = self._aff4_check()
 
             return hashes
         except Exception as e:
             logger.error(f"Error calculating hashes: {e}")
-            return {
+            failed = {
                 'computed_md5': 'Error',
                 'computed_sha1': 'Error',
                 'computed_sha256': 'Error',
@@ -684,6 +695,37 @@ class ImageHandler:
                 'stored_sha1': None,
                 'error': str(e)
             }
+            if image_type == "aff4":
+                # A damaged container (a segment failing the ZIP's CRC-32)
+                # cannot be hashed whole; its own check still says what is
+                # wrong.
+                failed['container_check'] = self._aff4_check()
+            return failed
+
+    def _aff4_check(self):
+        """(ok, detail) from re-hashing an AFF4 image's streams against
+        the hashes recorded at acquisition. Those are hashes of the stored
+        stream, not of the disk (a map can lay zeros and unread regions
+        around it), so they are checked here and the disk's own hashes are
+        computed beside them."""
+        source = getattr(self.img_info, '_source', None)
+        try:
+            results = source.verify()
+        except Exception as exc:
+            return False, f"The AFF4 streams could not be re-hashed: {exc}"
+        if not results:
+            return None, "The AFF4 image records no stream hashes."
+        bad = [r for r in results if not r['ok']]
+        names = ' and '.join(sorted({r['algorithm'].upper()
+                                     for r in results if not r.get('error')}))
+        if bad:
+            return False, '; '.join(
+                f"AFF4 stream unreadable: {r['error']}" if r.get('error')
+                else f"AFF4 stream {r['algorithm'].upper()} is "
+                     f"{r['computed']}; recorded {r['expected']}"
+                for r in bad) + '.'
+        return True, (f"The AFF4 image's stored data matches the {names} "
+                      f"recorded at acquisition.")
 
     @property
     def is_logical(self):
@@ -815,6 +857,12 @@ class ImageHandler:
                 self.img_info = EWFImgInfo(ewf_handle)
             elif image_type == "raw":
                 self.img_info = pytsk3.Img_Info(self.image_path)
+            elif image_type == "aff4":
+                # Read in Python (core/aff4.py): pyaff4 cannot be installed
+                # without a compiler.
+                from trace_app.core.aff4 import open_aff4
+                self.img_info, self.container_note = open_aff4(
+                    self.image_path)
             elif image_type == "virtual":
                 try:
                     self.img_info, self.container_note = \

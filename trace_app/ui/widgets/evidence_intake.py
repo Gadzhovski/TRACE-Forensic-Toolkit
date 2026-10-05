@@ -35,6 +35,7 @@ logger = logging.getLogger('TRACE.EvidenceIntake')
 #: Disk images, then logical evidence -- the file dialog's filter, here so
 #: the wizard and quick triage's File menu offer the same formats.
 DISK_IMAGE_PATTERNS = ("*.e01", "*.E01", "*.ex01", "*.Ex01", "*.s01", "*.S01",
+                       "*.aff4", "*.AFF4",
                        "*.raw", "*.RAW", "*.img", "*.IMG", "*.dd", "*.DD",
                        "*.iso", "*.ISO", "*.001", "*.dmg", "*.DMG",
                        "*.sparse", "*.sparseimage", "*.vmdk", "*.VMDK",

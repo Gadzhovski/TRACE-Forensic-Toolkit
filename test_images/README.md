@@ -148,6 +148,15 @@ clips from Wikimedia Commons, each released under **CC0**.
 | `ContainerShip.webm` | 289 KB | 1084×738, 30 fps, 22 s | [Commons](https://commons.wikimedia.org/wiki/File:ContainerShip.webm) |
 | `Wiki.OrientateEdges.ogg` | 770 KB | Theora, 480×480, 30 fps, 9 s -- an `.ogg` that holds video | [Commons](https://commons.wikimedia.org/wiki/File:Wiki.OrientateEdges.ogg) |
 
+## AFF4
+
+The AFF4 Standard v1.0 canonical reference images, made by Evimetry
+([aff4/ReferenceImages](https://github.com/aff4/ReferenceImages), pinned to a
+commit): `Base-Linear.aff4` (the whole disk), `Base-Allocated.aff4`
+(allocated blocks only; the rest is `aff4:UnknownData`) and
+`Base-Linear-ReadError.aff4` (a read error, `aff4:UnreadableData`). The disk
+SHA-1s TRACE must produce are the ones pyaff4's own tests assert.
+
 ## Checksums
 
 The two DFRWS images were verified against the MD5s their organisers published,
@@ -193,6 +202,9 @@ c863ccad01804b840a6dfa623a94996ca876e15ded41c6c0d8ae148620eb6493  dfr-01-ntfs.dd
 2efbc8cbc302ce5ae498fa3f019eeb36447f15372fa92d6a62165f92449c1236  VP9test.webm
 dc6f9ed8ea395c91df33f1b7aae0a50e1e4d54434514efffcb32258a1e2f4a3c  ContainerShip.webm
 4e583efb3a59d577f5f2a32cd8a6743785fe8f315a2f95c72778eb81635a1375  Wiki.OrientateEdges.ogg
+bcde3297ae95cd9df214bfb79821334628dad08f21ef38374a2c091481e391c0  Base-Linear.aff4
+df6c705c15339a53cf86b221858f2cd6b85c56f7078287ae99273145efe567c1  Base-Allocated.aff4
+0b1c2edd6bdf37f2efe9c6fa274dd3c100de3fc5152d8a1fd82fb61f41c68e12  Base-Linear-ReadError.aff4
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01
 a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA-1.E01
