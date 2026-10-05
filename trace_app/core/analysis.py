@@ -429,10 +429,20 @@ def analyse_bytes(name, data, modules, magic=None, size=None):
     return result
 
 
+#: Picture families (content_checks.family) given a perceptual hash.
+_PHASH_FAMILIES = {'jpeg', 'png', 'tiff', 'webp', 'heif'}
+
+
 def _add_findings(result, name, data, modules, size):
     """Run the content checks and attach what they find to `result`."""
     if not any(m in modules for m in _CONTENT_MODULES):
         return
+    if MODULE_PHOTO in modules and data and \
+            content_checks.family(data[:64]) in _PHASH_FAMILIES:
+        # The photo module has the whole picture in hand: what it looks like
+        # (core/phash.py), for Triage > Similar pictures.
+        from trace_app.core.phash import phash
+        result['phash'] = phash(data)
     findings = content_checks.inspect(name, data, modules, size)
     if MODULE_HIDDEN in modules:
         volume = content_checks.possible_encrypted_volume(

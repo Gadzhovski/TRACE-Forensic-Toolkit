@@ -1308,6 +1308,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             lambda: self.queue_hash_matching())
         self.triage_panel.add_hash_tab(self.hash_panel)
 
+        from trace_app.ui.viewers.similar_pictures_panel import             SimilarPicturesPanel
+        self.similar_panel = SimilarPicturesPanel()
+        self.similar_panel.file_selected.connect(self.preview_artifact)
+        self.similar_panel.file_activated.connect(self.open_finding)
+        self.similar_panel.file_menu_requested.connect(
+            self.open_finding_menu)
+        self.triage_panel.add_similar_tab(self.similar_panel)
+
         # Everything set to start by itself, graded.
         from trace_app.ui.viewers.persistence_panel import PersistencePanel
         self.persistence_panel = PersistencePanel()
@@ -5650,7 +5658,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # the image; both have to stop before the handler closes under them.
         for panel in ('search_panel', 'indicators_panel', 'activity_panel',
                       'ntfs_panel', 'hash_panel', 'timeline_panel',
-                      'persistence_panel', 'map_panel',
+                      'persistence_panel', 'map_panel', 'similar_panel',
                       'registry_extractor_widget'):
             if getattr(self, panel, None) is not None:
                 try:

@@ -122,7 +122,7 @@ def test_a_v15_case_gains_the_custody_columns(tmp_path):
         columns = {row[1] for row in
                    case._db.execute("PRAGMA table_info(evidence)")}
         assert set(EVIDENCE_DETAILS) <= columns
-        assert int(case._get('schema_version')) == SCHEMA_VERSION == 16
+        assert int(case._get('schema_version')) == SCHEMA_VERSION >= 16
     finally:
         case.close()
 

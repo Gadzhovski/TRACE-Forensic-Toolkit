@@ -341,6 +341,18 @@ class TriagePanel(QWidget):
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
 
+    def add_similar_tab(self, panel):
+        """Pictures that look alike (ui/viewers/similar_pictures_panel.py),
+        following the same image filter."""
+        self._similar_panel = panel
+        self._tab_for['similar'] = self.tabs.addTab(
+            panel, icons.icon(icons.FINDING_DUPLICATES), "Similar pictures")
+        panel.count_changed.connect(
+            lambda count: self.tabs.setTabText(
+                self._tab_for['similar'], f"Similar pictures ({count:,})"))
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
     def add_hash_tab(self, panel):
         """Hash-set matches (ui/viewers/hash_matches_panel.py), following
         the same image filter."""
@@ -470,7 +482,8 @@ class TriagePanel(QWidget):
                 getattr(self, '_keywords_panel', None),
                 getattr(self, '_thumbnails_panel', None),
                 getattr(self, '_deleted_panel', None),
-                getattr(self, '_map_panel', None))
+                getattr(self, '_map_panel', None),
+                getattr(self, '_similar_panel', None))
 
     def refresh(self):
         """Redraw from what the case holds now."""

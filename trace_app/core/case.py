@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -973,6 +973,19 @@ class Case:
 
     # --- analysis modules -------------------------------------------
 
+    def picture_hashes(self, evidence_id=None):
+        """Every picture with a perceptual hash: [{evidence_id,
+        artifact_ref, name, path, size, is_deleted, phash}]."""
+        query = ("SELECT evidence_id, artifact_ref, name, path, size, "
+                 "is_deleted, phash FROM file_analysis WHERE phash IS NOT "
+                 "NULL")
+        params = []
+        if evidence_id is not None:
+            query += " AND evidence_id = ?"
+            params.append(evidence_id)
+        return [dict(row) for row in self._db.execute(
+            query + " ORDER BY evidence_id, path", params)]
+
     def add_analysis_batch(self, evidence_id, rows):
         """Record what the modules found, for a batch of files.
 
@@ -995,14 +1008,15 @@ class Case:
                 facts.get('mismatch'), facts.get('entropy'),
                 facts.get('entropy_peak'), facts.get('entropy_peak_offset'),
                 facts.get('md5'), facts.get('sha256'), facts.get('note'),
-                now, facts.get('sha1')))
+                now, facts.get('sha1'), facts.get('phash')))
 
         self._db.executemany(
             "INSERT OR REPLACE INTO file_analysis "
             "(evidence_id, artifact_ref, name, path, size, is_deleted, "
             " mime, extension, mismatch, entropy, entropy_peak, "
-            " entropy_peak_offset, md5, sha256, note, analysed_utc, sha1) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", payload)
+            " entropy_peak_offset, md5, sha256, note, analysed_utc, sha1, "
+            " phash) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", payload)
 
         # Findings ride the same batch and the same commit, so a file's row
         # and what was found in it are never written apart.
@@ -2098,6 +2112,8 @@ class Case:
                 note          TEXT,
                 analysed_utc  TEXT NOT NULL,
                 sha1          TEXT,
+                -- Perceptual hash of a picture (core/phash.py), 16 hex.
+                phash         TEXT,
                 UNIQUE(evidence_id, artifact_ref)
             );
 
@@ -2451,6 +2467,15 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 17:
+            # A picture's perceptual hash, for Triage > Similar pictures.
+            try:
+                self._db.execute(
+                    "ALTER TABLE file_analysis ADD COLUMN phash TEXT")
+            except sqlite3.OperationalError:
+                pass            # already present (created above at v17)
+            self._db.commit()
 
         if version < 16:
             # Chain of custody per item. acquired_on is text as the image
