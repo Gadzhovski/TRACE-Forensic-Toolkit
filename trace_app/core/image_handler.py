@@ -53,14 +53,18 @@ class _Closed:
 class EWFImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
         self._ewf_handle = ewf_handle
+        # One handle, read from the window's thread and from workers: a
+        # seek and a read from two threads interleave into wrong bytes.
+        self._lock = threading.Lock()
         super(EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
 
     def close(self):
         self._ewf_handle.close()
 
     def read(self, offset, size):
-        self._ewf_handle.seek(offset)
-        return self._ewf_handle.read(size)
+        with self._lock:
+            self._ewf_handle.seek(offset)
+            return self._ewf_handle.read(size)
 
     def get_size(self):
         return self._ewf_handle.get_media_size()
@@ -1102,6 +1106,7 @@ class ImageHandler:
         self.get_fs_type.cache_clear()
         self._directory_cache.clear()
 
+    @containers.holding_libyal
     def volume_kind(self, start_sector):
         """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
         partition (or an unpartitioned image at 0)."""
@@ -1129,6 +1134,7 @@ class ImageHandler:
     def unlocked_kind(self, start_sector):
         return self._unlocked_kind.get(start_sector)
 
+    @containers.holding_libyal
     def unlock_volume(self, start_sector, kind, **secret):
         """Unlock a BitLocker, FileVault 2 or LUKS volume at a partition;
         its decrypted file system then replaces the partition's, at the same
@@ -1186,6 +1192,7 @@ class ImageHandler:
 
     # --- LVM and APFS: several volumes in one partition -------------------
 
+    @containers.holding_libyal
     def logical_volumes(self, start_sector):
         """An LVM partition's logical volumes: [{'key', 'index', 'name',
         'size', 'group'}]."""
@@ -1208,6 +1215,7 @@ class ImageHandler:
                  'group': group.name if group is not None else ''}
                 for index, volume in enumerate(volumes) if volume is not None]
 
+    @containers.holding_libyal
     def apfs_volumes(self, start_sector):
         """An APFS container's volumes: [{'key', 'index', 'name', 'size',
         'locked'}]."""
@@ -1234,6 +1242,7 @@ class ImageHandler:
                         'size': _safe(volume, 'size', 0), 'locked': locked})
         return out
 
+    @containers.holding_libyal
     def unlock_apfs(self, key, password=None, recovery_password=None):
         start, index = containers.split_apfs_key(key)
         self.apfs_volumes(start)
@@ -1246,6 +1255,7 @@ class ImageHandler:
         logger.info("APFS volume %d at sector %d unlocked", index, start)
         return True
 
+    @containers.holding_libyal
     def _apfs_file_system(self, key, start, index):
         from trace_app.core.apfs import ApfsFileSystem
         if key in self.fs_info_cache:
@@ -1346,6 +1356,7 @@ class ImageHandler:
                 0, volume.get_size())
         return self._partition_window(start_sector)
 
+    @containers.holding_libyal
     def shadow_copies(self, start_sector):
         """The partition's Volume Shadow Copies, oldest first:
         [{'key', 'index', 'created', 'size', 'identifier'}]."""

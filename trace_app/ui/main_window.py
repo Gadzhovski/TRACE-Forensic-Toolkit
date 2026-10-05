@@ -5558,6 +5558,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         widget = getattr(self, 'registry_extractor_widget', None)
         if widget is None:
             return
+        # Its threads open their own copy of each image, unlocked with the
+        # keys this session holds.
+        widget.unlocks_for = self._unlocks_for
         evidence = []
         for path, handler in self._image_handlers.items():
             row = self.case.evidence_for_path(path) \
@@ -6037,6 +6040,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         path = os.path.normpath(self.image_handler.image_path)
         self._bitlocker_keys.setdefault(path, {})[start] = dict(
             dialog.secret, _kind=kind)
+        # The Registry tab searches the unlocked volume too.
+        self._refresh_registry_evidence()
         if self.case is not None:
             row = self.case.evidence_for_path(path)
             self.case.record_event(

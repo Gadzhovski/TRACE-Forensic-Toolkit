@@ -149,7 +149,11 @@ def test_libmagic_names_content_not_extension():
     assert reader.from_buffer(png.getvalue()) == 'image/png'
     assert reader.from_buffer(jpeg()) == 'image/jpeg'
     assert reader.from_buffer(b'%PDF-1.4\n1 0 obj\n<<>>\nendobj\n') == 'application/pdf'
-    assert reader.from_buffer(zip_bytes({'a.txt': b'x'})) == 'application/zip'
+    # TRACE's reader: libmagic 5.46 finds a ZIP from its end, so a buffer
+    # reads as 'data' there; TRACE names it from its first header.
+    from trace_app.core.analysis import magic_reader
+    assert magic_reader().from_buffer(zip_bytes({'a.txt': b'x'})) ==         'application/zip'
+    assert magic_reader().from_buffer(png.getvalue()) == 'image/png'
 
 
 @pytest.mark.skipif(sys.platform != 'win32',
@@ -195,6 +199,18 @@ def test_disguised_png_is_shown_as_an_image_with_a_note():
     Image.new('RGB', (4, 4)).save(buffer, 'PNG')
     plan = plan_view('step2.txt', buffer.getvalue())
     assert plan.kind == 'image' and '.txt' in plan.note
+
+
+def test_a_guessed_targa_never_overrules_the_name():
+    """TGA has no signature: libmagic 5.41+ (macOS, Linux) calls almost any
+    bytes beginning 00 01 02 a Targa image. Passed as the MIME here, so
+    every platform's libmagic is tested alike."""
+    from trace_app.core.filetypes import plan_view
+    plan = plan_view('invoice.pdf', bytes(range(256)) * 32,
+                     mime='image/x-tga')
+    assert plan.kind == 'document' and not plan.note
+    assert plan_view('photo.tga', b'\0' * 64, mime='image/x-tga').kind == \
+        'image'
 
 
 def test_docx_keeps_tracked_deletions_and_comments():

@@ -159,9 +159,19 @@ def plan_from_name(name):
     return None
 
 
+#: Types libmagic can only guess, from a few header values rather than a
+#: signature: never confident enough to overrule an extension. TGA has no
+#: magic number -- libmagic 5.41+ (macOS, Linux) calls the bytes 00 01 02
+#: ... "Targa image data", so a deleted .pdf over other data was shown as a
+#: broken picture there (5.32 on Windows has no such rule).
+SIGNATURELESS_MIMES = frozenset({'image/x-tga'})
+
+
 def plan_from_mime(mime):
     """The plan a confident libmagic answer implies, or None."""
     mime = (mime or '').lower()
+    if mime in SIGNATURELESS_MIMES:
+        return None
     if mime.startswith('image/'):
         subtype = mime.split('/', 1)[1]
         subtype = {'svg+xml': 'svg', 'x-icon': 'ico',

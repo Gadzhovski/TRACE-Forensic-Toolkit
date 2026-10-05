@@ -517,7 +517,13 @@ def _valid_sqlite(data):
     connection = sqlite3.connect(':memory:')
     try:
         if hasattr(connection, 'deserialize'):          # Python 3.11+
-            connection.deserialize(bytes(data))
+            # Opened as rollback-journal mode, as sqlite_bytes does: SQLite
+            # will not read an in-memory database whose header says WAL --
+            # which rejected every carved WAL-mode database (phones, browsers)
+            # on Python 3.11+, where this check runs.
+            copy = bytearray(data)
+            copy[18] = copy[19] = 1
+            connection.deserialize(bytes(copy))
             connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
         return True
     finally:

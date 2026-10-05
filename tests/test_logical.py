@@ -352,6 +352,11 @@ def test_every_dmg_compression_hdiutil_writes(tmp_path, form):
     try:
         assert handler.loaded, handler.load_error
         files = _hfs_files(handler)
+        # What was found, when the file was not: the container's reading of
+        # the image, its partitions and the paths the walk saw.
+        found = (f"{handler.container_note!r}; partitions "
+                 f"{handler.get_partitions()}; files {sorted(files)[:20]}")
+        assert '/pageant.exe' in files, found
         assert files['/pageant.exe'] == content
     finally:
         handler.close_resources()

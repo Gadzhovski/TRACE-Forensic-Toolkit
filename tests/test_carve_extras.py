@@ -235,7 +235,7 @@ def test_names_keep_the_offset_and_say_what_the_file_was():
         '10.pdf'
     assert carved_name(0x10, 'pdf') == '10.pdf'
     assert safe_name('CON.txt') == '_CON.txt'
-    assert safe_name('a/b\c:d*?.doc. ') == 'a_b_c_d_.doc'
+    assert safe_name(r'a/b\c:d*?.doc. ') == 'a_b_c_d_.doc'
     long = safe_name('x' * 200 + '.docx')
     assert len(long) == 80 and long.endswith('.docx')
 

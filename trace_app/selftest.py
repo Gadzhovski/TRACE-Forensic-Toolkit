@@ -163,11 +163,13 @@ def _run(report, images, sandbox):
 
     @check('libmagic identifies content')
     def _():
-        import magic
         from trace_app.infra.preflight import libmagic_identity
         identity = libmagic_identity()
         assert identity, "libmagic did not load"
-        reader = magic.Magic(mime=True)
+        # TRACE's reader, as the analysis and viewer use it (it names a ZIP
+        # libmagic 5.46 calls 'data').
+        from trace_app.core.analysis import magic_reader
+        reader = magic_reader()
         found = {kind: reader.from_buffer(data) for kind, data in _samples().items()}
         want = {'png': 'image/png', 'pdf': 'application/pdf',
                 'zip': 'application/zip'}

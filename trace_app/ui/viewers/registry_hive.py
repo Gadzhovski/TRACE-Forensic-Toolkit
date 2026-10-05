@@ -20,6 +20,16 @@ logger = logging.getLogger('TRACE.Registry')
 
 
 
+def _own_handler(path, unlocks):
+    """The evidence opened afresh for one thread, with the volumes the
+    examiner unlocked unlocked again. The window's own handler is never
+    used here: the window reads it at the same time (opening the image,
+    building its tree), and one image's volume objects used from two
+    threads returned wrong bytes and crashed on Linux and macOS."""
+    from trace_app.core.background import _open_image
+    return _open_image(path, unlocks)
+
+
 class _HiveFinder(QThread):
     """Finds the hives on each piece of evidence in turn
     (core/registry_hives.py), off the UI thread: the Evidence list then says
@@ -30,19 +40,24 @@ class _HiveFinder(QThread):
 
     def __init__(self, evidence, parent=None):
         super().__init__(parent)
-        self.evidence = evidence            # [(path, handler)]
+        self.evidence = evidence            # [(path, unlocks)]
 
     def run(self):
         from trace_app.core import registry_hives
-        for path, handler in self.evidence:
+        for path, unlocks in self.evidence:
             if self.isInterruptionRequested():
                 return
+            handler = None
             try:
+                handler = _own_handler(path, unlocks)
                 hives = registry_hives.find_hives(
                     handler, self.isInterruptionRequested)
             except Exception as exc:
                 logger.error("Could not look for hives in %s: %s", path, exc)
                 hives = []
+            finally:
+                if handler is not None:
+                    handler.close_resources()
             if not self.isInterruptionRequested():
                 self.found.emit(path, hives)
 
@@ -55,22 +70,27 @@ class _HiveLoader(QThread):
     loaded = Signal(object, object)
     failed = Signal(str)
 
-    def __init__(self, image_handler, hive, parent=None):
+    def __init__(self, path, unlocks, hive, parent=None):
         super().__init__(parent)
-        self.image_handler = image_handler
+        self.path = path
+        self.unlocks = unlocks
         self.hive = hive
 
     def run(self):
         from trace_app.core import registry_hives
+        handler = None
         try:
-            data, facts = registry_hives.read_hive(self.image_handler,
-                                                   self.hive)
+            handler = _own_handler(self.path, self.unlocks)
+            data, facts = registry_hives.read_hive(handler, self.hive)
             root = Registry.Registry(io.BytesIO(data)).root()
             if not self.isInterruptionRequested():
                 self.loaded.emit(root, facts)
         except Exception as exc:
             logger.error("Could not read %s: %s", self.hive.path, exc)
             self.failed.emit(f"Could not read {self.hive.label}: {exc}")
+        finally:
+            if handler is not None:
+                handler.close_resources()
 
 
 class RegistryExtractor(QWidget):
@@ -100,6 +120,11 @@ class RegistryExtractor(QWidget):
         #: (path, Hive) of what the tree shows.
         self.shown = None
         self._source_rows = []
+        #: path -> {volume key: secret} the examiner unlocked; set by the
+        #: window, so this tab's threads can unlock their own copies.
+        self.unlocks_for = lambda path: {}
+        #: path -> which volumes were unlocked when it was searched.
+        self._searched_unlocked = {}
         self.init_ui()
 
     def set_image_handler(self, image_handler):
@@ -219,15 +244,20 @@ class RegistryExtractor(QWidget):
     def set_evidence(self, evidence):
         """The evidence open in the window: [(path, display name,
         handler)]. Hives are looked for on any not searched yet."""
+        unlocked = {p: sorted(self.unlocks_for(p)) for p, _n, _h in evidence}
         if [(p, n, id(h)) for p, n, h in evidence] == \
-                [(p, n, id(h)) for p, n, h in self._evidence]:
+                [(p, n, id(h)) for p, n, h in self._evidence] and \
+                all(self._searched_unlocked.get(p) == keys
+                    for p, keys in unlocked.items() if p in self._hives):
             return                  # every click activates an image
         known = {path for path, _n, _h in evidence}
         handlers = {path: handler for path, _n, handler in evidence}
         old = {path: handler for path, _n, handler in self._evidence}
-        # Gone, or reopened under the same path: forget what was found.
+        # Gone, reopened under the same path, or a volume unlocked since it
+        # was searched: forget what was found.
         for path in list(self._hives):
-            if path not in known or old.get(path) is not handlers.get(path):
+            if path not in known or old.get(path) is not handlers.get(path) \
+                    or self._searched_unlocked.get(path) != unlocked[path]:
                 self._hives.pop(path, None)
         self._evidence = list(evidence)
         if self._chosen not in known:
@@ -241,10 +271,13 @@ class RegistryExtractor(QWidget):
         if self._finder is not None and self._finder.isRunning():
             self._finder.requestInterruption()
             self._finder.wait(10000)
-        pending = [(path, handler) for path, _n, handler in self._evidence
+        pending = [(path, self.unlocks_for(path))
+                   for path, _n, _handler in self._evidence
                    if path not in self._hives]
         if not pending:
             return
+        for path, unlocks in pending:
+            self._searched_unlocked[path] = sorted(unlocks)
         self._finder = _HiveFinder(pending, self)
         self._finder.found.connect(self._hives_found)
         self._finder.start()
@@ -366,7 +399,8 @@ class RegistryExtractor(QWidget):
         # No placeholder row here: progress goes to the window's status bar,
         # and a tree entry saying "Reading..." reads like a registry key.
         self.treeWidget.clear()
-        self._loader = _HiveLoader(evidence[2], hive, self)
+        self._loader = _HiveLoader(evidence[0], self.unlocks_for(evidence[0]),
+                                   hive, self)
         self._loader.loaded.connect(
             lambda root, facts: self._on_hive_loaded(evidence, hive, root,
                                                      facts))

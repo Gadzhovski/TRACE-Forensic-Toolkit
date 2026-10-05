@@ -14,6 +14,7 @@ No Qt here.
 
 import logging
 import os
+import threading
 
 import pytsk3
 
@@ -22,6 +23,28 @@ logger = logging.getLogger('TRACE.Containers')
 
 class ContainerError(Exception):
     """A container could not be opened; the message says why."""
+
+
+#: Every call into a libyal object (reads, volume and container handles,
+#: APFS entries) holds this. The window and its workers use one image at
+#: once -- the Registry tab's hive finder walks volumes while the window
+#: builds the tree -- and libyal objects are not thread-safe: on Linux and
+#: macOS concurrent use returned wrong bytes (an APFS superblock failed its
+#: checksum) or crashed the process. Re-entrant, because a volume's read
+#: reaches its image's read on the same thread (BitLocker in a DMG).
+#: Background jobs are processes of their own and do not contend.
+LIBYAL_LOCK = threading.RLock()
+
+
+def holding_libyal(method):
+    """A method run under LIBYAL_LOCK."""
+    import functools
+
+    @functools.wraps(method)
+    def locked(*args, **kwargs):
+        with LIBYAL_LOCK:
+            return method(*args, **kwargs)
+    return locked
 
 
 class LibyalImgInfo(pytsk3.Img_Info):
@@ -39,7 +62,8 @@ class LibyalImgInfo(pytsk3.Img_Info):
         if offset >= self._size or length <= 0:
             return b''
         length = min(length, self._size - offset)
-        return self._source.read_buffer_at_offset(length, offset)
+        with LIBYAL_LOCK:
+            return self._source.read_buffer_at_offset(length, offset)
 
     def get_size(self):
         return self._size

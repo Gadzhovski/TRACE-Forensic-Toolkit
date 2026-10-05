@@ -21,6 +21,8 @@ import stat
 
 import pytsk3
 
+from trace_app.core.containers import LIBYAL_LOCK, holding_libyal
+
 logger = logging.getLogger('TRACE.APFS')
 
 ROOT_IDENTIFIER = 2
@@ -99,11 +101,13 @@ class _Info:
 class ApfsFile:
     """One file or directory -- pytsk3.File's shape."""
 
+    @holding_libyal
     def __init__(self, fs, entry):
         self._fs = fs
         self._entry = entry
         self.info = _Info(fs, entry)
 
+    @holding_libyal
     def read_random(self, offset, length, *_attribute):
         size = self.info.meta.size
         if offset >= size or length <= 0:
@@ -121,6 +125,7 @@ class ApfsFile:
         # are not data streams TRACE lists.
         return iter(())
 
+    @holding_libyal
     def extended_attributes(self):
         """[(name, size)] of the file's extended attributes."""
         out = []
@@ -140,13 +145,17 @@ class ApfsDirectory:
 
     def __iter__(self):
         try:
-            count = self._entry.number_of_sub_file_entries
+            with LIBYAL_LOCK:
+                count = self._entry.number_of_sub_file_entries
         except (OSError, IOError) as exc:
             logger.warning("APFS directory unreadable: %s", exc)
             return
         for index in range(count):
             try:
-                yield ApfsFile(self._fs, self._entry.get_sub_file_entry(index))
+                with LIBYAL_LOCK:   # not held across the yield
+                    item = ApfsFile(self._fs,
+                                    self._entry.get_sub_file_entry(index))
+                yield item
             except (OSError, IOError) as exc:
                 logger.debug("APFS entry %d unreadable: %s", index, exc)
 
@@ -176,12 +185,14 @@ class _FsInfo:
 class ApfsFileSystem:
     """An unlocked APFS volume, read like a pytsk3.FS_Info."""
 
+    @holding_libyal
     def __init__(self, volume, container=None, name=''):
         self.volume = volume
         self.container = container
         self.name = name or getattr(volume, 'name', '') or 'APFS volume'
         self.info = _FsInfo(volume)
 
+    @holding_libyal
     def _entry(self, path=None, inode=None):
         if inode is not None:
             return self.volume.get_file_entry_by_identifier(int(inode))

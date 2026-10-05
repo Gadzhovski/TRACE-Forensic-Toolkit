@@ -198,10 +198,38 @@ def magic_reader():
     """
     try:
         import magic
-        return magic.Magic(mime=True)
+        return _ZipAwareMagic(magic.Magic(mime=True))
     except Exception as exc:            # ImportError, or a missing DLL
         logger.warning("File type detection unavailable: %s", exc)
         return None
+
+
+#: A ZIP's first local file header, or the end record of an empty one.
+_ZIP_STARTS = (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08')
+
+
+class _ZipAwareMagic:
+    """libmagic, except that a buffer opening with a ZIP header is a ZIP.
+
+    libmagic 5.46 (Debian 13; Ubuntu next) finds a ZIP from its end, so
+    a buffer -- all TRACE ever passes, the analysis only a file's first
+    4 KB -- reads as 'application/octet-stream' ('data'); `file` on the
+    same bytes from a pipe says so too. 5.32-5.45 named it from its first
+    bytes. Without this every ZIP, DOCX, XLSX, JAR and APK would be
+    unidentified, and one with high entropy graded as encrypted."""
+
+    def __init__(self, reader):
+        self._reader = reader
+
+    def from_buffer(self, data):
+        mime = self._reader.from_buffer(data)
+        if mime in ('application/octet-stream', '') and \
+                bytes(data[:4]) in _ZIP_STARTS:
+            return 'application/zip'
+        return mime
+
+    def __getattr__(self, name):
+        return getattr(self._reader, name)
 
 
 def classify_mismatch(extension, mime, entropy=None):

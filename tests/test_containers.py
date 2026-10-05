@@ -306,3 +306,39 @@ def test_mailbox_messages_are_indexed_with_their_indicators(tmp_path):
         assert any(h['name'].endswith('Test 2.html') for h in hits)
     finally:
         index.close()
+
+
+def test_an_image_read_from_two_threads_reads_true():
+    """The window and its workers read one image at once. libyal handles
+    are not safe for that: on Linux and macOS a DMG read while another
+    thread read returned wrong bytes, and its APFS container failed its
+    superblock checksum (every time, with a second reader running)."""
+    import hashlib
+    import threading
+    handler = _handler(sample('apfs_encrypted.dmg'))
+    try:
+        expected = hashlib.sha256(handler.read(0, handler.get_size()))
+        expected = expected.hexdigest()
+        stop = threading.Event()
+        bad = []
+
+        def other_reader():
+            while not stop.is_set():
+                if handler.read(3_000_000, 65536) != tail:
+                    bad.append('other')
+        tail = handler.read(3_000_000, 65536)
+        thread = threading.Thread(target=other_reader)
+        thread.start()
+        try:
+            for _ in range(10):
+                whole = handler.read(0, handler.get_size())
+                if hashlib.sha256(whole).hexdigest() != expected:
+                    bad.append('main')
+                handler._apfs.clear()
+                assert handler.apfs_volumes(40), "APFS container unreadable"
+        finally:
+            stop.set()
+            thread.join()
+        assert not bad
+    finally:
+        handler.close_resources()
