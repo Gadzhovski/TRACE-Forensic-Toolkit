@@ -846,9 +846,10 @@ class ImageHandler:
                 try:
                     self.fs_info = pytsk3.FS_Info(self.img_info)
                 except Exception:
-                    self.fs_info = None
+                    # What TSK cannot read, libyal may: XFS.
+                    self.fs_info = self.get_fs_info(0)
                     # If no volume info and no filesystem, mark as wiped
-                    self.is_wiped_image = True
+                    self.is_wiped_image = self.fs_info is None
             return True
         except Exception as e:
             logger.error("Could not load image %s: %s", self.image_path, e)
@@ -879,6 +880,7 @@ class ImageHandler:
         (0x400, b'H+', 'HFS+'),
         (0x400, b'HX', 'HFSX'),
         (0x20, b'NXSB', 'APFS'),
+        (0, b'XFSB', 'XFS'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
         # accepted. UFS1 and UFS2 differ only in where the block sits.
@@ -1033,8 +1035,24 @@ class ImageHandler:
                         self.img_info, offset=start_offset * self.sector_size)
                 self.fs_info_cache[start_offset] = fs_info
             except Exception:
-                return None
+                # What TSK cannot read, libyal may: XFS (core/xfs.py).
+                fs_info = self._xfs_file_system(start_offset)
+                if fs_info is None:
+                    return None
+                self.fs_info_cache[start_offset] = fs_info
         return self.fs_info_cache[start_offset]
+
+    def _xfs_file_system(self, start_offset):
+        """An XFS volume at a partition (or an unpartitioned image), read
+        through libfsxfs, or None."""
+        if start_offset in self._volumes or                 start_offset >= containers.SHADOW_KEY_BASE:
+            return None
+        try:
+            window = self._partition_window(start_offset)
+        except KeyError:
+            return None
+        from trace_app.core.xfs import open_xfs
+        return open_xfs(window)
 
     # --- one file, read lazily --------------------------------------------------
 
@@ -1399,8 +1417,11 @@ class ImageHandler:
             fs = self.get_fs_info(start_offset)
             from trace_app.core.apfs import is_apfs
             from trace_app.core.logical import is_logical
+            from trace_app.core.xfs import is_xfs
             if is_apfs(fs):
                 return "APFS"
+            if is_xfs(fs):
+                return "XFS"
             if is_logical(fs):
                 return fs.label
             fs_type = fs.info.ftype

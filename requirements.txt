@@ -35,6 +35,7 @@ libvshadow-python>=20260714 # Volume Shadow Copies (snapshots of NTFS)
 libpff-python>=20260926     # Outlook PST / OST mailboxes
 libfvde-python>=20260923    # FileVault 2 (Core Storage) volumes
 libfsapfs-python>=20260921  # APFS containers and volumes, encrypted too
+libfsxfs-python>=20260901   # XFS, which The Sleuth Kit does not read
 libluksde-python>=20260902  # LUKS-encrypted Linux volumes
 libvslvm-python>=20260901   # Linux LVM volume groups
 libesedb-python>=20260704   # ESE databases: SRUM, Edge/IE WebCache

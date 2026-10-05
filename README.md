@@ -662,8 +662,9 @@ and persistence are read from wherever a system's `Windows` / `Users` (or
 `etc` / `home`, or macOS's `Library` / `private`) folders are.
 
 File system support comes from The Sleuth Kit — NTFS, FAT12/16/32, exFAT,
-Ext2/3/4, HFS+, APFS, UFS1/UFS2, ISO 9660 and YAFFS2. NTFS, FAT, exFAT, Ext2/3/4,
-HFS+, ISO 9660, APFS and UFS1/UFS2 have been tested here; YAFFS2 has not.
+Ext2/3/4, HFS+, UFS1/UFS2, ISO 9660 and YAFFS2 — and from libyal for what the
+Sleuth Kit cannot read: **APFS** (libfsapfs) and **XFS** (libfsxfs, the RHEL /
+CentOS / Rocky default). All but YAFFS2 have been tested here.
 
 Inside a disk:
 

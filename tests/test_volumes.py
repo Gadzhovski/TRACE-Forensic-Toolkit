@@ -157,6 +157,7 @@ def test_a_background_job_gets_the_keys_with_their_kind():
     ('lvm.raw', None),
     ('ufs1.raw', None),
     ('ufs2.raw', None),
+    ('xfs.raw', None),
     ('luks1.raw', {0: {'_kind': 'luks', 'password': 'luksde-TEST'}}),
 ])
 def test_analysis_reaches_the_files_inside(image, unlock):
@@ -194,3 +195,31 @@ def test_ufs_is_named_and_read(image, label):
     finally:
         handler.close_resources()
     assert label in probe(sample(image))['contents']
+
+
+def test_xfs_is_read_where_tsk_cannot():
+    """TSK (4.15) does not read XFS; libfsxfs does, shaped like pytsk3: the
+    file system is named, listed with its times, read, and an unpartitioned
+    XFS image is not mistaken for a wiped one."""
+    import pytsk3
+    from trace_app.core.evidence_probe import probe
+    from trace_app.core.xfs import is_xfs, superblock_geometry
+    with open(sample('xfs.raw'), 'rb') as handle:
+        head = handle.read(512)
+    with pytest.raises(OSError):
+        pytsk3.FS_Info(pytsk3.Img_Info(sample('xfs.raw')))
+    assert superblock_geometry(head) == (4096, 16 * 1024 * 1024)
+    handler = handler_for('xfs.raw')
+    try:
+        assert not handler.is_wiped() and is_xfs(handler.get_fs_info(0))
+        assert handler.get_fs_type(0) == 'XFS'
+        entries = {e['name']: e for e in handler.get_directory_contents(
+            0, handler.get_root_inode(0))}
+        assert {'a_directory', 'passwords.txt', 'a_link'} <= set(entries)
+        content, _meta = handler.get_file_content(
+            entries['passwords.txt']['inode_number'], 0)
+        assert content.startswith(b'place,user,password\nbank,joesmith')
+        assert 'XFS' in handler.detect_filesystems(0)
+    finally:
+        handler.close_resources()
+    assert probe(sample('xfs.raw'))['contents'] == 'XFS'

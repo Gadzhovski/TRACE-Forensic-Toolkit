@@ -255,6 +255,10 @@ SAMPLES = {
         '62d74398519015912e3216766912a2a4d1afc7dc4f7378f676943aaf5e0828f1'),
     # UFS1 and UFS2 (FreeBSD), each with a file, a folder and a link --
     # what TSK reads and TRACE used to label 'Unknown'.
+    # XFS, which TSK does not read (core/xfs.py, libfsxfs).
+    'xfs.raw': (
+        _DFVFS + 'xfs.raw',
+        '6f48cf411af128693436f38359177cf7018c7b54c33c730f7b8b2b83be70ac78'),
     'ufs1.raw': (
         _DFVFS + 'ufs1.raw',
         '0b809d5ef3623cca96ff1b9db67ccc8f833b4d27e1413751481c5fcad237bcc2'),

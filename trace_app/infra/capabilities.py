@@ -170,6 +170,9 @@ CAPABILITIES = (
     Capability('apfs', 'Volumes and encryption', "APFS containers, "
                "encrypted volumes included", 'libfsapfs',
                _module_version('pyfsapfs')),
+    Capability('xfs', 'Volumes and encryption', "XFS file systems (RHEL, "
+               "CentOS, Rocky servers)", 'libfsxfs',
+               _module_version('pyfsxfs')),
     Capability('luks', 'Volumes and encryption', "LUKS-encrypted Linux "
                "volumes", 'libluksde', _module_version('pyluksde')),
     Capability('lvm', 'Volumes and encryption', "Linux LVM logical volumes",
