@@ -52,7 +52,9 @@ note() { printf '    %s\n' "$1"; }
 term_width() {
     local w="${COLUMNS:-}" size=""
     if [[ ! "$w" =~ ^[0-9]+$ ]]; then
-        size=$(stty size < /dev/tty 2>/dev/null || true)
+        # Grouped: a failed "< /dev/tty" (no terminal, as in CI) is the
+        # shell's own error, outside the command's 2>/dev/null.
+        size=$( { stty size < /dev/tty; } 2>/dev/null || true)
         w="${size##* }"
     fi
     if [[ ! "$w" =~ ^[0-9]+$ ]]; then
