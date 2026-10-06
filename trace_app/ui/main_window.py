@@ -9,7 +9,8 @@ import uuid
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QByteArray, Qt, QSize, QThread, Signal, QTimer, QUrl
+from PySide6.QtCore import (QByteArray, QEventLoop, Qt, QSize, QThread,
+                            Signal, QTimer, QUrl)
 from PySide6.QtGui import (QIcon, QPalette, QAction, QActionGroup, QColor, QCursor,
                            QDesktopServices)
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTabWidget, QFileDialog,
@@ -81,6 +82,7 @@ from trace_app.ui.widgets.job_bar import Job, JobBar
 from trace_app.ui.dialogs.analysis_modules import (choose_modules,
                                                    default_choice)
 from trace_app.core.analysis import MODULES, is_high_entropy
+from trace_app.ui.widgets.context_menus import show_menu
 
 #: The listing's Flag text for each hidden-data finding.
 _FLAG_TEXT = {
@@ -108,10 +110,56 @@ class SizeTableWidgetItem(QTableWidgetItem):
 CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
                                   'jar', 'apk', 'epub', 'pst', 'ost', 'eml',
                                   'mbox'})
+#: File names the tree offers to expand as archives (the content decides
+#: when one is clicked or expanded; a name only earns the arrow).
+TREE_ARCHIVE_SUFFIXES = ('.zip', '.7z', '.rar', '.tar', '.gz', '.tgz',
+                         '.bz2', '.tbz', '.tbz2', '.xz', '.txz', '.jar',
+                         '.apk', '.pst', '.ost', '.mbox')
+#: Archives the tree keeps read, so stepping through one is not a re-read.
+TREE_ARCHIVES_KEPT = 3
 #: ...and those that are archives inside but documents to an examiner: a
 #: double-click shows the document; "Browse Archive" opens its parts.
 CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
                                         'ods', 'odp', 'odg'})
+
+
+class _HandlerOpener(QThread):
+    """Opens an ImageHandler and does each volume's first reads, off the
+    UI thread (MainWindow._open_handler). `done` is set however it ends;
+    `handler` or `error` holds the outcome."""
+
+    def __init__(self, image_path):
+        super().__init__()
+        import threading
+        self.image_path = image_path
+        self.handler = None
+        self.error = None
+        self.done = threading.Event()
+
+    def run(self):
+        try:
+            self.handler = ImageHandler(self.image_path)
+            if self.handler.loaded:
+                self._warm(self.handler)
+        except Exception as exc:
+            self.error = exc
+        finally:
+            self.done.set()
+
+    @staticmethod
+    def _warm(handler):
+        """What load_partitions_into_tree asks first, so its answers are
+        cached: a failure here is the tree's to report, not this."""
+        try:
+            partitions = handler.get_partitions()
+            starts = [p[2] for p in partitions] if partitions else [0]
+            for start in starts:
+                handler.volume_kind(start)
+                handler.encryption(start)
+                if handler.get_fs_info(start) is not None:
+                    handler.get_directory_contents(start, None)
+        except Exception as exc:
+            logger.debug("Warming %s: %s", handler.image_path, exc)
 
 
 class MainWindow(VolumeInfoMixin, QMainWindow):
@@ -183,6 +231,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: archive pushes another level, so the trail is also the answer to
         #: "where was this file found".
         self._archive_stack = []
+        # Archives read for the tree: {(image, offset, inode): (name, content, source)}.
+        self._tree_archives = {}
 
         #: Artifact references that carry a bookmark, so the listing can mark
         #: them without asking the database once per row.
@@ -222,6 +272,110 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.mark_image_verified(path, True)
 
     # ==================== HELPER METHODS ====================
+
+    def _apply_program_icon(self, name, inode, start_offset, file_size,
+                            set_icon):
+        """A program (or an .ico file) shown with its own icon once it is
+        read, in the background (ui/widgets/program_icons.py)."""
+        if inode is None or not getattr(self, 'current_image_path', None):
+            return
+        if not hasattr(self, 'program_icons'):
+            from trace_app.ui.widgets.program_icons import ProgramIcons
+            self.program_icons = ProgramIcons(self)
+        handler = self.image_handler
+        self.program_icons.apply(
+            (self.current_image_path, start_offset, inode), name,
+            lambda: self._file_reader(handler, inode, start_offset),
+            set_icon, file_size if isinstance(file_size, int) else None)
+
+    @staticmethod
+    def _file_reader(handler, inode, start_offset):
+        """`read(offset, length)` over a file on the image, or None."""
+        if handler is None:
+            return None
+        stream = handler.open_file_object(inode, start_offset)
+        if stream is None:
+            return None
+
+        def read(offset, length):
+            stream.seek(offset)
+            return stream.read(length)
+        return read
+
+    def _listing_program_icon(self, data, size):
+        """A listed program's icon at `size`, for the icon views (on the
+        thumbnail thread)."""
+        from trace_app.ui.widgets.listing_views import size_in_bytes
+        from trace_app.ui.widgets.program_icons import icon_bytes
+        read = self._file_reader(self._listing_handler(),
+                                 data.get('inode_number'),
+                                 data.get('start_offset'))
+        if read is None:
+            return None
+        return icon_bytes(data.get('name'), read, size,
+                          size_in_bytes(data.get('size')))
+
+    # --- what every menu naming a file offers -------------------------------
+
+    def _file_data_for(self, row):
+        """A menu row as the Listing's data for a file on the evidence --
+        what export and bookmarking take -- or None."""
+        if not isinstance(row, dict):
+            return None
+        if row.get('artifact_ref'):
+            parsed = parse_artifact_ref(row['artifact_ref'])
+            if parsed.get('kind') != 'file' or parsed.get('inode') is None:
+                return None
+            path = row.get('path') or row.get('artifact_path') or \
+                row.get('source_path') or ''
+            name = row.get('name') or row.get('artifact_name') or \
+                os.path.basename(path.rstrip('/')) or \
+                f"inode-{parsed['inode']}"
+            return {'inode_number': parsed['inode'],
+                    'start_offset': parsed['start_offset'],
+                    'sequence': parsed.get('sequence'), 'name': name,
+                    'path': path, 'type': 'file'}
+        if row.get('inode_number') is not None and \
+                row.get('start_offset') is not None and \
+                row.get('type') in ('file', 'directory'):
+            return row
+        return None
+
+    def _menu_extras(self, menu, row):
+        """Export File and Add Bookmark for any row naming a file on the
+        evidence, where the menu does not offer them already (the hook of
+        ui/widgets/context_menus.show_menu)."""
+        data = self._file_data_for(row)
+        if data is None:
+            return
+        texts = [action.text().replace('&', '').lower()
+                 for action in menu.actions()]
+        evidence_id = row.get('evidence_id')
+
+        def on_image(then):
+            if evidence_id is not None and \
+                    not self.activate_evidence(evidence_id):
+                return
+            then()
+
+        extras = []
+        if self.case and not any('bookmark' in t for t in texts):
+            extras.append(("Add Bookmark…",
+                           lambda: on_image(
+                               lambda: self.add_bookmark_for(data))))
+        if not any(t.startswith('export') and 'table' not in t
+                   for t in texts):
+            label = "Export Folder…" if data.get('type') == 'directory' \
+                else "Export File…"
+            extras.append((label, lambda: on_image(
+                lambda: self.handle_export(
+                    data, QFileDialog.getExistingDirectory(
+                        self, "Select Destination Directory",
+                        case_settings.export_dir())))))
+        if extras and menu.actions():
+            menu.addSeparator()
+        for label, slot in extras:
+            menu.addAction(label).triggered.connect(slot)
 
     def _get_file_icon(self, file_extension: str) -> QIcon:
         """Get icon for file extension with caching."""
@@ -286,6 +440,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Use cached icon lookup
         icon = self._get_file_icon(file_extension)
         item.setIcon(0, icon)
+        # A program shows its own icon, once read.
+        self._apply_program_icon(entry["name"], entry["inode_number"],
+                                 start_offset, entry.get("size"),
+                                 lambda icon, it=item: it.setIcon(0, icon))
         item.setData(0, Qt.UserRole, {
             "inode_number": entry["inode_number"],
             "type": 'file',
@@ -302,6 +460,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # different file.
             "sequence": entry.get("sequence"),
         })
+        # An archive is a folder to an examiner: it can be expanded.
+        if entry["name"].lower().endswith(TREE_ARCHIVE_SUFFIXES):
+            item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
 
     def _populate_table_entry(self, row_position: int, entry: Dict[str, Any], offset: int) -> None:
         """Populate a single table row with entry data."""
@@ -345,6 +506,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                           modified, changed, parent_inode,
                                           entry.get("sequence"),
                                           entry.get("attributes", ""))
+        if not is_directory and entry.get('type') != 'archive-member':
+            name_cell = self.listing_table.item(row_position, 0)
+            if name_cell is not None:
+                self._apply_program_icon(
+                    entry_name, inode_number, offset, entry.get("size"),
+                    lambda icon, cell=name_cell: cell.setIcon(icon))
 
         # A bookmarked file is marked where the examiner is looking. The
         # bookmark glyph goes in the Type column rather than replacing the
@@ -728,7 +895,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.add_folder_action.triggered.connect(self.load_folder_evidence)
         self.add_folder_action.setVisible(not self.case)
         self.add_disk_action = icons.action(
-            icons.EVIDENCE_ADD, "Add Live Disk...", self)
+            icons.LIVE_DISK, "Add Live Disk...", self)
         self.add_disk_action.setToolTip(
             "Read a disk attached to this computer, read-only, without "
             "imaging it (asks for administrator rights)")
@@ -1163,7 +1330,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.ui.widgets.listing_views import ListingIconView
         self.listing_icon_view = ListingIconView(
             self.listing_table, self._listing_picture_bytes,
-            open_video=self._listing_video_device)
+            open_video=self._listing_video_device,
+            read_head=self._listing_head_bytes,
+            read_icon=self._listing_program_icon)
         self.listing_icon_view.clicked.connect(
             lambda index: self._listing_view_activated(index, False))
         self.listing_icon_view.doubleClicked.connect(
@@ -1407,7 +1576,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.viewer_tab = QTabWidget(self)
 
         self.hex_viewer = HexViewer(self)
+        self.hex_viewer.sector_size = lambda: int(
+            getattr(self.image_handler, 'sector_size', 512) or 512)
+        self.hex_viewer.bookmarks_enabled = lambda: self.case is not None
+        from trace_app.ui.widgets.context_menus import set_row_hook
+        set_row_hook(self._menu_extras)
+        self.hex_viewer.bookmark_requested.connect(self.bookmark_byte_range)
         self.text_viewer = TextViewer(self)
+        self.text_viewer.bookmark_requested.connect(
+            self.bookmark_text_selection)
         self.application_viewer = UnifiedViewer(self)
         self.application_viewer.layout.setContentsMargins(0, 0, 0, 0)
         self.application_viewer.layout.setSpacing(0)
@@ -1418,9 +1595,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # tab index. Tab order comes from this list alone.
         self.case_panel = CasePanel()
         self.case_panel.set_case(self.case)
+        self.case_panel.verify_requested.connect(
+            lambda rows: self.queue_verification(rows, summary=True)
+            if rows else None)
+        self.case_panel.properties_requested.connect(
+            self.show_case_properties)
 
         self.notes_panel = NotesPanel()
         self.notes_panel.set_case(self.case)
+        self.notes_panel.open_artifact.connect(self.go_to_bookmark)
 
         # A SQLite database shows in the Application tab like any other
         # format; its -wal is read from beside it on the image.
@@ -1762,7 +1945,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 entry.setIcon(icons.icon(
                     icons.VERIFY_OK if state == 'verified' else icons.VERIFY))
             entry.triggered.connect(lambda _=False, p=path: self.verify_image(p))
-        menu.exec(QCursor.pos())
+        show_menu(menu, QCursor.pos())
 
     def _release_auxiliary_handler(self, image_path):
         """Close and forget a handler opened for evidence being removed."""
@@ -1795,7 +1978,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             entry.setIcon(icons.icon(icons.EVIDENCE_ADD))
             entry.triggered.connect(
                 lambda _=False, p=path: self.show_image_information_for(p))
-        menu.exec(QCursor.pos())
+        show_menu(menu, QCursor.pos())
 
     def show_image_information_for(self, image_path):
         """Open the information dialog against a named image.
@@ -1932,7 +2115,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 add.triggered.connect(
                     lambda: self._bookmark_carved(row, ref))
 
-        chosen = menu.exec_(position)
+        chosen = show_menu(menu, position)
         if chosen == export_action:
             self.export_carved_rows(selected)
         elif chosen == export_all:
@@ -2291,6 +2474,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'type': row.get('type') or (name.rsplit('.', 1)[-1]
                                         if '.' in name else ''),
             'offset': offset,
+            'fragments': row.get('fragments') or None,
             'is_carved': True,
             'source': 'carved_file',
             'file_content': content,
@@ -2332,7 +2516,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if parsed.get('kind') == 'file':
             self.add_virustotal_menu(menu, [data])
 
-        chosen = menu.exec_(position)
+        chosen = show_menu(menu, position)
         if chosen == open_action:
             self.open_search_result(row)
 
@@ -2370,10 +2554,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         the expensive part and happens once here; navigating inside the
         archive afterwards is all in memory.
         """
+        loaded = self._load_archive(data)
+        if loaded is None:
+            return False
+        self._archive_stack = [loaded]
+        return self.show_archive_level()
+
+    def _load_archive(self, data):
+        """(name, content, source) when the file `data` names is an archive
+        -- content being bytes, or a stream for a mailbox -- else None.
+        Nothing on screen changes but the status bar."""
         inode = data.get('inode_number')
         offset = data.get('start_offset')
         if inode is None or offset is None:
-            return False
+            return None
 
         name = data.get('name') or ''
         size = data.get('size') or 0
@@ -2389,13 +2583,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if stream is not None and \
                     archives.detect_archive(stream) in archives.STREAMED_KINDS:
                 self.set_status(f"Opening the mailbox {name}…")
-                self._archive_stack = [(name, stream, dict(data))]
-                return self.show_archive_level()
+                return (name, stream, dict(data))
 
         # Reading a large file to find out it is not an archive is wasted
         # work; the extension and a header read settle it far more cheaply.
         if size and size > archives.MAX_MEMBER_BYTES:
-            return False
+            return None
 
         try:
             header = self.image_handler.read_file_bytes(inode, offset, 512) \
@@ -2408,7 +2601,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if header is not None and not archives.detect_archive(header) and \
                 not thumbnails.is_cache_name(name) and \
                 not rdpcache.is_rdp_cache_name(name):
-            return False
+            return None
 
         self.set_status(f"Opening {name}…")
         try:
@@ -2416,14 +2609,200 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         except Exception as exc:
             logger.debug("Could not read %s: %s", name, exc)
             self.clear_status()
-            return False
+            return None
 
         if not content or not archives.detect_archive(content):
             self.clear_status()
-            return False
+            return None
+        return (name, content, dict(data))
 
-        self._archive_stack = [(name, content, dict(data))]
-        return self.show_archive_level()
+    # --- archives in the tree -----------------------------------------------
+
+    def _tree_archive_root(self, item):
+        """The tree item of the archive file (on the evidence) that `item`
+        is, or lies inside."""
+        while item is not None:
+            data = item.data(0, Qt.UserRole) or {}
+            if data.get('type') != 'archive-member':
+                return item
+            item = item.parent()
+        return None
+
+    def _tree_archive_stack(self, item):
+        """The archive stack (outermost first) for a tree item that is an
+        archive file or a member inside one -- read again from the image
+        when it is not among the last few read."""
+        root_item = self._tree_archive_root(item)
+        if root_item is None:
+            return None
+        root_data = root_item.data(0, Qt.UserRole) or {}
+        key = (self.current_image_path, root_data.get('start_offset'),
+               root_data.get('inode_number'))
+        cached = self._tree_archives.pop(key, None)
+        if cached is None:
+            cached = self._load_archive(root_data)
+            if cached is None:
+                return None
+            # The path the tree knows, for the archive trail.
+            cached[2].setdefault('path', self._tree_item_path(root_item))
+        self._tree_archives[key] = cached
+        while len(self._tree_archives) > TREE_ARCHIVES_KEPT:
+            self._tree_archives.pop(next(iter(self._tree_archives)))
+        stack = [cached]
+        data = item.data(0, Qt.UserRole) or {}
+        for member in data.get('archive_chain') or ():
+            content = archives.read_member(stack[-1][1], member)
+            stack.append((member, content, cached[2]))
+        return stack
+
+    def _tree_item_path(self, item):
+        parts = []
+        while item is not None and item.parent() is not None:
+            data = item.data(0, Qt.UserRole) or {}
+            if data.get('name'):
+                parts.append(data['name'])
+            item = item.parent()
+        return '/' + '/'.join(reversed(parts))
+
+    def _fill_archive_tree(self, item, members, chain):
+        """The members of the archive `item` is, as tree children: folders
+        from the members' paths, archives inside expandable in turn."""
+        item.takeChildren()
+        start_offset = (item.data(0, Qt.UserRole) or {}).get('start_offset')
+        folders = {'': item}
+
+        def folder(path):
+            if path in folders:
+                return folders[path]
+            parent_path, _sep, leaf = path.rpartition('/')
+            node = QTreeWidgetItem(folder(parent_path))
+            node.setText(0, leaf)
+            node.setIcon(0, QIcon(self.db_manager.get_icon_path('folder',
+                                                                'folder')))
+            node.setData(0, Qt.UserRole, {
+                'type': 'archive-member', 'name': leaf, 'is_directory': True,
+                'archive_member': path, 'archive_chain': list(chain),
+                'start_offset': start_offset})
+            folders[path] = node
+            return node
+
+        for member in sorted(members, key=lambda m: m['name'].lower()):
+            path = member['name'].strip('/')
+            if not path:
+                continue
+            if member['is_dir']:
+                folder(path)
+                continue
+            parent_path, _sep, leaf = path.rpartition('/')
+            node = QTreeWidgetItem(folder(parent_path))
+            node.setText(0, leaf)
+            extension = leaf.rsplit('.', 1)[-1].lower() if '.' in leaf \
+                else 'unknown'
+            node.setIcon(0, self._get_file_icon(extension))
+            node.setData(0, Qt.UserRole, {
+                'type': 'archive-member', 'name': leaf,
+                'is_directory': False, 'size': member['size'],
+                'archive_member': member['name'],
+                'archive_encrypted': member['encrypted'],
+                'archive_chain': list(chain),
+                'start_offset': start_offset})
+            if leaf.lower().endswith(TREE_ARCHIVE_SUFFIXES):
+                node.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+        if not members:
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.DontShowIndicatorWhenChildless)
+
+    def _expand_archive_item(self, item):
+        """Fill an archive's node (the file on the image, or an archive
+        inside one) with its members. False when it is not one."""
+        data = item.data(0, Qt.UserRole) or {}
+        try:
+            stack = self._tree_archive_stack(item)
+            if stack is None:
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.DontShowIndicatorWhenChildless)
+                return False
+            chain = list(data.get('archive_chain') or ())
+            content = stack[-1][1]
+            if data.get('type') == 'archive-member':
+                content = archives.read_member(content,
+                                               data['archive_member'])
+                if not archives.detect_archive(content):
+                    item.setChildIndicatorPolicy(
+                        QTreeWidgetItem.DontShowIndicatorWhenChildless)
+                    return False
+                chain.append(data['archive_member'])
+            self._fill_archive_tree(item, archives.list_members(content),
+                                    chain)
+            return True
+        except archives.ArchiveError as exc:
+            # Encrypted or damaged: a click says why; the tree just does not
+            # grow.
+            logger.debug("Archive %s not listed: %s", data.get('name'), exc)
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.DontShowIndicatorWhenChildless)
+            return False
+        finally:
+            self.clear_status()
+
+    def on_tree_archive_clicked(self, item):
+        """A click on an archive, or on something inside one, in the tree:
+        the Listing shows its contents (as a double-click there does) and
+        the tree shows them beneath it. False when it is no archive."""
+        data = item.data(0, Qt.UserRole) or {}
+        try:
+            stack = self._tree_archive_stack(item)
+        except archives.ArchiveError as exc:
+            message.warning(self, "Could not read the archive", str(exc))
+            return True
+        if stack is None:
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.DontShowIndicatorWhenChildless)
+            return False
+        self._archive_stack = stack
+        if data.get('type') != 'archive-member':
+            if self.show_archive_level():
+                if item.childCount() == 0:
+                    self._expand_archive_item(item)
+                item.setExpanded(True)
+            # The viewers show the archive file itself, as for any file.
+            content = stack[0][1]
+            if isinstance(content, (bytes, bytearray)):
+                self.update_viewer_with_file_content(bytes(content), data)
+            return True
+        if data.get('is_directory'):
+            self._show_archive_folder(data['archive_member'])
+            return True
+        self.open_archive_member_row(dict(data), navigate=True)
+        if self._archive_stack and \
+                self._archive_stack[-1][0] == data['archive_member']:
+            # An archive inside the archive: stepped into; grow the tree.
+            if item.childCount() == 0:
+                self._expand_archive_item(item)
+            item.setExpanded(True)
+        return True
+
+    def _show_archive_folder(self, folder):
+        """The members directly inside `folder` of the archive on top of
+        the stack, in the Listing."""
+        _name, content, source = self._archive_stack[-1]
+        try:
+            members = archives.list_members(content)
+        except archives.ArchiveError as exc:
+            message.warning(self, "Could not read the archive", str(exc))
+            return
+        prefix = folder.strip('/') + '/'
+        inside = [member for member in members
+                  if member['name'].strip('/').startswith(prefix)
+                  and '/' not in member['name'].strip('/')[len(prefix):]]
+        entries = self._archive_entries(inside, source)
+        for entry in entries:
+            entry['name'] = entry['name'].strip('/').rsplit('/', 1)[-1]
+        self.current_path = f"{self.archive_trail()}/{folder}"
+        self.update_directory_up_button()
+        if self.show_listing_entries(entries, source.get('start_offset', 0),
+                                     folder):
+            self.set_status(f"{self.current_path} — {len(entries)} item(s)")
 
     def show_archive_level(self):
         """List the archive on top of the stack in the listing table."""
@@ -4444,7 +4823,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             menu.addSeparator()
             menu.addAction(f"Copy Coordinates ({coordinates})").triggered \
                 .connect(lambda: QApplication.clipboard().setText(coordinates))
-        menu.exec(position)
+        show_menu(menu, position)
 
     # --- VirusTotal -------------------------------------------------
 
@@ -5808,7 +6187,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             previous = self._image_handlers.pop(image_path, None)
             if previous is not None:
                 previous.close_resources()
-            handler = ImageHandler(image_path)
+            handler = self._open_handler(image_path, progress)
             if not handler.loaded:
                 raise ValueError(
                     "The evidence could not be opened"
@@ -5860,6 +6239,38 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if progress is not None:
                 progress.close()
                 progress.deleteLater()
+
+    def _open_handler(self, image_path, progress):
+        """An ImageHandler, opened on a thread with each volume's first
+        reads done (partitions, file systems, root folders: cached, so the
+        tree is built from memory). On the UI thread a live disk froze the
+        window -- the administrator prompt is waited for, and the first
+        listing of a big NTFS volume reads its whole MFT through the
+        helper -- and a large image did the same, more briefly."""
+        from trace_app.core.live_disk import is_device_path
+        if is_device_path(image_path):
+            progress.setLabelText(
+                "Waiting for administrator approval, then reading the "
+                "disk's partitions and file systems...")
+        else:
+            progress.setLabelText("Reading partitions and file systems...")
+        # Cancel cannot stop a read already under way.
+        progress.setCancelButton(None)
+        opener = _HandlerOpener(image_path)
+        self._retain_worker(opener)
+        loop = QEventLoop()
+        timer = QTimer()
+        timer.setInterval(50)
+        timer.timeout.connect(
+            lambda: loop.quit() if opener.done.is_set() else None)
+        timer.start()
+        opener.start()
+        if not opener.done.is_set():
+            loop.exec()
+        timer.stop()
+        if opener.error is not None:
+            raise opener.error
+        return opener.handler
 
     def _close_image_handlers(self):
         for path, handler in list(self._image_handlers.items()):
@@ -5970,35 +6381,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # --- listing views -----------------------------------------------------
 
-    _LISTING_VIEW_ICONS = {
-        'details': icons.VIEW_DETAILS, 'list': icons.VIEW_LIST,
-        'small': icons.VIEW_SMALL_ICONS, 'medium': icons.VIEW_MEDIUM_ICONS,
-        'large': icons.VIEW_LARGE_ICONS,
-        'extra_large': icons.VIEW_EXTRA_LARGE_ICONS}
-
     def _build_listing_view_button(self):
         """A View button whose menu picks the listing's view; its icon is
-        the view in use."""
-        from PySide6.QtGui import QActionGroup
-        from trace_app.ui.widgets.listing_views import MODES, ORDER
-        self.listing_view_button = QToolButton()
-        self.listing_view_button.setObjectName("listingViewButton")
-        self.listing_view_button.setPopupMode(QToolButton.InstantPopup)
-        self.listing_view_button.setToolTip("Change the view")
-        menu = QMenu(self.listing_view_button)
-        group = QActionGroup(self)
-        group.setExclusive(True)
-        self._listing_view_actions = {}
-        for mode in ORDER:
-            action = QAction(MODES[mode][0], self)
-            action.setCheckable(True)
-            action.triggered.connect(
-                lambda _checked=False, m=mode: self.set_listing_view(m))
-            group.addAction(action)
-            menu.addAction(action)
-            self._listing_view_actions[mode] = action
-        self.listing_view_button.setMenu(menu)
-        self.listing_view_button.setProperty("dropdown", True)
+        the view in use. The Carved files tab has the same one."""
+        from trace_app.ui.widgets.listing_views import ViewButton
+        self.listing_view_button = ViewButton()
+        self.listing_view_button.chosen.connect(self.set_listing_view)
+        self._listing_view_actions = self.listing_view_button.actions
         self.listing_toolbar.addWidget(self.listing_view_button)
 
     def set_listing_view(self, mode, remember=True):
@@ -6013,11 +6402,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.listing_icon_view.set_mode(mode)
             self.listing_stack.setCurrentWidget(self.listing_icon_view)
         # Line icons are tinted at paint time, so this one follows the theme.
-        self.listing_view_button.setIcon(
-            icons.icon(self._LISTING_VIEW_ICONS[mode]))
-        self.listing_view_button.setToolTip(
-            f"Change the view ({MODES[mode][0]})")
-        self._listing_view_actions[mode].setChecked(True)
+        self.listing_view_button.set_current(mode)
         if remember:
             from trace_app.infra.window_state import save_listing_view
             save_listing_view(mode)
@@ -6036,18 +6421,33 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.open_listing_context_menu(
             self.listing_table.viewport().mapFromGlobal(point))
 
-    def _listing_picture_bytes(self, data):
-        """The bytes of a listing row's file, for its thumbnail -- from the
-        image the listing was filled from, not whichever is active."""
+    def _listing_handler(self):
+        """The handler of the image the listing was filled from, not
+        whichever is active."""
         path = os.path.normpath(self._listing_image) \
             if self._listing_image else None
         handler = self._image_handlers.get(path) if path else None
-        handler = handler or self.image_handler
+        return handler or self.image_handler
+
+    def _listing_picture_bytes(self, data):
+        """The bytes of a listing row's file, for its thumbnail (read on
+        the thumbnail thread)."""
+        handler = self._listing_handler()
         if handler is None or data.get('inode_number') is None:
             return None
         content, _meta = handler.get_file_content(data['inode_number'],
                                                   data['start_offset'])
         return content
+
+    def _listing_head_bytes(self, data):
+        """A listing row's first bytes, to tell by content whether it has
+        a thumbnail (a renamed picture)."""
+        from trace_app.ui.widgets.thumbnails import HEAD_BYTES
+        handler = self._listing_handler()
+        if handler is None or data.get('inode_number') is None:
+            return None
+        return handler.read_file_bytes(data['inode_number'],
+                                       data['start_offset'], HEAD_BYTES)
 
     def _listing_video_device(self, data):
         """A stream over a listing row's video, for its thumbnail: read on
@@ -6526,6 +6926,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         data = item.data(0, Qt.UserRole)
         if data is None:
             return
+        if data.get('type') in ('file', 'archive-member'):
+            # Only archives are expandable files.
+            self._expand_archive_item(item)
+            return
 
         if data.get("inode_number") is None:  # It's a partition
             self.populate_contents(item, data)
@@ -6685,6 +7089,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.current_selected_data = data
         self.update_status_for_selection(data, item)
 
+        # An archive, or a member inside one: opened like a folder.
+        if data.get('type') == 'archive-member' or (
+                data.get('type') == 'file' and
+                (data.get('name') or '').lower().endswith(
+                    TREE_ARCHIVE_SUFFIXES)):
+            if self.on_tree_archive_clicked(item):
+                return
+
         # Show a status message in the UI to indicate loading
         self.set_status("Loading content...")
 
@@ -6759,6 +7171,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.clear_status()
 
             elif data.get("inode_number") is not None:
+                if self._show_in_hex_from_image(data):
+                    return
                 # Handle files in background
                 self.file_worker = self._retain_worker(self.FileContentWorker(
                     self.image_handler, data["inode_number"], data["start_offset"]))
@@ -7431,6 +7845,83 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
 
 
+    def _show_in_hex_from_image(self, data):
+        """When the Hex tab is in front, give it the file to read from
+        the image a page at a time -- nothing is loaded whole. True when it
+        did; False leaves the caller to read the file as before."""
+        adapter = self.active_viewer_adapter()
+        if adapter is None or not getattr(adapter, 'reads_itself',
+                                          lambda _d: False)(data):
+            return False
+        from trace_app.core.hex_source import ImageFileSource
+        try:
+            source = ImageFileSource(self.image_handler,
+                                     data['inode_number'],
+                                     data['start_offset'])
+        except Exception as exc:
+            logger.debug("Hex view cannot read %s from the image: %s",
+                         data.get('name'), exc)
+            return False
+        if not source.size:
+            return False
+        adapter.widget.display_source(
+            source, self.annotate_with_case_identity(data))
+        self.clear_status()
+        return True
+
+    def bookmark_text_selection(self, begin, end, text):
+        """Text selected in the Text tab: bytes [begin, end) of the file
+        shown. Bookmarked as that byte range of the image when the bytes
+        are one stretch of it; else the file itself, the text its label."""
+        data = self.current_selected_data or {}
+        name = data.get('name') or 'file'
+        quoted = f"“{text[:60]}{'…' if len(text) > 60 else ''}”"
+        image = None
+        if data.get('type') == 'file' and \
+                data.get('inode_number') is not None:
+            from trace_app.core.hex_source import ImageFileSource
+            try:
+                source = ImageFileSource(self.image_handler,
+                                         data['inode_number'],
+                                         data['start_offset'])
+                if source.contiguous(begin, end):
+                    image = source.image_offset(begin)
+            except Exception as exc:
+                logger.debug("No image offset for the text: %s", exc)
+        elif data.get('is_carved') and not data.get('fragments') and \
+                data.get('offset') is not None:
+            image = int(data['offset']) + begin
+        if image is not None:
+            self.bookmark_byte_range(image, image + (end - begin),
+                                     f"{name}: {quoted}")
+            return
+        target = self._file_data_for(data) or data
+        self.add_bookmark_for(target, suggested_label=f"{quoted} in {name}")
+
+    def bookmark_byte_range(self, begin, end, description):
+        """Bookmark bytes [begin, end) of the active image -- a hex
+        selection. The reference is the byte range itself, so it opens
+        again (read from the image) after the case is reopened."""
+        if not self.case:
+            message.information(
+                self, "No case is open",
+                "Bookmarks are kept in a case. Start one from File ▸ New Case "
+                "to keep findings between sessions.")
+            return
+        label, ok = QInputDialog.getText(self, "Bookmark bytes", "Label:",
+                                         text=description)
+        if not ok or not label.strip():
+            return
+        name = (self.current_selected_data or {}).get('name') or ''
+        self.case.add_bookmark(
+            self.evidence_id_for_current_image(),
+            make_span_ref(0, begin, end), label.strip(),
+            artifact_name=f"{name} [{end - begin:,} bytes]" if name
+            else f"{end - begin:,} bytes",
+            artifact_path=f"image bytes 0x{begin:X}-0x{end - 1:X}")
+        self.refresh_bookmarks()
+        self.set_status(f"Bookmarked {label.strip()}")
+
     def update_viewer_with_media_stream(self, file_obj, file_size, metadata, data):
         """Update the application viewer with a media stream for playback."""
         # Clear the status message if it exists
@@ -7504,6 +7995,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 return
 
             if inode_number:
+                if self._show_in_hex_from_image(self.current_selected_data):
+                    return
                 # Ask the active viewer whether it wants a stream, rather than
                 # hardcoding the Application tab's index here.
                 if adapter.wants_stream(self.current_selected_data):
@@ -7566,7 +8059,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             export_action.triggered.connect(lambda: self.handle_export(data, QFileDialog.getExistingDirectory(
                 self, "Select Destination Directory", case_settings.export_dir())))
 
-            menu.exec_(self.listing_table.viewport().mapToGlobal(position))
+            show_menu(menu, self.listing_table.viewport().mapToGlobal(position))
 
     def handle_export(self, data, dest_dir):
         """Export the selected item in a background thread with progress display."""
@@ -7636,8 +8129,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 rename_action = menu.addAction("Rename Bookmark...")
                 menu.addSeparator()
                 remove_action = menu.addAction("Remove Bookmark")
-                chosen = menu.exec_(
-                    self.tree_viewer.viewport().mapToGlobal(position))
+                chosen = show_menu(
+                    menu, self.tree_viewer.viewport().mapToGlobal(position))
                 if chosen == go_action:
                     self.go_to_bookmark(row)
                 elif chosen == rename_action:
@@ -7666,7 +8159,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                          or data.get('is_activity_root')
                          or data.get('is_activity_group')
                          or data.get('is_analysis_root')
-                         or data.get('is_analysis_group')):
+                         or data.get('is_analysis_group')
+                         or data.get('type') == 'archive-member'):
+                # A member inside an archive has no inode to export or
+                # bookmark; it is read through its archive.
                 return
 
             if data and data.get('is_bitlocker') and \
@@ -7678,7 +8174,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 unlock.triggered.connect(
                     lambda _=False, it=selected_item:
                     self.unlock_bitlocker_item(it))
-                menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
+                show_menu(menu, self.tree_viewer.viewport().mapToGlobal(position))
                 return
 
             # Check if the selected item is a root item (disk image)
@@ -7711,7 +8207,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                self, "Select Destination Directory",
                                                case_settings.export_dir())))
 
-            menu.exec_(self.tree_viewer.viewport().mapToGlobal(position))
+            show_menu(menu, self.tree_viewer.viewport().mapToGlobal(position))
 
     def create_action(self, icon_name, text, callback):
         """Toolbar action whose icon follows the theme.
@@ -8234,6 +8730,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 else:
                     self.select_tree_item_by_inode(data.get("inode_number"), data["start_offset"])
 
+                if self._show_in_hex_from_image(data):
+                    return
                 # Files are processed in a background thread
                 inode_number = data.get("inode_number", 0)
                 self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, data["start_offset"]))

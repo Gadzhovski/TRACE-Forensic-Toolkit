@@ -1,5 +1,6 @@
 """The Listing's other views -- List, Small, Medium, Large and Extra large
-icons -- as Windows Explorer has them, beside Details (the table).
+icons -- as Windows Explorer has them, beside Details (the table). The
+Carved files tab uses the same view over its own table.
 
 They are one QListView over the table's own model and selection: the same
 rows, icons, sort order and selection, whichever is on screen. Nothing is
@@ -8,20 +9,23 @@ context menu, bookmarks) acts on what the icon views show; the window
 routes their clicks to it. Rows the table hides (known-good files) are
 hidden here too.
 
-From Medium icons up, a picture shows its own thumbnail, read from the
-evidence for the items on screen only, a few at a time, and scaled to fit
--- never cropped, a cropped thumbnail hides evidence. The file stays
-unchanged; the table keeps its file-type icons. A video shows a frame from
-a little way in, marked with a play badge, decoded from a stream over the
-file on the image (ui/viewers/media/video_thumbnails.py) -- never read whole.
+From Medium icons up, an item shows its own picture where it has one:
+pictures, a frame of a video (play-badged), a PDF's first page, the preview
+an ODF/Office document carries. What a file is comes from its name, or
+else from its first bytes -- a renamed or deleted picture shows itself.
+They are made for the items on screen only, on a background thread
+(widgets/thumbnails.py), scaled to fit -- never cropped, a cropped
+thumbnail hides evidence. The table keeps its file-type icons.
 """
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QIcon, QImage, QImageReader, QPixmap
-from PySide6.QtWidgets import (QListView, QStyledItemDelegate,
-                               QStyleOptionViewItem)
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap
+from PySide6.QtWidgets import (QListView, QMenu, QStyledItemDelegate,
+                               QStyleOptionViewItem, QToolButton)
+
+from trace_app.ui.widgets import thumbnails as thumbs
 
 logger = logging.getLogger('TRACE.ListingViews')
 
@@ -39,13 +43,14 @@ MODES = {
                     QSize(232, 244), QListView.LeftToRight),
 }
 ORDER = ('extra_large', 'large', 'medium', 'small', 'list', 'details')
-#: From this icon size up, pictures show their own content.
+#: From this icon size up, items show their own content.
 THUMBNAIL_FROM = 48
 #: Pictures larger than this are not read for a thumbnail.
-THUMBNAIL_MAX_BYTES = 16 * 1024 * 1024
-PICTURE_EXTENSIONS = {'jpg', 'jpeg', 'jpe', 'png', 'gif', 'bmp', 'webp',
-                      'tif', 'tiff', 'ico', 'heic', 'heif', 'avif'}
-_PER_TICK = 6
+THUMBNAIL_MAX_BYTES = thumbs.MAX_BYTES[thumbs.PICTURE]
+PICTURE_EXTENSIONS = thumbs.PICTURE_EXTENSIONS
+#: Thumbnails are made at least this big, so a step up in icon size does
+#: not have to make them again.
+_SMALLEST = 96
 
 
 _UNITS = {'B': 1, 'BYTES': 1, 'KB': 1024, 'MB': 1024 ** 2, 'GB': 1024 ** 3,
@@ -75,14 +80,11 @@ def size_in_bytes(value):
 
 
 def is_picture(name):
-    return '.' in (name or '') and \
-        name.rsplit('.', 1)[-1].lower() in PICTURE_EXTENSIONS
+    return thumbs.kind_by_name(name) == thumbs.PICTURE
 
 
 def is_video(name):
-    from trace_app.core.filetypes import VIDEO_EXTENSIONS
-    return '.' in (name or '') and \
-        name.rsplit('.', 1)[-1].lower() in VIDEO_EXTENSIONS
+    return thumbs.kind_by_name(name) == thumbs.VIDEO
 
 
 def video_thumbnail(image, size):
@@ -96,33 +98,76 @@ def video_thumbnail(image, size):
 
 def thumbnail(data, size):
     """A picture scaled to fit `size` x `size`, or a null pixmap."""
-    from PySide6.QtCore import QBuffer, QByteArray
-    buffer = QBuffer()
-    buffer.setData(QByteArray(bytes(data)))
-    buffer.open(QBuffer.ReadOnly)
-    reader = QImageReader(buffer)
-    reader.setAutoTransform(True)
-    original = reader.size()
-    if original.isValid() and (original.width() > size * 2 or
-                               original.height() > size * 2):
-        # Decoded small: a 24-megapixel photo is not decoded whole for a
-        # 96-pixel icon.
-        reader.setScaledSize(original.scaled(size * 2, size * 2,
-                                             Qt.KeepAspectRatio))
-    image = reader.read()
-    if image.isNull():
-        try:
-            from io import BytesIO
-            from PIL import Image
-            with Image.open(BytesIO(bytes(data))) as picture:
-                picture.thumbnail((size * 2, size * 2))
-                picture = picture.convert('RGBA')
-                image = QImage(picture.tobytes(), picture.width,
-                               picture.height, QImage.Format_RGBA8888).copy()
-        except Exception:
-            return QPixmap()
-    return QPixmap.fromImage(image.scaled(size, size, Qt.KeepAspectRatio,
-                                          Qt.SmoothTransformation))
+    return QPixmap.fromImage(thumbs.picture_image(data, size))
+
+
+def listing_item(data):
+    """(key, kind, size in bytes) for a Listing row that may have a
+    thumbnail, or None. The kind is the name's, or SNIFF: its first bytes
+    will say."""
+    if not isinstance(data, dict) or data.get('type') != 'file':
+        return None
+    size = size_in_bytes(data.get('size'))
+    if not size:
+        return None
+    return (ListingIconView._key(data),
+            thumbs.kind_by_name(data.get('name')) or thumbs.SNIFF, size)
+
+
+def _view_icons():
+    from trace_app.ui import icons
+    return {'details': icons.VIEW_DETAILS, 'list': icons.VIEW_LIST,
+            'small': icons.VIEW_SMALL_ICONS,
+            'medium': icons.VIEW_MEDIUM_ICONS,
+            'large': icons.VIEW_LARGE_ICONS,
+            'extra_large': icons.VIEW_EXTRA_LARGE_ICONS}
+
+
+class ViewButton(QToolButton):
+    """The View dropdown: Details, List and the icon sizes, and any
+    `extra` views after a separator ((key, label, icon name)). Its icon is
+    the view in use; `chosen(key)` when the examiner picks one."""
+
+    chosen = Signal(str)
+
+    def __init__(self, parent=None, extra=()):
+        super().__init__(parent)
+        self.setObjectName("listingViewButton")
+        self.setPopupMode(QToolButton.InstantPopup)
+        self.setProperty("dropdown", True)
+        self._icons = _view_icons()
+        self._labels = {mode: MODES[mode][0] for mode in ORDER}
+        menu = QMenu(self)
+        group = QActionGroup(self)
+        group.setExclusive(True)
+        self.actions = {}
+        entries = [(mode, MODES[mode][0], self._icons[mode])
+                   for mode in ORDER]
+        if extra:
+            entries.append(None)
+        entries.extend(extra)
+        for entry in entries:
+            if entry is None:
+                menu.addSeparator()
+                continue
+            key, label, icon_name = entry
+            self._icons[key] = icon_name
+            self._labels[key] = label
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked=False, k=key: self.chosen.emit(k))
+            group.addAction(action)
+            menu.addAction(action)
+            self.actions[key] = action
+        self.setMenu(menu)
+
+    def set_current(self, key):
+        """Show `key` as the view in use (no signal)."""
+        from trace_app.ui import icons
+        self.setIcon(icons.icon(self._icons[key]))
+        self.setToolTip(f"Change the view ({self._labels[key]})")
+        self.actions[key].setChecked(True)
 
 
 class _ThumbnailDelegate(QStyledItemDelegate):
@@ -144,16 +189,23 @@ class _ThumbnailDelegate(QStyledItemDelegate):
 
 
 class ListingIconView(QListView):
-    """The Listing in a list or icon view, over the table's model."""
+    """The Listing (or another table) in a list or icon view, over the
+    table's model."""
 
-    def __init__(self, table, read_picture, parent=None, open_video=None):
+    def __init__(self, table, read_picture, parent=None, open_video=None,
+                 read_head=None, describe=listing_item, read_icon=None):
         """`read_picture(data)` -> the bytes of the file a row's data
         names, or None; `open_video(data)` -> an open QIODevice streaming
-        it, or None."""
+        it, or None; `read_head(data)` -> its first bytes, to recognise it
+        by content; `describe(data)` -> (key, kind, size) or None."""
         super().__init__(parent)
         self.setObjectName("listingIconView")
         self.table = table
         self.read_picture = read_picture
+        self.read_head = read_head
+        #: `read_icon(data, size)` -> a program's icon bytes (pe_icons).
+        self.read_icon = read_icon
+        self.describe = describe
         self.setModel(table.model())
         self.setSelectionModel(table.selectionModel())
         self.setModelColumn(0)
@@ -168,11 +220,13 @@ class ListingIconView(QListView):
         self.mode = 'list'
         self.open_video = open_video
         self._videos = None             # the thumbnailer, made when needed
-        self._thumbs = {}
-        self._queue = []
-        self._timer = QTimer(self)
-        self._timer.setInterval(0)
-        self._timer.timeout.connect(self._draw_some)
+        self._thumbs = {}               # key -> QPixmap, or False: none
+        self._thumb_size = _SMALLEST
+        self._rows_for = {}             # key -> row data, while requested
+        self._loader = thumbs.ThumbnailLoader(self)
+        self._loader.ready.connect(self._image_ready)
+        self._loader.pdf.connect(self._pdf_ready)
+        self._loader.video.connect(self._is_video)
         model = table.model()
         model.modelReset.connect(self._model_changed)
         model.rowsInserted.connect(self._rows_changed)
@@ -192,6 +246,10 @@ class ListingIconView(QListView):
         self.setIconSize(QSize(size, size))
         self.setGridSize(grid or QSize())
         self.setSpacing(0 if grid else 2)
+        if size > self._thumb_size:
+            # Bigger than the thumbnails made: made again, at this size.
+            self._thumb_size = size
+            self._forget()
         self.sync_hidden()
         self._queue_visible()
 
@@ -218,14 +276,19 @@ class ListingIconView(QListView):
     def thumbnail_for(self, index):
         if not self.thumbnails_on():
             return None
-        found = self._thumbs.get(self._key(index.data(Qt.UserRole)))
+        described = self.describe(index.data(Qt.UserRole))
+        found = self._thumbs.get(described[0]) if described else None
         return found if found else None
 
-    def _model_changed(self):
+    def _forget(self):
         self._thumbs.clear()
-        self._queue = []
+        self._rows_for.clear()
+        self._loader.clear()
         if self._videos is not None:
             self._videos.clear()
+
+    def _model_changed(self):
+        self._forget()
         self._rows_changed()
 
     def _video_thumbnailer(self):
@@ -236,11 +299,36 @@ class ListingIconView(QListView):
             self._videos.ready.connect(self._video_ready)
         return self._videos
 
-    def _video_ready(self, key, image):
-        size = max(self.iconSize().width(), 96)
-        pixmap = video_thumbnail(image, size)
+    def _store(self, key, pixmap):
+        # Null is remembered too, so what will not decode is not read
+        # again on every scroll.
         self._thumbs[key] = pixmap if not pixmap.isNull() else False
+        self._rows_for.pop(key, None)
         self.viewport().update()
+
+    def _image_ready(self, key, image):
+        self._store(key, QPixmap.fromImage(image))
+
+    def _pdf_ready(self, key, content):
+        self._store(key, QPixmap.fromImage(
+            thumbs.pdf_image(content, self._thumb_size)))
+
+    def _video_ready(self, key, image):
+        self._store(key, video_thumbnail(image, self._thumb_size))
+
+    def _is_video(self, key):
+        """The loader found a video by its content: a frame from it."""
+        data = self._rows_for.get(key)
+        if data is None or self.open_video is None:
+            self._store(key, QPixmap())
+            return
+        self._request_video(key, data)
+
+    def _request_video(self, key, data):
+        videos = self._video_thumbnailer()
+        if not videos.pending(key):
+            videos.request(key, lambda data=data: self.open_video(data),
+                           (data or {}).get('name') or '')
 
     def _rows_changed(self, *_args):
         if self.isVisible():
@@ -257,59 +345,47 @@ class ListingIconView(QListView):
         QTimer.singleShot(0, self._queue_visible)
 
     def _queue_visible(self, *_args):
-        """Queue the pictures on screen that have no thumbnail yet."""
+        """Ask for thumbnails of the items on screen that have none yet."""
         if not self.thumbnails_on() or not self.isVisible():
             return
         model = self.model()
         rect = self.viewport().rect()
-        queued = {self._key(d) for d in self._queue}
         for row in range(model.rowCount()):
             index = model.index(row, 0)
             if self.isRowHidden(row) or \
                     not self.visualRect(index).intersects(rect):
                 continue
             data = index.data(Qt.UserRole)
-            key = self._key(data)
-            if key is None or key in self._thumbs or key in queued:
+            described = self.describe(data)
+            if described is None:
                 continue
-            size = size_in_bytes(data.get('size'))
-            if data.get('type') == 'file' and self.open_video is not None \
-                    and is_video(data.get('name')) and size:
-                # Streamed, so any size: only what the decoder asks for is
-                # read.
-                videos = self._video_thumbnailer()
-                if not videos.pending(key):
-                    videos.request(key, lambda data=data:
-                                   self.open_video(data), data.get('name'))
+            key, kind, size = described
+            if key in self._thumbs or key in self._rows_for:
                 continue
-            # A size that cannot be read is not risked: the file could be
-            # anything, and it would be read whole for one icon.
-            if data.get('type') != 'file' or \
-                    not is_picture(data.get('name')) or \
-                    size is None or size > THUMBNAIL_MAX_BYTES:
+            if kind == thumbs.VIDEO:
+                if self.open_video is not None:
+                    # Streamed, so any size: only what the decoder asks
+                    # for is read.
+                    self._rows_for[key] = data
+                    self._request_video(key, data)
                 continue
-            self._queue.append(data)
-            queued.add(key)
-        if self._queue:
-            self._timer.start()
-
-    def _draw_some(self):
-        size = self.iconSize().width()
-        for _ in range(_PER_TICK):
-            if not self._queue:
-                self._timer.stop()
-                return
-            data = self._queue.pop(0)
-            try:
-                content = self.read_picture(data)
-                pixmap = thumbnail(content, max(size, 96)) if content \
-                    else QPixmap()
-            except Exception as exc:
-                logger.debug("No thumbnail for %s: %s", data.get('name'),
-                             exc)
-                pixmap = QPixmap()
-            # Null is remembered too, so a picture that will not decode is
-            # not read again on every scroll.
-            self._thumbs[self._key(data)] = pixmap if not pixmap.isNull() \
-                else False
-        self.viewport().update()
+            if kind == thumbs.SNIFF and self.read_head is None:
+                continue
+            if kind == thumbs.PROGRAM:
+                if self.read_icon is None:
+                    continue
+                # Its own icon, as large as the view shows it.
+                self._rows_for[key] = data
+                self._loader.request(
+                    key, thumbs.PICTURE, self._thumb_size,
+                    lambda data=data: self.read_icon(data, self._thumb_size))
+                continue
+            # A file too big for its kind is not read whole for one icon.
+            if kind != thumbs.SNIFF and size > thumbs.MAX_BYTES.get(kind, 0):
+                continue
+            self._rows_for[key] = data
+            self._loader.request(
+                key, kind, self._thumb_size,
+                lambda data=data: self.read_picture(data),
+                (lambda data=data: self.read_head(data))
+                if self.read_head else None, size)

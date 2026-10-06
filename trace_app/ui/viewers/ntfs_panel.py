@@ -31,6 +31,7 @@ from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.NtfsPanel')
 
@@ -446,7 +447,7 @@ class NtfsPanel(QWidget):
         copy_row = menu.addAction("Copy Row")
         menu.addSeparator()
         show = menu.addAction("Show File in Listing")
-        chosen = menu.exec_(self.table.viewport().mapToGlobal(point))
+        chosen = show_menu(menu, self.table.viewport().mapToGlobal(point))
         if chosen == copy_path:
             QGuiApplication.clipboard().setText(payload.get('path') or '')
         elif chosen == copy_row:

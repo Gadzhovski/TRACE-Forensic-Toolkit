@@ -158,7 +158,8 @@ def _valid_card(text):
     """The card number in `text` (digits only), or None."""
     digits = re.sub(r'[ \-]', '', text)
     # The scheme prefix rules out 0000 0000 0000 0000, which passes Luhn.
-    if not 13 <= len(digits) <= 19 or not _CARD_SCHEMES.match(digits)             or not luhn_valid(digits):
+    if not 13 <= len(digits) <= 19 or not _CARD_SCHEMES.match(digits) \
+            or not luhn_valid(digits):
         return None
     return digits
 

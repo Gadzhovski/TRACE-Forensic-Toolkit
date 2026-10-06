@@ -41,6 +41,15 @@ logger = logging.getLogger('TRACE.LiveDisk')
 MAX_READ = 16 * 1024 * 1024
 #: How long TRACE waits for the helper (the prompt) before giving up.
 CONNECT_TIMEOUT = 120
+#: How long one read may take before the disk counts as stalled: an error
+#: then, never a window waiting forever on a disk that stopped answering.
+READ_TIMEOUT = 60
+#: Reads are fetched in aligned blocks and the most recent kept: The Sleuth
+#: Kit reads a file system in many small pieces, and each request is a
+#: round trip to the helper. Large reads (hashing) bypass the cache.
+CACHE_BLOCK = 256 * 1024
+CACHE_BLOCKS = 256                   # 64 MB
+CACHE_BYPASS = 4 * 1024 * 1024
 _FAILED = 0xFFFFFFFF
 
 
@@ -280,7 +289,9 @@ class _AlignedReader:
             return b''
         start = offset - offset % self.SECTOR
         end = offset + length
-        end += (-end) % self.SECTOR
+        # Whole sectors, but never past the end: a device's size is whole
+        # 512-byte sectors, not always whole 4 KB ones.
+        end = min(end + (-end) % self.SECTOR, self.size)
         os.lseek(self.handle, start, os.SEEK_SET)
         data = bytearray()
         while len(data) < end - start:
@@ -308,6 +319,7 @@ def serve(device, port, token_hex):
     except OSError:
         return 2
     connection.settimeout(None)
+    _no_delay(connection)
     with connection:
         connection.sendall(bytes.fromhex(token_hex) + struct.pack('<Q', size)
                            + status.encode('utf-8', 'replace')[:200]
@@ -329,6 +341,15 @@ def serve(device, port, token_hex):
                                    + message)
         os.close(handle)
     return 0
+
+
+def _no_delay(connection):
+    """Requests are tiny and each waits for its answer: Nagle's algorithm
+    would hold them back."""
+    try:
+        connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError:
+        pass
 
 
 def _receive(connection, count):
@@ -413,6 +434,7 @@ class LiveDisk:
                  command=None):
         self.device = device
         self._lock = threading.Lock()
+        self._cache, self._broken = {}, None
         token = secrets.token_bytes(32)
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(('127.0.0.1', 0))
@@ -456,7 +478,8 @@ class LiveDisk:
                 offered = None
             if offered is not None and secrets.compare_digest(offered,
                                                               token):
-                connection.settimeout(None)
+                connection.settimeout(READ_TIMEOUT)
+                _no_delay(connection)
                 return connection
             connection.close()
         raise LiveDiskError("The disk reader did not start (the "
@@ -464,26 +487,72 @@ class LiveDisk:
                             "out)")
 
     def read_buffer_at_offset(self, length, offset):
-        out = bytearray()
+        """`length` bytes at `offset`, through the block cache."""
+        if length <= 0 or offset >= self.size:
+            return b''
+        length = min(length, self.size - offset)
         with self._lock:
-            while length > 0 and offset < self.size:
-                take = min(length, MAX_READ)
-                self._socket.sendall(struct.pack('<QI', offset, take))
-                reply = _receive(self._socket, 4)
-                if reply is None:
-                    raise LiveDiskError("The disk reader stopped")
-                count = struct.unpack('<I', reply)[0]
-                if count == _FAILED:
-                    size = struct.unpack('<I', _receive(self._socket, 4))[0]
-                    message = _receive(self._socket, size) or b''
-                    raise OSError(f"Read at {offset:,} failed: "
-                                  f"{message.decode('utf-8', 'replace')}")
-                data = _receive(self._socket, count) if count else b''
-                if not data:
+            if length >= CACHE_BYPASS:
+                return self._fetch(length, offset)
+            cache = self._cache
+            out = bytearray()
+            block = offset - offset % CACHE_BLOCK
+            while block < offset + length:
+                data = cache.pop(block, None)
+                if data is None:
+                    data = self._fetch(min(CACHE_BLOCK, self.size - block),
+                                       block)
+                    while len(cache) >= CACHE_BLOCKS:
+                        cache.pop(next(iter(cache)))
+                cache[block] = data             # most recent last
+                begin = max(offset - block, 0)
+                out += data[begin:offset + length - block]
+                if len(data) < CACHE_BLOCK:
                     break
-                out += data
-                offset += len(data)
-                length -= len(data)
+                block += CACHE_BLOCK
+            return bytes(out)
+
+    def _fetch(self, length, offset):
+        """One request to the helper (lock held). A socket that times out
+        or breaks mid-reply is out of step for good: closed, and every later
+        read says so."""
+        if self._broken:
+            raise LiveDiskError(self._broken)
+        try:
+            return self._request(length, offset)
+        except OSError as exc:
+            if getattr(exc, 'reported', False):
+                raise                           # the helper's own answer
+            self._broken = (f"The disk reader stopped answering "
+                            f"({exc or type(exc).__name__}); add the disk "
+                            f"again to reconnect")
+            self.close()
+            raise LiveDiskError(self._broken) from exc
+
+    def _request(self, length, offset):
+        out = bytearray()
+        while length > 0 and offset < self.size:
+            take = min(length, MAX_READ)
+            self._socket.sendall(struct.pack('<QI', offset, take))
+            reply = _receive(self._socket, 4)
+            if reply is None:
+                raise ConnectionError("the connection closed")
+            count = struct.unpack('<I', reply)[0]
+            if count == _FAILED:
+                size = struct.unpack('<I', _receive(self._socket, 4))[0]
+                message = _receive(self._socket, size) or b''
+                error = OSError(f"Read at {offset:,} failed: "
+                                f"{message.decode('utf-8', 'replace')}")
+                error.reported = True
+                raise error
+            if not count:
+                break                           # the end of the disk
+            data = _receive(self._socket, count)
+            if data is None:
+                raise ConnectionError("the connection closed mid-reply")
+            out += data
+            offset += len(data)
+            length -= len(data)
         return bytes(out)
 
     def close(self):
@@ -525,16 +594,19 @@ class RelayClient:
     def __init__(self, device, port, token_hex):
         self.device = device
         self._lock = threading.Lock()
+        self._cache, self._broken = {}, None
         self._socket = socket.create_connection(('127.0.0.1', int(port)),
                                                 timeout=30)
         self._socket.sendall(bytes.fromhex(token_hex))
         header = _receive(self._socket, 8 + 200)
         if header is None:
             raise LiveDiskError("The live disk relay refused this job")
-        self._socket.settimeout(None)
+        self._socket.settimeout(READ_TIMEOUT)
+        _no_delay(self._socket)
         self.size = struct.unpack_from('<Q', header, 0)[0]
 
-    read_buffer_at_offset = None        # set below: LiveDisk's
+    # LiveDisk's reading, cache and all (set below).
+    read_buffer_at_offset = _fetch = _request = None
 
     def close(self):
         try:
@@ -577,6 +649,7 @@ class _Relay:
                                                              self.token):
                 return
             connection.settimeout(None)
+            _no_delay(connection)
             connection.sendall(struct.pack('<Q', self.disk.size)
                                + b'ok'.ljust(200, b' '))
             while True:
@@ -662,3 +735,5 @@ def open_live_disk(device, elevate=None):
 
 
 RelayClient.read_buffer_at_offset = LiveDisk.read_buffer_at_offset
+RelayClient._fetch = LiveDisk._fetch
+RelayClient._request = LiveDisk._request

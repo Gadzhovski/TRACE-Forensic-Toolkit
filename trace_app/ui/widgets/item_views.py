@@ -46,6 +46,9 @@ def install(app=None):
     """Put ItemViewStyle on the application, once. Views that already exist
     are polished again by Qt, so they get it too."""
     app = app or QApplication.instance()
+    # Ctrl+C and a Copy menu for every list, table and tree.
+    from trace_app.ui.widgets import context_menus
+    context_menus.install(app)
     # Asked by a property, not by app.style(): with a stylesheet set, Qt
     # answers with its stylesheet wrapper rather than the style beneath.
     if app is None or app.property('traceItemViewStyle'):

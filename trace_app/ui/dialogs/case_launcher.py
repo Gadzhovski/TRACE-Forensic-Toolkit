@@ -36,6 +36,7 @@ from trace_app.infra.paths import (forget_case, read_recent_cases,
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.CaseLauncher')
 
@@ -354,7 +355,7 @@ class CaseLauncher(QDialog):
         menu.addSeparator()
         forget_action = menu.addAction(icons.icon(icons.CLOSE),
                                        "Remove from List")
-        chosen = menu.exec(self.table.viewport().mapToGlobal(position))
+        chosen = show_menu(menu, self.table.viewport().mapToGlobal(position))
         if chosen is open_action:
             self._open_selected()
         elif chosen is show_action:

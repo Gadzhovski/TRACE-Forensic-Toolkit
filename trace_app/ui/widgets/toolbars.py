@@ -61,6 +61,10 @@ def align_controls(toolbar):
     widgets added after the initial pass.
     """
     for child in toolbar.findChildren(QToolButton):
+        if isinstance(child.parent(), QLineEdit):
+            # A field's own clear button: sized and placed by the field.
+            # Made a 28px toolbar button, it hung below a 24px field.
+            continue
         if child.text() and child.toolButtonStyle() != Qt.ToolButtonIconOnly:
             # Carries a label, so it needs room for the text: fix the height
             # only and let the width follow the content.

@@ -70,17 +70,18 @@ def forget_window_state():
 _LISTING = 'Listing'
 
 
-def read_listing_view(default='details'):
-    """The Listing's view mode the examiner last chose."""
+def read_listing_view(default='details', option='view'):
+    """The Listing's view mode the examiner last chose (`option`
+    'carved_view': the Carved files tab's)."""
     parser = configparser.ConfigParser()
     try:
         parser.read(config_file())
-        return parser.get(_LISTING, 'view', fallback=default)
+        return parser.get(_LISTING, option, fallback=default)
     except (configparser.Error, OSError):
         return default
 
 
-def save_listing_view(mode):
+def save_listing_view(mode, option='view'):
     parser = configparser.ConfigParser()
     try:
         parser.read(config_file())
@@ -88,7 +89,7 @@ def save_listing_view(mode):
         pass
     if not parser.has_section(_LISTING):
         parser.add_section(_LISTING)
-    parser.set(_LISTING, 'view', mode)
+    parser.set(_LISTING, option, mode)
     try:
         with open(config_file(), 'w', encoding='utf-8') as handle:
             parser.write(handle)

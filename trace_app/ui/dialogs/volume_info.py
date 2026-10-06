@@ -1,7 +1,8 @@
 """Volume and image information view.
 
-The "View Image Information" dialog: per-partition tables, filesystem details,
-and the space-allocation pie chart. Roughly 520 lines that had no reason to sit
+The "View Image Information" dialog: the image's overview, its disk layout
+drawn as a platter and a bar (ui/widgets/disk_map.py), and per-volume
+tables. Roughly 520 lines that had no reason to sit
 inside MainWindow.
 
 Provided as a mixin because the methods read `self.image_handler`,
@@ -15,8 +16,8 @@ import logging
 import os
 
 import pytsk3
-from PySide6.QtCore import Qt, QMargins, QSize
-from PySide6.QtGui import QBrush, QColor, QFontMetrics, QIcon, QPainter
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QBrush, QColor, QFontMetrics, QIcon
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
                                QScrollArea, QSizePolicy, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
@@ -55,17 +56,28 @@ class VolumeInfoMixin:
         summary_card = QWidget()
         summary_card.setObjectName("volumeInfoCard")
         summary_layout = QVBoxLayout(summary_card)
-        summary_layout.setContentsMargins(20, 20, 20, 20)
-        summary_layout.setSpacing(12)
+        summary_layout.setContentsMargins(20, 18, 20, 18)
+        summary_layout.setSpacing(7)
 
-        # Title
+        # Title, then sections: a small heading over a rule, each field a
+        # muted name beside its value (the field names were bold and the
+        # headings were not, so the hierarchy read upside down).
         title_label = QLabel("Disk Image Overview")
         title_label.setObjectName("volumeInfoTitle")
         summary_layout.addWidget(title_label)
 
+        def add_heading(text):
+            heading = QLabel(text.upper())
+            heading.setObjectName("volumeInfoSectionHeading")
+            summary_layout.addWidget(heading)
+
+        add_heading("Image")
+
         # Key info
         image_info = self._get_image_info()
-        key_fields = ["Image Path", "Image Type", "Total Size", "Partition Scheme", "Number of Partitions", "Status"]
+        key_fields = ["Image Path", "Image Type", "Total Size",
+                      "Bytes per Sector", "Partition Scheme",
+                      "Number of Partitions", "Status"]
 
         def add_row(field, text):
             info_row = QWidget()
@@ -74,11 +86,17 @@ class VolumeInfoMixin:
             info_row_layout.setContentsMargins(0, 0, 0, 0)
             info_row_layout.setSpacing(10)
 
-            label = QLabel(f"{field}:")
+            label = QLabel(field)
             label.setObjectName("volumeInfoFieldLabel")
-            label.setMinimumWidth(140)
+            label.setFixedWidth(130)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
-            value = QLabel(str(text))
+            text = str(text)
+            if field == "Image Path":
+                value = QLabel(os.path.basename(text) or text)
+                value.setToolTip(text)
+            else:
+                value = QLabel(text)
             value.setObjectName("volumeInfoFieldValue")
             value.setTextInteractionFlags(Qt.TextSelectableByMouse)
             value.setWordWrap(True)
@@ -101,19 +119,13 @@ class VolumeInfoMixin:
             title = "Installed System"
             if len(systems) > 1:
                 title = f"Installed System {index + 1}  (sector {start_offset:,})"
-            heading = QLabel(title)
-            heading.setObjectName("volumeInfoSectionHeading")
-            summary_layout.addSpacing(10)
-            summary_layout.addWidget(heading)
+            add_heading(title)
             for field, text in installed.items():
                 add_row(field, text)
 
         # Nothing installed: say so, and describe what the media is instead.
         if not systems:
-            heading = QLabel("Storage Media")
-            heading.setObjectName("volumeInfoSectionHeading")
-            summary_layout.addSpacing(10)
-            summary_layout.addWidget(heading)
+            add_heading("Storage Media")
             for field, text in self._media_summary().items():
                 add_row(field, text)
 
@@ -123,73 +135,46 @@ class VolumeInfoMixin:
         # Raw images carry no such record, so the section is omitted for them.
         acquisition = self.image_handler.get_acquisition_info()
         if acquisition:
-            heading = QLabel("Acquisition")
-            heading.setObjectName("volumeInfoSectionHeading")
-            summary_layout.addSpacing(10)
-            summary_layout.addWidget(heading)
+            add_heading("Acquisition")
             for field, text in acquisition.items():
                 add_row(field, text)
 
         summary_layout.addStretch()
-        summary_card.setFixedWidth(450)
+        summary_card.setFixedWidth(410)
 
-        # Right: Pie Chart with Legend
+        # Right: the disk itself -- a platter whose ring is the image's
+        # regions, a table of them, and the same regions as a bar in disk
+        # order (ui/widgets/disk_map.py). Tables and unallocated runs are
+        # named for what they are; tiny regions are drawn, not lost.
+        from trace_app.core import disk_layout
+        from trace_app.ui.widgets.disk_map import DiskMap
         chart_widget = QWidget()
         chart_widget.setObjectName("volumeInfoCard")
         chart_outer_layout = QVBoxLayout(chart_widget)
-        chart_outer_layout.setContentsMargins(15, 15, 15, 15)
-        chart_outer_layout.setSpacing(10)
-
-        chart_title = QLabel("Space Allocation")
-        chart_title.setObjectName("volumeInfoSubtitle")
-        chart_title.setAlignment(Qt.AlignCenter)
+        chart_outer_layout.setContentsMargins(18, 16, 18, 16)
+        chart_outer_layout.setSpacing(4)
+        chart_title = QLabel("Disk Layout")
+        chart_title.setObjectName("volumeInfoTitle")
         chart_outer_layout.addWidget(chart_title)
-
-        # Create horizontal layout for legend (left) and chart (right)
-        chart_content_layout = QHBoxLayout()
-        chart_content_layout.setSpacing(15)
-
-        # Create chart
-        chart_view, partition_info_list = self._create_space_allocation_chart()
-
-        # Compact legend on the left
-        if partition_info_list:
-            legend_widget = QWidget()
-            legend_widget.setObjectName("volumeInfoRow")
-            legend_layout = QVBoxLayout(legend_widget)
-            legend_layout.setContentsMargins(5, 5, 5, 5)
-            legend_layout.setSpacing(6)
-
-            for label_text, color in partition_info_list:
-                legend_row = QWidget()
-                legend_row.setObjectName("volumeInfoRow")
-                legend_row_layout = QHBoxLayout(legend_row)
-                legend_row_layout.setContentsMargins(0, 0, 0, 0)
-                legend_row_layout.setSpacing(8)
-
-                color_indicator = QLabel()
-                color_indicator.setFixedSize(16, 16)
-                color_indicator.setStyleSheet(f"""
-                    background-color: rgb({color.red()}, {color.green()}, {color.blue()});
-                    border: 1px solid #adb5bd;
-                    border-radius: 3px;
-                """)
-
-                text_label = QLabel(label_text)
-                text_label.setObjectName("volumeInfoLegendLabel")
-                text_label.setWordWrap(True)
-
-                legend_row_layout.addWidget(color_indicator)
-                legend_row_layout.addWidget(text_label, 1)
-
-                legend_layout.addWidget(legend_row)
-
-            legend_layout.addStretch()
-            legend_widget.setMaximumWidth(300)
-            chart_content_layout.addWidget(legend_widget)
-
-        chart_content_layout.addWidget(chart_view, 1)
-        chart_outer_layout.addLayout(chart_content_layout, 1)
+        regions = []
+        try:
+            regions = disk_layout.regions(self.image_handler)
+        except Exception as exc:
+            logger.warning("Could not lay out the disk: %s", exc)
+        volumes = sum(1 for r in regions if r['kind'] == disk_layout.VOLUME)
+        free = sum(r['bytes'] for r in regions
+                   if r['kind'] == disk_layout.UNALLOCATED)
+        subtitle = QLabel(
+            f"{FileSystemUtils.get_readable_size(self.image_handler.get_size())}"
+            f"  ·  {image_info.get('Partition Scheme', 'No partition table')}"
+            f"  ·  {volumes} volume{'s' if volumes != 1 else ''}"
+            f"  ·  {FileSystemUtils.get_readable_size(free)} unallocated")
+        subtitle.setObjectName("volumeInfoCaption")
+        chart_outer_layout.addWidget(subtitle)
+        chart_outer_layout.addSpacing(8)
+        self.disk_map = DiskMap()
+        self.disk_map.set_regions(regions)
+        chart_outer_layout.addWidget(self.disk_map, 1)
 
         # The overview plus the acquisition record is more than fits a fixed
         # card, so it scrolls rather than being clipped.
@@ -199,12 +184,12 @@ class VolumeInfoMixin:
         summary_scroll.setWidgetResizable(True)
         summary_scroll.setFrameShape(QScrollArea.NoFrame)
         summary_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        summary_scroll.setFixedWidth(470)
+        summary_scroll.setFixedWidth(430)
 
         top_layout.addWidget(summary_scroll)
         top_layout.addWidget(chart_widget, 1)
 
-        main_layout.addWidget(top_widget)
+        main_layout.addWidget(top_widget, 3)
 
         # === BOTTOM SECTION: Detailed Partition Information ===
         bottom_widget = QWidget()
@@ -293,7 +278,7 @@ class VolumeInfoMixin:
         button_layout.addWidget(close_button)
         bottom_layout.addLayout(button_layout)
 
-        main_layout.addWidget(bottom_widget, 1)
+        main_layout.addWidget(bottom_widget, 2)
 
         dialog.exec()
 
@@ -332,6 +317,18 @@ class VolumeInfoMixin:
 
             # Get filesystem type for icon
             fs_type = all_info.get("Filesystem Type", "Unknown")
+            # A partition table or an unallocated run is not a volume: say
+            # what it is, and leave the volume's columns empty, not "—".
+            from trace_app.core import disk_layout
+            raw_desc = desc.decode('utf-8', 'replace') \
+                if isinstance(desc, bytes) else str(desc)
+            slot_kind = disk_layout._kind(raw_desc)
+            if slot_kind == disk_layout.TABLE:
+                fs_type, all_info = "Partition table", {}
+            elif slot_kind == disk_layout.UNALLOCATED:
+                fs_type, all_info = "Unallocated", {}
+            elif slot_kind is None:
+                fs_type, all_info = "Extended partition (container)", {}
             icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
 
             # Column 0: Volume (with icon)
@@ -349,7 +346,7 @@ class VolumeInfoMixin:
             table.setItem(idx, 1, fs_item)
 
             # Column 2: Offset (Sectors)
-            offset_value = all_info.get("Partition Offset", "N/A")
+            offset_value = all_info.get("Partition Offset", "—")
             # Extract just the sector count
             if "sectors" in offset_value:
                 offset_value = offset_value.split("sectors")[0].strip()
@@ -357,44 +354,44 @@ class VolumeInfoMixin:
             table.setItem(idx, 2, offset_item)
 
             # Column 3: Block Size
-            block_size = all_info.get("Block Size", "N/A")
+            block_size = all_info.get("Block Size", "—")
             block_size_item = QTableWidgetItem(block_size)
             table.setItem(idx, 3, block_size_item)
 
             # Column 4: Volume Size
-            volume_size = all_info.get("Volume Size", "N/A")
+            volume_size = all_info.get("Volume Size", "—")
             volume_size_item = QTableWidgetItem(volume_size)
             table.setItem(idx, 4, volume_size_item)
 
             # Column 5: Total Blocks
-            total_blocks = all_info.get("Total Blocks", "N/A")
+            total_blocks = all_info.get("Total Blocks", "—")
             total_blocks_item = QTableWidgetItem(total_blocks)
             table.setItem(idx, 5, total_blocks_item)
 
             # Column 6: First Block
-            first_block = all_info.get("First Block", "N/A")
+            first_block = all_info.get("First Block", "—")
             first_block_item = QTableWidgetItem(first_block)
             table.setItem(idx, 6, first_block_item)
 
             # Column 7: Last Block
-            last_block = all_info.get("Last Block", "N/A")
+            last_block = all_info.get("Last Block", "—")
             last_block_item = QTableWidgetItem(last_block)
             table.setItem(idx, 7, last_block_item)
 
             # Column 8: Inode Count
-            inode_count = all_info.get("Inode Count", "N/A")
+            inode_count = all_info.get("Inode Count", "—")
             inode_count_item = QTableWidgetItem(inode_count)
             table.setItem(idx, 8, inode_count_item)
 
             # Column 9: Root Inode
-            root_inode = all_info.get("Root Inode", "N/A")
+            root_inode = all_info.get("Root Inode", "—")
             root_inode_item = QTableWidgetItem(root_inode)
             table.setItem(idx, 9, root_inode_item)
 
             # Column 10: Volume Serial -- identifies the volume independently
             # of the partition layout, which is how an image is tied back to
             # the device it came from.
-            serial = all_info.get("Volume Serial", "N/A")
+            serial = all_info.get("Volume Serial", "—")
             table.setItem(idx, 10, QTableWidgetItem(serial))
 
             # Columns 11-13: what the registry says about the installation on
@@ -403,16 +400,16 @@ class VolumeInfoMixin:
             build = all_info.get("Build", "")
             if operating_system and build:
                 operating_system = f"{operating_system} (build {build})"
-            table.setItem(idx, 11, QTableWidgetItem(operating_system or "N/A"))
+            table.setItem(idx, 11, QTableWidgetItem(operating_system or "—"))
 
             time_zone = all_info.get("Time Zone", "")
             offset_text = all_info.get("UTC Offset", "")
             if time_zone and offset_text:
                 time_zone = f"{time_zone} ({offset_text})"
-            table.setItem(idx, 12, QTableWidgetItem(time_zone or offset_text or "N/A"))
+            table.setItem(idx, 12, QTableWidgetItem(time_zone or offset_text or "—"))
 
             table.setItem(idx, 13,
-                          QTableWidgetItem(all_info.get("Computer Name", "N/A")))
+                          QTableWidgetItem(all_info.get("Computer Name", "—")))
 
         table.setSortingEnabled(True)  # Re-enable sorting after populating
         self._fit_volume_columns(table)
@@ -592,7 +589,8 @@ class VolumeInfoMixin:
 
             used = self._volume_usage(fs_info)
             if used:
-                labels.append(f"{fs_type} at sector {start:,}: {used}")
+                size = used.replace(' formatted', '')
+                labels.append(f"Sector {start:,}  ·  {fs_type}  ·  {size}")
 
             for path, description in self._MEDIA_SIGNATURES:
                 if description is None:
@@ -610,7 +608,9 @@ class VolumeInfoMixin:
             summary['Filesystems'] = 'None recognised'
 
         if labels:
-            summary['Usage'] = '   ·   '.join(labels)
+            # One volume to a line: run together, six volumes read as a
+            # paragraph.
+            summary['Volumes'] = '\n'.join(labels)
 
         if traces:
             summary['Indications'] = '; '.join(traces)
@@ -715,138 +715,21 @@ class VolumeInfoMixin:
 
             # Check if wiped
             if self.image_handler.is_wiped():
-                info["Status"] = "⚠️ Wiped/Empty Image"
+                info["Status"] = "Wiped or empty -- no file system found"
             else:
-                info["Status"] = "✓ Valid Image"
+                info["Status"] = "Readable"
 
             # File modification time
             if os.path.exists(self.image_handler.image_path):
                 mod_time = os.path.getmtime(self.image_handler.image_path)
-                info["File Modified"] = datetime.datetime.fromtimestamp(mod_time).strftime("%Y-%m-%d %H:%M:%S")
+                # UTC, as every time TRACE shows (the process is pinned to
+                # it, and a local conversion would differ between machines).
+                info["File Modified"] = datetime.datetime.fromtimestamp(
+                    mod_time, datetime.timezone.utc).strftime(
+                    "%Y-%m-%d %H:%M:%S UTC")
 
         except Exception as e:
             logger.error(f"Error getting image info: {e}")
             info["Error"] = str(e)
 
         return info
-
-    def _get_filesystem_colors(self):
-        """Return consistent color mapping for filesystem types."""
-        return {
-            "NTFS": QColor(41, 128, 185),      # Blue
-            "FAT32": QColor(46, 204, 113),     # Green
-            "FAT16": QColor(26, 188, 156),     # Turquoise
-            "FAT12": QColor(22, 160, 133),     # Dark Turquoise
-            "exFAT": QColor(52, 152, 219),     # Light Blue
-            "EXT4": QColor(231, 76, 60),       # Red
-            "EXT3": QColor(192, 57, 43),       # Dark Red
-            "EXT2": QColor(155, 89, 182),      # Purple
-            "HFS+": QColor(241, 196, 15),      # Yellow
-            "APFS": QColor(243, 156, 18),      # Orange
-            "ISO9660": QColor(230, 126, 34),   # Dark Orange
-            "Unallocated": QColor(149, 165, 166),  # Gray
-            "Unknown": QColor(127, 140, 141),  # Dark Gray
-        }
-
-    def _create_space_allocation_chart(self):
-        """Create a pie chart showing allocated vs unallocated space."""
-        # QtCharts is imported when a chart is drawn, not at startup (0.2 s).
-        from PySide6.QtCharts import QChart, QChartView, QPieSeries
-        # Create pie series
-        series = QPieSeries()
-        legend_items = []  # Track items for legend
-
-        try:
-            total_size = self.image_handler.get_size()
-            partitions = self.image_handler.get_partitions()
-
-            # Get filesystem color mapping
-            fs_colors = self._get_filesystem_colors()
-
-            # Calculate allocated space (partitions)
-            allocated_space = 0
-            partition_details = []
-
-            if partitions:
-                sector_size = self.image_handler.sector_size
-                for part in partitions:
-                    addr, desc, start, length = part
-                    size = length * sector_size
-                    allocated_space += size
-
-                    # Get filesystem type
-                    fs_type = self.image_handler.get_fs_type(start)
-                    if not fs_type:
-                        fs_type = "Unknown"
-
-                    partition_details.append((fs_type, size, part[0]))
-
-            # Calculate unallocated space
-            unallocated_space = total_size - allocated_space
-
-            # Add partition slices with consistent colors
-            for idx, (fs_type, size, part_num) in enumerate(partition_details):
-                percentage = (size / total_size) * 100
-
-                # Don't show label on slice - use legend instead
-                slice = series.append("", size)
-
-                # Use consistent color based on filesystem type
-                color = fs_colors.get(fs_type, fs_colors["Unknown"])
-                slice.setColor(color)
-                slice.setLabelVisible(False)  # Hide labels on pie
-
-                # Add border between slices for clear separation
-                slice.setBorderColor(QColor(255, 255, 255))
-                slice.setBorderWidth(3)
-
-                # Add to legend with full details
-                legend_label = f"{fs_type} - Partition {part_num} ({FileSystemUtils.get_readable_size(size)}, {percentage:.1f}%)"
-                legend_items.append((legend_label, color))
-
-            # Add unallocated space
-            if unallocated_space > 0:
-                percentage = (unallocated_space / total_size) * 100
-                unalloc_slice = series.append("", unallocated_space)
-                unalloc_slice.setColor(fs_colors["Unallocated"])
-                unalloc_slice.setLabelVisible(False)
-                unalloc_slice.setBorderColor(QColor(255, 255, 255))
-                unalloc_slice.setBorderWidth(3)
-
-                # Add to legend
-                legend_label = f"Unallocated Space ({FileSystemUtils.get_readable_size(unallocated_space)}, {percentage:.1f}%)"
-                legend_items.append((legend_label, fs_colors["Unallocated"]))
-
-            # If no partitions, show entire disk as unallocated
-            if not partitions:
-                slice = series.append("", total_size)
-                slice.setColor(fs_colors["Unallocated"])
-                slice.setLabelVisible(False)
-
-                # Add to legend
-                legend_label = f"Entire Disk ({FileSystemUtils.get_readable_size(total_size)}, 100%)"
-                legend_items.append((legend_label, fs_colors["Unallocated"]))
-
-        except Exception as e:
-            logger.error(f"Error creating allocation chart: {e}")
-            # Add error slice
-            series.append("Error Loading Data", 1)
-
-        # Create chart
-        chart = QChart()
-        chart.addSeries(series)
-        chart.setTitle("")
-        chart.setAnimationOptions(QChart.SeriesAnimations)
-        chart.legend().setVisible(False)  # Use custom legend instead
-
-        # Minimal margins for maximum chart size
-        chart.setMargins(QMargins(0, 0, 0, 0))
-        chart.setBackgroundVisible(False)
-
-        # Create chart view
-        chart_view = QChartView(chart)
-        chart_view.setRenderHint(QPainter.Antialiasing)
-        chart_view.setMinimumSize(350, 350)
-        chart_view.setObjectName("volumeInfoChartView")
-
-        return chart_view, legend_items

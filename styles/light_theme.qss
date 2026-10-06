@@ -146,7 +146,6 @@ QFrame {
    the full width of the viewport, putting that border immediately against the
    selection colour: being lighter, it read as a white line down the edge of
    the highlight rather than as the widget's frame. */
-QFrame#search_results_frame,
 QDockWidget > QFrame:not(QTreeWidget) {
     border: 1px solid #E5E5E5;
 }
@@ -554,35 +553,6 @@ QListWidget::item:selected, QTreeWidget::item:selected {
     padding: 5px 0;              /* Add a little space around the subtitle */
 }
 
-/* Search Results Area Styling for Light Theme */
-#search_results_frame {
-    background-color: #FFFFFF;
-    border: 1px solid #E5E5E5;
-    border-radius: 4px;
-    padding: 1px;
-}
-
-#search_results_title {
-    background-color: #F0F0F0;
-    color: #333333;
-    padding: 2px;
-    border-bottom: 1px solid #D3D3D3;
-}
-
-#search_results_widget {
-    background-color: #FFFFFF;
-    color: #333333;
-    border: none;
-    font-size: 11px;
-}
-
-#search_results_widget::item {
-    padding: 2px;
-}
-
-#search_results_widget::item:selected {
-    background-color: #CCE8FF;
-}
 
 /* Address bar in hex view */
 QLabel[text="Address"] {
@@ -787,6 +757,27 @@ QTableWidget#hexTable::item {
 
 QHeaderView#hexTableHeader::section {
     padding: 2px;
+}
+
+/* Hex view search results: a table beside the hex table, with its header
+   (hexTableHeader) and rows of the same height. */
+QTableWidget#hexSearchResults,
+QTableWidget#hexInspector {
+    gridline-color: transparent;
+    border: none;
+}
+QTableWidget#hexSearchResults::item,
+QTableWidget#hexInspector::item {
+    padding: 0px 6px;
+    border: none;
+}
+/* Under the bytes: the cursor's offset, the selection, and where the
+   byte lies on the image. */
+QLabel#hexStatus {
+    color: #6c757d;
+    font-size: 11px;
+    padding: 3px 6px;
+    border-top: 1px solid #E5E5E5;
 }
 
 QHeaderView#listingTableHeader::section {
@@ -1155,7 +1146,7 @@ QLabel#notesScope {
     padding: 2px 4px;
 }
 
-QTextEdit#notesEditor, QTableWidget#notesTable {
+QTableWidget#notesTableOld {
     border: 1px solid #D0D0D0;
 }
 
@@ -1662,18 +1653,6 @@ QToolButton#listingViewButton[dropdown="true"]:hover {
     background-color: #f1f3f5;
 }
 
-/* --- Settings dialog ---------------------------------------------------- */
-
-QLabel#settingsHint {
-    color: #6c757d;
-    font-size: 11px;
-    padding-bottom: 4px;
-}
-
-QLabel#settingsScopeNote {
-    color: #212529;
-    padding-top: 8px;
-}
 
 
 /* ============ Welcome screen, case wizard, evidence intake ============ */
@@ -1904,4 +1883,336 @@ QSlider#mediaPosition::groove:horizontal:disabled {
 QSlider#mediaPosition::handle:horizontal:disabled {
     background: transparent;
     border-color: transparent;
+}
+
+
+/* ============ Checkboxes, spin boxes ============ */
+/* A checkbox is a square with a frame whether ticked or not: the ticked
+   state used to draw the tick alone, with no box, and read as a stray
+   mark rather than a control. Item views' checkboxes look the same. */
+QCheckBox::indicator,
+QAbstractItemView::indicator,
+QGroupBox::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #8A949E;
+    background-color: #FFFFFF;
+}
+QCheckBox::indicator:hover,
+QAbstractItemView::indicator:hover {
+    border-color: #495057;
+}
+QCheckBox::indicator:checked,
+QAbstractItemView::indicator:checked,
+QGroupBox::indicator:checked {
+    border-color: #495057;
+    background-color: #F1F3F5;
+    image: url('Icons/tabler/themed/check-light.svg');
+}
+QCheckBox::indicator:indeterminate,
+QAbstractItemView::indicator:indeterminate {
+    border-color: #495057;
+    background-color: #F1F3F5;
+}
+QCheckBox::indicator:disabled,
+QAbstractItemView::indicator:disabled {
+    border-color: #CED4DA;
+}
+QCheckBox:disabled {
+    color: #6c757d;
+}
+
+/* Every spin box, whole-number and decimal alike, drawn by the theme:
+   the whole-number ones had no buttons styled and showed black blocks. */
+QAbstractSpinBox {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+    padding: 0px 22px 0px 8px;
+    min-height: 26px;
+    max-height: 26px;
+}
+QAbstractSpinBox:disabled {
+    color: #6c757d;
+}
+QAbstractSpinBox::up-button,
+QAbstractSpinBox::down-button {
+    subcontrol-origin: border;
+    width: 18px;
+    border: none;
+    border-left: 1px solid #ced4da;
+    background-color: #F1F3F5;
+}
+QAbstractSpinBox::up-button {
+    subcontrol-position: top right;
+    border-top-right-radius: 4px;
+}
+QAbstractSpinBox::down-button {
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: 4px;
+}
+QAbstractSpinBox::up-button:hover,
+QAbstractSpinBox::down-button:hover {
+    background-color: #E2E6EA;
+}
+QAbstractSpinBox::up-arrow {
+    image: url('Icons/tabler/themed/chevron-up-light.svg');
+    width: 10px;
+    height: 10px;
+}
+QAbstractSpinBox::down-arrow {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    width: 10px;
+    height: 10px;
+}
+QAbstractSpinBox::up-arrow:disabled,
+QAbstractSpinBox::down-arrow:disabled {
+    image: none;
+}
+
+/* ============ Settings dialog ============ */
+/* Pages down the side, one page beside them: a title, a line on what it
+   is for, small section headings, and each setting's help under it. */
+QDialog#settingsDialog {
+    background-color: #FFFFFF;
+}
+QListWidget#settingsNav {
+    border: none;
+    border-right: 1px solid #E5E5E5;
+    border-radius: 0px;
+    background-color: #F6F7F9;
+    padding: 10px 6px;
+    outline: 0;
+}
+QListWidget#settingsNav::item {
+    background-color: transparent;
+    border: none;
+    padding: 7px 10px;
+    margin: 1px 0px;
+    border-radius: 4px;
+    color: #212529;
+}
+QListWidget#settingsNav::item:hover {
+    background-color: #ECEEF1;
+}
+QListWidget#settingsNav::item:selected {
+    background-color: #E2E6EA;
+    color: #212529;
+    font-weight: 600;
+}
+QScrollArea#settingsScroll,
+QWidget#settingsPage,
+QWidget#settingsRow {
+    background-color: #FFFFFF;
+    border: none;
+}
+QFrame#settingsFooter {
+    border-top: 1px solid #E5E5E5;
+    background-color: #FFFFFF;
+}
+QLabel#settingsPageTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #212529;
+}
+QLabel#settingsPageIntro {
+    color: #6c757d;
+    padding-top: 3px;
+}
+QLabel#settingsSection {
+    font-weight: 600;
+    color: #212529;
+    padding-top: 20px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #E9ECEF;
+}
+QLabel#settingsLabel {
+    color: #212529;
+}
+QLabel#settingsHint {
+    color: #6c757d;
+    font-size: 11px;
+}
+QLabel#settingsScopeNote {
+    color: #6c757d;
+    background-color: #F6F7F9;
+    border: 1px solid #E9ECEF;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 12px;
+}
+QLabel#settingsScopeTag {
+    color: #6c757d;
+    font-size: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    padding: 0px 5px;
+}
+
+
+/* ============ Icon views (Listing, Carved files) ============ */
+/* The list and icon views were unstyled: a white page in the dark theme,
+   and a selection drawn like a pushed button. */
+QListView#listingIconView {
+    background-color: #FFFFFF;
+    border: none;
+    outline: 0;
+}
+QListView#listingIconView::item {
+    color: #212529;
+    border-radius: 4px;
+    padding: 2px;
+}
+QListView#listingIconView::item:hover {
+    background-color: #F1F3F5;
+}
+QListView#listingIconView::item:selected {
+    background-color: #DCE3EA;
+    color: #212529;
+}
+
+
+/* Text fields' clear button: the style's own icon sat low in its box,
+   touching the bottom of the field. */
+QLineEdit {
+    lineedit-clear-button-icon: url('Icons/tabler/themed/x-light.svg');
+}
+/* ...and the button itself: the toolbars' QToolButton rules reached it and
+   made it 28px tall inside a 24px field. */
+QLineEdit QToolButton {
+    min-width: 0px;
+    min-height: 0px;
+    max-width: 18px;
+    max-height: 18px;
+    padding: 0px;
+    margin: 0px;
+    border: none;
+    background: transparent;
+}
+
+
+/* ============ Case and Notes tabs ============ */
+/* A card at the left -- the case itself, or the note being written --
+   and the tables beside it. */
+QFrame#caseCard, QFrame#notesComposer {
+    background-color: #F6F7F9;
+    border: none;
+    border-right: 1px solid #E5E5E5;
+}
+QScrollArea#caseCardScroll {
+    background-color: #F6F7F9;
+    border: none;
+    border-right: 1px solid #E5E5E5;
+}
+QLabel#caseTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111111;
+    background: transparent;
+}
+QLabel#caseMeta {
+    color: #6c757d;
+    background: transparent;
+}
+QLabel#caseDescription {
+    color: #212529;
+    padding: 4px 0px 0px 0px;
+    background: transparent;
+}
+QLabel#caseDescription[empty="true"] {
+    color: #6c757d;
+    font-style: italic;
+}
+QLabel#caseFactLabel {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
+}
+QLabel#caseFactValue {
+    color: #212529;
+    font-size: 11px;
+    background: transparent;
+}
+QLabel#caseEmpty, QLabel#notesEmpty {
+    color: #6c757d;
+    padding: 24px;
+}
+QLabel#notesHeading {
+    font-weight: 600;
+    color: #111111;
+    background: transparent;
+}
+QLabel#notesHint, QLabel#notesCount {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
+}
+QFrame#notesBar {
+    border: none;
+    border-bottom: 1px solid #E5E5E5;
+}
+QTextEdit#notesEditor {
+    background-color: #FFFFFF;
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+    padding: 4px;
+}
+QTableWidget#notesTable {
+    border: none;
+}
+QTableWidget#notesTable::item {
+    padding: 6px 6px;
+}
+/* The card's buttons: sized to their text, none of the global side
+   margins (they pushed the third button out of the card). */
+QPushButton#caseAction {
+    margin: 0px;
+    min-width: 0px;
+    padding: 0px 10px;
+}
+/* Labels on the cards sit on the card's colour, not on a box of their own. */
+QFrame#caseCard QLabel, QFrame#notesComposer QLabel {
+    background: transparent;
+}
+
+/* The image information's disk layout: its caption, and the table of
+   regions beside the platter (ui/widgets/disk_map.py). */
+QLabel#volumeInfoCaption {
+    color: #6c757d;
+    background: transparent;
+}
+QWidget#diskMap, QWidget#diskPlatter, QWidget#diskBar {
+    background: transparent;
+}
+QTableWidget#diskMapTable {
+    background-color: #FFFFFF;
+    border: none;
+}
+
+/* Image information's overview: section headings as small capitals over
+   a rule, field names muted and plain, values in the text colour. */
+QLabel#volumeInfoSectionHeading {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #3D6A9E;
+    padding-top: 12px;
+    padding-bottom: 3px;
+    border: none;
+    border-bottom: 1px solid #E3E6EA;
+}
+QLabel#volumeInfoFieldLabel {
+    font-weight: normal;
+    font-size: 12px;
+    color: #6c757d;
+}
+QLabel#volumeInfoFieldValue {
+    font-size: 13px;
+    color: #1F2328;
+}
+QLabel#diskBarCaption {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
 }

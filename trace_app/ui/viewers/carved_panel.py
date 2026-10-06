@@ -3,7 +3,7 @@
 Carving searches raw image bytes for file signatures (core/carving.py). Here
 an examiner picks what to carve -- one image or every open one, which types,
 unallocated space or the whole image -- and works down what came back, in a
-table or as thumbnails.
+table or, as in the Listing, as a list or icons with thumbnails.
 
 Two modes, one engine:
 
@@ -21,11 +21,9 @@ not the copy on disk -- what is examined is the evidence.
 import logging
 import os
 
-from PySide6.QtCore import QSize, QThread, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QImageReader, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QButtonGroup, QCheckBox,
-                               QComboBox, QHeaderView, QLabel,
-                               QListWidget, QListWidgetItem, QPushButton,
+from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
+                               QHeaderView, QLabel, QPushButton,
                                QSizePolicy, QStackedWidget, QTableWidget,
                                QTableWidgetItem, QToolBar,
                                QVBoxLayout, QWidget)
@@ -38,6 +36,9 @@ from trace_app.infra.paths import carved_files_dir
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui import icons
+from trace_app.ui.widgets import thumbnails as thumbs
+from trace_app.ui.widgets.listing_views import (MODES, ListingIconView,
+                                                ViewButton)
 from trace_app.ui.widgets.multi_select import MultiSelectButton
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
@@ -46,15 +47,6 @@ from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.Carving')
 
-#: Thumbnails drawn per timer tick, so a gallery of thousands builds without
-#: freezing the window.
-_THUMBS_PER_TICK = 24
-_THUMB = 120
-
-#: Types shown as a rendered picture rather than an icon. Qt draws most;
-#: Pillow what Qt cannot -- AVIF, PSD, and HEIC through pi-heif.
-_PICTURE_TYPES = frozenset({'jpg', 'png', 'gif', 'bmp', 'tiff', 'webp',
-                            'avif', 'heic', 'psd', 'pdf'})
 _VIDEO = ('mov', 'mp4', 'm4v', '3gp', 'wmv', 'avi', 'flv', 'mpg', 'mkv', 'webm')
 _AUDIO = ('wav', 'mp3', 'ogg', 'opus', 'm4a')
 _ARCHIVE = ('zip', 'gz', 'bz2', 'xz', 'tar', 'rar', '7z')
@@ -252,10 +244,7 @@ class CarvedFilesPanel(QWidget):
         #: Quick triage's results, which live only as long as the window.
         self._session = []
         self._rows = []
-        self._thumb_queue = []
-        self._thumb_timer = QTimer(self)
-        self._thumb_timer.setInterval(0)
-        self._thumb_timer.timeout.connect(self._draw_some_thumbnails)
+        self.view = 'details'
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -305,23 +294,12 @@ class CarvedFilesPanel(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
 
-        # Table or thumbnails: one choice, two buttons. Push buttons, which
-        # size to their label: the theme caps toolbar tool buttons at an
-        # icon's width.
-        self.view_group = QButtonGroup(self)
-        for index, (text, tip) in enumerate((
-                ("Table", "List carved files with their details"),
-                ("Thumbnails", "Show carved files as pictures"),
-                ("Statistics", "What each carve run checked, rejected "
-                               "and kept, by type"))):
-            button = QPushButton(text)
-            button.setObjectName("carvedViewButton")
-            button.setToolTip(tip)
-            button.setCheckable(True)
-            button.setChecked(index == 0)
-            self.view_group.addButton(button, index)
-            bar.addWidget(button)
-        self.view_group.idToggled.connect(self._view_changed)
+        # The Listing's View dropdown: Details, List, the icon sizes (with
+        # thumbnails from Medium up), and the carve runs' Statistics.
+        self.view_button = ViewButton(extra=(
+            (STATISTICS, "Statistics", icons.VIEW_STATISTICS),))
+        self.view_button.chosen.connect(self.set_view)
+        bar.addWidget(self.view_button)
         align_controls(bar)
         layout.addWidget(bar)
 
@@ -400,21 +378,15 @@ class CarvedFilesPanel(QWidget):
         self.table.customContextMenuRequested.connect(self._table_menu)
         self.stack.addWidget(self.table)
 
-        self.gallery = QListWidget()
-        self.gallery.setObjectName("carvedGallery")
-        self.gallery.setViewMode(QListWidget.IconMode)
-        self.gallery.setIconSize(QSize(_THUMB, _THUMB))
-        self.gallery.setGridSize(QSize(_THUMB + 16, _THUMB + 34))
-        self.gallery.setResizeMode(QListWidget.Adjust)
-        self.gallery.setMovement(QListWidget.Static)
-        self.gallery.setUniformItemSizes(True)
-        self.gallery.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.gallery.currentItemChanged.connect(
-            lambda item, _old: item and self.file_selected.emit(
-                item.data(Qt.UserRole)))
-        self.gallery.itemDoubleClicked.connect(
-            lambda item: self.file_activated.emit(item.data(Qt.UserRole)))
-        self.gallery.setContextMenuPolicy(Qt.CustomContextMenu)
+        # List and icon views: the Listing's own, over this table's model
+        # and selection -- same rows, order and selection either way.
+        self.gallery = ListingIconView(
+            self.table, self._carve_bytes, open_video=self._carve_video,
+            describe=carved_item)
+        self.gallery.clicked.connect(
+            lambda index: self.file_selected.emit(self._row_at(index)))
+        self.gallery.doubleClicked.connect(
+            lambda index: self.file_activated.emit(self._row_at(index)))
         self.gallery.customContextMenuRequested.connect(self._gallery_menu)
         self.stack.addWidget(self.gallery)
 
@@ -424,6 +396,9 @@ class CarvedFilesPanel(QWidget):
 
         self.set_targets([])
         self.refresh()
+        from trace_app.infra.window_state import read_listing_view
+        self.set_view(read_listing_view(option=CARVED_VIEW_OPTION),
+                      remember=False)
 
     # --- what can be carved ------------------------------------------
 
@@ -530,8 +505,6 @@ class CarvedFilesPanel(QWidget):
                 self._duplicates[digest] = self._duplicates.get(digest, 0) + 1
             if self._filtered([record]):
                 self._add_table_row(record)
-            if self.stack.currentIndex() == 1:
-                self._add_gallery_item(record)
             self._update_status()
 
     def forget(self, key):
@@ -583,8 +556,6 @@ class CarvedFilesPanel(QWidget):
         if shown:
             fit_columns(self.table, _FIT)
             self.table.setColumnWidth(0, max(self.table.columnWidth(0), 160))
-        if self.stack.currentIndex() == 1:
-            self._rebuild_gallery()
         self._update_status()
 
     def _shown(self, record):
@@ -735,10 +706,12 @@ class CarvedFilesPanel(QWidget):
                 f"{copies} carves have this SHA-256: the same bytes found "
                 f"in {copies} places")
         values[0].setData(Qt.UserRole, row)
-        if self.icon_resolver:
-            icon = self.icon_resolver(row.get('type') or 'unknown')
-            if icon is not None:
-                values[0].setIcon(icon)
+        kind = row.get('type') or 'unknown'
+        icon = self.icon_resolver(kind) if self.icon_resolver else None
+        if icon is None and kind in _ICON_FOR_TYPE:
+            icon = icons.icon(_ICON_FOR_TYPE[kind])
+        if icon is not None:
+            values[0].setIcon(icon)
         values[0].setToolTip(f"Found at byte {offset:,} of "
                              f"{row.get('evidence_label') or 'the image'}")
         if date == UNKNOWN_DATE:
@@ -770,16 +743,27 @@ class CarvedFilesPanel(QWidget):
                 return relative
         return path
 
-    # --- thumbnails --------------------------------------------------
+    # --- views --------------------------------------------------------
 
-    def _view_changed(self, index, checked):
-        if not checked:
-            return
-        self.stack.setCurrentIndex(index)
-        if index == 1:
-            self._rebuild_gallery()
-        elif index == 2:
+    def set_view(self, key, remember=True):
+        """Details (the table), List, an icon size, or Statistics."""
+        if key == STATISTICS:
+            self.stack.setCurrentWidget(self.stats_view)
             self._fill_stats()
+        elif key in MODES:
+            if key == 'details':
+                self.stack.setCurrentWidget(self.table)
+            else:
+                self.gallery.set_mode(key)
+                self.stack.setCurrentWidget(self.gallery)
+        else:
+            key = 'details'
+            self.stack.setCurrentWidget(self.table)
+        self.view = key
+        self.view_button.set_current(key)
+        if remember:
+            from trace_app.infra.window_state import save_listing_view
+            save_listing_view(key, option=CARVED_VIEW_OPTION)
 
     def _fill_stats(self):
         """Every run of the images shown, newest first."""
@@ -791,96 +775,32 @@ class CarvedFilesPanel(QWidget):
         self.stats_view.set_runs(
             self.case.carving_runs(self.evidence_filter, limit=500), names)
 
-    def _rebuild_gallery(self):
-        self._thumb_timer.stop()
-        self.gallery.clear()
-        self._thumb_queue = []
-        self._video_items = {}
-        if getattr(self, '_videos', None) is not None:
-            self._videos.clear()
-        for row in getattr(self, '_visible', self._rows):
-            self._add_gallery_item(row)
+    def _row_at(self, index):
+        item = self.table.item(index.row(), 0)
+        return item.data(Qt.UserRole) if item is not None else None
 
-    def _add_gallery_item(self, row):
-        item = QListWidgetItem(row.get('name') or '')
-        item.setData(Qt.UserRole, row)
-        item.setToolTip(f"{row.get('evidence_label') or ''}\n"
-                        f"{(row.get('type') or '').upper()}, "
-                        f"{FileSystemUtils.get_readable_size(row.get('size') or 0)}")
-        kind = row.get('type') or 'unknown'
-        glyph = _ICON_FOR_TYPE.get(kind)
-        fallback = self.icon_resolver(kind) if self.icon_resolver else None
-        if kind in _VIDEO and self.content_reader is not None and \
-                0 < int(row.get('size') or 0) <= THUMBNAIL_MAX_BYTES:
-            # The video's icon until a frame from it is drawn (with a play
-            # badge), read from the image like a picture's.
-            item.setIcon(icons.icon(glyph))
-            self._queue_video(item, row)
-        elif glyph is not None:
-            item.setIcon(icons.icon(glyph))
-        else:
-            # The file type's own icon -- until, for a picture, its thumbnail
-            # is drawn; or for good, if the data will not decode.
-            item.setIcon(fallback or icons.icon(icons.CARVING))
-            if kind in _PICTURE_TYPES:
-                self._thumb_queue.append(item)
-                self._thumb_timer.start()
-        self.gallery.addItem(item)
+    def _carve_bytes(self, row):
+        """A carve's bytes for its thumbnail (on the thumbnail thread),
+        read from the image -- there may be no copy."""
+        if self.content_reader is None:
+            return None
+        return self.content_reader(row)
 
-    def _queue_video(self, item, row):
-        from trace_app.ui.viewers.media.video_thumbnails import (
-            VideoThumbnailer, buffer_opener)
-        if getattr(self, '_videos', None) is None:
-            self._videos = VideoThumbnailer(self)
-            self._videos.ready.connect(self._video_ready)
-        if not hasattr(self, '_video_items'):
-            self._video_items = {}
-        key = (row.get('evidence_id') if row.get('evidence_id') is not None
-               else row.get('image_path'), row.get('offset'), row.get('type'))
-        self._video_items[key] = item
-
-        def opener(row=row):
-            return buffer_opener(self.content_reader(row))()
-        self._videos.request(key, opener, row.get('name') or '')
-
-    def _video_ready(self, key, image):
-        from trace_app.ui.viewers.media.video_thumbnails import with_play_badge
-        item = getattr(self, '_video_items', {}).pop(key, None)
-        if item is None or image.isNull():
-            return
-        try:
-            item.setIcon(QIcon(with_play_badge(QPixmap.fromImage(
-                image.scaled(_THUMB, _THUMB, Qt.KeepAspectRatio,
-                             Qt.SmoothTransformation)))))
-        except RuntimeError:
-            pass        # the gallery was rebuilt meanwhile
-
-    def _draw_some_thumbnails(self):
-        for _ in range(_THUMBS_PER_TICK):
-            if not self._thumb_queue:
-                self._thumb_timer.stop()
-                return
-            item = self._thumb_queue.pop(0)
-            row = item.data(Qt.UserRole) or {}
-            if self.content_reader is None or \
-                    int(row.get('size') or 0) > THUMBNAIL_MAX_BYTES:
-                continue
-            try:
-                content = self.content_reader(row)
-            except Exception as exc:
-                logger.debug("Thumbnail read failed: %s", exc)
-                content = None
-            pixmap = _thumbnail(content, row.get('type') or '')
-            if not pixmap.isNull():
-                item.setIcon(QIcon(pixmap))
+    def _carve_video(self, row):
+        """A carved video, as a stream over its bytes, for a frame."""
+        if self.content_reader is None or \
+                not 0 < int(row.get('size') or 0) <= MAX_VIDEO_BYTES:
+            return None
+        from trace_app.ui.viewers.media.video_thumbnails import buffer_opener
+        return buffer_opener(self.content_reader(row))()
 
     def selected_rows(self):
-        """The carves selected in the table (or the gallery), in order."""
-        if self.stack.currentWidget() is self.gallery:
-            return [item.data(Qt.UserRole)
-                    for item in self.gallery.selectedItems()]
+        """The carves selected, in order -- one selection, whichever view
+        shows it."""
         rows = sorted({index.row() for index in
-                       self.table.selectionModel().selectedRows()})
+                       self.table.selectionModel().selectedRows(0)} |
+                      {index.row() for index in
+                       self.table.selectionModel().selectedIndexes()})
         return [self.table.item(r, 0).data(Qt.UserRole) for r in rows
                 if self.table.item(r, 0) is not None]
 
@@ -900,72 +820,40 @@ class CarvedFilesPanel(QWidget):
                 row, self.table.viewport().mapToGlobal(point))
 
     def _gallery_menu(self, point):
-        item = self.gallery.itemAt(point)
-        if item is not None:
+        index = self.gallery.indexAt(point)
+        row = self._row_at(index) if index.isValid() else None
+        if row:
             self.file_menu_requested.emit(
-                item.data(Qt.UserRole),
-                self.gallery.viewport().mapToGlobal(point))
+                row, self.gallery.viewport().mapToGlobal(point))
 
 
-#: Larger carves are not read for a thumbnail: the gallery reads from the
-#: image as it scrolls, on the UI thread.
-THUMBNAIL_MAX_BYTES = 64 * 1024 * 1024
+#: A carved video larger than this is not read for a frame: a carve is read
+#: whole from the image, on the UI thread, to be decoded.
+MAX_VIDEO_BYTES = 64 * 1024 * 1024
+#: The menu's extra view, and where the choice is remembered.
+STATISTICS = 'statistics'
+CARVED_VIEW_OPTION = 'carved_view'
+
+_THUMBNAIL_KINDS = {
+    **{t: thumbs.PICTURE for t in ('jpg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+                                   'avif', 'heic', 'psd', 'ico', 'cr2', 'nef',
+                                   'arw', 'dng', 'pef')},
+    **{t: thumbs.VIDEO for t in _VIDEO},
+    'pdf': thumbs.PDF,
+    **{t: thumbs.DOCUMENT for t in ('docx', 'xlsx', 'pptx', 'vsdx', 'odt',
+                                    'ods', 'odp', 'odg')},
+}
 
 
-def _pillow_thumbnail(content):
-    """What Qt cannot decode -- AVIF, PSD -- through Pillow."""
-    import io
-    from PIL import Image
-    from PySide6.QtGui import QImage
-    with Image.open(io.BytesIO(content)) as image:
-        image.thumbnail((_THUMB * 2, _THUMB * 2))
-        image = image.convert('RGBA')
-        data = image.tobytes('raw', 'RGBA')
-        qimage = QImage(data, image.width, image.height, QImage.Format_RGBA8888)
-        return QPixmap.fromImage(qimage.copy())
-
-
-def _thumbnail(content, file_type):
-    """A thumbnail of a carved picture or PDF, from its bytes (read from
-    the image, not a copy), or a null pixmap.
-
-    Scaled to fit, never cropped: a thumbnail that trims the edges of a
-    picture hides part of the evidence.
-    """
-    pixmap = QPixmap()
-    if not content:
-        return pixmap
-    try:
-        if file_type == 'pdf':
-            from pymupdf import Matrix, open as open_pdf
-            with open_pdf(stream=bytes(content), filetype='pdf') as document:
-                if document.page_count:
-                    page = document.load_page(0)
-                    scale = _THUMB / max(page.rect.width, page.rect.height, 1)
-                    image = page.get_pixmap(matrix=Matrix(scale * 2, scale * 2))
-                    pixmap.loadFromData(image.tobytes('png'), 'PNG')
-        elif file_type in _PICTURE_TYPES:
-            from PySide6.QtCore import QBuffer, QByteArray, QIODevice
-            buffer = QBuffer()
-            buffer.setData(QByteArray(bytes(content)))
-            buffer.open(QIODevice.ReadOnly)
-            reader = QImageReader(buffer)
-            reader.setAutoTransform(True)
-            size = reader.size()
-            if size.isValid() and size.width() and size.height():
-                factor = (_THUMB * 2) / max(size.width(), size.height())
-                if factor < 1:
-                    reader.setScaledSize(size * factor)
-            image = reader.read()
-            buffer.close()
-            if not image.isNull():
-                pixmap = QPixmap.fromImage(image)
-            else:
-                pixmap = _pillow_thumbnail(content)
-    except Exception as exc:
-        logger.debug("No thumbnail for a carved %s: %s", file_type, exc)
-        return QPixmap()
-    if pixmap.isNull():
-        return pixmap
-    return pixmap.scaled(_THUMB, _THUMB, Qt.KeepAspectRatio,
-                         Qt.SmoothTransformation)
+def carved_item(row):
+    """(key, kind, size) for a carve the icon views can show as a picture,
+    or None. The carve's type is what its content proved it to be."""
+    if not isinstance(row, dict):
+        return None
+    kind = _THUMBNAIL_KINDS.get((row.get('type') or '').lower())
+    size = int(row.get('size') or 0)
+    if kind is None or size <= 0:
+        return None
+    key = (row.get('evidence_id') if row.get('evidence_id') is not None
+           else row.get('image_path'), row.get('offset'), row.get('type'))
+    return key, kind, size

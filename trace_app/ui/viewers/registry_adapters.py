@@ -66,7 +66,15 @@ class HexAdapter(ViewerAdapter):
     label = 'Hex'
 
     def display(self, content, data):
-        self.widget.display_hex_content(content)
+        self.widget.display_hex_content(content, data)
+
+    def reads_itself(self, data):
+        """A file on the image is read by the hex view a page at a time
+        (core/hex_source.ImageFileSource), never loaded whole."""
+        return bool(data) and data.get('type') == 'file' and \
+            data.get('inode_number') is not None and \
+            data.get('start_offset') is not None and \
+            not data.get('archive_member')
 
 
 class TextAdapter(ViewerAdapter):

@@ -161,3 +161,38 @@ def test_the_disk_chooser_warns_about_the_system_disk(qapp):
     dialog.table.selectRow(1)
     dialog._accept()
     assert dialog.device == '/dev/sdb'
+
+
+def test_small_reads_are_served_from_the_cache(disk_file, isolated):
+    """The Sleuth Kit reads in small pieces: each must not be a round trip
+    to the helper."""
+    path, data = disk_file
+    disk = live_disk.LiveDisk(path, elevate=False)
+    try:
+        trips = []
+        fetch = disk._fetch
+        disk._fetch = lambda length, offset: (trips.append(offset),
+                                              fetch(length, offset))[1]
+        for offset in range(0, 200_000, 512):
+            assert disk.read_buffer_at_offset(512, offset) == \
+                data[offset:offset + 512]
+        assert len(trips) == 1                  # one 256 KB block
+        # A read across blocks and the disk's odd-sized end.
+        tail = len(data) - 3000
+        assert disk.read_buffer_at_offset(10_000, tail) == data[tail:]
+        # Hashing-sized reads go straight through.
+        assert disk.read_buffer_at_offset(5 * 2**20, 0) == data[:5 * 2**20]
+    finally:
+        disk.close()
+
+
+def test_a_reader_that_dies_is_an_error_not_a_hang(disk_file, isolated):
+    path, _data = disk_file
+    disk = live_disk.LiveDisk(path, elevate=False)
+    disk._process.kill()
+    disk._process.wait()
+    with pytest.raises(live_disk.LiveDiskError):
+        disk.read_buffer_at_offset(512, 2 * 2**20)
+    # And it stays an error, said the same way.
+    with pytest.raises(live_disk.LiveDiskError, match='add the disk again'):
+        disk.read_buffer_at_offset(512, 0)

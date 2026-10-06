@@ -196,6 +196,16 @@ def _capture_viewer(window):
         shown.append(content)
         return original(_self, content, data)
     window.update_viewer_with_file_content = record
+
+    # With the Hex tab in front a file on the image goes to it as a source
+    # read a page at a time: what it would show is the whole source.
+    viewer = window.hex_viewer
+    show_source = type(viewer).display_source
+
+    def record_source(source, data=None, _viewer=viewer):
+        shown.append(source.read(0, source.size))
+        return show_source(_viewer, source, data)
+    viewer.display_source = record_source
     return shown
 
 
@@ -728,10 +738,11 @@ def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs,
         assert (window.current_selected_data or {}).get('is_carved')
 
         # Thumbnails come from the image too: there is no copy to read.
-        from trace_app.ui.viewers.carved_panel import _thumbnail
+        from trace_app.ui.widgets.thumbnails import picture_image
         picture = next(r for r in window.carved_panel._rows
                        if r['type'] == 'jpg' and r['status'] != 'partial')
-        assert not _thumbnail(window._carved_bytes(picture), 'jpg').isNull()
+        assert not picture_image(window._carved_bytes(picture),
+                                 96).isNull()
 
         # Export: copies read from the image, each matching its hash.
         rows = window.carved_panel._rows[:3]
@@ -2179,14 +2190,197 @@ def test_videos_get_thumbnails_in_the_listing_and_the_gallery(qapp,
     panel.content_reader = lambda row: video
     panel.resize(700, 400)
     try:
-        panel.view_group.button(1).setChecked(True)       # Thumbnails
-        panel.add_record({'name': '1a00.webm', 'type': 'webm',
-                          'offset': 0x1a00, 'size': len(video),
-                          'evidence_id': None, 'image_path': 'x',
-                          'evidence_label': 'x', 'status': 'valid'})
-        item = panel.gallery.item(0)
-        assert pump(qapp, 15, lambda: not panel._video_items)
-        # A frame now, not the video glyph: a pixmap icon has its size.
-        assert item.icon().availableSizes()
+        panel.set_view('large', remember=False)
+        record = {'name': '1a00.webm', 'type': 'webm', 'offset': 0x1a00,
+                  'size': len(video), 'evidence_id': None,
+                  'image_path': 'x', 'evidence_label': 'x',
+                  'status': 'valid'}
+        panel.add_record(record)
+        panel.show()
+        index = panel.table.model().index(0, 0)
+        assert pump(qapp, 15, lambda: panel.gallery.thumbnail_for(index))
+        # A frame, play-badged, in the view the Listing uses.
+        frame = panel.gallery.thumbnail_for(index)
+        assert max(frame.width(), frame.height()) == 96
     finally:
         panel.deleteLater()
+
+
+def test_an_archive_in_the_tree_opens_and_grows_beneath_it(qapp, window,
+                                                          monkeypatch):
+    """A click on an archive in the tree lists it (as a double-click in the
+    Listing does) and shows its members under it: folders, files, and an
+    archive inside that opens in turn."""
+    import io
+    import zipfile
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QTreeWidgetItem
+
+    def zipped(files):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            for name, data in files.items():
+                archive.writestr(name, data)
+        return buffer.getvalue()
+
+    inner = zipped({'deep.txt': b'inside the inner archive'})
+    outer = zipped({'docs/a.txt': b'alpha', 'docs/b.txt': b'beta',
+                    'top.txt': b'top level', 'inner.zip': inner})
+    tree = window.tree_viewer
+    volume = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount())
+                  if (tree.topLevelItem(i).data(0, Qt.UserRole) or {})
+                  .get('image_path'))
+    window.activate_item_image(volume)
+    offset = next((p[2] for p in window.image_handler.get_partitions() or ()
+                   if window.image_handler.has_filesystem(p[2])), 0)
+    node = QTreeWidgetItem(volume)
+    node.setText(0, 'evidence.zip')
+    node.setData(0, Qt.UserRole, {'type': 'file', 'name': 'evidence.zip',
+                                  'inode_number': 999999,
+                                  'start_offset': offset})
+    monkeypatch.setattr(window, '_load_archive',
+                        lambda data: ('evidence.zip', outer, dict(data)))
+    window._tree_archives.clear()
+
+    def listed():
+        table = window.listing_table
+        return sorted(table.item(r, 0).text() for r in range(table.rowCount())
+                      if table.item(r, 0))
+
+    def child(item, name):
+        return next(item.child(i) for i in range(item.childCount())
+                    if item.child(i).text(0) == name)
+
+    try:
+        window.on_item_clicked(node, 0)
+        assert 'top.txt' in listed() and 'inner.zip' in listed()
+        assert sorted(node.child(i).text(0) for i in range(node.childCount())) \
+            == ['docs', 'inner.zip', 'top.txt']
+        assert node.isExpanded()
+
+        window.on_item_clicked(child(node, 'docs'), 0)
+        assert listed() == ['a.txt', 'b.txt']
+        assert sorted(child(node, 'docs').child(i).text(0)
+                      for i in range(2)) == ['a.txt', 'b.txt']
+
+        nested = child(node, 'inner.zip')
+        window.on_item_clicked(nested, 0)
+        assert listed() == ['deep.txt']
+        deep = child(nested, 'deep.txt')
+
+        captured = _capture_viewer(window)
+        window._tree_archives.clear()           # read again from the image
+        window.on_item_clicked(deep, 0)
+        pump(qapp, 5, lambda: bool(captured))
+        assert captured[-1] == b'inside the inner archive'
+    finally:
+        volume.removeChild(node)
+        window._archive_stack = []
+        window.__dict__.pop('update_viewer_with_file_content', None)
+
+
+def test_icon_views_know_files_by_content_and_draw_documents(qapp):
+    """A renamed picture shows itself (its first bytes say what it is); a
+    PDF shows its first page and an ODF document the preview it carries;
+    text keeps its icon. Made off the UI thread."""
+    import io
+    import zipfile
+    import pymupdf
+    from PIL import Image
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+    from trace_app.ui.widgets import thumbnails as thumbs
+    from trace_app.ui.widgets.listing_views import ListingIconView
+
+    def encoded(kind, size=(300, 200)):
+        buffer = io.BytesIO()
+        Image.new('RGB', size, (20, 120, 200)).save(buffer, kind)
+        return buffer.getvalue()
+
+    document = pymupdf.open()
+    document.new_page(width=300, height=400).insert_text((40, 60), "Page")
+    pdf = document.tobytes()
+    odt = io.BytesIO()
+    with zipfile.ZipFile(odt, 'w') as archive:
+        archive.writestr('mimetype', 'application/vnd.oasis.opendocument.text')
+        archive.writestr('Thumbnails/thumbnail.png',
+                         encoded('PNG', (120, 160)))
+    files = {'holiday.txt': encoded('JPEG'), 'scan.dat': encoded('PNG'),
+             'report.pdf': pdf, 'letter.odt': odt.getvalue(),
+             'readme.txt': b'plain words, nothing more ' * 4}
+    assert thumbs.kind_by_content(files['holiday.txt']) == thumbs.PICTURE
+    assert thumbs.kind_by_content(pdf) == thumbs.PDF
+    assert thumbs.kind_by_content(files['letter.odt']) == thumbs.DOCUMENT
+    assert thumbs.kind_by_content(files['readme.txt']) is None
+
+    table = QTableWidget(len(files), 1)
+    for row, (name, content) in enumerate(files.items()):
+        cell = QTableWidgetItem(name)
+        cell.setData(Qt.UserRole, {'type': 'file', 'name': name,
+                                   'size': len(content), 'inode_number': row,
+                                   'start_offset': 0, 'image_path': 'x'})
+        table.setItem(row, 0, cell)
+    view = ListingIconView(table, lambda d: files[d['name']],
+                           read_head=lambda d: files[d['name']][:64])
+    view.resize(800, 400)
+    view.set_mode('large')
+    view.show()
+    try:
+        keys = [view._key(table.item(r, 0).data(Qt.UserRole))
+                for r in range(len(files))]
+        assert pump(qapp, 10, lambda: all(k in view._thumbs for k in keys))
+        made = {name: view._thumbs[key] for name, key in zip(files, keys)}
+        for name in ('holiday.txt', 'scan.dat', 'report.pdf', 'letter.odt'):
+            assert made[name] and not made[name].isNull(), name
+        assert made['readme.txt'] is False
+        page = made['report.pdf']
+        assert page.height() == 96 and page.width() < 96   # fitted, not cut
+    finally:
+        view.deleteLater()
+
+
+
+def test_the_hex_tab_reads_a_listed_file_from_its_image(qapp, window, truth,
+                                                        monkeypatch):
+    """With the Hex tab in front, a listed file is read from the image a
+    page at a time (nothing loaded whole); a selected range bookmarks as
+    bytes of the image and opens again from the bookmark."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QInputDialog
+    from trace_app.core.case import parse_artifact_ref
+    from trace_app.core.hex_source import ImageFileSource
+    window.on_item_clicked(_first_volume(_root(window, SECOND)), 0)
+    pump(qapp, 0.5)
+    table = window.listing_table
+    row = next(r for r in range(table.rowCount())
+               if (table.item(r, 0).data(Qt.UserRole) or {}).get('type')
+               == 'file' and table.item(r, 0).text() == '$MFT')
+    data = table.item(row, 0).data(Qt.UserRole)
+    viewer = window.hex_viewer
+    window.viewer_tab.setCurrentWidget(viewer)
+    window.on_listing_table_item_clicked(table.item(row, 0), navigate=False)
+    pump(qapp, 0.5)
+    assert isinstance(viewer.source, ImageFileSource)
+    handler = truth[SECOND]
+    content, _meta = handler.get_file_content(data['inode_number'],
+                                              data['start_offset'])
+    assert viewer.source.read(0, 4096) == content[:4096]
+    assert viewer.hex_table.item(0, 1).text() == f"{content[0]:02X}"
+
+    viewer.show_bytes(0, 4)                          # 'FILE'
+    begin = viewer.source.image_offset(0)
+    assert handler.read(begin, 4) == content[:4] == b'FILE'
+    monkeypatch.setattr(QInputDialog, 'getText',
+                        lambda *a, **k: ('MFT signature', True))
+    viewer.bookmark_selection()
+    mark = next(b for b in window.case.bookmarks()
+                if b['label'] == 'MFT signature')
+    ref = parse_artifact_ref(mark['artifact_ref'])
+    assert ref['kind'] == 'span' and (ref['begin'], ref['end']) == \
+        (begin, begin + 4)
+    window.preview_artifact(mark)
+    pump(qapp, 0.5)
+    assert viewer.source.read(0, 4) == b'FILE'
+    assert viewer.source.image_offset(0) == begin
+    window.case.remove_bookmark(mark['id'])
+    window.refresh_bookmarks()

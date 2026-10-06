@@ -1104,7 +1104,8 @@ class ImageHandler:
     def _xfs_file_system(self, start_offset):
         """An XFS volume at a partition (or an unpartitioned image), read
         through libfsxfs, or None."""
-        if start_offset in self._volumes or                 start_offset >= containers.SHADOW_KEY_BASE:
+        if start_offset in self._volumes or \
+                start_offset >= containers.SHADOW_KEY_BASE:
             return None
         try:
             window = self._partition_window(start_offset)

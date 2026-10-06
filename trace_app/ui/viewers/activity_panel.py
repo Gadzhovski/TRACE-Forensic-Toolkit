@@ -32,6 +32,7 @@ from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.ActivityPanel')
 
@@ -411,7 +412,7 @@ class ActivityPanel(QWidget):
             if not row.get('recycle_content'):
                 content.setToolTip("Run Analysis ▸ Deleted files first, or "
                                    "the content is still in the bin")
-        chosen = menu.exec_(self.table.viewport().mapToGlobal(point))
+        chosen = show_menu(menu, self.table.viewport().mapToGlobal(point))
         if chosen is not None and chosen == content:
             self.deleted_requested.emit(row['recycle_content'])
             return

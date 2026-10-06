@@ -147,10 +147,13 @@ class EvidenceIntake(QWidget):
         self.remove_button.clicked.connect(self.remove_selected)
         for button in (self.add_file_button, self.add_folder_button,
                        self.disk_button, self.remove_button):
+            # Never narrower than its text: a squeezed row clipped it.
+            button.setMinimumWidth(button.sizeHint().width())
             buttons.addWidget(button)
         buttons.addStretch(1)
         hint = QLabel("or drop files and folders on the list")
         hint.setObjectName("intakeHint")
+        hint.setWordWrap(True)
         buttons.addWidget(hint)
         layout.addLayout(buttons)
 

@@ -9,32 +9,51 @@ case pages show the defaults in use and cannot be changed.
 
 import os
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import QSize, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QCompleter, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QPushButton, QSpinBox, QTabWidget,
-                               QVBoxLayout, QWidget)
+                               QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem,
+                               QPushButton, QScrollArea, QSpinBox,
+                               QStackedWidget, QVBoxLayout, QWidget)
 
 from trace_app.core import settings
 from trace_app.ui import icons
 
-#: page title -> (scope, keys). Order is the dialog's.
+#: The pages, in order: (title, icon, introduction, sections), each
+#: section (heading or None, scope, keys).
 PAGES = (
-    ("General", 'user', ('examiner', 'organisation', 'case_folder',
-                         'size_units', 'verify_order', 'debug_log')),
-    ("Display", 'mixed', (('user', 'show_deleted'), ('user', 'show_system'),
-                          ('case', 'display_zone'))),
-    ("Privacy && Network", 'case', ('offline', 'vt_uploads')),
-    ("Analysis", 'case', ('hash_md5', 'hash_sha1', 'max_analysis_mb',
-                          'max_inspect_mb', 'high_entropy', 'archive_depth',
-                          'archive_member_mb', 'indicators')),
-    ("Carving && Exports", 'case', ('carve_source', 'carve_min_kb',
-                                    'analyse_carves', 'carve_write_copies',
-                                    'carved_folder',
-                                    'export_folder')),
+    ("General", icons.SETTINGS,
+     "Who you are, where cases start, how sizes read. Kept for you on this "
+     "computer, in every case.",
+     ((None, 'user', ('examiner', 'organisation', 'case_folder')),
+      ("Working", 'user', ('size_units', 'verify_order')),
+      ("Troubleshooting", 'user', ('debug_log',)))),
+    ("Display", icons.DISPLAY,
+     "What the Listing shows, and the time zone shown beside UTC.",
+     (("Listing", 'user', ('show_deleted', 'show_system')),
+      ("Times", 'case', ('display_zone',)))),
+    ("Privacy & Network", icons.VOLUME_LOCKED,
+     "Whether anything from this case may leave this computer.",
+     ((None, 'case', ('offline', 'vt_uploads')),)),
+    ("Analysis", icons.TRIAGE,
+     "What the analysis modules hash, read and extract.",
+     (("Hashes", 'case', ('hash_md5', 'hash_sha1')),
+      ("Limits", 'case', ('max_analysis_mb', 'max_inspect_mb',
+                          'high_entropy')),
+      ("Archives", 'case', ('archive_depth', 'archive_member_mb')),
+      ("Indicators", 'case', ('indicators',)))),
+    ("Carving & Exports", icons.FINDING_CARVED,
+     "How files are carved, and where copies and exports are written.",
+     (("Carving", 'case', ('carve_source', 'carve_min_kb', 'analyse_carves',
+                           'carve_write_copies')),
+      ("Folders", 'case', ('carved_folder', 'export_folder')))),
 )
+
+#: How far a checkbox's explanation is indented: past its box, so it lines
+#: up with the label's text.
+SETTING_INDENT = 24
 
 #: Number ranges: key -> (lowest, highest, step or None for whole numbers).
 RANGES = {
@@ -69,69 +88,168 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setObjectName("settingsDialog")
         self.setWindowIcon(icons.icon(icons.LOGO))
-        self.setMinimumWidth(620)
+        self.resize(820, 600)
+        self.setMinimumSize(680, 460)
         self.user_values = settings.read_user()
         self.case_values = settings.for_case(case)
         self.editors = {}          # (scope, key) -> (widget, read function)
         self.changed = {}          # filled on accept: case keys changed
 
         layout = QVBoxLayout(self)
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("settingsTabs")
-        layout.addWidget(self.tabs)
-        for title, scope, keys in PAGES:
-            self.tabs.addTab(self._page(scope, keys), title.replace('&&', '&'))
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        layout.addLayout(body, 1)
 
+        # The pages down the side; one at a time beside them.
+        self.nav = QListWidget()
+        self.nav.setObjectName("settingsNav")
+        self.nav.setIconSize(QSize(16, 16))
+        self.nav.setFixedWidth(190)
+        self.pages = QStackedWidget()
+        self.pages.setObjectName("settingsPages")
+        for title, icon_name, intro, sections in PAGES:
+            QListWidgetItem(icons.icon(icon_name), title, self.nav)
+            self.pages.addWidget(self._page(title, intro, sections))
+        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+        body.addWidget(self.nav)
+        body.addWidget(self.pages, 1)
+
+        footer = QFrame()
+        footer.setObjectName("settingsFooter")
+        row = QHBoxLayout(footer)
+        row.setContentsMargins(16, 10, 12, 10)
+        where = QLabel(
+            "Your settings are kept on this computer; Case settings in the "
+            "case." if case is not None else
+            "Quick triage: Case settings show the defaults in use.")
+        where.setObjectName("settingsHint")
+        row.addWidget(where, 1)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok |
                                    QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        row.addWidget(buttons)
+        layout.addWidget(footer)
+
+    def page_count(self):
+        return self.pages.count()
+
+    def show_page(self, index):
+        self.nav.setCurrentRow(index)
 
     # --- building ---------------------------------------------------------
 
-    def _page(self, scope, keys):
-        page = QWidget()
-        outer = QVBoxLayout(page)
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        outer.addLayout(form)
-        has_case_settings = False
-        for item in keys:
-            item_scope, key = item if isinstance(item, tuple) else (scope, item)
-            spec = (settings.USER if item_scope == 'user' else
-                    settings.CASE)[key]
-            values = (self.user_values if item_scope == 'user' else
-                      self.case_values)
-            widget, read = self._editor(key, spec, values[key])
-            widget.setToolTip(spec[2])
-            if item_scope == 'case':
-                has_case_settings = True
-                widget.setEnabled(self.case is not None)
-            self.editors[(item_scope, key)] = (widget, read)
-            if isinstance(widget, QCheckBox):
-                form.addRow(widget)
-            else:
-                form.addRow(spec[1], widget)
-            hint = QLabel(spec[2])
-            hint.setObjectName("settingsHint")
-            hint.setWordWrap(True)
-            form.addRow('', hint)
-        if scope == 'user' and 'debug_log' in keys:
-            open_log = QPushButton("Open Log Folder")
-            open_log.clicked.connect(self._open_log_folder)
-            form.addRow('', open_log)
-        if has_case_settings:
+    def _page(self, title, intro, sections):
+        """One page: its title, what it is for, then each setting with its
+        explanation beneath it -- in a scroll area, so a long page never
+        squeezes its rows."""
+        content = QWidget()
+        content.setObjectName("settingsPage")
+        column = QVBoxLayout(content)
+        column.setContentsMargins(24, 18, 24, 18)
+        column.setSpacing(0)
+        heading = QLabel(title)
+        heading.setObjectName("settingsPageTitle")
+        column.addWidget(heading)
+        about = QLabel(intro)
+        about.setObjectName("settingsPageIntro")
+        about.setWordWrap(True)
+        column.addWidget(about)
+
+        if any(scope == 'case' for _heading, scope, _keys in sections):
             note = QLabel(
-                "Kept in this case and written to its audit trail when "
-                "changed; the report states them." if self.case is not None
-                else "No case is open (quick triage): these are the "
-                     "defaults in use. Open a case to change them.")
+                "Settings marked Case are kept in this case and written to "
+                "its audit trail when changed; the report states them."
+                if self.case is not None else
+                "No case is open (quick triage): settings marked Case show "
+                "the defaults in use. Open a case to change them.")
             note.setObjectName("settingsScopeNote")
             note.setWordWrap(True)
-            outer.addWidget(note)
-        outer.addStretch(1)
-        return page
+            column.addWidget(note)
+
+        for section, scope, keys in sections:
+            if section:
+                label = QLabel(section)
+                label.setObjectName("settingsSection")
+                column.addWidget(label)
+            for key in keys:
+                column.addWidget(self._row(scope, key))
+            if 'debug_log' in keys:
+                open_log = QPushButton("Open Log Folder")
+                open_log.clicked.connect(self._open_log_folder)
+                holder = QHBoxLayout()
+                holder.setContentsMargins(SETTING_INDENT - 8, 6, 0, 0)
+                holder.addWidget(open_log)
+                holder.addStretch(1)
+                column.addLayout(holder)
+        column.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+        return scroll
+
+    def _row(self, scope, key):
+        """A setting: its label (or the checkbox itself), the editor, and
+        its explanation in the page's full width under it."""
+        spec = (settings.USER if scope == 'user' else settings.CASE)[key]
+        values = self.user_values if scope == 'user' else self.case_values
+        widget, read = self._editor(key, spec, values[key])
+        widget.setToolTip(spec[2])
+        if scope == 'case':
+            widget.setEnabled(self.case is not None)
+        self.editors[(scope, key)] = (widget, read)
+
+        row = QWidget()
+        row.setObjectName("settingsRow")
+        lines = QVBoxLayout(row)
+        lines.setContentsMargins(0, 12, 0, 0)
+        lines.setSpacing(5)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        if isinstance(widget, QCheckBox):
+            top.addWidget(widget)
+            indent = SETTING_INDENT
+        else:
+            name = QLabel(spec[1])
+            name.setObjectName("settingsLabel")
+            name.setBuddy(widget)
+            top.addWidget(name)
+            indent = 0
+        if scope == 'case':
+            tag = QLabel("Case")
+            tag.setObjectName("settingsScopeTag")
+            tag.setToolTip("Kept in this case and audited when changed")
+            top.addWidget(tag)
+        top.addStretch(1)
+        lines.addLayout(top)
+        if not isinstance(widget, QCheckBox):
+            field = QHBoxLayout()
+            stretches = self._stretches(widget)
+            field.addWidget(widget, 1 if stretches else 0)
+            if not stretches:
+                field.addStretch(1)
+            lines.addLayout(field)
+        hint = QLabel(spec[2])
+        hint.setObjectName("settingsHint")
+        hint.setWordWrap(True)
+        hint.setContentsMargins(indent, 0, 0, 0)
+        lines.addWidget(hint)
+        return row
+
+    @staticmethod
+    def _stretches(widget):
+        """Text and folder fields take the page's width; numbers and
+        choices keep their own."""
+        return isinstance(widget, QLineEdit) or \
+            hasattr(widget, 'line_edit') or hasattr(widget, 'boxes')
 
     def _editor(self, key, spec, value):
         default = spec[0]
@@ -144,6 +262,7 @@ class SettingsDialog(QDialog):
             for choice in CHOICES[key]:
                 combo.addItem(choice, choice)
             combo.setCurrentIndex(max(0, combo.findData(value)))
+            combo.setMinimumWidth(220)
             return combo, combo.currentData
         if isinstance(default, bool):
             box = QCheckBox(spec[1])
@@ -162,6 +281,7 @@ class SettingsDialog(QDialog):
                 spin.setSingleStep(step)
                 spin.setDecimals(2)
                 spin.setValue(float(value))
+            spin.setMinimumWidth(140)
             return spin, spin.value
         edit = QLineEdit(str(value or ''))
         if key == 'display_zone':
@@ -196,13 +316,15 @@ class SettingsDialog(QDialog):
     def _indicators(self, value):
         holder = QWidget()
         grid = QGridLayout(holder)
-        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setContentsMargins(0, 2, 0, 2)
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(8)
         boxes = {}
         for index, kind in enumerate(settings.INDICATORS):
             box = QCheckBox(INDICATOR_LABELS.get(kind, kind))
             box.setChecked(kind in value)
             boxes[kind] = box
-            grid.addWidget(box, index // 2, index % 2)
+            grid.addWidget(box, index // 3, index % 3)
         holder.boxes = boxes
         return holder, lambda: [kind for kind, box in boxes.items()
                                 if box.isChecked()]

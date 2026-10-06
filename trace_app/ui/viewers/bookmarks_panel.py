@@ -22,6 +22,7 @@ from trace_app.core.case import parse_artifact_ref
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.Bookmarks')
 
@@ -169,7 +170,7 @@ class BookmarksPanel(QWidget):
         menu.addSeparator()
         remove = menu.addAction("Remove Bookmark")
 
-        action = menu.exec(self.table.viewport().mapToGlobal(position))
+        action = show_menu(menu, self.table.viewport().mapToGlobal(position))
         if action == go:
             self.jump_requested.emit(row)
         elif action == rename:

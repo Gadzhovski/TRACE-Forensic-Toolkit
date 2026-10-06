@@ -25,6 +25,7 @@ from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.Indicators')
 
@@ -373,7 +374,7 @@ class IndicatorsPanel(QWidget):
         menu = QMenu(self)
         copy = menu.addAction("Copy Value")
         search = menu.addAction("Search for This Value")
-        chosen = menu.exec_(self.values_table.viewport().mapToGlobal(point))
+        chosen = show_menu(menu, self.values_table.viewport().mapToGlobal(point))
         if chosen == copy:
             QGuiApplication.clipboard().setText(row['value'])
         elif chosen == search:

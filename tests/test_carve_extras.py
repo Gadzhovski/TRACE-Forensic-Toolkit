@@ -293,7 +293,7 @@ def test_statistics_show_what_the_run_recorded(qapp, carved):
     assert bar(0.5).startswith('█' * 10 + '░' * 10)
     panel = CarvedFilesPanel()
     panel.set_case(case)
-    panel.view_group.button(2).setChecked(True)
+    panel.set_view('statistics', remember=False)
     assert panel.stack.currentWidget() is panel.stats_view
     view = panel.stats_view
     assert view.run_combo.count() == 1

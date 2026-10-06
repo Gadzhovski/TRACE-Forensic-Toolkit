@@ -47,6 +47,7 @@ from trace_app.ui import icons
 from trace_app.ui.widgets.flow_layout import FlowLayout
 from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.Timeline')
 
@@ -1195,7 +1196,7 @@ class TimelinePanel(QWidget):
         if self.menu_extender is not None and has_file:
             menu.addSeparator()
             self.menu_extender(menu, self._payload(row))
-        menu.exec(self.table.viewport().mapToGlobal(point))
+        show_menu(menu, self.table.viewport().mapToGlobal(point))
 
     def _around(self, row, seconds):
         start, end = timeline.around(row['time'], seconds)

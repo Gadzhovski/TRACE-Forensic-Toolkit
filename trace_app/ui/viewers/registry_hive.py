@@ -13,6 +13,7 @@ from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.property_table import PropertyTable
+from trace_app.ui.widgets.context_menus import show_menu
 
 logger = logging.getLogger('TRACE.Registry')
 
@@ -228,7 +229,7 @@ class RegistryExtractor(QWidget):
         copyAction = contextMenu.addAction("Copy")
 
         # Execute the menu and check which action was triggered
-        action = contextMenu.exec_(self.tableWidget.mapToGlobal(position))
+        action = show_menu(contextMenu, self.tableWidget.mapToGlobal(position))
 
         if action == copyAction:
             # Copy the selected cell's text to the clipboard
