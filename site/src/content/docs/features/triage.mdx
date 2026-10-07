@@ -1,0 +1,73 @@
+---
+title: Triage and analysis
+description: TRACE's analysis modules in one pass over the evidence -- file type from content, entropy, hashes, hidden data, photo GPS, document authors, executables, NTFS internals and thumbnail caches -- graded so what matters comes first.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import triage from '../../../assets/repo/triage.png';
+
+<figure>
+<Image src={triage} alt="TRACE's Triage tab listing executables with their signers" />
+<figcaption>Triage: what stands out across the whole case.</figcaption>
+</figure>
+
+## One pass, every module
+
+The file analysis modules want the same bytes, so a run reads **each file once**, whatever you selected: the first 4 KB to identify it, the rest streamed in 64 KB blocks only if a module needs it. Anything not selected stays *not measured* -- distinguishable from *measured as nothing*. Rows are written in batches, so a 20,000-file image is a few hundred transactions, not 20,000.
+
+| Module | What it finds |
+|:--|:--|
+| **File type** | the type from the content (libmagic), compared with the name |
+| **Entropy** | Shannon entropy, the mean *and* the highest-scoring block |
+| **Hashes** | SHA-256 always; MD5 and SHA-1 if the case asks for them |
+| **Hidden data** | deceptive names, bytes after a file's real end, encryption, possible encrypted volumes |
+| **Photo metadata** | EXIF, including GPS -- every located photo goes on the map |
+| **Document authors** | authors and editors recorded in Office, ODF and PDF files |
+| **Executables** | PE, ELF and Mach-O: architecture, libraries, signer, overlays |
+
+## Graded, not flagged
+
+A list that opens with a thousand false alarms is a list nobody reads twice, so findings are **graded**:
+
+- **Suspicious** -- an executable wearing a document's extension.
+- **Notable** -- content that cannot be identified *and* scores high entropy, which is what an encrypted file looks like from outside.
+- **Benign** -- `.jpe` holding a JPEG. Recorded, not reported.
+
+Entropy is judged by type first: a ZIP at 7.99 bits per byte is a ZIP, and flagging it would teach you to ignore the flag. And because a small encrypted payload appended to a photograph hardly moves the mean, the **peak** block is kept too. Files under a minimum size score 0 rather than a number -- over a few dozen bytes, entropy measures how many distinct values appeared, not disorder.
+
+## Hidden data
+
+- **Bytes after the end** of a JPEG, PNG or PDF -- found by parsing the format, not by searching for the last end marker.
+- **Deceptive names**: double extensions such as `invoice.pdf.exe`, and right-to-left override characters that make a name read backwards.
+- **Encrypted documents and archives**, and files that look like **encrypted volumes**.
+
+## Executables
+
+PE, ELF and Mach-O (fat binaries too) are parsed by TRACE itself: architecture, imported libraries, build time, signer and any overlay appended after the program. The Authenticode signer is read from the signature -- and TRACE says plainly that it is **not verified**. A reproducible build's PE timestamp is recognised as a hash, not a time. Triage lists every executable; the Findings node only the notable and suspicious ones. The values are tested against `pefile` and `pyelftools` on real binaries (PuTTY, SQLite, BusyBox, bat, ripgrep).
+
+## NTFS internals
+
+The **NTFS** module reads the raw `$MFT` and `$UsnJrnl:$J` into events with 100-nanosecond times, plus:
+
+- **Timestomping**, graded: a `$STANDARD_INFORMATION` time earlier than `$FILE_NAME` alone is benign (installers do it thousands of times); a whole-second SI time where FN has a fraction is notable; both together are suspicious.
+- **`$I30` slack** -- index entries for files long gone.
+- **`$LogFile`** records, accepted only where their log sequence number points back to where they sit.
+
+Paths of deleted entries are rebuilt the way `libfsntfs` does; orphans go under `$Orphan`.
+
+## Thumbnail caches
+
+Windows `thumbcache_*.db` and `Thumbs.db`, the Windows Search index's thumbnail IDs (Windows.edb and the Windows 11 Windows.db), and the RDP bitmap cache. Each picture is checked against its original: still **present**, **deleted**, or **absent** -- a picture of a file that no longer exists is a finding.
+
+## Persistence and hash sets
+
+See [Detection](/TRACE-Forensic-Toolkit/features/detection/): autoruns graded by the file they start, and NSRL and your own hash sets to hide the known and flag the known-bad.
+
+## The map
+
+Photo GPS and activity records that carry coordinates are drawn on **Triage ▸ Map** -- offline by default, over a bundled world map. Online map tiles are opt-in, asked once per server per session, and audited.
+
+<Aside type="note" title="Findings are everywhere you look">
+The same findings appear as listing columns, in Triage and under the **Findings** node in the tree -- which only appears once there is something in it.
+</Aside>

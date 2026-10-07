@@ -1,0 +1,65 @@
+---
+title: User activity and timeline
+description: TRACE reads what the users did -- programs run, files opened, USB devices, logons, browser history, chats, phone records -- from Windows, macOS, Linux, iOS and Android artifacts, and puts every source on one timeline.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import activity from '../../../assets/repo/activity.png';
+import timeline from '../../../assets/repo/timeline.png';
+
+<figure>
+<Image src={activity} alt="TRACE's Activity tab: programs run, files opened and devices, in time order" />
+<figcaption>Activity: what the users did, in time order, each row linked to the file it was read from.</figcaption>
+</figure>
+
+## Targeted, not a walk
+
+The activity module does not crawl the disk. It looks up the paths where each operating system keeps its records -- case-insensitively, wherever the system root is -- and reads only those. A full Windows XP image is read in a few seconds.
+
+Every record has the same shape: **category, source, time, what happened, subject, user**, details, and the file it came from -- so a single click previews the source artifact and a double-click goes to it.
+
+<Aside type="note" title="What a time means">
+Not every time is *when it happened*. Where it is not, the record says so in its **basis**: Shimcache's time is the file's modification time; a ShellBag's is when Explorer rewrote the bag; Prefetch's "first run" is the `.pf` file's creation; a shell history without timestamps has its commands in order, with the file's modification time.
+</Aside>
+
+## What is read
+
+| Category | Sources |
+|:--|:--|
+| **Programs** | Prefetch (Windows XP to 11, compressed included), Amcache, Shimcache, UserAssist, BAM, RunMRU, PowerShell history and script-block logging (event 4104), bash / zsh / fish history |
+| **Files and folders** | ShellBags, LNK shortcuts, Jump Lists, RecentDocs, TypedPaths, Office recent files, macOS recent items and shared file lists, FSEvents, `recently-used.xbel` |
+| **USB devices** | USBSTOR, DeviceClasses, MountPoints2, setupapi logs |
+| **Logons** | Windows event logs (logons, sessions; service and machine accounts left out), Linux journal, syslog, wtmp/utmpx |
+| **Browsers** | Chrome, Edge, Brave, Vivaldi and other Chromium browsers, Firefox, Safari, Internet Explorer (WebCache and `index.dat`) -- history and downloads |
+| **Searches** | WordWheelQuery (what was typed into Explorer's search box) and search-engine searches from browser history |
+| **Network** | NetworkList profiles, SRUM connectivity, Wi-Fi networks on iOS and Android |
+| **Usage** | SRUM application, network and energy use; macOS KnowledgeC |
+| **Communication** | Skype, iMessage and SMS, WhatsApp (iOS and Android), Android and iOS call logs and contacts |
+| **Cloud** | OneDrive, Google Drive |
+| **Antivirus** | Microsoft Defender detection history, MPLog, and quarantined files (decrypted in memory) |
+| **Recycle Bin** | `$I` / `$R` (including deleted `$I` records of an emptied bin) and XP's INFO2 |
+| **System** | time zone, installed programs, Windows version, macOS install history, phone accounts and builds |
+
+Windows Timeline (ActivitiesCache.db), SRUM and WebCache are read from their own databases -- ESE through libesedb, SQLite through TRACE's reader, which applies a write-ahead log's committed frames first.
+
+## Deleted records, recovered
+
+SQLite keeps deleted rows in free pages and freeblocks until they are overwritten. TRACE recovers them -- from freelist pages, freeblocks, the gaps between cells, and a WAL's older frames -- and keeps a candidate only if it decodes as a row of one of the database's own tables **and** exactly fills its cell. Recovered Skype and iMessage messages, Android SMS and Chromium and Firefox history appear as *Deleted … (recovered)*.
+
+## Its own parsers, checked against references
+
+Prefetch's LZXPRESS Huffman compression, EVTX binary XML, shell items and LNK files, Linux journals (including zstd-compressed fields), Android's binary XML (ABX) -- each parser is TRACE's own, and its output is compared in the tests with the values plaso, python-evtx and other references publish for the same files.
+
+## The timeline
+
+<figure>
+<Image src={timeline} alt="TRACE's Timeline tab with a histogram of events over time above a list of every source" />
+<figcaption>The timeline: every source together, with a histogram to find the busy hours.</figcaption>
+</figure>
+
+The timeline merges eight sources into one list: **file-system times** (`$STANDARD_INFORMATION` and `$FILE_NAME` separately on NTFS), the **change journal** (`$UsnJrnl`), **user activity**, **photo** EXIF times, **document** metadata times, **carved files**, **Sigma detections** and the case's own **events**. Filter by time range, source, user, folder and text -- or only deleted files, only timestomped ones, or without known-good files -- with a histogram on a square-root scale so quiet days still show. **Add to Report** picks rows for the [report](/TRACE-Forensic-Toolkit/features/reports/).
+
+## The Recycle Bin, linked
+
+A Recycle Bin record names its `$R` content file; if that file is deleted too, TRACE links the record to the deleted file's entry, so one click previews what was binned -- even when the bin was emptied.

@@ -1,0 +1,127 @@
+---
+// Download buttons for the latest release. The links work without
+// JavaScript (they open the latest release); a script then asks GitHub for
+// that release and points each button at its file, with version and size,
+// and puts the visitor's own system first.
+import { Icon } from '@astrojs/starlight/components';
+
+const repo = 'Gadzhovski/TRACE-Forensic-Toolkit';
+const latest = `https://github.com/${repo}/releases/latest`;
+const { compact = false } = Astro.props;
+
+const targets = [
+	{ key: 'windows', icon: 'seti:windows', label: 'Windows', sub: '64-bit', match: '-windows-x64.zip' },
+	{ key: 'mac-arm', icon: 'apple', label: 'macOS', sub: 'Apple Silicon', match: '-macos-arm64.dmg' },
+	{ key: 'mac-intel', icon: 'apple', label: 'macOS', sub: 'Intel', match: '-macos-x86_64.dmg' },
+	{ key: 'linux', icon: 'linux', label: 'Linux', sub: 'from source', href: `${import.meta.env.BASE_URL}start/install/` },
+] as const;
+---
+
+<div class:list={['downloads', 'not-content', { compact }]} data-repo={repo}>
+	<div class="buttons">
+		{
+			targets.map((t) => (
+				<a class="dl" href={'href' in t ? t.href : latest} data-key={t.key} data-match={'match' in t ? t.match : ''}>
+					<Icon name={t.icon} size="1.6rem" />
+					<span class="text">
+						<span class="label">{t.label}</span>
+						<span class="sub" data-sub>{t.sub}</span>
+					</span>
+				</a>
+			))
+		}
+	</div>
+	<p class="meta">
+		<span data-version>Latest release</span> · free and open source (MIT) ·{' '}
+		<a href={`https://github.com/${repo}/releases`}>all releases and checksums</a>
+	</p>
+</div>
+
+<script>
+	function guess() {
+		const ua = navigator.userAgent;
+		if (/Windows/i.test(ua)) return 'windows';
+		if (/Mac OS X|Macintosh/i.test(ua)) return 'mac-arm';
+		if (/Linux|X11/i.test(ua) && !/Android/i.test(ua)) return 'linux';
+		return '';
+	}
+	const size = (n: number) => `${Math.round(n / 1e6)} MB`;
+
+	for (const box of document.querySelectorAll<HTMLElement>('.downloads')) {
+		const mine = guess();
+		const own = box.querySelector<HTMLElement>(`.dl[data-key="${mine}"]`);
+		if (own) {
+			own.classList.add('primary');
+			own.parentElement?.prepend(own);
+		}
+		fetch(`https://api.github.com/repos/${box.dataset.repo}/releases/latest`)
+			.then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+			.then((release) => {
+				const version = box.querySelector('[data-version]');
+				if (version) version.textContent = `Version ${String(release.tag_name).replace(/^v/, '')}`;
+				for (const link of box.querySelectorAll<HTMLAnchorElement>('.dl[data-match]')) {
+					const asset = release.assets?.find((a: { name: string }) => a.name.endsWith(link.dataset.match!));
+					if (!asset || !link.dataset.match) continue;
+					link.href = asset.browser_download_url;
+					const sub = link.querySelector('[data-sub]');
+					if (sub) sub.textContent = `${sub.textContent} · ${size(asset.size)}`;
+				}
+			})
+			.catch(() => {
+				/* offline or rate-limited: the buttons open the release page */
+			});
+	}
+</script>
+
+<style>
+	.downloads {
+		margin-block: 1.5rem;
+	}
+	.buttons {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+		gap: 0.75rem;
+	}
+	.dl {
+		display: flex;
+		align-items: center;
+		gap: 0.85rem;
+		padding: 0.9rem 1.1rem;
+		border-radius: 12px;
+		border: 1px solid var(--trace-border);
+		background: var(--trace-surface);
+		color: var(--sl-color-white);
+		text-decoration: none;
+		transition: border-color 0.2s, transform 0.2s, background 0.2s;
+	}
+	.dl:hover {
+		border-color: var(--sl-color-accent);
+		transform: translateY(-2px);
+	}
+	.dl.primary {
+		background: linear-gradient(135deg, var(--sl-color-accent), color-mix(in srgb, var(--trace-cyan) 70%, var(--sl-color-accent)));
+		border-color: transparent;
+		color: #fff;
+		box-shadow: 0 12px 30px -12px var(--sl-color-accent);
+	}
+	.text {
+		display: flex;
+		flex-direction: column;
+		line-height: 1.25;
+	}
+	.label {
+		font-weight: 650;
+	}
+	.sub {
+		font-size: var(--sl-text-xs);
+		opacity: 0.75;
+	}
+	.meta {
+		margin-top: 0.8rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-3);
+	}
+	.compact .meta {
+		text-align: center;
+	}
+</style>

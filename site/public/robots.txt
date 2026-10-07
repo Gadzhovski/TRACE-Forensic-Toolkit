@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://gadzhovski.github.io/TRACE-Forensic-Toolkit/sitemap-index.xml

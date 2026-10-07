@@ -1,0 +1,160 @@
+---
+// The README's screenshots as a tabbed tour of the application, framed like
+// a window. Images are Astro-optimised (WebP, sized) from Icons/readme.
+import { Image } from 'astro:assets';
+import main from '../assets/repo/main-dark.png';
+import triage from '../assets/repo/triage.png';
+import activity from '../assets/repo/activity.png';
+import timeline from '../assets/repo/timeline.png';
+import search from '../assets/repo/search.png';
+import hex from '../assets/repo/hex.png';
+import thumbnails from '../assets/repo/thumbnails.png';
+import registry from '../assets/repo/registry.png';
+import layout from '../assets/repo/disk-layout.png';
+
+const shots = [
+	{ id: 'browse', tab: 'Browse', src: main, text: 'The evidence tree, a file listing with every timestamp, and a viewer for whatever is selected.' },
+	{ id: 'triage', tab: 'Triage', src: triage, text: 'What stands out across the whole case: executables and their signers, hidden data, photos, authors.' },
+	{ id: 'activity', tab: 'Activity', src: activity, text: 'What the users did -- programs run, files opened, devices, logons -- read from the system’s own records.' },
+	{ id: 'timeline', tab: 'Timeline', src: timeline, text: 'Every source in one view, with a histogram to find the busy hours.' },
+	{ id: 'search', tab: 'Search', src: search, text: 'Full-text search inside documents, mail and archives, with indicators found automatically.' },
+	{ id: 'hex', tab: 'Hex', src: hex, text: 'A hex view with search, a data inspector and byte-range bookmarks.' },
+	{ id: 'thumbs', tab: 'Thumbnails', src: thumbnails, text: 'Pictures, video frames and document previews, fitted -- never cropped.' },
+	{ id: 'registry', tab: 'Registry', src: registry, text: 'Every hive on the image, with transaction logs replayed.' },
+	{ id: 'layout', tab: 'Disk layout', src: layout, text: 'The disk drawn as it is: partitions, tables and unallocated space, to scale.' },
+];
+---
+
+<div class="showcase not-content" role="tablist" aria-label="TRACE screenshots">
+	<div class="tabs">
+		{
+			shots.map((s, i) => (
+				<button role="tab" aria-selected={i === 0 ? 'true' : 'false'} aria-controls={`shot-${s.id}`} data-shot={s.id}>
+					{s.tab}
+				</button>
+			))
+		}
+	</div>
+	<div class="window">
+		<div class="bar"><i></i><i></i><i></i><span>TRACE</span></div>
+		{
+			shots.map((s, i) => (
+				<figure id={`shot-${s.id}`} role="tabpanel" hidden={i !== 0}>
+					<Image
+						src={s.src}
+						alt={`TRACE: ${s.tab.toLowerCase()} view. ${s.text}`}
+						widths={[640, 960, 1280, 1600]}
+						sizes="(max-width: 72rem) 100vw, 72rem"
+						loading={i === 0 ? 'eager' : 'lazy'}
+					/>
+					<figcaption>{s.text}</figcaption>
+				</figure>
+			))
+		}
+	</div>
+</div>
+
+<script>
+	for (const box of document.querySelectorAll<HTMLElement>('.showcase')) {
+		const tabs = [...box.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+		const show = (tab: HTMLButtonElement) => {
+			for (const t of tabs) {
+				const on = t === tab;
+				t.setAttribute('aria-selected', String(on));
+				const panel = box.querySelector<HTMLElement>(`#${t.getAttribute('aria-controls')}`);
+				if (panel) panel.hidden = !on;
+			}
+		};
+		tabs.forEach((tab, i) => {
+			tab.addEventListener('click', () => show(tab));
+			tab.addEventListener('keydown', (e) => {
+				const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+				if (!step) return;
+				const next = tabs[(i + step + tabs.length) % tabs.length];
+				next.focus();
+				show(next);
+			});
+		});
+	}
+</script>
+
+<style>
+	.showcase {
+		margin-top: 2rem;
+	}
+	.tabs {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.4rem;
+		margin-bottom: 1.25rem;
+	}
+	.tabs button {
+		font: inherit;
+		font-size: var(--sl-text-sm);
+		padding: 0.4rem 0.95rem;
+		border-radius: 999px;
+		border: 1px solid var(--trace-border);
+		background: var(--trace-surface);
+		color: var(--sl-color-gray-2);
+		cursor: pointer;
+		transition: all 0.15s;
+	}
+	.tabs button:hover {
+		color: var(--sl-color-white);
+		border-color: var(--sl-color-accent);
+	}
+	.tabs button[aria-selected='true'] {
+		background: var(--sl-color-accent);
+		border-color: var(--sl-color-accent);
+		color: #fff;
+	}
+	.window {
+		border-radius: 14px;
+		overflow: hidden;
+		border: 1px solid var(--trace-border);
+		background: #20242c;
+		box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.03);
+	}
+	.bar {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.6rem 0.9rem;
+		background: #2a2f38;
+	}
+	.bar i {
+		width: 0.72rem;
+		height: 0.72rem;
+		border-radius: 50%;
+		background: #ff5f56;
+	}
+	.bar i:nth-child(2) {
+		background: #ffbd2e;
+	}
+	.bar i:nth-child(3) {
+		background: #27c93f;
+	}
+	.bar span {
+		margin-left: auto;
+		margin-right: auto;
+		font-size: var(--sl-text-xs);
+		color: #9aa6b8;
+		transform: translateX(-1.2rem);
+	}
+	figure {
+		margin: 0;
+	}
+	figure img {
+		display: block;
+		width: 100%;
+		height: auto;
+	}
+	figcaption {
+		padding: 0.85rem 1.1rem;
+		font-size: var(--sl-text-sm);
+		color: #c3cede;
+		background: #20242c;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
+	}
+</style>

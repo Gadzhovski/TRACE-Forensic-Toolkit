@@ -1,0 +1,47 @@
+---
+title: Forensic soundness
+description: The principles TRACE is built on -- evidence read-only, hashes verified as a history, an audit trail, times never converted, offline by default, and nothing from evidence executed or sent anywhere without a record.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+These are the rules TRACE's code follows -- each one written down in the project and enforced by its tests.
+
+## Evidence is only ever read
+
+- Images are **read, never mounted** by the operating system, and never written to. A case refers to evidence by **path and hash**; nothing is copied into it.
+- Live disks are opened **read-only** by a helper that answers sector reads and nothing else.
+- Archives, mailboxes and attachments are read **from memory** -- never unpacked to disk to be browsed.
+- No evidence is ever handed to an external program: compressed RAR members, which would need `unrar`, are reported rather than extracted.
+
+## Integrity you can show
+
+- **Verification is a history**: every check is appended with its result; nothing is overwritten. Images are checked against every hash they store.
+- **The audit trail** records every action that matters, including keys used (never the keys themselves), exports, removals, settings changes and anything sent over the network.
+- **Carved files are validated** before they are kept, and graded by what their structure *proves*, not what it suggests. Exports are re-checked against the SHA-256 recorded at carving.
+- **Reports** state the versions and settings used, and escape every value that came from evidence.
+
+## Times are evidence
+
+- TRACE runs in **UTC** internally, so The Sleuth Kit cannot shift zone-less times by the examiner's own time zone: the same image reads the same on any machine.
+- Times are **stored as recorded** and shown in UTC, with your chosen display zone beside them, DST-correct.
+- Times that carry no zone on disk -- FAT, exFAT, ZIP, DOS dates, SYSTEMTIME -- are labelled **local, no zone**, never guessed.
+- NTFS times are kept to **100 nanoseconds**, and implausible dates in the hex inspector are shown as *—*, not as a misleading date.
+
+## Nothing leaves without your say
+
+- **HTML from evidence never meets a browser engine**: no scripts run, nothing is fetched from the network or the disk, links are not followed. A fetch would tell a page's owner it was opened, and from where.
+- **The map is offline by default**. Online tiles are asked for once per server per session, fetch only the visible area, and are audited.
+- **VirusTotal** is used only when you ask, an upload only after a confirmation, and every query is kept and audited. A case in **offline** mode refuses all network use.
+- Wi-Fi networks are never located through an online lookup, since that would disclose evidence; saved Wi-Fi passwords are never copied into records.
+
+## Nothing is hidden by presentation
+
+- Thumbnails and report pictures are **scaled, never cropped** -- a cropped picture can hide what matters.
+- Office documents are shown with what a reader would not see: tracked deletions, comments, speaker notes, hidden sheets.
+- When the content of a file disagrees with its name, the content wins -- and TRACE says so.
+- A feature that cannot run says why, rather than quietly producing nothing.
+
+<Aside type="tip" title="Validate your own copy">
+Run [`--self-test`](/TRACE-Forensic-Toolkit/start/download/#validate-the-installed-copy) against a known image before using a new version on casework, and keep the report.
+</Aside>

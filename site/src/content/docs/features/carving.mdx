@@ -1,0 +1,82 @@
+---
+title: File carving
+description: TRACE carves 70 file types from unallocated space, slack or a whole image, sizes each file from its own structure, proves which are complete, and rebuilds fragmented ZIP and PDF files -- scored against published answer keys.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Carving finds files by their content where the file system no longer records them. TRACE's carver is built to be **trusted**: every file it keeps is validated, sized from its own structure and graded by how far that structure proves it whole.
+
+## Where it looks
+
+| Source | |
+|:--|:--|
+| **Unallocated space** | every free stretch of each volume -- not just chunks that happen to be wholly free |
+| **Slack** | the bytes after the end of each live file in its last cluster |
+| **Whole image** | everything, allocated or not |
+
+## 70 file types
+
+| Category | Types |
+|:--|:--|
+| **Pictures** | JPG, PNG, GIF, BMP, TIFF, WebP, HEIC, AVIF, PSD, PSB |
+| **Camera raw** | CR2, CR3, NEF, ARW, DNG, RAF, RW2, ORF, PEF |
+| **Documents** | PDF, DOCX, XLSX, PPTX, VSDX, ODT, ODS, ODP, ODG, EPUB, OLE (legacy Office), RTF, HTML |
+| **Email** | PST, OST, mbox, EML |
+| **Databases and logs** | SQLite, SQLite WAL, EVTX event logs, registry hives |
+| **Windows artifacts** | LNK shortcuts |
+| **Executables** | EXE, DLL, SYS, ELF, Mach-O, APK, JAR |
+| **Archives** | ZIP, GZ, BZ2, XZ, TAR (old V7 tars with no magic too), RAR, 7Z |
+| **Audio** | WAV, MP3, OGG, Opus, M4A |
+| **Video** | MP4, MOV, M4V, 3GP, AVI, WMV, FLV, MPG, MKV, WebM |
+
+A ZIP is named for what it is -- `.docx`, `.odt`, `.apk`, `.jar`, `.epub` -- from its members; an ISO media file from its brand; a RIFF file as `.wav`, `.webp` or `.avi`.
+
+## Sized from structure, never guessed
+
+For each format, the extent comes from the header or a walk of the file's own structure -- a TIFF's every IFD and the strips they point to, an MP4's boxes, a ZIP's central directory. The carver reads as far as the structure says, so files of 64-256 MB come out whole. The one heuristic is plain-text mail, which ends at the first control byte.
+
+**Every carve is validated before it is kept.** A type with no validator is rejected, not waved through.
+
+## Graded by proof
+
+| Status | Meaning |
+|:--|:--|
+| **Complete** | the format's own checks prove it whole: ZIP CRCs, PDF cross-reference offsets, SQLite page count and integrity check, strict OLE sector chains, PE checksum, JPEG restart markers |
+| **Valid** | every check passed, but the format has no proof (most JPEGs, HTML, media) |
+| **Reconstructed** | rebuilt from fragments, each split proved by a checksum |
+| **Partial** | a check failed: part of the file is missing or overwritten |
+
+Tested against the DFRWS 2006 answer key: no fragmented file is called complete, and no unfragmented file partial.
+
+## Fragmented files rebuilt
+
+When a ZIP or PDF is split around other data, TRACE uses the file's own index -- a ZIP's end-of-central-directory, a PDF's cross-reference chain -- to work out how much is missing and where each member or object should start. A split is accepted **only when a checksum proves it**: the member's CRC-32, or the Flate stream's Adler-32. No checksum, no rebuild; an encrypted PDF is located but not rebuilt. Fragments that touch allocated space are refused.
+
+## Names that help
+
+A carve that starts where a **deleted file** began takes its name -- `1a2b000-holiday.jpg`. Otherwise a document's own **title** is used, and failing that its offset. A deleted entry's state is shown too: recoverable, partly overwritten, overwritten, resident, entry reused.
+
+## A carve is a reference
+
+Like X-Ways and Autopsy, TRACE records each carved file as a **reference** -- offset, fragments, hashes, status -- not a copy. Previews and thumbnails read it from the image. **Export** writes chosen carves out, re-checking each against the SHA-256 recorded at carving, with a `manifest.csv`; the case can also keep copies of everything if you turn that on.
+
+## And then analysed
+
+Every carved file goes through the same triage modules as live files -- type, entropy, hidden data, photo GPS, authors, executables -- and into the search index. Carved SQLite databases are read for user activity, and each carved WAL file is paired with the database it belongs to and replayed.
+
+<Aside type="tip" title="Stopping is safe">
+Cancel keeps everything found so far, and **Resume** continues from the last checkpoint with the same settings. Carved files ▸ Statistics shows each run's numbers: bytes read, candidates checked and rejected per type, files kept by status.
+</Aside>
+
+## Scored against the answer keys
+
+| Test image | Located | Byte-exact | |
+|:--|:--:|:--:|:--|
+| DFTT #11 `11-carve-fat.dd` | 15 / 15 | -- | full recovery |
+| DFTT #12 `12-carve-ext2.dd` | 10 / 10 | 3 / 3 | two PDFs rebuilt around ext2's indirect blocks |
+| DFRWS 2006 challenge | 27 / 27 | 12 / 12 | two ZIPs rebuilt from two fragments |
+| DFRWS 2007 challenge | 78 / 114 | 16 / 16 | the misses are fragmented or incomplete |
+| Real-file corpus | 63 / 63 | 63 / 63 | 63 published files, 27 signature decoys -- none carved |
+
+*Located* counts files found; *byte-exact* counts those stored contiguously or rebuilt, which must match the original exactly. Carves the answer keys do not account for are listed too -- that is the false-positive rate. More in [Testing and validation](/TRACE-Forensic-Toolkit/quality/testing/).

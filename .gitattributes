@@ -7,3 +7,7 @@
 
 # PowerShell is happiest with CRLF on Windows.
 *.ps1 text eol=crlf
+
+# The website's source is not part of TRACE: leave it out of GitHub's
+# "Download ZIP" and release source archives.
+site/ export-ignore

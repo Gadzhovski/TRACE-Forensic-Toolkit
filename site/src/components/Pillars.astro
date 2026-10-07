@@ -1,0 +1,92 @@
+---
+// Feature tiles for the home page: icon, title, a line, and where to read on.
+import { Icon } from '@astrojs/starlight/components';
+import type { ComponentProps } from 'astro/types';
+
+type IconName = ComponentProps<typeof Icon>['name'];
+interface Props {
+	items: { icon: IconName; title: string; text: string; href?: string }[];
+	columns?: number;
+}
+const { items, columns = 3 } = Astro.props;
+const base = import.meta.env.BASE_URL;
+---
+
+<div class="pillars not-content" style={`--cols: ${columns}`}>
+	{
+		items.map((p) => {
+			const Tag = p.href ? 'a' : 'div';
+			return (
+				<Tag class="pillar" href={p.href ? `${base}${p.href}` : undefined}>
+					<span class="icon">
+						<Icon name={p.icon} size="1.3rem" />
+					</span>
+					<strong>{p.title}</strong>
+					<span class="text">{p.text}</span>
+					{p.href && <span class="more">Learn more →</span>}
+				</Tag>
+			);
+		})
+	}
+</div>
+
+<style>
+	.pillars {
+		display: grid;
+		grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+		gap: 1rem;
+		margin-top: 2rem;
+	}
+	@media (max-width: 60rem) {
+		.pillars {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+	@media (max-width: 38rem) {
+		.pillars {
+			grid-template-columns: 1fr;
+		}
+	}
+	.pillar {
+		display: flex;
+		flex-direction: column;
+		gap: 0.45rem;
+		padding: 1.35rem;
+		border-radius: var(--trace-radius);
+		border: 1px solid var(--trace-border);
+		background: var(--trace-surface);
+		color: var(--sl-color-gray-2);
+		text-decoration: none;
+		transition: border-color 0.2s, transform 0.2s;
+	}
+	a.pillar:hover {
+		border-color: color-mix(in srgb, var(--sl-color-accent) 60%, transparent);
+		transform: translateY(-3px);
+	}
+	.icon {
+		display: grid;
+		place-items: center;
+		width: 2.5rem;
+		height: 2.5rem;
+		border-radius: 10px;
+		color: var(--sl-color-accent-high);
+		background: linear-gradient(135deg, var(--sl-color-accent-low), color-mix(in srgb, var(--sl-color-accent) 30%, transparent));
+		border: 1px solid color-mix(in srgb, var(--sl-color-accent) 35%, transparent);
+		margin-bottom: 0.35rem;
+	}
+	strong {
+		color: var(--sl-color-white);
+		font-size: var(--sl-text-lg);
+	}
+	.text {
+		font-size: var(--sl-text-sm);
+		line-height: 1.55;
+	}
+	.more {
+		margin-top: auto;
+		padding-top: 0.5rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-accent-high);
+		font-weight: 600;
+	}
+</style>

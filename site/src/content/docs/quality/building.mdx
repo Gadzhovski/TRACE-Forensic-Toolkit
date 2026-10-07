@@ -1,0 +1,49 @@
+---
+title: Building the app
+description: Build TRACE's standalone Windows zip and macOS DMG from source with build_app.py, how each package is self-tested before it is kept, and how releases are published.
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+The standalone apps are built from the same source with one command, from an installed TRACE:
+
+```bash
+python build_app.py
+```
+
+| Platform | Output |
+|:--|:--|
+| Windows | `dist/TRACE-<version>-windows-<arch>.zip` (`TRACE\TRACE.exe` inside) |
+| macOS | `dist/TRACE-<version>-macos-<arch>.dmg` (`TRACE.app` inside) |
+
+Each comes with a `.sha256` beside it. A macOS build runs on the architecture it was built on -- Apple Silicon or Intel.
+
+## What the build does
+
+<Steps>
+
+1. **Bundles** the application with PyInstaller, from one build definition (`TRACE.spec`). Nothing is listed by hand: every TRACE module and every library's data is collected by PyInstaller's hooks, and libraries only optional code reaches are left out (about 70 MB).
+
+2. **Packages** it: a zip on Windows, a DMG on macOS -- signed ad hoc and sealed, or with your own identity if `TRACE_CODESIGN_IDENTITY` is set. Icons and the Windows version resource are generated from the logo and the version number.
+
+3. **Tests the package, not the build folder**: the zip is unpacked into a path with spaces and a non-ASCII letter, the DMG mounted read-only, and the app started with `--self-test` against public images. Every check must pass and every image's manifest must equal the test suite's -- or the build fails.
+
+</Steps>
+
+<Aside type="note" title="Why no installer, no signing certificate">
+The Windows build is a portable folder, and no publisher certificate signs it -- SmartScreen asks once. The macOS app is ad-hoc signed and not notarised -- Gatekeeper asks once. No UPX compression is used: it triggers antivirus false positives and breaks Qt's libraries.
+</Aside>
+
+## Releases
+
+<Steps>
+
+1. Set `__version__` in `trace_app/__init__.py` and merge to `master`.
+
+2. Push a tag: `git tag v2.1.0 && git push origin v2.1.0`.
+
+3. The **Release** workflow checks the tag matches the version, builds and self-tests the Windows x64 zip and both macOS DMGs on GitHub's runners, and -- only if every one passed -- publishes the release with the packages and their checksums. GitHub adds the source archives.
+
+</Steps>
+
+A tag with a suffix, such as `v2.1.0-rc1`, is published as a pre-release.

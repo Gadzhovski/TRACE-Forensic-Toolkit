@@ -1,0 +1,52 @@
+---
+title: Frequently asked questions
+description: Answers about TRACE -- cost and licence, supported systems and evidence, whether it changes evidence, how it compares with other forensic tools, and how to get help.
+---
+
+### Is TRACE free?
+
+Yes. TRACE is open source under the **MIT License**: free to use -- in a lab, in a classroom or commercially -- to study, change and share. The libraries it builds on keep their own licences.
+
+### Which systems does it run on?
+
+**Windows 10 and 11** (64-bit) and **macOS 13 or later** (Apple Silicon or Intel) as a standalone app, and **Linux** from source with one script. All four are tested on every change to the code.
+
+### Can TRACE change my evidence?
+
+No. Images are read, never mounted or written to; a case refers to evidence by path and hash and copies nothing. Live disks are opened read-only. See [Forensic soundness](/TRACE-Forensic-Toolkit/quality/soundness/).
+
+### What can it open?
+
+E01/Ex01, AFF4, raw/dd (split too), ISO, DMG, VMDK, VHD/VHDX, QCOW2, AD1, L01, ZIP/TAR collections, folders, iOS backups and live disks -- with NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, UFS and ISO 9660 file systems, and BitLocker, FileVault 2, LUKS and encrypted APFS volumes. The full list is in [Supported evidence](/TRACE-Forensic-Toolkit/reference/evidence/).
+
+### How does TRACE compare with other forensic tools?
+
+Like Autopsy, TRACE is free and builds on The Sleuth Kit. What sets TRACE apart is how it is made: a single desktop application in Python and Qt, installed from pre-built packages with no compiler and nothing else to set up; native on Windows, macOS (Apple Silicon and Intel) and Linux; carving results graded by what each file's structure proves, with fragmented ZIP and PDF files rebuilt; and every release tested against public forensic images with published answer keys.
+
+### Does it send anything over the internet?
+
+Only when you ask: VirusTotal lookups or uploads, and online map tiles -- each audited, and all refused when a case is set **offline**. The download buttons on this website ask GitHub for the latest release; the application itself does not check for updates.
+
+### Can I use it for real casework?
+
+TRACE is tested against public evidence with published answers, and can **self-test** any installed copy against a known image -- a validation step you can record. As with any tool, validate it under your own lab's procedures before relying on it.
+
+### Why does Windows or macOS warn me on first launch?
+
+The packages are not signed with a paid publisher certificate. Windows SmartScreen and macOS Gatekeeper each ask once; [Download](/TRACE-Forensic-Toolkit/start/download/#first-launch) shows how to allow it. Check the download's SHA-256 against the `.sha256` published beside it.
+
+### Where are my settings and logs?
+
+In your user profile -- see [Where TRACE keeps data](/TRACE-Forensic-Toolkit/reference/data/). Cases live wherever you create them.
+
+### How do I get help or report a problem?
+
+Ask in [GitHub Discussions](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/discussions), or [open an issue](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/issues/new/choose) -- the bug-report form asks for what is needed. **Never attach evidence or case data**: issues are public.
+
+### Can I ask for a new file format or artifact?
+
+Yes -- use the *File format or artifact request* form, ideally with a link to a public sample file. TRACE's parsers are tested against real files, so a sample makes the difference.
+
+### How can I contribute?
+
+Fork the repository, make your change on a branch, and open a pull request; the CI runs the tests your change touches. Feature ideas are welcome in Discussions or as a feature request.

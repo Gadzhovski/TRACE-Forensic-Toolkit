@@ -1,0 +1,39 @@
+---
+title: Reports
+description: Build an HTML or PDF report of a TRACE case -- evidence and verification, findings, activity, timeline picks, carved files, indicators, the methods used and the audit trail -- with a table of contents and links.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+**Case ▸ Create Report…** builds the case's report as **HTML** or **PDF**, as a background job. You choose the sections and their options; the report is saved in the case's `exports/` folder and its SHA-256 written to the audit trail.
+
+## Sections
+
+| Section | What it holds |
+|:--|:--|
+| **Case summary** | case details, the examiner's summary and conclusions, counts of everything examined and found |
+| **Evidence and verification** | each image -- file, size, custody details, hashes -- and every verification run against it |
+| **Bookmarks and notes** | what the examiner marked, with notes and a picture of each bookmarked image |
+| **Findings** | type mismatches, high entropy, hidden data, located photos, document authors, executables, YARA matches, Sigma detections, thumbnails of files gone |
+| **Hash set matches** | files matching known-bad and notable hash sets |
+| **NTFS** | timestomping, Mark of the Web, alternate data streams |
+| **Persistence** | everything set to start by itself, suspicious and notable first, with the reasons |
+| **Keyword hits** | each list's terms, how many files hold each, the first hit in context |
+| **User activity** | programs run, files opened, USB devices, logons, web history -- the newest of each kind |
+| **Timeline** | the events you added with *Add to Report*, and/or every event in a time range |
+| **Carved files** | files recovered from unallocated space |
+| **Indicators** | e-mail addresses, URLs and the rest, most widespread first |
+| **VirusTotal** | every lookup and upload, as answered |
+| **Methods and tools** | TRACE's and every library's version, which modules ran on each image, and the case settings that shaped the results |
+| **Appendix: audit trail** | every action recorded in the case, in order |
+
+## Made to be read -- and trusted
+
+- **HTML** is one self-contained file: styles inline, pictures embedded, **no scripts, nothing fetched**. It opens in any browser and prints cleanly.
+- **PDF** is the same report laid out on A4, with a running header and *Page n of m* footer, a table of contents with page numbers, clickable cross-references and a PDF outline.
+- Pictures are read from the images themselves and **scaled to fit -- never cropped**.
+- Every value that came from evidence is escaped: a file named `<script>` is text in the report, never markup.
+
+<Aside type="tip">
+The Methods section is what lets someone else reproduce your results: it states the versions and the settings, not just the conclusions.
+</Aside>
