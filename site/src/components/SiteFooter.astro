@@ -1,10 +1,12 @@
 ---
 // Starlight's own footer (edit link, last updated, pagination), then the
-// site's: what TRACE is, where it lives, its licence.
+// site's: what TRACE is, who develops it, where it lives, its licence.
 import Default from '@astrojs/starlight/components/Footer.astro';
+import { Icon } from '@astrojs/starlight/components';
 
 const base = import.meta.env.BASE_URL;
 const repo = 'https://github.com/Gadzhovski/TRACE-Forensic-Toolkit';
+const linkedin = 'https://www.linkedin.com/in/radoslav-gadzhovski/';
 const year = new Date().getFullYear();
 ---
 
@@ -15,6 +17,10 @@ const year = new Date().getFullYear();
 		<div class="about">
 			<strong>TRACE</strong>
 			<p>Toolkit for Retrieval and Analysis of Cyber Evidence. Open-source digital forensics for Windows, macOS and Linux.</p>
+			<a class="author" href={linkedin} rel="author noopener">
+				<Icon name="linkedin" size="1.1rem" />
+				<span>Developed by <strong>Radoslav Gadzhovski</strong></span>
+			</a>
 		</div>
 		<nav aria-label="Project">
 			<span>Project</span>
@@ -31,7 +37,7 @@ const year = new Date().getFullYear();
 			<a href={`${repo}/issues/new/choose`}>Report an issue</a>
 		</nav>
 	</div>
-	<p class="legal">© {year} Radoslav Gadzhovski · Released under the MIT License · Built with The Sleuth Kit, libewf, the libyal libraries and PySide6</p>
+	<p class="legal">© {year} <a href={linkedin} rel="author noopener">Radoslav Gadzhovski</a> · Released under the MIT License · Built with The Sleuth Kit, libewf, the libyal libraries and PySide6</p>
 </div>
 
 <style>
@@ -54,6 +60,27 @@ const year = new Date().getFullYear();
 	.about p {
 		margin-top: 0.4rem;
 		max-width: 26rem;
+	}
+	.author {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.9rem;
+		color: var(--sl-color-gray-2);
+		text-decoration: none;
+	}
+	.author :global(svg) {
+		color: var(--sl-color-accent-high);
+	}
+	.author strong {
+		font-size: inherit;
+		color: var(--sl-color-white);
+	}
+	.author:hover span {
+		text-decoration: underline;
+	}
+	.legal a {
+		color: inherit;
 	}
 	nav {
 		display: flex;
