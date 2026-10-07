@@ -1,0 +1,23 @@
+---
+title: Quick triage
+description: Look into a disk image with TRACE without creating a case – browse, preview, search and carve in a session that keeps nothing afterwards.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Sometimes you need to look before you commit: is this the right drive, is there anything on it, which partition matters? **Quick Triage**, on the welcome screen, opens images straight away with no case behind them.
+
+## What works
+
+- Browsing the file systems, every viewer, the hex view and the disk layout.
+- Opening encrypted volumes with a key, shadow copies, LVM and APFS volumes.
+- **File carving** -- with the same engine and results panel as in a case. Carved files are kept as references for the session; copies are written only if you turn that setting on, into your user data folder.
+- Exporting files.
+
+## What does not
+
+A quick triage keeps no case: no audit trail, no verification history, no bookmarks or notes that outlive the session, and the per-case settings stay at their defaults. When you close it, it is gone.
+
+<Aside type="tip">
+If what you find is worth keeping, start a **New Case** and add the same image -- nothing about the evidence changes either way.
+</Aside>

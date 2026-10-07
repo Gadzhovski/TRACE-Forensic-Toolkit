@@ -16,6 +16,8 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
 </p>
 
+<a href="https://trace.gadzhovski.com/"><b>Website & docs</b></a> ·
+<a href="https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/releases/latest"><b>Download</b></a> ·
 <a href="#features"><b>Features</b></a> ·
 <a href="#screenshots"><b>Screenshots</b></a> ·
 <a href="#supported-evidence"><b>Evidence</b></a> ·

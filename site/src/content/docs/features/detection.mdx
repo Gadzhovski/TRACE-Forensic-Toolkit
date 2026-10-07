@@ -1,0 +1,43 @@
+---
+title: "Detection: YARA, Sigma, keywords"
+description: Run YARA rules over files, Sigma rules over Windows event logs, keyword lists over the search index, NSRL and custom hash sets, and graded persistence checks in TRACE – every hit a finding in the case.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Detection modules turn rules into **findings**: each hit is recorded in the case, listed in Triage, placed on the timeline and available to the report.
+
+## YARA
+
+**Tools ▸ YARA Rules** builds a library of rule sets. Imported files are **copied** into TRACE's own folder with their SHA-256s, so a rule set cannot change under a case without you knowing; a file another one includes is compiled through it only. Each set is its own namespace. The **YARA** module then scans every file in the evidence with the [yara-x](https://virustotal.github.io/yara-x/) engine.
+
+## Sigma
+
+**Tools ▸ Sigma Rules** imports a rule file, a folder or a whole [SigmaHQ](https://github.com/SigmaHQ/sigma) release zip. Each rule's log source is mapped to the Windows event channels and IDs it applies to -- process creation from Security event 4688 is renamed to Sysmon's fields so the same rules fire -- and the **Sigma** module runs them over every event log in the evidence.
+
+Hits are graded by the rule's level: *critical* and *high* are suspicious, *medium* notable. The tests run SigmaHQ's 2,547 Windows rules over the EVTX-ATTACK-SAMPLES logs and check that the rules that must fire do, and that two that must stay silent do.
+
+## Keyword lists
+
+**Tools ▸ Keyword Lists** keeps lists of words, prefixes and regular expressions (POSIX classes included). The **Keywords** module searches the [search index](/features/search/) -- so it is fast -- and confirms every hit in the text itself, folding accents the same way. Each term found in each file becomes a finding. It is tested against the published answer key of DFTT test image #2.
+
+## Hash sets
+
+**Tools ▸ Hash Sets** imports your own hash lists, or **links** the NSRL RDS v3 database read-only -- nothing is copied. The **Hash sets** module matches every file:
+
+- **Known good** (NSRL, your clean sets) can be **hidden** from the listing, so what is left is what matters.
+- **Known bad** sets flag files in the listing's *Flag* column and as findings.
+
+Which sets a case uses is a case setting.
+
+## Persistence
+
+The **Persistence** module lists what starts automatically -- Run keys, services, scheduled tasks, startup folders, Image File Execution Options, Winlogon's Shell and Userinit, AppInit_DLLs and WMI event consumers -- and grades each one by **the file it starts** on the image: Windows' own programs live *directly* in `System32`, `SysWOW64` or `Windows`, so a system name in a subfolder is a dropper. A started program's embedded signature is noted (present, never verified).
+
+## VirusTotal
+
+Right-click any number of files ▸ **VirusTotal ▸ Look Up Hash**, or one file ▸ **Upload File…** (after a confirmation that says the file becomes available to VirusTotal's subscribers). Your free or paid API key goes in **Options ▸ API Keys**; requests wait their turn under VirusTotal's rate limits rather than failing.
+
+<Aside type="caution" title="Nothing leaves without a record">
+Every VirusTotal query is kept in the case and written to the audit trail, and a case in **offline** mode refuses all of them. Uploads can be disabled per case.
+</Aside>

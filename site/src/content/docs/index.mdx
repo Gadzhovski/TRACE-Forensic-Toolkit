@@ -1,0 +1,110 @@
+---
+title: Digital forensics for disk images
+description: TRACE (Toolkit for Retrieval and Analysis of Cyber Evidence) is free, open-source digital forensics software. Open E01, AFF4 and raw disk images read-only, triage what stands out, recover deleted files by carving, rebuild user activity on a timeline and search inside the evidence – on Windows, macOS and Linux.
+template: splash
+editUrl: false
+lastUpdated: false
+hero:
+  title: '<span class="fullname">TRACE · Toolkit for Retrieval and Analysis of Cyber Evidence</span>Open-source digital forensics software.'
+  tagline: TRACE opens disk images read-only, organises them into cases, triages what stands out, recovers deleted files and searches inside the evidence – free and open source, on Windows, macOS and Linux.
+  image:
+    file: ../../assets/repo/logo.png
+    alt: The TRACE logo, a cat looking through a magnifying glass
+  actions:
+    - text: Get TRACE
+      link: '#get-trace'
+      icon: download
+      variant: primary
+    - text: Get started
+      link: /start/download/
+      icon: right-arrow
+      variant: secondary
+    - text: View on GitHub
+      link: https://github.com/Gadzhovski/TRACE-Forensic-Toolkit
+      icon: github
+      variant: minimal
+---
+
+import Downloads from '../../components/Downloads.astro';
+import Showcase from '../../components/Showcase.astro';
+import Stats from '../../components/Stats.astro';
+import Pillars from '../../components/Pillars.astro';
+
+<Stats
+	items={[
+		{ value: '70', label: 'file types carved' },
+		{ value: '9', label: 'file systems read' },
+		{ value: '5', label: 'kinds of encryption unlocked' },
+		{ value: '4', label: 'platforms tested' },
+		{ value: 'MIT', label: 'free and open source' },
+	]}
+/>
+
+## Screenshots
+
+One window for the whole investigation: the evidence tree, every timestamp, and a viewer for whatever you select.
+
+<Showcase />
+
+## What it does
+
+From the first hash check to the final report, in one application that never writes to the evidence.
+
+<Pillars
+	items={[
+		{ icon: 'open-book', title: 'Cases', text: 'One investigation, any number of devices – with custody details, an audit trail, bookmarks, notes and a report.', href: 'features/cases/' },
+		{ icon: 'approve-check-circle', title: 'Integrity', text: 'Evidence is never mounted or written to. Hashes are checked against those the image stores, and every check is kept.', href: 'features/cases/' },
+		{ icon: 'magnifier', title: 'Triage', text: 'File types from content, entropy, hidden data, photo GPS, document authors, executables and their signers.', href: 'features/triage/' },
+		{ icon: 'puzzle', title: 'File carving', text: '70 file types from unallocated space or slack, each checked for completeness. Fragmented ZIP and PDF files are rebuilt.', href: 'features/carving/' },
+		{ icon: 'clock', title: 'User activity', text: 'Programs run, files opened, USB devices, logons, browser history, chats and phone backups – on one timeline.', href: 'features/activity/' },
+		{ icon: 'list-format', title: 'Search', text: 'Full-text search inside documents, mail and archives, with e-mails, URLs, phone, card and IBAN numbers found automatically.', href: 'features/search/' },
+		{ icon: 'warning', title: 'Detection', text: 'YARA rules over files, Sigma rules over event logs, keyword lists, hash sets (NSRL) and persistence graded by risk.', href: 'features/detection/' },
+		{ icon: 'document', title: 'Viewers', text: 'Pictures, video, PDF, Office, mail, SQLite, registry hives, a hex editor with a data inspector, and HTML shown offline.', href: 'features/viewers/' },
+		{ icon: 'padlock', title: 'Encrypted volumes', text: 'BitLocker, FileVault 2, LUKS and encrypted APFS unlocked in place; shadow copies, LVM and XFS read too.', href: 'features/volumes/' },
+	]}
+/>
+
+## How it handles evidence
+
+<Pillars
+	columns={4}
+	items={[
+		{ icon: 'padlock', title: 'Read-only', text: 'Images are read, never mounted. A case refers to evidence by path and hash – nothing is copied or changed.' },
+		{ icon: 'notes', title: 'Audit trail', text: 'Verification is a history, never overwritten. Every action that matters is an audit line in the case.' },
+		{ icon: 'cloud-download', title: 'Offline by default', text: 'Nothing leaves the machine unless you say so. HTML from evidence is shown without scripts or network.' },
+		{ icon: 'approve-check', title: 'Tested', text: 'Tested against published forensic test images and their answer keys, on four platforms, for every change.' },
+	]}
+/>
+
+## Supported evidence
+
+| | |
+|:--|:--|
+| **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2 |
+| **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups |
+| **Live disks** | an attached disk, read-only, without imaging it first |
+| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, UFS, ISO 9660 |
+| **Encrypted volumes** | BitLocker, FileVault 2, LUKS, encrypted APFS and iOS backups |
+| **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
+
+[Everything TRACE reads →](/reference/evidence/)
+
+## How it is tested
+
+File carving is scored, not eyeballed: the real carvers run over public test images and are compared with the answer keys their authors published. A change that loses a file fails the build.
+
+| Test image | Files located | Byte-exact |
+|:--|:--:|:--:|
+| DFTT #11 `11-carve-fat.dd` | 15 / 15 | -- |
+| DFTT #12 `12-carve-ext2.dd` | 10 / 10 | 3 / 3 |
+| DFRWS 2006 challenge | 27 / 27 | 12 / 12 |
+| DFRWS 2007 challenge | 78 / 114 | 16 / 16 |
+| Real-file corpus (63 formats) | 63 / 63 | 63 / 63 |
+
+[How TRACE is tested →](/quality/testing/) · [Every test image and what it tests →](/quality/test-data/)
+
+## Get TRACE
+
+Install from source for open code you can read and the newest fixes -- or take the standalone app for the quickest start.
+
+<Downloads />

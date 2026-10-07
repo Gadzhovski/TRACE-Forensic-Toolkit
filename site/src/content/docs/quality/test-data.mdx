@@ -1,0 +1,100 @@
+---
+title: Test images and data
+description: Every public disk image, artifact sample and real file TRACE's tests use – DFTT, DFRWS, NIST CFReDS, NPS / Digital Corpora, AFF4, plaso, dfvfs, EVTX-ATTACK-SAMPLES and more – and what each one tests.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+TRACE is tested on **public** evidence only: forensic test images and real artifact files that their authors published, each downloaded from its publisher and checked against a recorded SHA-256 before use. No private or case evidence is ever used, and none is stored in the repository.
+
+| | Count | Where the list lives |
+|:--|:--:|:--|
+| Disk images downloaded in CI | 23 | `tools/fetch_test_images.py` |
+| Larger images tested locally | 7 | `test_images/README.md` |
+| Artifact samples | 176 | `tools/fetch_artifact_samples.py` |
+| Real files in the carving corpus | 62 | `tools/carve_corpus.py` |
+
+[How the tests run →](/quality/testing/)
+
+## Disk images (downloaded in CI)
+
+Sixteen of these have a **manifest**: the tests read the whole file system and require every partition and every entry -- inode, size, deleted state, timestamps and SHA-256 -- to equal the committed record.
+
+| Image | Source | What it is | How the tests use it |
+|:--|:--|:--|:--|
+| `fat-img-kw.dd` | [DFTT #2](https://dftt.sourceforge.net/test2/index.html) | keyword search on FAT16 | keyword lists checked against the published answer key, including what is correctly *not* found (strings in slack or across files); carving quality |
+| `ntfs-img-kw-1.dd` | [DFTT #3](https://dftt.sourceforge.net/test3/index.html) | keyword search on NTFS | manifest; NTFS `$I30` index slack compared with dfir_ntfs's parser |
+| `ext3-img-kw-1.dd` | [DFTT #4](https://dftt.sourceforge.net/test4/index.html) | keyword search on ext3 | manifest; packaged-app self-test |
+| `daylight.dd` | [DFTT #5](https://dftt.sourceforge.net/test5/index.html) | FAT times across a daylight-saving boundary | manifest; FAT times re-read in a child process under a foreign time zone must not move |
+| `6-fat-undel.dd` | [DFTT #6](https://dftt.sourceforge.net/test6/index.html) | deleted files on FAT | manifest; deleted entries and what is left of them; carving of deleted files |
+| `7-ntfs-undel.dd` | [DFTT #7](https://dftt.sourceforge.net/test7/index.html) | deleted files on NTFS, and a leap day | manifest; deleted entries and what is left of them (a file in two fragments); `$I30` slack compared with dfir_ntfs; carving |
+| `8-jpeg-search.dd` | [DFTT #8](https://dftt.sourceforge.net/test8/index.html) | JPEGs found by content, not extension | the second device of the two-image UI test; file types; hex view; YARA; reports; carving the two deleted JPEGs; disk layout; packaged-app self-test |
+| `9-fat-label.dd` | [DFTT #9](https://dftt.sourceforge.net/test9/index.html) | FAT volume labels | manifest |
+| `11-carve-fat.dd` | [DFTT #11](https://dftt.sourceforge.net/test11/index.html) | carving on FAT32 | carving score (15 / 15); case and UI carving tests; carving settings |
+| `12-carve-ext2.dd` | [DFTT #12](https://dftt.sourceforge.net/test12/index.html) | carving on ext2 | carving score (10 / 10, two PDFs rebuilt around ext2's indirect blocks); fragment reassembly |
+| `iso-dirtree1.iso`, `iso-dirtree2.iso` | [DFTT #14](https://dftt.sourceforge.net/test14/index.html) | ISO 9660 directory structures | manifests |
+| `iso-endian.iso` | [DFTT #14](https://dftt.sourceforge.net/test14/index.html) | ISO 9660 byte order | manifest; packaged-app self-test |
+| `ntfs1-gen2.E01` | [NPS / Digital Corpora](https://digitalcorpora.org/corpora/drives/) | NTFS with the same files raw, compressed and EFS-encrypted, fragmented by interleaved writes | E01 reading and **stored-hash verification**; byte-for-byte reads of compressed and encrypted files; the first device of the two-image UI test; hash sets; NTFS internals; the case wizard; packaged-app self-test |
+| `image.gen1.dmg` | [NPS / Digital Corpora](https://digitalcorpora.org/corpora/drives/) | a journaled HFS+ volume | manifest; Mac disk image reading; packaged-app self-test |
+| `dfr-01-xfat.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | deleted files on exFAT | manifest; packaged-app self-test |
+| `dfr-01-recycle-ntfs.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | files deleted through the Recycle Bin | Recycle Bin records, including those of an emptied bin, linked to the deleted content |
+| `Base-Linear.aff4`, `Base-Allocated.aff4`, `Base-Linear-ReadError.aff4` | [AFF4 standard reference images](https://github.com/aff4/ReferenceImages) | the AFF4 standard's own test images | disk hashes must equal the reference implementation's (pyaff4); symbolic streams; stored stream hashes re-checked |
+| `VP9test.webm`, `ContainerShip.webm`, `Wiki.OrientateEdges.ogg` | [Wikimedia Commons](https://commons.wikimedia.org/) | real video and audio files | the media player: playback, frame stepping, video thumbnails |
+
+## Larger images (tested locally)
+
+These are too large to download on every CI run. Their tests run on a developer's machine whenever the image is present, and are skipped in CI.
+
+| Image | Source | How the tests use it |
+|:--|:--|:--|
+| `dfrws-2006-challenge.raw` | [DFRWS 2006](https://github.com/dfrws/dfrws2006-challenge) | carving score (27 / 27); ZIPs rebuilt from two fragments; carve statuses checked against the answer key; resuming an interrupted carve |
+| `dfrws-2007-challenge.img` | [DFRWS 2007](https://github.com/dfrws/dfrws2007-challenge) | carving score (78 / 114, every format of the official key); PDFs rebuilt from fragments |
+| `dfr-01-ext.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | deleted files on ext2, ext3 and ext4, and what is left of them (ext keeps no data for most) |
+| `dfr-01-ntfs.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | NTFS `$I30` index slack compared with dfir_ntfs's parser |
+| `dfr-05-nest-ntfs.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | deleted files nested in one another's gaps; `$I30` slack compared with dfir_ntfs |
+| `nps-2009-domexusers.E01` | [NPS / Digital Corpora](https://digitalcorpora.org/corpora/drives/) | a multi-user Windows XP machine, end to end: user activity, persistence, thumbnail caches |
+| `ubnist1.casper-rw.gen3.E01` | [NPS / Digital Corpora](https://digitalcorpora.org/corpora/drives/) | an Ubuntu 8.10 live USB's persistence file: Linux activity end to end |
+
+## Artifact samples
+
+Real files from the projects that publish them, pinned by commit and SHA-256. Where a project publishes expected values for its files, TRACE's output is compared with them.
+
+| Source | Files | What they are | How the tests use them |
+|:--|:--:|:--|:--|
+| [plaso](https://github.com/log2timeline/plaso) | 63 | Prefetch (XP to 11), registry hives (NTUSER, UsrClass, SYSTEM, SOFTWARE, Amcache), Jump Lists, LNK, Recycle Bin `$I`/INFO2, event logs, Chrome / Firefox / Safari history, SRUM, WebCache, `index.dat`, Windows Timeline, `$MFT` and `$UsnJrnl`, shell histories, wtmp/utmp, macOS and Linux logs, mobile databases | user activity, registry, NTFS, timeline, SQLite recovery, persistence -- values compared with **plaso's own test expectations** |
+| [dfvfs](https://github.com/log2timeline/dfvfs) | 17 | VHD, VHDX with its parent, VMDK, QCOW2, BitLocker To Go, Volume Shadow Copies, APFS (encrypted too), FileVault, LUKS, LVM, XFS, UFS1/2, HFS+ DMG and sparse image, FSEvents | containers, encrypted volumes unlocked with their published passwords, volume systems, file systems |
+| [dissect (fox-it)](https://github.com/fox-it) | 20 | AD1 images (compressed, long names, encrypted), thumbcache from Vista to Windows 11, Windows Search `Windows.edb` and `Windows.db`, Defender quarantine, RDP bitmap cache, `recently-used.xbel` | logical images, thumbnail caches, search index, Defender, RDP cache |
+| [EVTX-ATTACK-SAMPLES](https://github.com/sbousseaden/EVTX-ATTACK-SAMPLES) | 13 | event logs recorded during real attack techniques (DCSync, log clearing, Mimikatz, WMI, PowerShell) | **Sigma**: the rules that must fire do, two that must stay silent do; PowerShell script-block reassembly |
+| [SigmaHQ](https://github.com/SigmaHQ/sigma) | 1 | the r2026-07-01 release of all rules | 2,547 Windows rules compiled and run |
+| [MVT](https://github.com/mvt-project/mvt) | 13 | an iPhone backup | iOS files and records; the tests **encrypt** it and require every file to decrypt back to its original |
+| [regipy](https://github.com/mkorman90/regipy) | 9 | dirty registry hives with their transaction logs | log replay -- the recovered hives must be **byte-identical** to yarp's |
+| [pyad1](https://github.com/pcbje/pyad1) | 4 | a four-segment AD1 image and FTK Imager's log | AD1 reading; the image hash must equal **FTK Imager's own** |
+| [L01 samples (ggeng2)](https://github.com/ggeng2) | 2 | EnCase logical evidence files | L01 reading |
+| [evtx (omerbenamram)](https://github.com/omerbenamram/evtx) | 3 | event logs, one with a damaged chunk | EVTX parsing, record by record; damage handled |
+| [CCL android-bits](https://github.com/cclgroupltd/android-bits) | 6 | Android binary XML (ABX) with the plain XML it encodes | the ABX decoder must reproduce the XML |
+| [DFIRArtifactMuseum](https://github.com/AndrewRathbun/DFIRArtifactMuseum) | 5 | a Windows 11 thumbcache with its search index; Defender logs and quarantine | thumbnails linked to file names through the search index; Defender |
+| [Thumbs.db files](https://github.com/ISET/isetcam) (ISETCam, TabularEditor, W3C) | 3 | XP and Vista `Thumbs.db` | thumbnail catalog and pictures |
+| [fq](https://github.com/wader/fq) | 2 | macOS shared file lists (`.sfl2`) | recent documents and applications |
+| [Python](https://github.com/python/cpython) | 5 | the standard library's test e-mails | EML reading |
+| [zstd](https://github.com/facebook/zstd) | 7 | golden decompression files, valid and must-fail | TRACE's own zstd decoder (Linux journals) |
+| PuTTY's `pageant.exe`, [bat](https://github.com/sharkdp/bat), [ripgrep](https://github.com/BurntSushi/ripgrep) | 3 | Windows, Linux and macOS (Apple Silicon) executables | PE, ELF and Mach-O parsing compared with **pefile** and **pyelftools**; the Authenticode signer |
+
+## The carving corpus
+
+`tools/carve_corpus.py` lays **62 real published files** -- 63 counting the program inside a TAR -- out among random filler, with **27 signature decoys** (a format's magic followed by junk), and writes the answer key. All 63 must be carved byte-exact and no decoy may be.
+
+| Source | Formats |
+|:--|:--|
+| [raw.pixls.us](https://raw.pixls.us/) (CC0) | camera raws: ARW, CR2, CR3, DNG, NEF, ORF, PEF, RAF, RW2 |
+| [filesamples.com](https://filesamples.com/) | 3GP, M4A, MKV, ODP, ODS, ODT, Opus, RTF, XLSX |
+| [GNU](https://www.gnu.org/) | GZIP, BZIP2, XZ, TAR |
+| Pillow, psd-tools, libheif, pi-heif test files | AVIF, PSD, PSB, WebP, HEIC |
+| java-libpst, python-docx, python-pptx, EPUB samples, the Chinook database | PST, OST, DOCX, PPTX, EPUB, SQLite |
+| python-evtx, regf samples, LNK samples, Python e-mails | EVTX, registry hive, LNK, EML |
+| rarfile and py7zr test archives | RAR, 7z |
+| PuTTY, SQLite, BusyBox, ripgrep, Maven, Androguard | EXE, DLL, ELF, Mach-O, JAR, APK |
+| test-videos.co.uk, Wikimedia, Matroska test files, Google | MP4, WebM, OGG, MKV, WebP |
+
+<Aside type="note" title="Tests that make their own images">
+Many more tests build small disk images, archives, databases and documents on the fly -- to test an exact edge case, such as a SQLite record deleted in a known way. Those are generated by the tests themselves and are not listed here.
+</Aside>

@@ -1,0 +1,100 @@
+---
+title: Get TRACE
+description: Get the free TRACE digital forensics software – install it from source on Windows, macOS or Linux with one script (recommended), or download the standalone app for Windows or macOS.
+sidebar:
+  label: Get TRACE
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import Downloads from '../../../components/Downloads.astro';
+
+Two ways, both free: **install from source** -- what we recommend -- or download the **standalone app** for the quickest start.
+
+<Downloads />
+
+| | From source | Standalone app |
+|:--|:--|:--|
+| **Windows** | Python 3.10 or newer | Windows 10 or 11, 64-bit |
+| **macOS** | Python 3.10 or newer (from python.org) | macOS 13 or later -- the DMG for your Mac: Apple Silicon or Intel |
+| **Linux** | Python 3.10 or newer; on Debian/Ubuntu the script installs the rest | -- |
+
+## First launch of the app
+
+<Tabs syncKey="os">
+<TabItem label="Windows" icon="seti:windows">
+<Steps>
+
+1. Unzip the whole folder somewhere you can write, for example *Documents*. Do not run `TRACE.exe` from inside the zip.
+
+2. Double-click `TRACE\TRACE.exe`.
+
+3. Windows SmartScreen may say it *"protected your PC"*: TRACE is not signed by a publisher. Choose **More info**, then **Run anyway**. Windows asks once.
+
+</Steps>
+</TabItem>
+<TabItem label="macOS" icon="apple">
+<Steps>
+
+1. Open the DMG and drag **TRACE** into the *Applications* folder.
+
+2. Open TRACE from *Applications*.
+
+3. TRACE is not signed with an Apple Developer ID, so macOS stops the first launch. Control-click (right-click) TRACE, choose **Open**, then **Open** again. On macOS 15 and later: try to open it once, then go to **System Settings ▸ Privacy & Security** and click **Open Anyway**. macOS asks once.
+
+4. When you open a disk image on an external drive, macOS may ask whether TRACE may access it: allow it.
+
+</Steps>
+</TabItem>
+</Tabs>
+
+<Aside type="tip" title="Folders with spaces or accents are fine">
+The Windows package is tested unzipped into a path containing spaces and a non-ASCII letter, and the macOS package from a read-only mounted DMG -- the places a packaged app usually breaks.
+</Aside>
+
+## Check what you downloaded
+
+Each release file has a `.sha256` beside it on the [releases page](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/releases). Compare it with the file you have before using TRACE on a case:
+
+<Tabs syncKey="os">
+<TabItem label="Windows" icon="seti:windows">
+
+```powershell
+Get-FileHash .\TRACE-2.0.0-windows-x64.zip -Algorithm SHA256
+```
+
+</TabItem>
+<TabItem label="macOS" icon="apple">
+
+```bash
+shasum -a 256 TRACE-2.0.0-macos-arm64.dmg
+```
+
+</TabItem>
+</Tabs>
+
+## Validate the installed copy
+
+TRACE can check itself. The self-test exercises every engine and native library the app depends on, then runs the full case workflow -- create, add evidence, verify, analyse, index, search, reopen -- on any disk image you give it, inside a temporary sandbox that is deleted afterwards. It writes one JSON report and exits with status 0 only if every check passed.
+
+<Tabs syncKey="os">
+<TabItem label="Windows" icon="seti:windows">
+
+```powershell
+.\TRACE\TRACE.exe --self-test report.json C:\images\known-good.E01
+```
+
+</TabItem>
+<TabItem label="macOS" icon="apple">
+
+```bash
+/Applications/TRACE.app/Contents/MacOS/TRACE --self-test report.json ~/images/known-good.E01
+```
+
+</TabItem>
+</Tabs>
+
+This is the same check every release passes before it is published, and a validation step you can record for your own lab.
+
+## Updating
+
+Download the new release and replace the old folder or app. Cases are kept wherever you created them and settings in your user profile, so nothing is lost; a case opened in a newer TRACE is upgraded in place.

@@ -1,0 +1,82 @@
+---
+title: Artifacts parsed
+description: The Windows, macOS, Linux, iOS and Android artifacts TRACE reads into user activity – Prefetch, Amcache, ShellBags, SRUM, event logs, browsers, KnowledgeC, FSEvents, journals, chats and phone records.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+TRACE's [user activity](/features/activity/) module reads these into one record shape and onto the timeline. Each record links to the file it came from.
+
+<Tabs>
+<TabItem label="Windows" icon="seti:windows">
+
+| Artifact | What it tells you |
+|:--|:--|
+| **Prefetch** (XP to 11, LZXPRESS-compressed included) | programs run, run counts, last run times |
+| **Amcache** | programs present and run, with hashes |
+| **Shimcache** (AppCompatCache) | programs seen by the compatibility layer |
+| **UserAssist**, **BAM** | programs run by each user |
+| **RunMRU**, **TypedPaths**, **WordWheelQuery** | Run box commands, Explorer paths typed, Explorer searches |
+| **ShellBags** | folders browsed, including on removed drives |
+| **LNK** shortcuts, **Jump Lists**, **RecentDocs**, Office recent files | files opened |
+| **USBSTOR**, **DeviceClasses**, **MountPoints2**, **setupapi** logs | USB devices: what, when first and last, which user |
+| **Event logs** (EVTX, and XP `.evt`) | logons and sessions, with service and machine accounts left out |
+| **PowerShell** history and script-block logging (4104) | commands typed and scripts run, blocks joined |
+| **SRUM** | application, network and energy use; connectivity |
+| **Windows Timeline** (ActivitiesCache.db) | activity history |
+| **WebCache**, **index.dat** | Internet Explorer and legacy Edge history and downloads |
+| **NetworkList**, **TimeZoneInformation**, **Uninstall**, **CurrentVersion** | networks joined, time zone, installed programs, Windows version |
+| **Recycle Bin** (`$I`/`$R`, INFO2, deleted `$I` records) | what was deleted, from where, when |
+| **Microsoft Defender** MPLog, detection history, quarantine | detections and quarantined files |
+| **thumbcache**, **Thumbs.db**, **Windows Search** index, **RDP bitmap cache** | pictures seen, including of files now gone |
+| **NTFS** `$MFT`, `$UsnJrnl`, `$I30` slack, `$LogFile` | file events, timestomping, traces of deleted files |
+
+</TabItem>
+<TabItem label="Browsers">
+
+| Browser | Read |
+|:--|:--|
+| **Chrome, Edge, Brave, Vivaldi** and other Chromium browsers | history, downloads, searches; deleted history recovered |
+| **Firefox** | history, downloads and searches (`places.sqlite`, older `downloads.sqlite`); deleted history recovered |
+| **Safari** | history |
+| **Internet Explorer** | WebCache and `index.dat` |
+
+Browser profiles are found in Windows, macOS and Linux home folders, and on Android.
+
+</TabItem>
+<TabItem label="macOS" icon="apple">
+
+| Artifact | What it tells you |
+|:--|:--|
+| **KnowledgeC** | application usage and browsing |
+| **FSEvents** | file-system events, from `.fseventsd` on any volume |
+| **Recent items**, **shared file lists** (`.sfl2`) | files and apps opened, with bookmark data decoded |
+| **Quarantine events** | files downloaded and where from |
+| **InstallHistory** | software installed |
+| zsh / bash history | commands typed |
+
+</TabItem>
+<TabItem label="Linux" icon="linux">
+
+| Artifact | What it tells you |
+|:--|:--|
+| **systemd journal** (LZ4 and zstd compressed fields) | security-relevant events: logons, SSH logins and failures, sudo, su and pkexec, account changes |
+| **syslog** / **auth.log** | the same, from text logs |
+| **wtmp** / **utmpx** | logons and reboots |
+| bash / zsh / fish history | commands typed |
+| `recently-used.xbel` | files opened in desktop applications |
+
+</TabItem>
+<TabItem label="Phones and apps" icon="mobile-android">
+
+| Source | Read |
+|:--|:--|
+| **iOS backups** | call history, contacts, Messages and iMessage, WhatsApp, accounts, Wi-Fi networks |
+| **Android** (a data partition or `/data/data`) | call log, contacts, SMS, WhatsApp, Chrome, accounts, Wi-Fi (including Android's binary XML), build information |
+| **Skype** | messages, calls and file transfers |
+| **OneDrive**, **Google Drive** | synced files |
+
+Saved Wi-Fi passwords are never copied into a record.
+
+</TabItem>
+</Tabs>

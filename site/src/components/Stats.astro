@@ -1,0 +1,73 @@
+---
+// A strip of numbers. Each is a fact from the code or the test suite --
+// keep them true when the code changes.
+interface Props {
+	items: { value: string; label: string }[];
+}
+const { items } = Astro.props;
+---
+
+<dl class="stats not-content">
+	{
+		items.map((s) => (
+			<div>
+				<dt>{s.label}</dt>
+				<dd>{s.value}</dd>
+			</div>
+		))
+	}
+</dl>
+
+<style>
+	.stats {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+		gap: 1px;
+		margin: 2.5rem 0 0;
+		border-radius: var(--trace-radius);
+		overflow: hidden;
+		border: 1px solid var(--trace-border);
+		background: var(--trace-border);
+	}
+	@media (max-width: 40rem) {
+		.stats {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+		.stats div:last-child:nth-child(odd) {
+			grid-column: 1 / -1;
+		}
+	}
+	/* Number in the first row of every cell, label below it from the top:
+	   numbers stay on one line however many lines a label takes. (The dt
+	   comes first in the markup, as a definition list requires.) */
+	.stats div {
+		display: grid;
+		grid-template-rows: auto 1fr;
+		align-content: start;
+		padding: 1.3rem 1rem;
+		text-align: center;
+		background: var(--sl-color-black);
+	}
+	.stats dd {
+		grid-row: 1;
+	}
+	.stats dt {
+		grid-row: 2;
+		align-self: start;
+	}
+	dd {
+		margin: 0;
+		font-size: clamp(1.7rem, 3.5vw, 2.3rem);
+		font-weight: 750;
+		letter-spacing: -0.03em;
+		background: linear-gradient(120deg, var(--sl-color-accent-high), var(--trace-cyan));
+		-webkit-background-clip: text;
+		background-clip: text;
+		color: transparent;
+	}
+	dt {
+		margin-top: 0.25rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-3);
+	}
+</style>

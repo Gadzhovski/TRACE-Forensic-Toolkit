@@ -1,0 +1,57 @@
+---
+title: Where TRACE keeps data
+description: The folders TRACE uses – the case folder, per-user settings and libraries, and the log – on Windows, macOS and Linux, and what is in each.
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+
+TRACE never writes beside the application or to the evidence. It uses three kinds of place.
+
+## The case folder
+
+Wherever you create the case:
+
+<FileTree>
+- My Case/
+  - case.db evidence, verification history, audit trail, bookmarks, notes, findings, activity
+  - search.db the full-text search index (a cache: rebuilt rather than migrated)
+  - carved/ copies of carved files, only if the case setting asks for them
+  - exports/ exported files and reports
+  - thumbnails/
+</FileTree>
+
+## Your settings
+
+| | Folder |
+|:--|:--|
+| Windows | `%APPDATA%\TRACE` |
+| macOS | `~/Library/Application Support/TRACE` |
+| Linux | `$XDG_CONFIG_HOME/TRACE`, else `~/.config/TRACE` |
+
+It holds `config.ini` -- theme, recent cases, window layout, your user settings (examiner, organisation, default case folder, size units) and API keys -- and saved report templates.
+
+<Aside type="caution" title="API keys">
+A VirusTotal API key you enter is stored in `config.ini` in plain text, readable by your user account.
+</Aside>
+
+## Your libraries and the log
+
+| | Folder |
+|:--|:--|
+| Windows | `%LOCALAPPDATA%\TRACE` |
+| macOS | `~/Library/Application Support/TRACE` |
+| Linux | `$XDG_DATA_HOME/TRACE`, else `~/.local/share/TRACE` |
+
+<FileTree>
+- TRACE/
+  - trace.log the application log
+  - hashsets/ imported hash sets (NSRL is linked where it is, not copied)
+  - yara/ YARA rule sets, copied with their SHA-256s
+  - sigma/ Sigma rules
+  - keywords/ keyword lists
+  - carved_files/ quick-triage carve copies, if that setting is on
+</FileTree>
+
+<Aside type="tip" title="Reporting a problem">
+`trace.log` is the first thing to look at -- and to attach, with anything from a real case removed, to a [bug report](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/issues/new/choose).
+</Aside>

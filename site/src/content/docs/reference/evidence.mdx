@@ -1,0 +1,71 @@
+---
+title: Supported evidence
+description: Every disk image, logical image, file system, volume system, encrypted volume and container format TRACE reads – E01, AFF4, raw, DMG, VMDK, VHDX, QCOW2, AD1, L01, NTFS, APFS, ext4, BitLocker, FileVault, LUKS and more.
+---
+
+## Disk images
+
+| Format | Notes |
+|:--|:--|
+| **E01 / Ex01** (EnCase) | segments found automatically; stored MD5/SHA-1 verified; custody details read from the header |
+| **AFF4** | maps and image streams, Snappy / LZ4 / deflate; symbolic streams; stored stream hashes re-checked |
+| **Raw / dd** | single files and split images (`.001`, `.002`, …), hashed across all segments |
+| **ISO** | ISO 9660 images |
+| **DMG** | UDIF with zlib, bzip2, LZFSE, LZMA or ADC compression; `.sparseimage`; `.sparsebundle` folders |
+| **VMDK** | VMware disks, snapshots chained to their parents |
+| **VHD / VHDX** | Hyper-V and Virtual PC disks, differencing disks chained to their parents |
+| **QCOW / QCOW2** | QEMU disks |
+
+## Logical images and collections
+
+| Format | Notes |
+|:--|:--|
+| **AD1** | FTK Imager logical images, multi-segment, hashed as FTK does (encrypted AD1 refused with a clear message) |
+| **L01** | EnCase logical evidence |
+| **ZIP / TAR** | collections as evidence |
+| **Folder** | e.g. KAPE or Velociraptor output; symbolic links never followed; a collection's system root (`C`, `uploads/auto/C%3A`) found by its folders |
+| **iOS backup** | iTunes/Finder backups, plain or encrypted, files at their phone paths |
+
+## Live disks
+
+An attached physical disk -- `\\.\PhysicalDriveN` on Windows, `/dev/…` on macOS and Linux -- read-only through an administrator helper, without imaging it first.
+
+## Volume systems
+
+DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels; **LVM** volume groups; **APFS** containers; **Volume Shadow Copies** of NTFS volumes.
+
+## File systems
+
+| File system | Read by |
+|:--|:--|
+| NTFS (compressed and EFS-encrypted files, alternate data streams) | The Sleuth Kit 4.15 |
+| FAT12 / FAT16 / FAT32, exFAT | The Sleuth Kit |
+| ext2 / ext3 / ext4 | The Sleuth Kit |
+| HFS+ | The Sleuth Kit |
+| UFS | The Sleuth Kit |
+| ISO 9660 | The Sleuth Kit |
+| APFS (encrypted too) | libfsapfs |
+| XFS | libfsxfs |
+
+Unpartitioned images -- a single file system with no partition table -- are read too.
+
+## Encrypted volumes
+
+| | |
+|:--|:--|
+| **BitLocker** and BitLocker To Go | recovery key, password or `.BEK` startup key |
+| **FileVault 2** | password or recovery key |
+| **LUKS** | passphrase |
+| **APFS** | password or recovery key |
+| **iOS backups** | backup password |
+
+## Inside files
+
+| | |
+|:--|:--|
+| **Archives** | ZIP (and every ZIP-based format), 7z, RAR (all members listed; stored members read), TAR, GZIP, BZIP2, XZ -- nested, bomb-guarded, encrypted members reported as encrypted |
+| **Mail** | Outlook PST / OST (with orphan items), EML, mbox |
+| **Windows** | registry hives with transaction logs, EVTX and XP `.evt` event logs, Prefetch, LNK, Jump Lists, ESE databases, thumbcache and Thumbs.db, Defender quarantine, RDP bitmap cache |
+| **Databases** | SQLite with WAL, including deleted records |
+| **Documents** | PDF, Office (old and new), OpenDocument, RTF, EPUB, XPS, CBZ, FB2, MOBI |
+| **Pictures** | all common formats plus HEIC, AVIF, JPEG 2000, PSD, PCX and camera raws |

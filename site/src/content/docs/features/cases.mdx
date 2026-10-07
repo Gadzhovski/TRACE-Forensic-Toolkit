@@ -1,0 +1,63 @@
+---
+title: Cases and integrity
+description: How TRACE organises an investigation – a case folder across many devices, custody details, verification history, an audit trail, bookmarks and notes – without ever copying or changing evidence.
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+
+## One investigation, many devices
+
+A case holds every device in an investigation -- a laptop, a phone backup, a USB stick, a cloud export. All of them stay open together; Triage, the Findings node and the timeline cover the whole case and name each row's device, and Triage can be filtered to one.
+
+A case is a **folder**:
+
+<FileTree>
+- My Case/
+  - case.db the case: evidence, verification history, audit trail, bookmarks, notes, findings
+  - search.db the full-text search index
+  - carved/ copies of carved files, only if you ask for them
+  - exports/ files you export
+  - thumbnails/
+</FileTree>
+
+**Evidence is referenced by path and hash, never copied.** Moving an image breaks only the path; its recorded hashes still say whether it is the same image.
+
+<Aside type="caution" title="Copy a case only with TRACE closed">
+Both databases use write-ahead logging, so the window can read while a job writes. An open case has `-wal` and `-shm` files beside its databases; copy the folder only when TRACE is closed.
+</Aside>
+
+## Custody details
+
+Each piece of evidence carries an **exhibit number**, **description**, **acquired by** and **acquired on**. They are prefilled from an E01 or L01 header where it records them -- the date kept exactly as recorded, since an E01's date has no time zone -- and can be edited later from the Case tab. Every change is audited, old value to new.
+
+## Verification is a history
+
+Verifying evidence **appends** a result; nothing is ever overwritten.
+
+- An image that stores its own hashes (E01, AFF4, AD1, L01) is checked against **every** hash it stores; all must match.
+- An image with none is hashed and that becomes its **baseline**; later checks compare with it.
+- Each image is hashed the way it was recorded: an E01 by its media contents, a split raw image across all segments, a virtual disk by the disk it presents rather than its container files.
+- A live disk is recorded as *what was read, when* -- never as verified, since a running disk changes.
+
+Verification runs as a job beside analysis (before, after or alongside -- your choice), and **Verify All** checks every image in the case.
+
+## The audit trail
+
+The Case tab's **Activity log** records every action that matters: case created, evidence added or removed (with its recorded hashes), verification outcomes, volumes unlocked (*with a recovery key* -- never the key itself), files exported, settings changed (old value to new), anything sent to VirusTotal, map tiles fetched.
+
+## Bookmarks and notes
+
+- **Bookmarks** point at a file, a byte range selected in the hex view, a text selection (mapped back to the file's bytes) or a registry key -- and still resolve after the case is reopened.
+- **Notes** are written about the selected file or the whole case, and **outlive what they describe**: deleting a bookmark keeps its notes, and a note whose evidence was removed keeps its text, prefixed with the image's name.
+
+## Removing evidence
+
+**File ▸ Remove Evidence** takes everything TRACE derived from an image -- findings, index entries, carved copies -- and records an audit line naming the image's hashes and what went. The confirmation shows the same list first. The image file itself is never touched.
+
+## Settings that change results belong to the case
+
+Anything that changes **what is found or sent** is a case setting, stated in the report's methods section: the display time zone, offline mode, whether VirusTotal uploads are allowed, MD5 and SHA-1 alongside SHA-256, analysis and inspection limits, the entropy threshold, archive depth and member size, which indicator kinds are extracted, the carving source and minimum size. Changing one is audited.
+
+<Aside type="note" title="Times are never converted in storage">
+Times are stored and shown as recorded -- in UTC, with your display zone shown **beside** them, DST-correct. Times that have no zone on disk (FAT, ZIP, DOS dates, Windows SYSTEMTIME) are labelled *local, no zone* rather than guessed.
+</Aside>

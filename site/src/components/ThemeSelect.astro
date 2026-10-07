@@ -1,0 +1,102 @@
+---
+// The theme switch: three icon buttons -- light, dark, follow the system --
+// in place of Starlight's native <select>, whose open list is drawn by the
+// operating system and matches nothing on the page. Same storage as
+// Starlight's ('starlight-theme' in localStorage: 'light', 'dark' or '' for
+// auto) and the same data-theme on <html>, so everything else is unchanged.
+import { Icon } from '@astrojs/starlight/components';
+
+const choices = [
+	{ value: 'light', icon: 'sun', label: 'Light theme' },
+	{ value: 'dark', icon: 'moon', label: 'Dark theme' },
+	{ value: 'auto', icon: 'laptop', label: 'Match the system theme' },
+] as const;
+---
+
+<trace-theme-switch class="switch" role="group" aria-label="Theme">
+	{
+		choices.map((c) => (
+			<button type="button" data-theme-choice={c.value} aria-pressed="false" aria-label={c.label} title={c.label}>
+				<Icon name={c.icon} size="1rem" />
+			</button>
+		))
+	}
+</trace-theme-switch>
+
+{/* Inlined so the right button is marked before the page is painted. */}
+<script is:inline>
+	(() => {
+		const stored = typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const current = stored === 'light' || stored === 'dark' ? stored : 'auto';
+		document.querySelectorAll('[data-theme-choice]').forEach((b) => {
+			b.setAttribute('aria-pressed', String(b.getAttribute('data-theme-choice') === current));
+		});
+	})();
+</script>
+
+<script>
+	type Theme = 'auto' | 'dark' | 'light';
+	const storageKey = 'starlight-theme';
+
+	const parse = (t: unknown): Theme => (t === 'light' || t === 'dark' ? t : 'auto');
+	const load = (): Theme => parse(typeof localStorage !== 'undefined' && localStorage.getItem(storageKey));
+	const system = (): Theme => (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+
+	function apply(theme: Theme) {
+		document.documentElement.dataset.theme = theme === 'auto' ? system() : theme;
+		if (typeof localStorage !== 'undefined') localStorage.setItem(storageKey, theme === 'auto' ? '' : theme);
+		document.querySelectorAll<HTMLButtonElement>('[data-theme-choice]').forEach((b) => {
+			b.setAttribute('aria-pressed', String(b.dataset.themeChoice === theme));
+		});
+	}
+
+	matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+		if (load() === 'auto') apply('auto');
+	});
+
+	class TraceThemeSwitch extends HTMLElement {
+		connectedCallback() {
+			this.querySelectorAll<HTMLButtonElement>('[data-theme-choice]').forEach((b) => {
+				b.addEventListener('click', () => apply(parse(b.dataset.themeChoice)));
+			});
+		}
+	}
+	if (!customElements.get('trace-theme-switch')) customElements.define('trace-theme-switch', TraceThemeSwitch);
+</script>
+
+<style>
+	.switch {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		padding: 3px;
+		border-radius: 999px;
+		border: 1px solid var(--trace-border);
+		background: var(--trace-surface);
+	}
+	button {
+		display: grid;
+		place-items: center;
+		width: 1.9rem;
+		height: 1.9rem;
+		padding: 0;
+		border: 0;
+		border-radius: 999px;
+		background: transparent;
+		color: var(--sl-color-gray-3);
+		cursor: pointer;
+		transition: color 0.15s, background 0.15s;
+	}
+	button:hover {
+		color: var(--sl-color-white);
+	}
+	button[aria-pressed='true'] {
+		color: #fff;
+		background: linear-gradient(135deg, var(--sl-color-accent), color-mix(in srgb, var(--trace-cyan) 70%, var(--sl-color-accent)));
+		box-shadow: 0 4px 12px -4px var(--sl-color-accent);
+	}
+	button:focus-visible {
+		outline: 2px solid var(--sl-color-accent-high);
+		outline-offset: 1px;
+	}
+</style>

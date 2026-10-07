@@ -1,0 +1,87 @@
+# Builds the website in site/ (Astro + Starlight) and publishes it to GitHub
+# Pages at its custom domain: https://trace.gadzhovski.com/
+# (Settings > Pages > Custom domain; DNS: CNAME trace -> gadzhovski.github.io)
+#
+# A push to master that touches the site -- or the screenshots, logo and
+# social preview it copies from Icons/ -- builds and deploys it. A pull
+# request only builds it, so a broken page is caught before it is merged.
+# Nothing built is committed: the HTML goes straight to Pages.
+#
+# Public repository, so: actions pinned by commit SHA, a read-only token for
+# the build, and the Pages permissions only on the deploy job.
+
+name: Website
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'site/**'
+      - 'Icons/readme/**'
+      - 'Icons/logo_prev_ui.png'
+      - 'Icons/social-preview.png'
+      - '.github/workflows/pages.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'Icons/readme/**'
+      - 'Icons/logo_prev_ui.png'
+      - 'Icons/social-preview.png'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          # Whole history: each page's "Last updated" comes from git.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install
+        run: npm ci --no-fund --no-audit
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        if: github.event_name != 'pull_request'
+        with:
+          path: site/dist
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d  # v6.0.0
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1

@@ -1,0 +1,115 @@
+---
+// Starlight's own footer (edit link, last updated, pagination), then the
+// site's: what TRACE is, who develops it, where it lives, its licence.
+import Default from '@astrojs/starlight/components/Footer.astro';
+import { Icon } from '@astrojs/starlight/components';
+
+const base = import.meta.env.BASE_URL;
+const repo = 'https://github.com/Gadzhovski/TRACE-Forensic-Toolkit';
+const linkedin = 'https://www.linkedin.com/in/radoslav-gadzhovski/';
+const year = new Date().getFullYear();
+---
+
+<Default><slot /></Default>
+
+<div class="site-footer">
+	<div class="cols">
+		<div class="about">
+			<strong>TRACE</strong>
+			<p>Toolkit for Retrieval and Analysis of Cyber Evidence. Open-source digital forensics for Windows, macOS and Linux.</p>
+			<a class="author" href={linkedin} rel="author noopener">
+				<Icon name="linkedin" size="1.1rem" />
+				<span>Developed by <strong>Radoslav Gadzhovski</strong></span>
+			</a>
+		</div>
+		<nav aria-label="Project">
+			<span>Project</span>
+			<a href={`${repo}/releases/latest`}>Download</a>
+			<a href={repo}>Source code</a>
+			<a href={`${repo}/releases`}>Releases</a>
+			<a href={`${repo}/blob/master/LICENSE`}>MIT License</a>
+		</nav>
+		<nav aria-label="Help">
+			<span>Help</span>
+			<a href={`${base}start/download/`}>Getting started</a>
+			<a href={`${base}faq/`}>FAQ</a>
+			<a href={`${repo}/discussions`}>Discussions</a>
+			<a href={`${repo}/issues/new/choose`}>Report an issue</a>
+		</nav>
+	</div>
+	<p class="legal">© {year} <a href={linkedin} rel="author noopener">Radoslav Gadzhovski</a> · Released under the MIT License · Built with The Sleuth Kit, libewf, the libyal libraries and PySide6</p>
+</div>
+
+<style>
+	.site-footer {
+		margin-top: 3rem;
+		padding-top: 2rem;
+		border-top: 1px solid var(--trace-border);
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-3);
+	}
+	.cols {
+		display: grid;
+		grid-template-columns: 2fr 1fr 1fr;
+		gap: 2rem;
+	}
+	.about strong {
+		color: var(--sl-color-white);
+		font-size: var(--sl-text-base);
+	}
+	.about p {
+		margin-top: 0.4rem;
+		max-width: 26rem;
+	}
+	.author {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-top: 0.9rem;
+		color: var(--sl-color-gray-2);
+		text-decoration: none;
+	}
+	.author :global(svg) {
+		color: var(--sl-color-accent-high);
+	}
+	.author strong {
+		font-size: inherit;
+		color: var(--sl-color-white);
+	}
+	.author:hover span {
+		text-decoration: underline;
+	}
+	.legal a {
+		color: inherit;
+	}
+	nav {
+		display: flex;
+		flex-direction: column;
+		gap: 0.35rem;
+	}
+	nav span {
+		color: var(--sl-color-white);
+		font-weight: 600;
+		margin-bottom: 0.2rem;
+	}
+	nav a {
+		color: var(--sl-color-gray-3);
+		text-decoration: none;
+	}
+	nav a:hover {
+		color: var(--sl-color-accent-high);
+	}
+	.legal {
+		margin-top: 2rem;
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-4);
+	}
+	@media (max-width: 50rem) {
+		.cols {
+			grid-template-columns: 1fr 1fr;
+		}
+		.about {
+			grid-column: 1 / -1;
+		}
+	}
+</style>

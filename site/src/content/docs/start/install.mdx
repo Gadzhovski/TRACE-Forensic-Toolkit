@@ -1,0 +1,147 @@
+---
+title: Install from source
+description: Install TRACE from source on Windows, macOS, Linux or WSL with one script. Python 3.10 or newer; no compiler, no Homebrew – every forensic engine installs as a pre-built wheel.
+sidebar:
+  label: Install from source
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Running from source is how you use TRACE on Linux, and how you follow the newest code on any system. One script per platform does the whole install.
+
+**You need Python 3.10 or newer -- and nothing else.** No C compiler, no Visual Studio Build Tools, and on macOS no Homebrew: The Sleuth Kit (pytsk3), libewf and every other forensic engine install as pre-built wheels for Windows, macOS (Apple Silicon and Intel) and Linux. The installers refuse to fall back to compiling, so a missing wheel fails clearly instead of half-way through a C build.
+
+<Tabs syncKey="os">
+<TabItem label="Windows" icon="seti:windows">
+
+<Steps>
+
+1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) if you do not have it.
+
+2. Get the code and run the installer in PowerShell:
+
+   ```powershell
+   git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+   cd TRACE-Forensic-Toolkit
+   powershell -ExecutionPolicy Bypass -File install_windows.ps1
+   ```
+
+3. Start TRACE:
+
+   ```powershell
+   venv\Scripts\activate
+   python main.py
+   ```
+
+</Steps>
+
+Add `-Yes` to accept every default without questions (it reuses an existing `venv`).
+
+</TabItem>
+<TabItem label="macOS" icon="apple">
+
+<Steps>
+
+1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/macos/). macOS's own `python3` is 3.9, which is too old.
+
+2. Get the code and run the installer:
+
+   ```bash
+   git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+   cd TRACE-Forensic-Toolkit
+   ./install.sh
+   ```
+
+3. Start TRACE:
+
+   ```bash
+   source venv/bin/activate
+   python main.py
+   ```
+
+</Steps>
+
+Nothing outside Python is installed. File-type identification (libmagic) comes from the `pylibmagic` wheel, and TRACE logs at start-up which copy it loaded. The test suite and the packaged self-test both fail if it is any other copy -- such as one Homebrew put on the machine.
+
+</TabItem>
+<TabItem label="Linux and WSL" icon="linux">
+
+<Steps>
+
+1. Get the code and run the installer:
+
+   ```bash
+   git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+   cd TRACE-Forensic-Toolkit
+   ./install.sh
+   ```
+
+   On Debian and Ubuntu it asks for your `sudo` password once, up front, and installs the runtime libraries Qt and libmagic need (below).
+
+2. Start TRACE:
+
+   ```bash
+   source venv/bin/activate
+   python main.py
+   ```
+
+</Steps>
+
+The system packages, all runtime only (`--no-install-recommends`, so no compiler arrives with them):
+
+```text
+python3 python3-venv python3-pip
+libmagic1
+libxcb-cursor0 libxcb-xinerama0 libegl1 libxkbcommon-x11-0 libgl1
+libglib2.0-0 libfontconfig1 libdbus-1-3
+libpulse0          # Qt Multimedia -- without it the window cannot open
+libgssapi-krb5-2   # Qt Network
+```
+
+On other distributions, install the equivalents of these, then run `./install.sh` -- it automates apt only, and says so.
+
+</TabItem>
+</Tabs>
+
+## Installer options
+
+| | |
+|:--|:--|
+| `./install.sh --yes` / `install_windows.ps1 -Yes` | non-interactive: accept the detected platform and the defaults |
+| `TRACE_PYTHON=/path/to/python3.12 ./install.sh` | use this interpreter rather than the newest one found |
+| `install.log` | everything the install did, beside the scripts -- attach the end of it to an install bug report |
+
+Long steps never scroll: on a terminal, one line shows what is happening now (*Downloading pyside6 6.11.2 (175 MB)*), and a failing step prints the end of `install.log`.
+
+## Installing by hand
+
+In an activated virtual environment:
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+There is one `requirements.txt` for every platform; Windows-only packages carry environment markers, so the same file is correct everywhere.
+
+## Updating
+
+```bash
+git pull
+./install.sh        # or install_windows.ps1 on Windows
+```
+
+<Aside type="note" title="Every library is required">
+TRACE has no optional dependencies: everything it imports is in `requirements.txt` and installs on every supported platform. **Options ▸ Supported Features** lists each feature with the library that provides it, and says plainly if one could not load.
+</Aside>
+
+## Running the tests
+
+The test suite downloads public forensic images (checked against recorded SHA-256s) and runs in parallel:
+
+```bash
+python tools/fetch_test_images.py
+python -m pytest -n auto --dist loadfile
+```
+
+See [Testing and validation](/quality/testing/) for what it covers.

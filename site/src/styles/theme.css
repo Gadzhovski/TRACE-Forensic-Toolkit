@@ -1,0 +1,214 @@
+/* TRACE's colours on Starlight's variables: the app's blue on deep navy,
+   as in the logo, the installers' gradient and the social preview. */
+
+:root {
+	--sl-font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+	--sl-font-mono: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Mono', monospace;
+
+	/* Dark (Starlight's default) */
+	--sl-color-accent-low: #10284d;
+	--sl-color-accent: #4c8eda;
+	--sl-color-accent-high: #bcd8ff;
+	--sl-color-white: #ffffff;
+	--sl-color-gray-1: #e6edf7;
+	--sl-color-gray-2: #c3cede;
+	--sl-color-gray-3: #8d9bb3;
+	--sl-color-gray-4: #5a6982;
+	--sl-color-gray-5: #34425a;
+	--sl-color-gray-6: #1b2638;
+	--sl-color-black: #0c1422;
+
+	--trace-glow: rgba(76, 142, 218, 0.28);
+	--trace-cyan: #3fc7e0;
+	--trace-surface: rgba(255, 255, 255, 0.035);
+	--trace-border: rgba(140, 180, 240, 0.16);
+	--trace-radius: 14px;
+}
+
+:root[data-theme='light'] {
+	--sl-color-accent-low: #d9e8fb;
+	--sl-color-accent: #1f63b8;
+	--sl-color-accent-high: #0e3a73;
+	--sl-color-white: #0c1422;
+	--sl-color-gray-1: #1b2638;
+	--sl-color-gray-2: #34425a;
+	--sl-color-gray-3: #5a6982;
+	--sl-color-gray-4: #8d9bb3;
+	--sl-color-gray-5: #c9d3e2;
+	--sl-color-gray-6: #eaf0f8;
+	--sl-color-gray-7: #f5f8fc;
+	--sl-color-black: #ffffff;
+
+	--trace-glow: rgba(31, 99, 184, 0.14);
+	--trace-surface: rgba(12, 20, 34, 0.025);
+	--trace-border: rgba(31, 70, 130, 0.14);
+}
+
+/* Header: a little glass over the page. */
+.header {
+	backdrop-filter: blur(10px);
+	background-color: color-mix(in srgb, var(--sl-color-black) 82%, transparent);
+	border-bottom-color: var(--trace-border);
+}
+.site-title img {
+	height: 2.1rem;
+}
+/* Search on the right, beside GitHub and the theme switch, on every page.
+   Starlight lines it up with the content column, so it sat beside the
+   title on the home page and moved on pages with a sidebar. */
+@media (min-width: 50rem) {
+	.header {
+		grid-template-columns: auto 1fr auto;
+	}
+	.header > div:nth-child(2) {
+		justify-content: flex-end;
+	}
+	.header > div:nth-child(2) > * {
+		width: 100%;
+		max-width: 17rem;
+	}
+}
+
+/* Headings and body. */
+.sl-markdown-content h2 {
+	letter-spacing: -0.015em;
+}
+.sl-markdown-content :is(h1, h2, h3) {
+	font-weight: 700;
+}
+:root {
+	--sl-text-h1: 2.4rem;
+}
+
+/* Tables read as data: tighter, with a soft header. */
+.sl-markdown-content table {
+	border-radius: 10px;
+	overflow: hidden;
+}
+.sl-markdown-content th {
+	background: var(--sl-color-gray-6);
+}
+
+/* Screenshots in the docs: framed, never cropped. */
+.sl-markdown-content img.shot,
+.sl-markdown-content figure img {
+	border-radius: 10px;
+	border: 1px solid var(--trace-border);
+	box-shadow: 0 18px 50px -22px rgba(0, 0, 0, 0.55);
+}
+.sl-markdown-content figcaption {
+	color: var(--sl-color-gray-3);
+	font-size: var(--sl-text-sm);
+	text-align: center;
+	margin-top: 0.6rem;
+}
+
+/* Cards: the brand surface. */
+.sl-markdown-content .card {
+	border-radius: var(--trace-radius);
+	border-color: var(--trace-border);
+	background: var(--trace-surface);
+	transition: border-color 0.2s, transform 0.2s;
+}
+.sl-markdown-content .card:hover {
+	border-color: color-mix(in srgb, var(--sl-color-accent) 55%, transparent);
+	transform: translateY(-2px);
+}
+
+/* The home page (splash): wide, with a glow behind the hero. */
+[data-has-hero] .main-frame {
+	background:
+		radial-gradient(60rem 30rem at 85% -5%, var(--trace-glow), transparent 70%),
+		radial-gradient(40rem 24rem at 0% 10%, color-mix(in srgb, var(--trace-cyan) 12%, transparent), transparent 70%);
+}
+[data-has-hero] .sl-container {
+	max-width: 72rem;
+}
+[data-has-hero] .hero {
+	padding-block: 3.5rem 1rem;
+}
+[data-has-hero] .hero h1 {
+	font-size: clamp(2.6rem, 6vw, 4.2rem);
+	letter-spacing: -0.03em;
+	line-height: 1.05;
+	background: linear-gradient(120deg, var(--sl-color-white) 30%, var(--sl-color-accent-high));
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+}
+/* The full name, a small line above the headline (inside the h1). */
+[data-has-hero] .hero h1 .fullname {
+	display: block;
+	margin-bottom: 1rem;
+	font-size: clamp(0.8rem, 1.4vw, 0.95rem);
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	line-height: 1.4;
+	color: var(--sl-color-accent-high);
+	-webkit-text-fill-color: var(--sl-color-accent-high);
+}
+[data-has-hero] .hero .tagline {
+	font-size: clamp(1.1rem, 2vw, 1.3rem);
+	color: var(--sl-color-gray-2);
+	max-width: 36rem;
+}
+[data-has-hero] .hero img {
+	filter: drop-shadow(0 24px 40px rgba(0, 0, 0, 0.45));
+}
+/* Landing-page sections: centred headings with a lead line under them. */
+[data-has-hero] .sl-markdown-content > .sl-heading-wrapper.level-h2 {
+	margin-top: 5rem;
+	text-align: center;
+}
+[data-has-hero] .sl-markdown-content > .sl-heading-wrapper.level-h2 h2 {
+	text-align: center;
+	font-size: clamp(1.7rem, 3.4vw, 2.4rem);
+	letter-spacing: -0.025em;
+}
+[data-has-hero] .sl-markdown-content > .sl-heading-wrapper.level-h2 + p {
+	text-align: center;
+	color: var(--sl-color-gray-3);
+	font-size: var(--sl-text-lg);
+	max-width: 44rem;
+	margin-inline: auto;
+}
+/* The section's link onward ("Everything TRACE reads ->"), centred. */
+[data-has-hero] .sl-markdown-content > p:has(> a:only-child) {
+	text-align: center;
+}
+/* A table whose header row is empty shows no header. */
+.sl-markdown-content thead:not(:has(th:not(:empty))) {
+	display: none;
+}
+@media (min-width: 50rem) {
+	[data-has-hero] .sl-markdown-content table {
+		display: table;
+		width: 100%;
+		max-width: 56rem;
+		margin-inline: auto;
+	}
+}
+
+/* Tip asides in the brand's cyan rather than Starlight's purple. */
+:root {
+	--sl-color-purple-low: #0c2f3a;
+	--sl-color-purple: #3fc7e0;
+	--sl-color-purple-high: #c6f1fa;
+}
+:root[data-theme='light'] {
+	--sl-color-purple-low: #dcf4f9;
+	--sl-color-purple: #0b8aa6;
+	--sl-color-purple-high: #064656;
+}
+
+/* Hero buttons: the primary carries the brand gradient. */
+.hero .sl-link-button.primary {
+	background: linear-gradient(135deg, var(--sl-color-accent), color-mix(in srgb, var(--trace-cyan) 75%, var(--sl-color-accent)));
+	border-color: transparent;
+	color: #fff;
+	box-shadow: 0 14px 34px -14px var(--sl-color-accent);
+}
+.hero .sl-link-button.primary:hover {
+	filter: brightness(1.08);
+}

@@ -1,0 +1,59 @@
+---
+title: Volumes and encryption
+description: TRACE unlocks BitLocker, FileVault 2, LUKS and encrypted APFS in place, browses Volume Shadow Copies, reads LVM, APFS and XFS, opens virtual disks with their parents, Mac disk images, AFF4 and logical images, and previews live disks read-only.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import layout from '../../../assets/repo/disk-layout.png';
+
+## Encrypted volumes, unlocked in place
+
+| Volume | Unlocked with |
+|:--|:--|
+| **BitLocker** (including BitLocker To Go) | the 48-digit recovery key, the password, or a `.BEK` startup key file |
+| **FileVault 2** (Core Storage) | password or recovery key |
+| **LUKS** | passphrase |
+| **Encrypted APFS** | password or recovery key |
+| **Encrypted iOS backups** | the backup password |
+
+An unlocked volume **replaces its partition's file system in place**: bookmarks, findings, the tree and every reader keep working exactly as for an unencrypted disk, and analysis, indexing and carving jobs receive the key too. Keys are held **in memory only**, for the session; the audit trail says *unlocked with a recovery key*, never the key.
+
+<Aside type="note">
+TRACE detects BitLocker by asking libbde, not by a signature byte -- BitLocker To Go hides behind a FAT32 "discovery volume" that other tools open instead.
+</Aside>
+
+## More than partitions
+
+- **Volume Shadow Copies** -- each snapshot of an NTFS volume appears in the tree beside the live volume, browsable like any file system. A bookmark into a snapshot still resolves after the case is reopened.
+- **LVM** -- each logical volume of a volume group.
+- **APFS** -- containers and their volumes, read through libfsapfs (The Sleuth Kit's wheels cannot read APFS), with nanosecond times.
+- **XFS** -- read through libfsxfs where The Sleuth Kit cannot.
+- **NTFS, FAT12/16/32, exFAT, ext2/3/4, HFS+, UFS, ISO 9660** -- through The Sleuth Kit 4.15, including compressed and EFS-encrypted NTFS files.
+
+## Containers
+
+- **Virtual disks** -- VMDK, VHD, VHDX and QCOW2. A differencing VHD/VHDX or a VMDK snapshot chains its parents from the same folder by name, since the recorded path is the original machine's; a missing parent is named, not guessed.
+- **Mac disk images** -- DMG (zlib, bzip2, LZFSE, LZMA, ADC compression), sparseimage and sparsebundle.
+- **AFF4** -- read by TRACE's own pure-Python reader (maps, image streams, Snappy, LZ4 and deflate); the disk hashes match the reference implementation's on the AFF4 standard reference images, and the container's recorded stream hashes are re-checked on verification.
+- **E01 / Ex01**, split raw (`.001`), ISO.
+
+## Logical evidence
+
+- **AD1** (FTK Imager) -- read in pure Python, hashed the way FTK Imager hashes it, so the hash matches FTK's own log. Encrypted AD1 is refused with a clear message.
+- **L01** -- logical evidence files.
+- **ZIP and TAR collections**, and **folders** such as KAPE or Velociraptor output -- symbolic links never followed, and the case notes that a folder's times are the copies' times.
+- **iOS backups** -- files at their real phone paths, encrypted backups decrypted on the fly with the password.
+
+Logical evidence opens as one file system at offset 0, so every module works on it unchanged (there is no unallocated space to carve).
+
+## Live disks
+
+**File ▸ Add Live Disk** reads an attached disk **without imaging it first** -- for preview and triage. TRACE starts a small read-only helper with administrator rights (one prompt), which opens the device read-only and serves sectors to TRACE over a local connection proven by a one-time token. Background jobs reuse the same helper; they never prompt.
+
+A live disk's hashes are recorded as *what was read, when* -- never as verified, because a disk in use changes. TRACE warns before you open the system disk.
+
+<figure>
+<Image src={layout} alt="TRACE's image information window drawing the disk's partitions as a platter, a bar and a table" />
+<figcaption>Image information: every sector of the disk assigned to one region, drawn to scale.</figcaption>
+</figure>
