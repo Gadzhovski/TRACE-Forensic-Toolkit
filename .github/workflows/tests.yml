@@ -13,15 +13,20 @@
 #
 # What runs depends on what changed (tools/ci_select.py, shown on each run's
 # summary page): a branch or pull request runs the test files that reach
-# the code it touched, downloads only the images those name, scores the
-# carver only if carving changed, on Python 3.10 and 3.14. A push to the
-# default branch, the weekly run and a manual run test everything on every
-# Python. Every operating system, every time.
+# the code it touched, downloads only the images those name, and scores the
+# carver only if carving changed. A push to the default branch, the weekly
+# run and a manual run test everything.
+#
+# Where it runs depends on how close the change is to master
+# (ci_select.matrix): a branch push is one quick job (Ubuntu, Python 3.12);
+# master and pull requests run on every operating system with Python 3.10
+# and 3.14; the weekly and manual runs add 3.12.
 
 name: Tests
 
 on:
   push:
+    branches: ['**']     # not tags: a release tag is master's code, tested
   pull_request:
   workflow_dispatch:
   # Weekly, everything: catches what the per-change selection lets through,
@@ -68,6 +73,7 @@ jobs:
       corpus: ${{ steps.select.outputs.corpus }}
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
+      oses: ${{ steps.select.outputs.oses }}
     steps:
       # Whole history: a branch is compared with where it left the default
       # branch, so a push cancelled by a newer one loses nothing.
@@ -91,7 +97,9 @@ jobs:
         # Ubuntu pinned to 24.04: "ubuntu-latest" moves to Ubuntu 26 on
         # 19 October 2026, and the installer's apt package names are
         # 24.04's. Move it on purpose, after trying 26.04.
-        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-24.04]
+        # ci_select.ALL_OSES: windows-latest, macos-latest, macos-15-intel,
+        # ubuntu-24.04.
+        os: ${{ fromJSON(needs.plan.outputs.oses) }}
         python: ${{ fromJSON(needs.plan.outputs.pythons) }}
 
     env:
@@ -109,17 +117,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
-      # A Mac needs no Homebrew: libmagic comes from the pylibmagic wheel.
-      # The runner image may carry Homebrew's copy, so remove it first and
-      # check nothing is left where python-magic would look -- otherwise a
-      # pass could rest on a library an examiner's Mac does not have.
-      - name: Remove Homebrew's libmagic (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew uninstall --ignore-dependencies --force libmagic 2>/dev/null || true
-          if ls /opt/homebrew/lib/libmagic* /usr/local/lib/libmagic* /opt/local/lib/libmagic* 2>/dev/null; then
-            echo "::error::a system libmagic is still present"; exit 1
-          fi
+      # No Homebrew libmagic removal: a Mac needs none, and
+      # test_core's bundled-libmagic test fails if any other copy loads.
 
       # The real installers, unattended: they are part of what is tested.
       - name: Install (macOS / Linux)

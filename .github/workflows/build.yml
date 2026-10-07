@@ -13,9 +13,10 @@ name: Build
 
 on:
   push:
-    # Branches only. Path filters are not applied to tag pushes, so without
-    # this a version tag would build here as well as through release.yml.
-    branches: ['**']
+    # master only: a branch is built when it reaches a pull request. (Path
+    # filters are not applied to tag pushes, so naming the branch also keeps
+    # a version tag from building here as well as through release.yml.)
+    branches: [master]
     paths:
       - 'main.py'
       - 'trace_app/**'
@@ -77,16 +78,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      # The DMG must work on a Mac without Homebrew: build where Homebrew's
-      # libmagic cannot be picked up, as the tests do.
-      - name: Remove Homebrew's libmagic (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew uninstall --ignore-dependencies --force libmagic 2>/dev/null || true
-          if ls /opt/homebrew/lib/libmagic* /usr/local/lib/libmagic* /opt/local/lib/libmagic* 2>/dev/null; then
-            echo "::error::a system libmagic is still present"; exit 1
-          fi
-
+      # No Homebrew libmagic removal: the packaged self-test fails if the
+      # app loads any libmagic but its own (selftest 'libmagic identifies
+      # content').
       - name: Install (macOS)
         if: runner.os == 'macOS'
         env:
