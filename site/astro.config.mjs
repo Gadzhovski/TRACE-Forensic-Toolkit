@@ -2,10 +2,11 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-const SITE = 'https://gadzhovski.github.io';
-const BASE = '/TRACE-Forensic-Toolkit';
+// Served from its own subdomain (GitHub Pages custom domain; a CNAME at
+// Netlify DNS points trace -> gadzhovski.github.io), so at the root.
+const SITE = 'https://trace.gadzhovski.com';
 const REPO = 'https://github.com/Gadzhovski/TRACE-Forensic-Toolkit';
-const OG_IMAGE = `${SITE}${BASE}/og.png`;
+const OG_IMAGE = `${SITE}/og.png`;
 
 // Tells search engines this is an application, with what it runs on and
 // what it costs -- the facts Google can show beside a result.
@@ -21,7 +22,7 @@ const SOFTWARE = {
 	softwareVersion: '2.0.0',
 	license: 'https://opensource.org/licenses/MIT',
 	offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-	url: `${SITE}${BASE}/`,
+	url: `${SITE}/`,
 	downloadUrl: `${REPO}/releases/latest`,
 	codeRepository: REPO,
 	image: OG_IMAGE,
@@ -30,7 +31,6 @@ const SOFTWARE = {
 
 export default defineConfig({
 	site: SITE,
-	base: BASE,
 	trailingSlash: 'always',
 	integrations: [
 		starlight({

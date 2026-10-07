@@ -1,5 +1,6 @@
 # Builds the website in site/ (Astro + Starlight) and publishes it to GitHub
-# Pages: https://gadzhovski.github.io/TRACE-Forensic-Toolkit/
+# Pages at its custom domain: https://trace.gadzhovski.com/
+# (Settings > Pages > Custom domain; DNS: CNAME trace -> gadzhovski.github.io)
 #
 # A push to master that touches the site -- or the screenshots, logo and
 # social preview it copies from Icons/ -- builds and deploys it. A pull
