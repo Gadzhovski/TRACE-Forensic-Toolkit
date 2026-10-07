@@ -3,6 +3,7 @@ import datetime
 import gc
 import logging
 import os
+import posixpath
 import re
 import tempfile
 import uuid
@@ -5702,6 +5703,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             logger.debug("Could not list the parent directory: %s", exc)
             return
 
+        # The listing's Path column is built from current_path; left as it
+        # was, every row read '/<name>' as if the folder were the root.
+        if parent == self.image_handler.get_root_inode(offset):
+            self.current_path = '/'
+        elif '/' in artifact_path.strip('/'):
+            self.current_path = '/' + artifact_path.strip('/').rsplit('/', 1)[0]
+
         if not self.show_listing_entries(entries, offset,
                                          data.get('name') or 'This folder'):
             return
@@ -7154,7 +7162,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         self.current_path = "/"
                     else:
                         # If it's a regular directory, update the path
-                        self.current_path = data.get("path", os.path.join(self.current_path, data.get("name", "")))
+                        self.current_path = data.get("path", posixpath.join(self.current_path, data.get("name", "")))
 
                 # An empty directory leaves the current view alone rather
                 # than replacing it with a blank table.
@@ -7759,7 +7767,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             row_position = self.listing_table.rowCount() - 1  # Current row (rows are 0-indexed)
 
             # Calculate the full path for this item
-            file_path = os.path.join(self.current_path, entry_name) if entry_name != ".." else os.path.dirname(
+            file_path = posixpath.join(self.current_path, entry_name) if entry_name != ".." else os.path.dirname(
                 self.current_path)
 
             name_item = QTableWidgetItem(entry_name)
@@ -8694,7 +8702,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.current_path = "/"
                 else:
                     # Navigate into directory
-                    self.current_path = os.path.join(self.current_path, data.get("name", ""))
+                    self.current_path = posixpath.join(self.current_path, data.get("name", ""))
 
                 # Directories are processed synchronously
                 entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)

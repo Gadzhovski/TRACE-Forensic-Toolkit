@@ -138,6 +138,25 @@ def test_browsing_each_image_lists_that_images_files(qapp, window, truth):
         assert _listed(window) == expected, name
 
 
+def test_going_to_a_file_lists_its_folder_with_full_paths(qapp, window):
+    """go_to_bookmark lists the file's folder; the Path column must name
+    that folder, not read '/<name>' as if it were the root."""
+    from trace_app.core.case import make_artifact_ref
+    evidence = next(r['id'] for r in window.case.evidence()
+                    if r['path'].endswith(SECOND))
+    window.go_to_bookmark({'artifact_ref': make_artifact_ref(0, 29, 1),
+                           'evidence_id': evidence,
+                           'artifact_name': 'file1.jpg',
+                           'artifact_path': '/alloc/file1.jpg'})
+    pump(qapp, 0.5)
+    table = window.listing_table
+    column = next(c for c in range(table.columnCount())
+                  if table.horizontalHeaderItem(c).text() == 'Path')
+    paths = {table.item(r, column).text() for r in range(table.rowCount())
+             if table.item(r, column)}
+    assert '/alloc/file1.jpg' in paths, paths
+
+
 def test_a_listing_row_reads_its_own_image_after_another_is_active(
         qapp, window, truth):
     from PySide6.QtCore import Qt
