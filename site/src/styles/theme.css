@@ -53,6 +53,21 @@
 .site-title img {
 	height: 2.1rem;
 }
+/* Search on the right, beside GitHub and the theme switch, on every page.
+   Starlight lines it up with the content column, so it sat beside the
+   title on the home page and moved on pages with a sidebar. */
+@media (min-width: 50rem) {
+	.header {
+		grid-template-columns: auto 1fr auto;
+	}
+	.header > div:nth-child(2) {
+		justify-content: flex-end;
+	}
+	.header > div:nth-child(2) > * {
+		width: 100%;
+		max-width: 17rem;
+	}
+}
 
 /* Headings and body. */
 .sl-markdown-content h2 {
