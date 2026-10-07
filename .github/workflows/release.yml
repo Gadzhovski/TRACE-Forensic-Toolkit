@@ -1,0 +1,78 @@
+# Publishes a GitHub release for a version tag (v2.0.0, or v2.1.0-rc1 as a
+# pre-release): build.yml builds and self-tests the Windows zip and the macOS
+# DMGs, and only if every one of them passed is the release created, with
+# each package and its .sha256. GitHub adds the source code archives itself.
+#
+#   git tag v2.0.0 && git push origin v2.0.0
+#
+# The tag must match trace_app.__version__ (a pre-release suffix aside), so
+# a package never carries a different version than its release. Only this
+# job gets a token that can write, and only to create the release.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Tag matches the version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare the tag with __version__
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' trace_app/__init__.py)
+          tag="${TAG#v}"
+          if [ "${tag%%-*}" != "$version" ]; then
+            echo "::error::tag $TAG does not match __version__ $version"
+            exit 1
+          fi
+          echo "Releasing $TAG (version $version)"
+
+  build:
+    needs: version
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: TRACE-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check the packages
+        working-directory: dist
+        run: |
+          ls -l
+          sha256sum -c ./*.sha256
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=(--verify-tag --generate-notes --title "TRACE ${TAG#v}")
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" "${flags[@]}" \
+            dist/TRACE-*.zip dist/TRACE-*.dmg dist/TRACE-*.sha256

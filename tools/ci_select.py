@@ -69,7 +69,7 @@ IGNORED = (
     re.compile(r'^Icons_archive/'),
     re.compile(r'^test_images/README'),
     re.compile(r'^(build_app\.py|TRACE\.spec)$'),
-    re.compile(r'^\.github/workflows/build\.yml$'),
+    re.compile(r'^\.github/workflows/(build|release)\.yml$'),
     re.compile(r'^trace_app/selftest\.py$'),
 )
 

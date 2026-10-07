@@ -6,12 +6,16 @@
 #
 # Public repository, so: a read-only token, no secrets, actions pinned by
 # commit SHA, pull_request (never pull_request_target). Nothing is signed by a
-# publisher and nothing is released from here.
+# publisher and nothing is released from here: release.yml calls this
+# workflow for a version tag and publishes what it built.
 
 name: Build
 
 on:
   push:
+    # Branches only. Path filters are not applied to tag pushes, so without
+    # this a version tag would build here as well as through release.yml.
+    branches: ['**']
     paths:
       - 'main.py'
       - 'trace_app/**'
@@ -38,12 +42,15 @@ on:
       - 'install_windows.ps1'
       - '.github/workflows/build.yml'
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}
+  # github.workflow is the caller's name when release.yml calls this, so a
+  # release build never cancels, or is cancelled by, a branch build.
+  group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
