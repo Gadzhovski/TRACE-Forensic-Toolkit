@@ -1,0 +1,126 @@
+name: Bug report
+description: Something in TRACE, or in installing it, does not work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        > [!CAUTION]
+        > **This issue is public.** Never attach evidence, disk images, case
+        > folders (`case.db`, `search.db`) or exported files, and check logs
+        > and screenshots for names, user accounts, paths or file names from a
+        > real case before posting. If a problem only shows on real evidence,
+        > describe it here and we will find a way to reproduce it without the
+        > data, for example on a public test image.
+
+  - type: checkboxes
+    id: no-evidence
+    attributes:
+      label: Before posting
+      options:
+        - label: Nothing in this report comes from real evidence or a real case (or it has been removed).
+          required: true
+        - label: I searched the existing issues and this has not been reported.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - Installing (install_windows.ps1 / install.sh)
+        - Opening an image or evidence
+        - Browsing files / viewers (hex, text, pictures, PDF, media...)
+        - Analysis, triage or findings
+        - File carving
+        - Search, indicators or keyword lists
+        - User activity, timeline or registry
+        - YARA / Sigma / hash sets
+        - Cases, bookmarks, notes or report
+        - The standalone app (zip / DMG)
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Opened an E01 image (NTFS, about 20 GB) in a new case
+        2. Ran File Carving on unallocated space
+        3. ...
+        Expected: ...
+        Instead: ...
+    validations:
+      required: true
+
+  - type: input
+    id: evidence-type
+    attributes:
+      label: Evidence type
+      description: Format and file system only -- no names or contents.
+      placeholder: "E01, Windows 10, NTFS, 256 GB / AD1 logical image / live disk..."
+
+  - type: input
+    id: version
+    attributes:
+      label: TRACE version
+      description: Help ▸ About shows it.
+      placeholder: "2.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is TRACE installed?
+      options:
+        - Standalone app from Releases (Windows zip / macOS DMG)
+        - From source, with install_windows.ps1
+        - From source, with install.sh
+        - From source, installed by hand (pip)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - WSL
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-details
+    attributes:
+      label: OS version and Python version
+      description: For source installs, `python --version`.
+      placeholder: "Windows 11 24H2, Python 3.12.7 / macOS 15.4 / Ubuntu 24.04, Python 3.12"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: |
+        The part of the log around the problem, with anything from a case removed.
+        - App log: `trace.log` in `%LOCALAPPDATA%\TRACE` (Windows),
+          `~/Library/Application Support/TRACE` (macOS) or `~/.local/share/TRACE` (Linux)
+        - Install problems: `install.log` in the TRACE folder
+      render: text
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Optional. Check them for case data first.

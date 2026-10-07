@@ -1,0 +1,51 @@
+name: File format or artifact request
+description: Ask TRACE to read, view, carve or parse a format it does not support yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TRACE is tested against real, public files, so a format request goes
+        much faster with a sample anyone can download.
+
+        > [!CAUTION]
+        > **This issue is public.** Never attach files from real evidence or a
+        > real case. Point to a public sample instead, or describe the format.
+
+  - type: input
+    id: format
+    attributes:
+      label: Format or artifact
+      placeholder: "Canon CR3 raw photos / Windows Notepad tab state / iOS KnowledgeC.db..."
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: support
+    attributes:
+      label: What should TRACE do with it?
+      options:
+        - label: Open it as evidence (disk image, container, logical image)
+        - label: Show it in a viewer
+        - label: Carve it from unallocated space
+        - label: Parse it into user activity, the timeline or findings
+        - label: Index its text for search
+        - label: Something else (describe below)
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Where it comes from and why it matters
+      description: What creates it (program, OS, device and version), and what an examiner learns from it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: samples
+    attributes:
+      label: Public sample files and documentation
+      description: Links to downloadable samples, a specification, or another tool that reads it.
+      placeholder: |
+        Sample: https://...
+        Specification: https://...
+        Read by: plaso / dissect / ...

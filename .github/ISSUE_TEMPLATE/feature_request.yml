@@ -1,0 +1,39 @@
+name: Feature request
+description: Suggest a new feature or a change to how TRACE works.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a new file format or artifact, use **File format or artifact
+        request** instead. For questions, use
+        [Discussions](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/discussions).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+      description: The task you are trying to do in an investigation, and what gets in the way today.
+      placeholder: "When reviewing a large case, I can't ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: What would you like TRACE to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: How you work around it now, or how another tool does it.
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to help build this.

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/discussions
+    about: How to do something in TRACE, or whether it fits your work -- ask in Discussions.
+  - name: Download TRACE
+    url: https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/releases/latest
+    about: The latest standalone app for Windows and macOS.

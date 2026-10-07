@@ -73,6 +73,7 @@ FULL = (
 IGNORED = (
     re.compile(r'\.md$'),
     re.compile(r'^(LICENSE|\.gitignore|\.gitattributes)$'),
+    re.compile(r'^\.github/ISSUE_TEMPLATE/'),
     re.compile(r'^docs/'),
     re.compile(r'^Icons_archive/'),
     re.compile(r'^test_images/README'),
