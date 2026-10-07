@@ -1,36 +1,93 @@
 ---
-// Download buttons for the latest release. The links work without
-// JavaScript (they open the latest release); a script then asks GitHub for
-// that release and points each button at its file, with version and size,
-// and puts the visitor's own system first.
+// The ways to get TRACE, in the order we recommend them: from source first
+// (readable code, the newest fixes, every platform, nothing unsigned to
+// trust), then the standalone app (quickest, but unsigned and packaged).
+//
+// The app links work without JavaScript (they open the latest release); a
+// script then asks GitHub for that release and points each button at its
+// file with version and size, and opens the visitor's own system's commands.
 import { Icon } from '@astrojs/starlight/components';
 
 const repo = 'Gadzhovski/TRACE-Forensic-Toolkit';
 const latest = `https://github.com/${repo}/releases/latest`;
-const { compact = false } = Astro.props;
+const base = import.meta.env.BASE_URL;
 
-const targets = [
+const clone = [
+	'git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git',
+	'cd TRACE-Forensic-Toolkit',
+];
+const systems = [
+	{ key: 'windows', label: 'Windows', icon: 'seti:windows', lines: [...clone, 'powershell -ExecutionPolicy Bypass -File install_windows.ps1', 'venv\\Scripts\\activate', 'python main.py'] },
+	{ key: 'mac', label: 'macOS', icon: 'apple', lines: [...clone, './install.sh', 'source venv/bin/activate', 'python main.py'] },
+	{ key: 'linux', label: 'Linux', icon: 'linux', lines: [...clone, './install.sh', 'source venv/bin/activate', 'python main.py'] },
+] as const;
+
+const apps = [
 	{ key: 'windows', icon: 'seti:windows', label: 'Windows', sub: '64-bit', match: '-windows-x64.zip' },
-	{ key: 'mac-arm', icon: 'apple', label: 'macOS', sub: 'Apple Silicon', match: '-macos-arm64.dmg' },
+	{ key: 'mac', icon: 'apple', label: 'macOS', sub: 'Apple Silicon', match: '-macos-arm64.dmg' },
 	{ key: 'mac-intel', icon: 'apple', label: 'macOS', sub: 'Intel', match: '-macos-x86_64.dmg' },
-	{ key: 'linux', icon: 'linux', label: 'Linux', sub: 'from source', href: `${import.meta.env.BASE_URL}start/install/` },
 ] as const;
 ---
 
-<div class:list={['downloads', 'not-content', { compact }]} data-repo={repo}>
-	<div class="buttons">
-		{
-			targets.map((t) => (
-				<a class="dl" href={'href' in t ? t.href : latest} data-key={t.key} data-match={'match' in t ? t.match : ''}>
-					<Icon name={t.icon} size="1.6rem" />
-					<span class="text">
-						<span class="label">{t.label}</span>
-						<span class="sub" data-sub>{t.sub}</span>
-					</span>
-				</a>
-			))
-		}
-	</div>
+<div class="downloads not-content" data-repo={repo}>
+	<section class="source">
+		<div class="why">
+			<span class="badge">Recommended</span>
+			<h3>Install from source</h3>
+			<p>One script sets everything up – Python 3.10 or newer is all you need. No compiler, no Homebrew: every forensic engine installs as a pre-built package.</p>
+			<ul>
+				<li><Icon name="approve-check" size="1.05rem" /> <span><strong>Nothing to take on trust</strong> – you run the open code itself, not an unsigned executable.</span></li>
+				<li><Icon name="approve-check" size="1.05rem" /> <span><strong>The same code the tests check</strong> – installed and tested from scratch on every platform.</span></li>
+				<li><Icon name="approve-check" size="1.05rem" /> <span><strong>Newest fixes first</strong>, and the only way on Linux.</span></li>
+			</ul>
+			<a class="more" href={`${base}start/install/`}>Full install guide <Icon name="right-arrow" size="1rem" /></a>
+		</div>
+		<div class="terminal">
+			<div class="tabs" role="tablist" aria-label="Your system">
+				{
+					systems.map((s, i) => (
+						<button role="tab" data-os={s.key} aria-selected={i === 0 ? 'true' : 'false'}>
+							<Icon name={s.icon} size="0.95rem" />
+							{s.label}
+						</button>
+					))
+				}
+				<button class="copy" type="button" aria-label="Copy the commands" data-copy>
+					<Icon name="document" size="0.95rem" /><span>Copy</span>
+				</button>
+			</div>
+			{
+				systems.map((s, i) => (
+					<pre data-panel={s.key} hidden={i !== 0}><code>{s.lines.map((line) => <span class="line">{line}</span>)}</code></pre>
+				))
+			}
+		</div>
+	</section>
+
+	<section class="app">
+		<div class="why">
+			<h3>Standalone app <span class="tag">Quickest</span></h3>
+			<p>
+				One download, nothing else to install – each package is self-tested against public disk images before release. It is{' '}
+				<strong>not signed</strong> by a paid publisher certificate, so Windows SmartScreen and macOS Gatekeeper ask you to trust it once, and a packaged build can have problems the source install does not. If something misbehaves, install from source and <a href={`https://github.com/${repo}/issues/new/choose`}>tell us</a>.
+			</p>
+		</div>
+		<div class="buttons">
+			{
+				apps.map((a) => (
+					<a class="dl" href={latest} data-key={a.key} data-match={a.match}>
+						<Icon name={a.icon} size="1.5rem" />
+						<span class="text">
+							<span class="label">{a.label}</span>
+							<span class="sub" data-sub>{a.sub}</span>
+						</span>
+						<Icon name="download" size="1.1rem" class="arrow" />
+					</a>
+				))
+			}
+		</div>
+	</section>
+
 	<p class="meta">
 		<span data-version>Latest release</span> · free and open source (MIT) ·{' '}
 		<a href={`https://github.com/${repo}/releases`}>all releases and checksums</a>
@@ -41,19 +98,37 @@ const targets = [
 	function guess() {
 		const ua = navigator.userAgent;
 		if (/Windows/i.test(ua)) return 'windows';
-		if (/Mac OS X|Macintosh/i.test(ua)) return 'mac-arm';
-		if (/Linux|X11/i.test(ua) && !/Android/i.test(ua)) return 'linux';
+		if (/Mac OS X|Macintosh/i.test(ua)) return 'mac';
+		if (/Linux|X11|CrOS/i.test(ua) && !/Android/i.test(ua)) return 'linux';
 		return '';
 	}
 	const size = (n: number) => `${Math.round(n / 1e6)} MB`;
 
 	for (const box of document.querySelectorAll<HTMLElement>('.downloads')) {
+		const tabs = [...box.querySelectorAll<HTMLButtonElement>('[data-os]')];
+		const show = (os: string) => {
+			for (const t of tabs) t.setAttribute('aria-selected', String(t.dataset.os === os));
+			for (const p of box.querySelectorAll<HTMLElement>('[data-panel]')) p.hidden = p.dataset.panel !== os;
+		};
+		tabs.forEach((t) => t.addEventListener('click', () => show(t.dataset.os!)));
 		const mine = guess();
-		const own = box.querySelector<HTMLElement>(`.dl[data-key="${mine}"]`);
-		if (own) {
-			own.classList.add('primary');
-			own.parentElement?.prepend(own);
-		}
+		if (mine) show(mine);
+		box.querySelector<HTMLElement>(`.dl[data-key="${mine}"]`)?.classList.add('mine');
+
+		const copy = box.querySelector<HTMLButtonElement>('[data-copy]');
+		copy?.addEventListener('click', async () => {
+			const panel = box.querySelector<HTMLElement>('[data-panel]:not([hidden])');
+			const text = [...(panel?.querySelectorAll('.line') ?? [])].map((l) => l.textContent).join('\n');
+			const label = copy.querySelector('span');
+			try {
+				await navigator.clipboard.writeText(text);
+				if (label) label.textContent = 'Copied';
+			} catch {
+				if (label) label.textContent = 'Select and copy';
+			}
+			setTimeout(() => label && (label.textContent = 'Copy'), 1800);
+		});
+
 		fetch(`https://api.github.com/repos/${box.dataset.repo}/releases/latest`)
 			.then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
 			.then((release) => {
@@ -61,7 +136,7 @@ const targets = [
 				if (version) version.textContent = `Version ${String(release.tag_name).replace(/^v/, '')}`;
 				for (const link of box.querySelectorAll<HTMLAnchorElement>('.dl[data-match]')) {
 					const asset = release.assets?.find((a: { name: string }) => a.name.endsWith(link.dataset.match!));
-					if (!asset || !link.dataset.match) continue;
+					if (!asset) continue;
 					link.href = asset.browser_download_url;
 					const sub = link.querySelector('[data-sub]');
 					if (sub) sub.textContent = `${sub.textContent} · ${size(asset.size)}`;
@@ -75,53 +150,220 @@ const targets = [
 
 <style>
 	.downloads {
-		margin-block: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+		margin-block: 1.75rem;
+	}
+	section {
+		border-radius: var(--trace-radius);
+		border: 1px solid var(--trace-border);
+		background: var(--trace-surface);
+		padding: 1.5rem;
+	}
+	h3 {
+		margin: 0 0 0.5rem;
+		font-size: var(--sl-text-xl);
+		color: var(--sl-color-white);
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
+	.why p {
+		margin: 0;
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-sm);
+		line-height: 1.6;
+	}
+	.why a {
+		color: var(--sl-color-accent-high);
+	}
+
+	/* From source: the recommended path, given the emphasis. */
+	.source {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+		gap: 1.5rem;
+		border-color: color-mix(in srgb, var(--sl-color-accent) 55%, transparent);
+		background:
+			radial-gradient(30rem 14rem at 0% 0%, color-mix(in srgb, var(--sl-color-accent) 16%, transparent), transparent 70%),
+			var(--trace-surface);
+		box-shadow: 0 20px 50px -30px var(--sl-color-accent);
+	}
+	.badge {
+		display: inline-block;
+		margin-bottom: 0.6rem;
+		padding: 0.15rem 0.6rem;
+		border-radius: 999px;
+		font-size: var(--sl-text-xs);
+		font-weight: 700;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		color: #fff;
+		background: linear-gradient(135deg, var(--sl-color-accent), color-mix(in srgb, var(--trace-cyan) 75%, var(--sl-color-accent)));
+	}
+	ul {
+		list-style: none;
+		padding: 0;
+		margin: 1rem 0 0;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-2);
+	}
+	li {
+		display: flex;
+		gap: 0.5rem;
+		align-items: flex-start;
+	}
+	li :global(svg) {
+		flex: none;
+		margin-top: 0.15rem;
+		color: var(--trace-cyan);
+	}
+	li strong {
+		color: var(--sl-color-white);
+	}
+	.more {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		margin-top: 1.1rem;
+		font-weight: 600;
+		font-size: var(--sl-text-sm);
+		text-decoration: none;
+	}
+
+	.terminal {
+		display: flex;
+		flex-direction: column;
+		border-radius: 10px;
+		overflow: hidden;
+		background: #0a0f1a;
+		border: 1px solid rgba(140, 180, 240, 0.18);
+		align-self: start;
+	}
+	.tabs {
+		display: flex;
+		gap: 0.25rem;
+		padding: 0.45rem;
+		background: #131b2b;
+		border-bottom: 1px solid rgba(140, 180, 240, 0.12);
+	}
+	.tabs button {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		font: inherit;
+		font-size: var(--sl-text-xs);
+		padding: 0.3rem 0.65rem;
+		border-radius: 6px;
+		border: 0;
+		background: transparent;
+		color: #9aa6b8;
+		cursor: pointer;
+	}
+	.tabs button:hover {
+		color: #fff;
+	}
+	.tabs button[aria-selected='true'] {
+		background: #24314a;
+		color: #fff;
+	}
+	.tabs .copy {
+		margin-left: auto;
+	}
+	pre {
+		margin: 0;
+		padding: 0.9rem 1rem;
+		overflow-x: auto;
+		font-family: var(--sl-font-mono);
+		font-size: 0.8rem;
+		line-height: 1.75;
+		color: #d7e3f4;
+	}
+	pre code {
+		display: flex;
+		flex-direction: column;
+	}
+	.line::before {
+		content: '$ ';
+		color: #4c8eda;
+		user-select: none;
+	}
+
+	/* The app: the quick path. */
+	.app {
+		display: flex;
+		flex-direction: column;
+		gap: 1.1rem;
+	}
+	.tag {
+		padding: 0.1rem 0.55rem;
+		border-radius: 999px;
+		font-size: var(--sl-text-xs);
+		font-weight: 600;
+		color: var(--sl-color-gray-2);
+		border: 1px solid var(--trace-border);
 	}
 	.buttons {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-		gap: 0.75rem;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.6rem;
 	}
 	.dl {
 		display: flex;
 		align-items: center;
-		gap: 0.85rem;
-		padding: 0.9rem 1.1rem;
-		border-radius: 12px;
+		gap: 0.7rem;
+		padding: 0.8rem 0.9rem;
+		border-radius: 10px;
 		border: 1px solid var(--trace-border);
-		background: var(--trace-surface);
+		background: var(--sl-color-black);
 		color: var(--sl-color-white);
 		text-decoration: none;
-		transition: border-color 0.2s, transform 0.2s, background 0.2s;
+		transition: border-color 0.2s, transform 0.2s;
+	}
+	.dl:hover,
+	.dl.mine {
+		border-color: var(--sl-color-accent);
 	}
 	.dl:hover {
-		border-color: var(--sl-color-accent);
 		transform: translateY(-2px);
-	}
-	.dl.primary {
-		background: linear-gradient(135deg, var(--sl-color-accent), color-mix(in srgb, var(--trace-cyan) 70%, var(--sl-color-accent)));
-		border-color: transparent;
-		color: #fff;
-		box-shadow: 0 12px 30px -12px var(--sl-color-accent);
 	}
 	.text {
 		display: flex;
 		flex-direction: column;
 		line-height: 1.25;
+		min-width: 0;
 	}
 	.label {
 		font-weight: 650;
 	}
 	.sub {
 		font-size: var(--sl-text-xs);
-		opacity: 0.75;
-	}
-	.meta {
-		margin-top: 0.8rem;
-		font-size: var(--sl-text-sm);
 		color: var(--sl-color-gray-3);
 	}
-	.compact .meta {
+	.dl :global(.arrow) {
+		margin-left: auto;
+		color: var(--sl-color-gray-3);
+	}
+	.meta {
+		margin: 0;
+		font-size: var(--sl-text-sm);
+		color: var(--sl-color-gray-3);
 		text-align: center;
+	}
+
+	@media (max-width: 52rem) {
+		.source {
+			grid-template-columns: 1fr;
+		}
+	}
+	@media (max-width: 30rem) {
+		.buttons {
+			grid-template-columns: 1fr;
+		}
 	}
 </style>

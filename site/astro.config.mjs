@@ -70,7 +70,7 @@ export default defineConfig({
 				{
 					label: 'Get started',
 					items: [
-						{ label: 'Download', slug: 'start/download' },
+						{ label: 'Get TRACE', slug: 'start/download' },
 						{ label: 'Install from source', slug: 'start/install' },
 						{ label: 'Your first case', slug: 'start/first-case' },
 						{ label: 'Quick triage', slug: 'start/quick-triage' },

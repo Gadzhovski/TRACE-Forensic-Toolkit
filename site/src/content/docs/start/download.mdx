@@ -1,24 +1,24 @@
 ---
-title: Download TRACE
-description: Download the free TRACE digital forensics app for Windows or macOS -- a standalone build that needs no Python or other software -- and check it before use.
+title: Get TRACE
+description: Get the free TRACE digital forensics software – install it from source on Windows, macOS or Linux with one script (recommended), or download the standalone app for Windows or macOS.
 sidebar:
-  label: Download
+  label: Get TRACE
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import Downloads from '../../../components/Downloads.astro';
 
-The standalone app is the quickest way to start: one download, nothing else to install. Every package is built from the released source, then **unpacked or mounted and self-tested against public disk images** before it is published -- a package that reads any of them differently from the test suite is never released.
+Two ways, both free: **install from source** -- what we recommend -- or download the **standalone app** for the quickest start.
 
 <Downloads />
 
-| | Requirements |
-|:--|:--|
-| **Windows** | Windows 10 or 11, 64-bit |
-| **macOS** | macOS 13 or later, on Apple Silicon or Intel (download the matching DMG) |
-| **Linux** | install from source with one script -- see [Install from source](/TRACE-Forensic-Toolkit/start/install/) |
+| | From source | Standalone app |
+|:--|:--|:--|
+| **Windows** | Python 3.10 or newer | Windows 10 or 11, 64-bit |
+| **macOS** | Python 3.10 or newer (from python.org) | macOS 13 or later -- the DMG for your Mac: Apple Silicon or Intel |
+| **Linux** | Python 3.10 or newer; on Debian/Ubuntu the script installs the rest | -- |
 
-## First launch
+## First launch of the app
 
 <Tabs syncKey="os">
 <TabItem label="Windows" icon="seti:windows">
