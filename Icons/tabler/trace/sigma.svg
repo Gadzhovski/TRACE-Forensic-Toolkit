@@ -1,0 +1,6 @@
+<!-- TRACE: Sigma, a rule over event logs (a sigma over a log line). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M17 4h-11l6 7l-6 7h11" />
+  <path d="M15 21h6" />
+  <path d="M18 18v3" />
+</svg>

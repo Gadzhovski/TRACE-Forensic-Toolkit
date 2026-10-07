@@ -1,0 +1,103 @@
+{
+ "image": "9-fat-label.dd",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 320004,
+     "mtime": 0,
+     "path": "/$FAT1",
+     "size": 40448,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 320005,
+     "mtime": 0,
+     "path": "/$FAT2",
+     "size": 40448,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 320003,
+     "mtime": 0,
+     "path": "/$MBR",
+     "size": 512,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 320006,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 3,
+     "mtime": 1093174058,
+     "path": "/LABEL2      (Volume Label Entry)",
+     "sha256": "51c4426eed4f29209cd13457b57a7a91c6712aaf5efbb2dd0adeaf0b7d84bc0a",
+     "size": 96541,
+     "type": "file"
+    },
+    {
+     "atime": 1093132800,
+     "crtime": 1093174552,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 5,
+     "mtime": 1093174554,
+     "path": "/New Folder",
+     "size": 0,
+     "type": "dir"
+    },
+    {
+     "atime": 1093132800,
+     "crtime": 1093174552,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 6,
+     "mtime": 1093174554,
+     "path": "/dir1",
+     "size": 512,
+     "type": "dir"
+    },
+    {
+     "atime": 1093132800,
+     "crtime": 1093174630,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 517,
+     "mtime": 1093174460,
+     "path": "/dir1/FILE2   DLL (Volume Label Entry)",
+     "sha256": "701cb771a3b35869d01eeb13c6202fa0d7e7b214473b18abda857fb1cbc039a2",
+     "size": 14610,
+     "type": "file"
+    }
+   ],
+   "fs_type": "FAT16",
+   "offset": 0
+  }
+ ]
+}

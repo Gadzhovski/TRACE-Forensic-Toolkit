@@ -1,0 +1,36 @@
+{
+ "image": "iso-endian.iso",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 2,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 0,
+     "crtime": 1266833575,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 1,
+     "mtime": 0,
+     "path": "/File1.txt",
+     "sha256": "fde5c819b3a94a3b762b70ff488da03c00d4b7d70d81c7ac05c612e846c14241",
+     "size": 31,
+     "type": "file"
+    }
+   ],
+   "fs_type": "ISO9660",
+   "offset": 0
+  }
+ ]
+}

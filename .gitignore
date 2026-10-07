@@ -1,25 +1,84 @@
-# Ignore E01, dd, and raw image files in the root directory
-/*.E01
-/*.dd
-/*.raw
+# Forensic evidence -- never commit it. Un-anchored on purpose: a leading slash
+# would match only the repository root, so evidence moved into test_images/ --
+# or any other subdirectory -- would be committable. Bracketed so lower-case
+# names match too: git is case-sensitive on macOS and Linux.
+# EnCase / EWF, every segment (E01, E02 ... E99), and its logical variants
+*.[Ee][0-9][0-9]
+*.[Ee][Xx][0-9][0-9]
+*.[Ss][0-9][0-9]
+*.[Ll][0-9][0-9]
+*.[Ll][Xx][0-9][0-9]
+# Raw images, including split segments (.001, .002 ...)
+*.[Dd][Dd]
+*.[Rr][Aa][Ww]
+*.[Ii][Mm][Gg]
+*.[0-9][0-9][0-9]
+# Optical, AccessData, AFF, virtual and Apple disk images, memory captures
+*.[Ii][Ss][Oo]
+*.[Aa][Dd]1
+*.[Aa][Ff][Ff]
+*.[Aa][Ff][Ff]4
+*.[Vv][Mm][Dd][Kk]
+*.[Vv][Hh][Dd]
+*.[Vv][Hh][Dd][Xx]
+*.[Dd][Mm][Gg]
+*.[Mm][Ee][Mm]
 
-# Ignore IDE-specific folders and files
-.idea/
+# Case working data. A case is created wherever the examiner points TRACE,
+# which during testing is often inside the repository; its database and search
+# index are derived data, never source.
+case.db
+case.db-wal
+case.db-shm
+search.db
+search.db-wal
+search.db-shm
 
-# Ignore config files
+# The maintainer's working case and notes, kept beside the source
+/New folder/
+/features_to_add.txt
+
+# User config (may contain API keys)
 /config.ini
 
-# Ignore the carved_files directory
+# Application output
 /carved_files/
 
-# Ignore virtual environment folders
+# Installer log (install.sh / install_windows.ps1)
+/install.log
+
+# Virtual environments
 /venv/
+/.venv/
+/venv-*/
 
-# Ignore Python cache
-__pycache__
+# Python cache and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
-# Ignore build artifacts
+# PyInstaller build artifacts
 /build/
 /dist/
-*.spec
-build_exe.py      
+
+# Vendored third-party binaries (downloaded, not committed)
+/tools/Arsenal-Image-Mounter-*/
+/tools/sleuthkit-*/
+
+# Local docs
+/docs/
+
+# Full local copy of the original icon set, kept so an icon can be recovered
+# without going through git history. Only the icons the application actually
+# uses are committed.
+/Icons_archive/
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Screenshots pasted into an assistant session land here
+/image.png

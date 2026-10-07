@@ -1,0 +1,42 @@
+{
+ "image": "iso-dirtree1.iso",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 3,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "deleted": true,
+     "inode": null,
+     "path": "/$OrphanFiles/OrphanFile-2",
+     "type": null
+    },
+    {
+     "atime": 0,
+     "crtime": 1266833587,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 1,
+     "mtime": 0,
+     "path": "/File2.txt",
+     "sha256": "7e206cf042730d5cbf8d55cfa98d33171c8e45ea88bff706c326464e6029f205",
+     "size": 24,
+     "type": "file"
+    }
+   ],
+   "fs_type": "ISO9660",
+   "offset": 0
+  }
+ ]
+}

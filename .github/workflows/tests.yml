@@ -1,0 +1,256 @@
+# Installs TRACE from scratch and tests it on Windows, macOS (Apple Silicon
+# and Intel) and Linux, on Python 3.10, 3.12 and 3.14.
+#
+# Public-repository hygiene, deliberately:
+#   * the token is read-only (permissions: contents: read);
+#   * no secrets are used anywhere -- VirusTotal is tested against a faked
+#     network, never a real key;
+#   * forks run through `pull_request`, never `pull_request_target`, so code
+#     from a fork cannot reach anything privileged;
+#   * third-party actions are pinned to full commit SHAs (tags can be moved);
+#   * only public test images are used, downloaded from their publishers and
+#     checked against recorded SHA-256s -- no evidence is ever stored here.
+#
+# What runs depends on what changed (tools/ci_select.py, shown on each run's
+# summary page): a branch or pull request runs the test files that reach
+# the code it touched, downloads only the images those name, scores the
+# carver only if carving changed, on Python 3.10 and 3.14. A push to the
+# default branch, the weekly run and a manual run test everything on every
+# Python. Every operating system, every time.
+
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  # Weekly, everything: catches what the per-change selection lets through,
+  # and a dependency release that breaks an untouched part.
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  no-evidence-in-repo:
+    name: No evidence in the repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Refuse disk images and case databases
+        run: |
+          found=$(git ls-files | grep -iE '\.(e0[0-9]|ex01|l01|s01|ad1|dd|raw|img|dmg|iso|vmdk|vhdx?|aff4?|001)$|(^|/)(case|search)\.db(-wal|-shm)?$' || true)
+          if [ -n "$found" ]; then
+            echo "These must never be committed:"; echo "$found"; exit 1
+          fi
+          echo "No evidence files tracked."
+
+  plan:
+    name: Choose tests from the change
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.select.outputs.run }}
+      full: ${{ steps.select.outputs.full }}
+      tests: ${{ steps.select.outputs.tests }}
+      images: ${{ steps.select.outputs.images }}
+      fetch_images: ${{ steps.select.outputs.fetch_images }}
+      images_key: ${{ steps.select.outputs.images_key }}
+      artifacts: ${{ steps.select.outputs.artifacts }}
+      corpus: ${{ steps.select.outputs.corpus }}
+      carve_score: ${{ steps.select.outputs.carve_score }}
+      pythons: ${{ steps.select.outputs.pythons }}
+    steps:
+      # Whole history: a branch is compared with where it left the default
+      # branch, so a push cancelled by a newer one loses nothing.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Select
+        id: select
+        run: python3 tools/ci_select.py --github
+
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Ubuntu pinned to 24.04: "ubuntu-latest" moves to Ubuntu 26 on
+        # 19 October 2026, and the installer's apt package names are
+        # 24.04's. Move it on purpose, after trying 26.04.
+        os: [windows-latest, macos-latest, macos-15-intel, ubuntu-24.04]
+        python: ${{ fromJSON(needs.plan.outputs.pythons) }}
+
+    env:
+      QT_QPA_PLATFORM: offscreen
+      TRACE_REQUIRE_IMAGES: '1'
+      PYTHONUTF8: '1'
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        id: python
+        with:
+          python-version: ${{ matrix.python }}
+
+      # A Mac needs no Homebrew: libmagic comes from the pylibmagic wheel.
+      # The runner image may carry Homebrew's copy, so remove it first and
+      # check nothing is left where python-magic would look -- otherwise a
+      # pass could rest on a library an examiner's Mac does not have.
+      - name: Remove Homebrew's libmagic (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew uninstall --ignore-dependencies --force libmagic 2>/dev/null || true
+          if ls /opt/homebrew/lib/libmagic* /usr/local/lib/libmagic* /opt/local/lib/libmagic* 2>/dev/null; then
+            echo "::error::a system libmagic is still present"; exit 1
+          fi
+
+      # The real installers, unattended: they are part of what is tested.
+      - name: Install (macOS / Linux)
+        if: runner.os != 'Windows'
+        env:
+          TRACE_PYTHON: ${{ steps.python.outputs.python-path }}
+        run: ./install.sh --yes
+
+      - name: Install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install_windows.ps1 -Yes
+
+      - name: Nothing was compiled
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" - <<'EOF'
+          import trace_app   # before magic: on macOS it selects the bundled libmagic
+          import sys, pytsk3, pyewf, PySide6, magic, py7zr, pymupdf, PIL
+          from trace_app.infra.preflight import libmagic_identity
+          print("Python", sys.version.split()[0])
+          print("Sleuth Kit", pytsk3.TSK_VERSION_STR, "| libewf", pyewf.get_version())
+          print("PySide6", PySide6.__version__, "| Pillow", PIL.__version__)
+          print("libmagic %s from %s" % libmagic_identity())
+          EOF
+
+      # Keyed by the set of images too: a run needing other images starts
+      # from the nearest cache, fetches the rest, and saves the result.
+      - name: Cache public test images
+        if: needs.plan.outputs.fetch_images == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images
+          key: test-images-${{ hashFiles('tools/fetch_test_images.py') }}-${{ needs.plan.outputs.images_key }}
+          restore-keys: |
+            test-images-${{ hashFiles('tools/fetch_test_images.py') }}-
+
+      # IMAGES empty = the whole catalog (a full run).
+      - name: Fetch and verify public test images
+        if: needs.plan.outputs.fetch_images == 'true'
+        shell: bash
+        env:
+          IMAGES: ${{ needs.plan.outputs.images }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/fetch_test_images.py $IMAGES
+
+      # Real published files of every format the DFTT/DFRWS images do not
+      # hold, pinned by SHA-256 (tools/carve_corpus.py). Cached with the
+      # other test images.
+      - name: Cache the carving corpus samples
+        if: needs.plan.outputs.corpus == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/carve_samples
+          key: carve-samples-${{ hashFiles('tools/carve_corpus.py') }}
+
+      - name: Build the carving corpus
+        if: needs.plan.outputs.corpus == 'true'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/carve_corpus.py
+
+      # Real Windows and browser artifacts for the activity tests, pinned by
+      # SHA-256 (tools/fetch_artifact_samples.py).
+      - name: Cache the artifact samples
+        if: needs.plan.outputs.artifacts == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/artifact_samples
+          key: artifact-samples-${{ hashFiles('tools/fetch_artifact_samples.py') }}
+
+      - name: Fetch the artifact samples
+        if: needs.plan.outputs.artifacts == 'true'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/fetch_artifact_samples.py
+
+      # -rfE: every failure and error summarised at the end of the log;
+      # the JUnit report feeds the run's summary page and the artifact.
+      # TESTS empty = every test file (a full run).
+      - name: Tests
+        if: needs.plan.outputs.full == 'true' || needs.plan.outputs.tests != ''
+        shell: bash
+        env:
+          TESTS: ${{ needs.plan.outputs.tests }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" -m pytest -v -rfE --junitxml=test-results.xml $TESTS
+
+      - name: Carving against published answer keys
+        if: needs.plan.outputs.carve_score == 'true'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" tools/carve_score.py 11-carve-fat.dd 12-carve-ext2.dd carve-corpus.dd
+
+      # Which tests failed, on the run's summary page -- not 600 lines
+      # down a log.
+      - name: Summarise failures
+        if: failure()
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          [ -f test-results.xml ] || { echo "No test report: the tests did not run." >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          "$PY" - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import os, xml.etree.ElementTree as ET
+          root = ET.parse('test-results.xml').getroot()
+          suites = [root] if root.tag == 'testsuite' else list(root)
+          title = f"{os.environ.get('RUNNER_OS')} / Python {os.environ.get('PYTHON_VERSION', '')}"
+          print(f"### Failed tests: {title}\n")
+          for suite in suites:
+              for case in suite.iter('testcase'):
+                  for problem in list(case.findall('failure')) + list(case.findall('error')):
+                      name = f"{case.get('classname')}::{case.get('name')}"
+                      text = (problem.get('message') or '').splitlines()[:1]
+                      print(f"- `{name}` -- {text[0][:300] if text else problem.tag}")
+          EOF
+        env:
+          PYTHON_VERSION: ${{ matrix.python }}
+
+      - name: Keep the test report and installer log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: test-report-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            test-results.xml
+            install.log
+          if-no-files-found: ignore
+          retention-days: 14

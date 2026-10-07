@@ -1,0 +1,859 @@
+"""Carved files: the Triage sub-tab that recovers deleted files and lists them.
+
+Carving searches raw image bytes for file signatures (core/carving.py). Here
+an examiner picks what to carve -- one image or every open one, which types,
+unallocated space or the whole image -- and works down what came back, in a
+table or, as in the Listing, as a list or icons with thumbnails.
+
+Two modes, one engine:
+
+* **With a case** a carve is a job on the shared queue, its files written
+  under the case's carved/<evidence>/ and recorded in case.db (Case.add_carved)
+  with an audit line; they appear in Triage, the Findings node and can be
+  bookmarked. The Analysis Modules dialog queues the same jobs.
+* **Quick triage** (no case) keeps the results for the session only, in the
+  per-user carved_files/<image>/ folder.
+
+A click previews the file read straight back from the image at its offset,
+not the copy on disk -- what is examined is the evidence.
+"""
+
+import logging
+import os
+
+from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
+                               QHeaderView, QLabel, QPushButton,
+                               QSizePolicy, QStackedWidget, QTableWidget,
+                               QTableWidgetItem, QToolBar,
+                               QVBoxLayout, QWidget)
+
+from trace_app.core.carving import (CARVABLE_TYPES, CARVE_CATEGORIES,
+                                    SOURCE_LABELS, SOURCES)
+from trace_app.core import settings as case_settings
+from trace_app.infra.constants import TABLE_ROW_HEIGHT, UNKNOWN_DATE
+from trace_app.infra.paths import carved_files_dir
+from trace_app.infra.utils import FileSystemUtils
+from trace_app.ui.process_worker import ProcessWorker
+from trace_app.ui import icons
+from trace_app.ui.widgets import thumbnails as thumbs
+from trace_app.ui.widgets.listing_views import (MODES, ListingIconView,
+                                                ViewButton)
+from trace_app.ui.widgets.multi_select import MultiSelectButton
+from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.row_preview import connect_row_preview
+from trace_app.ui.widgets.table_columns import fit_columns
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+
+logger = logging.getLogger('TRACE.Carving')
+
+_VIDEO = ('mov', 'mp4', 'm4v', '3gp', 'wmv', 'avi', 'flv', 'mpg', 'mkv', 'webm')
+_AUDIO = ('wav', 'mp3', 'ogg', 'opus', 'm4a')
+_ARCHIVE = ('zip', 'gz', 'bz2', 'xz', 'tar', 'rar', '7z')
+_ICON_FOR_TYPE = {
+    **{t: icons.FILE_VIDEO for t in _VIDEO},
+    **{t: icons.FILE_AUDIO for t in _AUDIO},
+    **{t: icons.FILE_ARCHIVE for t in _ARCHIVE},
+    'ole': icons.FILE_DOC, 'html': icons.FILE_HTML,
+}
+
+_COLUMNS = ['Name', 'Evidence', 'Type', 'Status', 'Size', 'Offset', 'Was',
+            'Copies', 'Embedded date', 'Date from', 'Pieces', 'SHA-256',
+            'Saved to']
+#: Column positions used below.
+_STATUS, _WAS, _COPIES, _DATE, _PIECES, _DIGEST, _SAVED = 3, 6, 7, 8, 10, \
+    11, 12
+_FIT = {1: 220, 6: 320, 11: 140, 12: 320}
+
+_STATUS_TONE = {'complete': 'clean', 'reconstructed': 'clean',
+                'valid': 'unknown', 'partial': 'suspicious'}
+_MARK = {True: '\u2713', False: '\u26a0', None: '\u2022'}
+
+
+def checks_text(row):
+    """The status and the checks behind it, one per line."""
+    from trace_app.core.carve_verify import STATUS_LABELS
+    status = row.get('status')
+    if not status:
+        return "Carved before checks were recorded."
+    from trace_app.core.carve_verify import STATUS_MEANINGS
+    lines = [f"{STATUS_LABELS.get(status, status)}: "
+             f"{STATUS_MEANINGS.get(status, '')}"]
+    lines += [f"{_MARK.get(ok, '-')} {text}"
+              for ok, text in row.get('checks') or []]
+    for name in ('md5', 'sha1', 'sha256'):
+        if row.get(name):
+            lines.append(f"{name.upper().replace('SHA', 'SHA-')}: "
+                         f"{row[name]}")
+    return '\n'.join(lines)
+
+
+def origin_text(row):
+    origin = row.get('origin') or {}
+    if not origin:
+        return '', ''
+    tip = '\n'.join(p for p in (
+        f"Was: {origin.get('path')}", origin.get('basis'),
+        origin.get('modified') and f"Modified: {origin['modified']} UTC",
+        origin.get('created') and f"Created: {origin['created']} UTC",
+        origin.get('changed') and
+        f"Entry changed: {origin['changed']} UTC (usually when it was "
+        f"deleted)") if p)
+    return origin.get('path') or '', tip
+
+
+def _pieces(row):
+    """(cell text, tooltip) for how a carved file was laid out on disk."""
+    fragments = row.get('fragments')
+    if not fragments:
+        return 'contiguous', "Carved as one run of bytes."
+    lines = [f"  {length:,} bytes at 0x{begin:x}" for begin, length in fragments]
+    return (f"rebuilt from {len(fragments)}",
+            "Reassembled: the file system had split this file, and its own "
+            "structure proved where. Joined from:\n"
+            + "\n".join(lines))
+
+
+def session_folder(label):
+    """Quick triage's folder for one image's carved files."""
+    safe = ''.join(c if c.isalnum() or c in '-_.' else '_'
+                   for c in label)[:60].strip('._') or 'image'
+    return os.path.join(carved_files_dir(), safe)
+
+
+class CarvedExportWorker(QThread):
+    """Writes carved files out (carving.export_carved) off the UI thread:
+    reading them back from the image is I/O, and an E01 decompresses."""
+
+    #: Files done so far.
+    progressed = Signal(int)
+    #: export_carved's results.
+    exported = Signal(list)
+
+    def __init__(self, rows, folder, reader, parent=None):
+        super().__init__(parent)
+        self.rows, self.folder, self.reader = list(rows), folder, reader
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        from trace_app.core.carving import export_carved
+        try:
+            results = export_carved(
+                self.rows, self.folder, self.reader,
+                progress=lambda done, _total: self.progressed.emit(done),
+                should_stop=lambda: self._stop)
+        except Exception as exc:
+            logger.exception("Export of carved files failed")
+            results = [{'row': row, 'path': '', 'verified': False,
+                        'error': str(exc)} for row in self.rows]
+        self.exported.emit(results)
+
+
+class CarvingWorker(ProcessWorker):
+    """Carves one image in a child process (core/background.py)."""
+
+    #: (megabytes done, megabytes total, files found)
+    progressed = Signal(int, int, int)
+    file_carved = Signal(dict)
+    finished_carving = Signal(int, str)
+
+    kind = 'carve'
+
+    def __init__(self, image_path, file_types, unallocated_only,
+                 case_folder=None, evidence_id=None, label='', parent=None,
+                 source=None, resume=False):
+        self.image_path = image_path
+        self.evidence_id = evidence_id
+        self.label = label or os.path.basename(image_path)
+        super().__init__({
+            'image_path': image_path,
+            'file_types': list(file_types),
+            'unallocated_only': unallocated_only,
+            'source': source or ('unallocated' if unallocated_only
+                                 else 'image'),
+            'resume': resume,
+            'case_folder': case_folder,
+            'evidence_id': evidence_id,
+            # Decided here: the per-user folder is the window's to choose.
+            'folder': None if case_folder else session_folder(self.label),
+            # Quick triage keeps references too (the defaults); a case
+            # reads its own setting in carve_evidence.
+            'write_copies': bool(case_settings.current('carve_write_copies')),
+        }, parent)
+
+    def on_progress(self, done, total, found):
+        self.progressed.emit(done, total, found)
+
+    def on_item(self, record):
+        self.file_carved.emit(dict(record, evidence_id=self.evidence_id,
+                                   evidence_key=self._key(),
+                                   evidence_label=self.label,
+                                   image_path=self.image_path))
+
+    def on_done(self, count, error):
+        self.finished_carving.emit(count, error)
+
+    def _key(self):
+        return self.evidence_id if self.evidence_id is not None \
+            else self.image_path
+
+
+class _SortItem(QTableWidgetItem):
+    """A cell that sorts by a number rather than by its text."""
+
+    def __init__(self, text, key):
+        super().__init__(text)
+        self._key = key
+
+    def __lt__(self, other):
+        if isinstance(other, _SortItem):
+            return self._key < other._key
+        return super().__lt__(other)
+
+
+class CarvedFilesPanel(QWidget):
+    """Carve, and list what was carved."""
+
+    #: (targets, types, source). `targets` is a list of evidence keys --
+    #: evidence ids with a case, image paths without -- or None for every
+    #: image; `source` one of carving.SOURCES.
+    carve_requested = Signal(object, list, str)
+    #: Carry on an interrupted carve of this evidence id.
+    resume_requested = Signal(int)
+    #: A row the examiner landed on: preview it.
+    file_selected = Signal(dict)
+    #: A double-click: open it -- an archive is browsed like a folder.
+    file_activated = Signal(dict)
+    #: (row, global position): the host builds the menu.
+    file_menu_requested = Signal(dict, object)
+    count_changed = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("carvedPanel")
+        self.case = None
+        self.evidence_filter = None
+        self.icon_resolver = None
+        #: `reader(row)` -> a carve's bytes, read from its image without
+        #: changing the window's active one; set by the window. Thumbnails
+        #: come from the evidence, as previews do -- there may be no copy.
+        self.content_reader = None
+        #: Quick triage's results, which live only as long as the window.
+        self._session = []
+        self._rows = []
+        self.view = 'details'
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        bar = QToolBar()
+        prepare_toolbar(bar)
+        bar.setObjectName("carvedToolbar")
+        bar.addWidget(QLabel("Carve"))
+        self.target_combo = QComboBox()
+        self.target_combo.setObjectName("carveTargetCombo")
+        self.target_combo.setToolTip("Which image to search: one, or every "
+                                     "image open.")
+        bar.addWidget(self.target_combo)
+        bar.addWidget(QLabel("for"))
+        self.type_button = MultiSelectButton(CARVABLE_TYPES, self, noun="types",
+                                             categories=CARVE_CATEGORIES)
+        self.type_button.set_selected(CARVABLE_TYPES)
+        bar.addWidget(self.type_button)
+        bar.addWidget(QLabel("in"))
+        self.source_combo = QComboBox()
+        self.source_combo.setObjectName("carveSourceCombo")
+        for key in SOURCES:
+            self.source_combo.addItem(SOURCE_LABELS[key], key)
+        self.source_combo.setToolTip(
+            "Unallocated space: every free stretch between live files -- "
+            "deleted data, without burying it in copies of live files.\n"
+            "File slack: the unused end of each live file's last cluster, "
+            "where older data survives.\n"
+            "Whole image: every byte.")
+        bar.addWidget(self.source_combo)
+        self.carve_button = QPushButton("Start Carving")
+        self.carve_button.setObjectName("carveButton")
+        self.carve_button.clicked.connect(self._request)
+        bar.addWidget(self.carve_button)
+        self.resume_button = QPushButton("Resume")
+        self.resume_button.setObjectName("carveButton")
+        self.resume_button.setToolTip("Carry on the interrupted carve of "
+                                      "this image from where it stopped, "
+                                      "keeping what it found")
+        self.resume_button.clicked.connect(self._resume)
+        self.resume_button.hide()
+        bar.addWidget(self.resume_button)
+        self._duplicates = {}
+
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        bar.addWidget(spacer)
+
+        # The Listing's View dropdown: Details, List, the icon sizes (with
+        # thumbnails from Medium up), and the carve runs' Statistics.
+        self.view_button = ViewButton(extra=(
+            (STATISTICS, "Statistics", icons.VIEW_STATISTICS),))
+        self.view_button.chosen.connect(self.set_view)
+        bar.addWidget(self.view_button)
+        align_controls(bar)
+        layout.addWidget(bar)
+
+        self.status_label = QLabel()
+        self.status_label.setObjectName("carvedStatus")
+        self.status_label.setWordWrap(True)
+        layout.addWidget(self.status_label)
+
+        # What is shown of what was carved.
+        filters = QToolBar()
+        prepare_toolbar(filters)
+        filters.setObjectName("carvedFilterBar")
+        filters.addWidget(QLabel("Show"))
+        self.status_filter = QComboBox()
+        self.status_filter.setObjectName("carvedStatusFilter")
+        for label, key in (("Every status", None), ("Complete", 'complete'),
+                           ("Valid", 'valid'),
+                           ("Reconstructed", 'reconstructed'),
+                           ("Partial", 'partial')):
+            self.status_filter.addItem(label, key)
+        self.status_filter.setToolTip(
+            "Complete: every check passed and the format's own checksums "
+            "prove the file whole. Valid: every check passed, but the format "
+            "has nothing that could prove no foreign data is inside. "
+            "Reconstructed: rebuilt from fragments a checksum proved. "
+            "Partial: a check failed -- truncated, damaged or mixed with "
+            "another file's data.")
+        self.status_filter.currentIndexChanged.connect(
+            lambda _index: self._show(self._rows))
+        filters.addWidget(self.status_filter)
+        self.named_box = QCheckBox("Named only")
+        self.named_box.setToolTip("Only carves found to be a deleted file "
+                                  "the file system still names")
+        self.named_box.toggled.connect(lambda _on: self._show(self._rows))
+        filters.addWidget(self.named_box)
+        self.unique_box = QCheckBox("Hide copies")
+        self.unique_box.setToolTip("Show each set of identical carves "
+                                   "(same SHA-256) once")
+        self.unique_box.toggled.connect(lambda _on: self._show(self._rows))
+        filters.addWidget(self.unique_box)
+        filters.addWidget(QLabel("at least"))
+        self.min_size = QComboBox()
+        self.min_size.setObjectName("carvedMinSize")
+        for label, size in (("any size", 0), ("1 KB", 1024),
+                            ("10 KB", 10240), ("100 KB", 102400),
+                            ("1 MB", 1 << 20), ("10 MB", 10 << 20)):
+            self.min_size.addItem(label, size)
+        self.min_size.currentIndexChanged.connect(
+            lambda _index: self._show(self._rows))
+        filters.addWidget(self.min_size)
+        align_controls(filters)
+        layout.addWidget(filters)
+
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack, 1)
+
+        self.table = QTableWidget()
+        self.table.setObjectName("triageTable")
+        self.table.setColumnCount(len(_COLUMNS))
+        self.table.setHorizontalHeaderLabels(_COLUMNS)
+        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setItemDelegate(NoFocusDelegate(self.table))
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Interactive)
+        self.table.setSortingEnabled(True)
+        self.table.setWordWrap(False)
+        self.table.setTextElideMode(Qt.ElideMiddle)
+        connect_row_preview(self.table, self.file_selected.emit)
+        self.table.itemDoubleClicked.connect(
+            lambda item: self.file_activated.emit(
+                self.table.item(item.row(), 0).data(Qt.UserRole)))
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._table_menu)
+        self.stack.addWidget(self.table)
+
+        # List and icon views: the Listing's own, over this table's model
+        # and selection -- same rows, order and selection either way.
+        self.gallery = ListingIconView(
+            self.table, self._carve_bytes, open_video=self._carve_video,
+            describe=carved_item)
+        self.gallery.clicked.connect(
+            lambda index: self.file_selected.emit(self._row_at(index)))
+        self.gallery.doubleClicked.connect(
+            lambda index: self.file_activated.emit(self._row_at(index)))
+        self.gallery.customContextMenuRequested.connect(self._gallery_menu)
+        self.stack.addWidget(self.gallery)
+
+        from trace_app.ui.viewers.carving_stats import CarvingStatsView
+        self.stats_view = CarvingStatsView()
+        self.stack.addWidget(self.stats_view)
+
+        self.set_targets([])
+        self.refresh()
+        from trace_app.infra.window_state import read_listing_view
+        self.set_view(read_listing_view(option=CARVED_VIEW_OPTION),
+                      remember=False)
+
+    # --- what can be carved ------------------------------------------
+
+    def set_targets(self, targets):
+        """The images on offer: [(key, label)], key an evidence id with a
+        case or an image path without."""
+        keep = self.target_combo.currentData()
+        self.target_combo.blockSignals(True)
+        self.target_combo.clear()
+        if len(targets) > 1:
+            self.target_combo.addItem(f"All {len(targets)} images", None)
+        for key, label in targets:
+            self.target_combo.addItem(label, key)
+        index = self.target_combo.findData(keep)
+        self.target_combo.setCurrentIndex(max(index, 0))
+        self.target_combo.blockSignals(False)
+        if self.case is not None:
+            self._select_target(self.evidence_filter)
+        self.target_combo.setEnabled(bool(targets))
+        self.carve_button.setEnabled(bool(targets))
+
+    def _request(self):
+        types = [t.lower() for t in self.type_button.selected()]
+        if not types:
+            self.status_label.setText("Choose at least one file type to "
+                                      "carve for.")
+            return
+        key = self.target_combo.currentData()
+        self.carve_requested.emit(None if key is None else [key], types,
+                                  self.source_combo.currentData())
+
+    def _resumable(self):
+        """The evidence ids whose last carve stopped before the end."""
+        if self.case is None:
+            return []
+        out = []
+        for row in self.case.evidence():
+            if self.evidence_filter is not None and \
+                    row['id'] != self.evidence_filter:
+                continue
+            state = self.case.carving_state(row['id'])
+            if state and state['status'] in ('cancelled', 'failed',
+                                             'running') and \
+                    state['bytes_done'] < state['bytes_total']:
+                out.append((row['id'], state))
+        return out
+
+    def _resume(self):
+        for evidence_id, _state in self._resumable():
+            self.resume_requested.emit(evidence_id)
+
+    def update_resume(self, running=()):
+        """Show Resume when a carve shown here stopped part way (and is
+        not running now)."""
+        stopped = [(e, s) for e, s in self._resumable() if e not in running]
+        self.resume_button.setVisible(bool(stopped))
+        if stopped:
+            evidence_id, state = stopped[0]
+            share = 100 * state['bytes_done'] // max(1, state['bytes_total'])
+            self.resume_button.setToolTip(
+                f"Carry on from {share}% ({state['status']}), keeping the "
+                f"{state['found']:,} file(s) it found")
+
+    # --- what was carved ---------------------------------------------
+
+    def set_case(self, case):
+        self.case = case
+        self.use_settings()
+        self.refresh()
+
+    def use_settings(self):
+        """Start from the case's default source (Options > Settings)."""
+        from trace_app.core.settings import current
+        index = self.source_combo.findData(current('carve_source'))
+        if index >= 0:
+            self.source_combo.setCurrentIndex(index)
+
+    def set_evidence_filter(self, evidence_id):
+        """Show one image's carved files, or all; and carve that image.
+
+        The Carve selector follows Triage's filter, so the image being looked
+        at is the image Start Carving searches. It used to stay on "All
+        images", and a carve meant for one image ran on every one.
+        """
+        self.evidence_filter = evidence_id
+        self._select_target(evidence_id)
+        self.refresh()
+
+    def _select_target(self, evidence_id):
+        if self.case is None:
+            return
+        index = self.target_combo.findData(evidence_id)
+        if index >= 0:
+            self.target_combo.setCurrentIndex(index)
+
+    def add_record(self, record):
+        """A file just carved: shown at once, before the job finishes."""
+        if self.case is None:
+            self._session.append(record)
+        if self._shown(record):
+            self._rows.append(record)
+            digest = record.get('sha256')
+            if digest:
+                self._duplicates[digest] = self._duplicates.get(digest, 0) + 1
+            if self._filtered([record]):
+                self._add_table_row(record)
+            self._update_status()
+
+    def forget(self, key):
+        """Drop one image's earlier results as it is carved again.
+
+        From the rows on screen rather than by re-reading the case: the
+        worker is clearing that evidence's rows at the same moment.
+        """
+        self._session = [r for r in self._session
+                         if r.get('evidence_key') != key]
+        self._rows = [r for r in self._rows if r.get('evidence_key') != key]
+        self._show(self._rows)
+
+    def _filtered(self, rows):
+        status = self.status_filter.currentData()
+        smallest = self.min_size.currentData() or 0
+        seen, out = set(), []
+        for row in rows:
+            if status and row.get('status') != status:
+                continue
+            if self.named_box.isChecked() and not row.get('origin'):
+                continue
+            if int(row.get('size') or 0) < smallest:
+                continue
+            digest = row.get('sha256')
+            if self.unique_box.isChecked() and digest:
+                if digest in seen:
+                    continue
+                seen.add(digest)
+            out.append(row)
+        return out
+
+    def _count_copies(self, rows):
+        counts = {}
+        for row in rows:
+            if row.get('sha256'):
+                counts[row['sha256']] = counts.get(row['sha256'], 0) + 1
+        self._duplicates = counts
+
+    def _show(self, rows):
+        self._count_copies(rows)
+        shown = self._filtered(rows)
+        self._visible = shown
+        self.table.setSortingEnabled(False)
+        self.table.setRowCount(0)
+        for row in shown:
+            self._add_table_row(row, fit=False)
+        self.table.setSortingEnabled(True)
+        if shown:
+            fit_columns(self.table, _FIT)
+            self.table.setColumnWidth(0, max(self.table.columnWidth(0), 160))
+        self._update_status()
+
+    def _shown(self, record):
+        return (self.case is None or self.evidence_filter is None
+                or record.get('evidence_id') == self.evidence_filter)
+
+    def refresh(self):
+        self.update_resume()
+        if self.case is not None:
+            names = {r['id']: r.get('display_name')
+                     or os.path.basename(r['path'])
+                     for r in self.case.evidence()}
+            paths = {r['id']: r['path'] for r in self.case.evidence()}
+            rows = []
+            for row in self.case.carved_files(self.evidence_filter):
+                row['evidence_label'] = names.get(row['evidence_id'], '')
+                row['evidence_key'] = row['evidence_id']
+                row['image_path'] = paths.get(row['evidence_id'], '')
+                rows.append(row)
+        else:
+            rows = list(self._session)
+        self._rows = rows
+        self._show(rows)
+        if self.stack.currentIndex() == 2:
+            self._fill_stats()
+
+    @property
+    def count(self):
+        return len(self._rows)
+
+    def _update_status(self):
+        count = len(self._rows)
+        self.count_changed.emit(count)
+        if count:
+            images = len({r.get('evidence_key') for r in self._rows})
+            where = f" from {images} images" if images > 1 else ""
+            kept = ("in the case" if self.case is not None
+                    else "for this session only — open a case to keep them")
+            states = {}
+            for row in self._rows:
+                states[row.get('status')] = states.get(row.get('status'), 0) \
+                    + 1
+            named = sum(1 for r in self._rows if r.get('origin'))
+            copies = sum(n - 1 for n in self._duplicates.values() if n > 1)
+            parts = [f"{states[k]:,} {k}" for k in
+                     ('complete', 'valid', 'reconstructed', 'partial')
+                     if states.get(k)]
+            text = f"{count:,} file(s) recovered{where}, kept {kept}"
+            if parts:
+                text += f": {', '.join(parts)}"
+            if named:
+                text += f"; {named:,} named from deleted entries"
+            if copies:
+                text += f"; {copies:,} identical cop{'y' if copies == 1 else 'ies'}"
+            text += '.'
+            runs = self._latest_runs()
+            if runs:
+                candidates = rejected = 0
+                for run in runs:
+                    stats = run.get('stats') or {}
+                    candidates += sum((stats.get('candidates') or {})
+                                      .values())
+                    rejected += sum((stats.get('rejected') or {}).values())
+                if candidates:
+                    text += (f" Latest run{'s' if len(runs) > 1 else ''}: "
+                             f"{candidates:,} signature hits checked, "
+                             f"{rejected:,} rejected as not the format.")
+                self.status_label.setToolTip('\n\n'.join(
+                    self._run_tooltip(run) for run in runs))
+            self.status_label.setText(text)
+        elif self.case is None:
+            self.status_label.setText(
+                "Carving recovers deleted files from an image's raw bytes by "
+                "their signatures. Without a case the results last for this "
+                "session.")
+        else:
+            self.status_label.setText(
+                "Nothing carved yet. Carving recovers deleted files from an "
+                "image's raw bytes by their signatures; it can also run from "
+                "Analysis ▸ Run Analysis Modules.")
+
+    def _latest_runs(self):
+        """The latest run of each image shown."""
+        if self.case is None:
+            return []
+        latest = {}
+        for run in self.case.carving_runs(self.evidence_filter, limit=500):
+            latest.setdefault(run['evidence_id'], run)
+        return list(latest.values())
+
+    @staticmethod
+    def _run_tooltip(run):
+        stats = run.get('stats') or {}
+        lines = [f"Run {run['id']} ({run['status']}), "
+                 f"{run.get('started_utc', '')} to "
+                 f"{run.get('finished_utc') or '…'} UTC",
+                 f"Engine: {run.get('engine')}",
+                 f"Source: {(run.get('settings') or {}).get('source')}",
+                 f"Scanned {stats.get('bytes_scanned', 0):,} bytes; skipped "
+                 f"{stats.get('bytes_skipped', 0):,} allocated", '',
+                 "Type: kept / checked / rejected"]
+        candidates = stats.get('candidates') or {}
+        for kind in sorted(set(candidates) | set(stats.get('kept') or {})):
+            lines.append(f"{kind.upper()}: "
+                         f"{(stats.get('kept') or {}).get(kind, 0):,} / "
+                         f"{candidates.get(kind, 0):,} / "
+                         f"{(stats.get('rejected') or {}).get(kind, 0):,}")
+        return '\n'.join(lines)
+
+    def _add_table_row(self, row, fit=True):
+        sorting = self.table.isSortingEnabled()
+        self.table.setSortingEnabled(False)
+        position = self.table.rowCount()
+        self.table.insertRow(position)
+        size = int(row.get('size') or 0)
+        offset = int(row.get('offset') or 0)
+        date = row.get('embedded_date') or UNKNOWN_DATE
+        pieces, pieces_tip = _pieces(row)
+        from trace_app.core.carve_verify import STATUS_LABELS
+        from trace_app.ui.viewers.virustotal import verdict_brush
+        was, was_tip = origin_text(row)
+        copies = self._duplicates.get(row.get('sha256'), 1)
+        values = [
+            QTableWidgetItem(row.get('name') or ''),
+            QTableWidgetItem(row.get('evidence_label') or ''),
+            QTableWidgetItem((row.get('type') or '').upper()),
+            QTableWidgetItem(STATUS_LABELS.get(row.get('status'),
+                                               'Not checked')),
+            _SortItem(FileSystemUtils.get_readable_size(size), size),
+            _SortItem(f"0x{offset:x}", offset),
+            QTableWidgetItem(was),
+            _SortItem(str(copies) if copies > 1 else '', copies),
+            QTableWidgetItem(date),
+            QTableWidgetItem(row.get('date_source') or ''),
+            QTableWidgetItem(pieces),
+            QTableWidgetItem((row.get('sha256') or '')[:16] + '…'
+                             if row.get('sha256') else ''),
+            QTableWidgetItem(self._shown_path(row.get('path') or '')
+                             or 'Not saved'),
+        ]
+        values[_STATUS].setToolTip(checks_text(row))
+        tone = _STATUS_TONE.get(row.get('status'))
+        if tone:
+            values[_STATUS].setForeground(verdict_brush(tone))
+        values[_WAS].setToolTip(was_tip)
+        if copies > 1:
+            values[_COPIES].setToolTip(
+                f"{copies} carves have this SHA-256: the same bytes found "
+                f"in {copies} places")
+        values[0].setData(Qt.UserRole, row)
+        kind = row.get('type') or 'unknown'
+        icon = self.icon_resolver(kind) if self.icon_resolver else None
+        if icon is None and kind in _ICON_FOR_TYPE:
+            icon = icons.icon(_ICON_FOR_TYPE[kind])
+        if icon is not None:
+            values[0].setIcon(icon)
+        values[0].setToolTip(f"Found at byte {offset:,} of "
+                             f"{row.get('evidence_label') or 'the image'}")
+        if date == UNKNOWN_DATE:
+            values[_DATE].setToolTip(
+                f"{(row.get('type') or '').upper()} carries no date in its "
+                "own data, and a carved file has no file-system record to "
+                "read one from.")
+        values[_PIECES].setToolTip(pieces_tip)
+        values[_DIGEST].setToolTip(checks_text(row))
+        values[_SAVED].setToolTip(
+            row.get('path') or "Kept as a reference: read from the image at "
+            "its offset whenever it is shown. Right-click ▸ Export writes "
+            "a copy, checked against its SHA-256.")
+        for column, item in enumerate(values):
+            self.table.setItem(position, column, item)
+        self.table.setSortingEnabled(sorting)
+        if fit and position == 0:
+            fit_columns(self.table, _FIT)
+
+    def _shown_path(self, path):
+        """Inside a case, the path from the case folder: it is shorter and
+        says where in the case the copy is."""
+        if self.case is not None and path:
+            try:
+                relative = os.path.relpath(path, self.case.folder)
+            except ValueError:
+                return path
+            if not relative.startswith('..'):
+                return relative
+        return path
+
+    # --- views --------------------------------------------------------
+
+    def set_view(self, key, remember=True):
+        """Details (the table), List, an icon size, or Statistics."""
+        if key == STATISTICS:
+            self.stack.setCurrentWidget(self.stats_view)
+            self._fill_stats()
+        elif key in MODES:
+            if key == 'details':
+                self.stack.setCurrentWidget(self.table)
+            else:
+                self.gallery.set_mode(key)
+                self.stack.setCurrentWidget(self.gallery)
+        else:
+            key = 'details'
+            self.stack.setCurrentWidget(self.table)
+        self.view = key
+        self.view_button.set_current(key)
+        if remember:
+            from trace_app.infra.window_state import save_listing_view
+            save_listing_view(key, option=CARVED_VIEW_OPTION)
+
+    def _fill_stats(self):
+        """Every run of the images shown, newest first."""
+        if self.case is None:
+            self.stats_view.set_runs([], {})
+            return
+        names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
+                 for r in self.case.evidence()}
+        self.stats_view.set_runs(
+            self.case.carving_runs(self.evidence_filter, limit=500), names)
+
+    def _row_at(self, index):
+        item = self.table.item(index.row(), 0)
+        return item.data(Qt.UserRole) if item is not None else None
+
+    def _carve_bytes(self, row):
+        """A carve's bytes for its thumbnail (on the thumbnail thread),
+        read from the image -- there may be no copy."""
+        if self.content_reader is None:
+            return None
+        return self.content_reader(row)
+
+    def _carve_video(self, row):
+        """A carved video, as a stream over its bytes, for a frame."""
+        if self.content_reader is None or \
+                not 0 < int(row.get('size') or 0) <= MAX_VIDEO_BYTES:
+            return None
+        from trace_app.ui.viewers.media.video_thumbnails import buffer_opener
+        return buffer_opener(self.content_reader(row))()
+
+    def selected_rows(self):
+        """The carves selected, in order -- one selection, whichever view
+        shows it."""
+        rows = sorted({index.row() for index in
+                       self.table.selectionModel().selectedRows(0)} |
+                      {index.row() for index in
+                       self.table.selectionModel().selectedIndexes()})
+        return [self.table.item(r, 0).data(Qt.UserRole) for r in rows
+                if self.table.item(r, 0) is not None]
+
+    def shown_rows(self):
+        """Every carve the filters leave showing."""
+        return list(getattr(self, '_visible', self._rows))
+
+    # --- menus -------------------------------------------------------
+
+    def _table_menu(self, point):
+        item = self.table.itemAt(point)
+        if item is None:
+            return
+        row = self.table.item(item.row(), 0).data(Qt.UserRole)
+        if row:
+            self.file_menu_requested.emit(
+                row, self.table.viewport().mapToGlobal(point))
+
+    def _gallery_menu(self, point):
+        index = self.gallery.indexAt(point)
+        row = self._row_at(index) if index.isValid() else None
+        if row:
+            self.file_menu_requested.emit(
+                row, self.gallery.viewport().mapToGlobal(point))
+
+
+#: A carved video larger than this is not read for a frame: a carve is read
+#: whole from the image, on the UI thread, to be decoded.
+MAX_VIDEO_BYTES = 64 * 1024 * 1024
+#: The menu's extra view, and where the choice is remembered.
+STATISTICS = 'statistics'
+CARVED_VIEW_OPTION = 'carved_view'
+
+_THUMBNAIL_KINDS = {
+    **{t: thumbs.PICTURE for t in ('jpg', 'png', 'gif', 'bmp', 'tiff', 'webp',
+                                   'avif', 'heic', 'psd', 'ico', 'cr2', 'nef',
+                                   'arw', 'dng', 'pef')},
+    **{t: thumbs.VIDEO for t in _VIDEO},
+    'pdf': thumbs.PDF,
+    **{t: thumbs.DOCUMENT for t in ('docx', 'xlsx', 'pptx', 'vsdx', 'odt',
+                                    'ods', 'odp', 'odg')},
+}
+
+
+def carved_item(row):
+    """(key, kind, size) for a carve the icon views can show as a picture,
+    or None. The carve's type is what its content proved it to be."""
+    if not isinstance(row, dict):
+        return None
+    kind = _THUMBNAIL_KINDS.get((row.get('type') or '').lower())
+    size = int(row.get('size') or 0)
+    if kind is None or size <= 0:
+        return None
+    key = (row.get('evidence_id') if row.get('evidence_id') is not None
+           else row.get('image_path'), row.get('offset'), row.get('type'))
+    return key, kind, size

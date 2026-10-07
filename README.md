@@ -1,241 +1,134 @@
-<h1 align="center">Toolkit for Retrieval and Analysis of Cyber Evidence (TRACE)</h1>
+<div align="center">
 
-<p align="center">
-  TRACE is a digital forensic tool I developed as my final year project. It provides an intuitive interface for analyzing disk images and includes a range of functionalities to assist forensic examiners in extracting and viewing the contents of various image file formats.
-</p>
+<img src="Icons/logo_prev_ui.png" alt="TRACE" width="260"/>
 
-<p align="center">
-  <img src="Icons/logo_prev_ui.png" alt="TRACE Logo" width="400"/>
-</p>
+# TRACE
 
-## Navigation 🧭 
+**Toolkit for Retrieval and Analysis of Cyber Evidence**
 
-- [Preview 👀](#preview-)
-- [Features 🌟](#features-)
-- [Screenshots 📸](#screenshots-)
-- [Supported Image Formats 💾](#supported-image-formats-)
-- [Tested File Systems 🗂️](#tested-file-systems-%EF%B8%8F)
-- [Cross-Platform Compatibility 🖥️💻](#cross-platform-compatibility-%EF%B8%8F)
-- [Getting Started 🚀](#getting-started-)
-  - [Prerequisites 🛠️](#prerequisites-)
-  - [Configuration ⚙️](#configuration-%EF%B8%8F)
-  - [Running the Tool ▶️](#running-the-tool-%EF%B8%8F)
-- [Built With 🧱](#built-with-)
-- [Work in Progress 🛠️](#work-in-progress-)
-- [Testing & Feedback 🧪](#testing--feedback-)
-- [Contributing 🤝](#contributing-)
-- [Socials 👨‍💻](#socials-)
-
-
-## Preview 👀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+Open disk images read-only, organise them into cases, triage what stands out,<br/>
+search inside the evidence and recover deleted files — on Windows, macOS and Linux.
 
 <p>
-  <br/>
-  <img src="Icons/readme/Preview_Dark.png" alt="TRACE Preview" width="100%"/>
-  <br/>
+  <img src="https://img.shields.io/badge/version-2.0.0-4c8eda?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
+  <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
 </p>
 
-<br>
+<a href="#features"><b>Features</b></a> ·
+<a href="#screenshots"><b>Screenshots</b></a> ·
+<a href="#supported-evidence"><b>Evidence</b></a> ·
+<a href="#installation"><b>Install</b></a>
+
+<br/><br/>
+
+<img src="Icons/readme/main-dark.png" alt="TRACE main window" width="100%"/>
+
+</div>
+
+## Features
+
+- **Cases** — one investigation, any number of images, with custody details,
+  an audit trail, bookmarks, notes and a PDF/HTML report.
+- **Integrity** — evidence is never mounted or written to; hashes are verified
+  against those stored in the image, and every check is kept.
+- **Triage** — file types from content, entropy, hidden data, photo GPS,
+  document authors, executables, duplicates and hash sets.
+- **User activity** — programs run, files opened, USB devices, logons, the
+  Recycle Bin, browser history, chats and phone backups, on one timeline.
+- **Search** — full-text search inside documents, mail and archives, plus
+  emails, URLs, phone numbers, card numbers and IBANs found automatically.
+- **Detection** — YARA rules over files, Sigma rules over event logs,
+  keyword lists and persistence (autoruns) graded by risk.
+- **File carving** — 70 file types from unallocated space or slack, checked
+  for completeness, with fragmented ZIP and PDF files rebuilt.
+- **Viewers** — pictures, video, PDF, Office, mail, SQLite, registry hives,
+  a hex editor with a data inspector, and HTML shown offline.
+- **Under the hood** — NTFS $MFT, $UsnJrnl and $LogFile, shadow copies,
+  BitLocker / FileVault / LUKS unlocking, APFS, LVM and XFS volumes.
 
-## Features 🌟 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+## Screenshots
 
-✅ ***Image Mounting**: Mount forensic disk images. (Windows only) \
-✅ **Tree Viewer**: Navigate through the disk image structure, including partitions and files.\
-✅ **Detailed File Analysis**: View file content in different formats, such as HEX, text, and application-specific views.\
-✅ **EXIF Data Extraction**: Extract and display EXIF metadata from photos.\
-✅ **Registry Viewer**: View and examine Windows registry files.\
-✅ **Basic File Carving**: Recover deleted files from disk images.\
-✅ **Virus Total API Integration**: Check files for malware using the Virus Total API.\
-✅ **E01 Image Verification**: Verify the integrity of E01 disk images.\
-✅ **Convert E01 to Raw**: Convert E01 disk images to raw format.\
-✅ **Message Decoding**: Decode messages from base64, binary, and other encodings.
+| Triage | Activity |
+|:--:|:--:|
+| ![Triage: executables, signers and what stands out](Icons/readme/triage.png) | ![Activity: what the users did, in time order](Icons/readme/activity.png) |
+| **Timeline** — every source in one view | **Search** — inside documents, mail and archives |
+| ![Timeline](Icons/readme/timeline.png) | ![Search](Icons/readme/search.png) |
+| **Hex view** — search, data inspector, selection | **Thumbnails** — pictures, videos and documents |
+| ![Hex view](Icons/readme/hex.png) | ![Thumbnails](Icons/readme/thumbnails.png) |
+| **Registry** — every hive on the image | **Image information** — the disk's layout |
+| ![Registry](Icons/readme/registry.png) | ![Disk layout](Icons/readme/disk-layout.png) |
 
-<br>
+<details>
+<summary><b>Light theme and welcome screen</b></summary>
 
-## Screenshots 📸 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+![TRACE in light theme](Icons/readme/main-light.png)
 
-### Registry Browser 🗂️
+![Welcome screen](Icons/readme/welcome.png)
 
-<p>
-  <br/>
-  <img src="Icons/readme/registry.png" alt="Registry Browser" width="90%"/>
-  <br/>
-</p>
+</details>
 
+<sub>Screenshots show the 2020 Jimmy Wilson training image.</sub>
 
-### File Carving 🔪
+## Supported evidence
 
-<p>
-  <br/>
-  <img src="Icons/readme/carving.png" alt="File Carving" width="90%"/>
-  <br/>
-</p>
+| | |
+|:--|:--|
+| **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2 |
+| **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups |
+| **Live disks** | an attached disk, read-only, without imaging it first |
+| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, UFS, ISO 9660 |
+| **Encrypted volumes** | BitLocker, FileVault 2, LUKS, encrypted APFS and iOS backups |
+| **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
 
-### File Search 🔍
-<p>
-  <br/>
-  <img src="Icons/readme/file_search.png" alt="Image Verification" width="80%"/>
-  <br/>
-</p>
+## Installation
 
-### Image Verification ✅
+Python **3.10 or newer**. Everything installs from pre-built packages — no
+compiler, and on macOS no Homebrew.
 
-<p>
-  <br/>
-  <img src="Icons/readme/trace_verify.png" alt="Image Verification" width="70%"/>
-  <br/>
-</p>
+**Windows**
 
-<br>
+```powershell
+git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+cd TRACE-Forensic-Toolkit
+powershell -ExecutionPolicy Bypass -File install_windows.ps1
+venv\Scripts\activate
+python main.py
+```
 
+**macOS, Linux and WSL**
 
+```bash
+git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
+cd TRACE-Forensic-Toolkit
+./install.sh
+source venv/bin/activate
+python main.py
+```
 
-## Supported Image Formats 💾 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+A standalone app (Windows `.zip`, macOS `.dmg`) is built with
+`python build_app.py`, and every push builds them on GitHub Actions.
 
-| Image Format                                   | Extensions             | Split   |  Unsplit |
-|------------------------------------------------|------------------------|---------|----------|
-| EnCase® Image File (EVF / Expert Witness Format)| `*.E01` `*.Ex01`       | ✔️      | ✔️       |
-| SMART/Expert Witness Image File                | `*.s01`                | ✔️      | ✔️       |
-| Single Image Unix / Linux DD / Raw             | `*.dd`, `*.img`, `*.raw` | ✔️      | ✔️       |
-| ISO Image File                                 | `*.iso`                |         | ✔️       |
-| AccessData Image File                          | `*.ad1`                | ✔️       | ✔️        |
+## Testing
 
-<br>
+Every push is installed from scratch and tested on Windows, macOS (Apple
+Silicon and Intel) and Linux, against public forensic test images (DFTT,
+DFRWS, NPS, NIST). File carving is scored against the answer keys their
+authors published. Run the suite locally with:
 
-## Tested File Systems 🗂️ &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+```bash
+python tools/fetch_test_images.py
+python -m pytest
+```
 
-| File System | Tested |
-|-------------|--------|
-| NTFS        | ✔️     |
-| FAT32       |        |
-| exFAT       |        |
-| HFS+        |        |
-| APFS        |        |
-| EXT2,3,4    |        |
+---
 
-<br>
+<div align="center">
 
+Released under the [MIT License](LICENSE) ·
+Developed by [**Radoslav Gadzhovski**](https://linkedin.com/in/radoslav-gadzhovski)
 
-## Cross-Platform Compatibility 🍏🐧🗔  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
+<sub>Built with PySide6, The Sleuth Kit (pytsk3), libewf and the libyal libraries, PyMuPDF, Pillow and Tabler Icons.</sub>
 
-| Operating System                   | Screenshot                                                                                                           |
-|------------------------------------|----------------------------------------------------------------------------------------------------------------------|
-| **macOS Sonoma** 🍏                | <a href="Icons/readme/macos.png"><img src="Icons/readme/macos.png" alt="macOS Screenshot" width="900"/></a>          |
-| **Kali Linux 2024** 🐧             | <a href="Icons/readme/kali.png"><img src="Icons/readme/kali.png" alt="Kali Linux Screenshot" width="900"/></a>       |
-| **\*WSL2 - Ubuntu 22.04.3 LTS** 🐧 | <a href="Icons/readme/wsl3.png"><img src="Icons/readme/wsl3.png" alt="Kali Linux Screenshot" width="900"/></a>        |
-| **Windows 10** 🗔                  | <a href="Icons/readme/windows10.png"><img src="Icons/readme/windows10.png" alt="Windows Screenshot" width="900"/></a> |
-
-
-
-## Getting Started 🚀 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-### Installation ⚙️
-
-
-#### **Windows:**
-1.  Install Python 3.11<br>
-    (⚠️ Python 3.12 is not supported)<br>
-    [👉 Download from python.org](https://www.python.org/downloads/release/python-3110/)
-
-2.  Install Microsoft C++ Build Tools<br>
-    [👉 Download Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-
-    During setup, ensure the following workloads are selected:
-
-    - ✅ Desktop development with C++
-    - ✅ C++ build tools
-
-3.  Create and activate a virtual environment
-
-    ```bash
-    python -m venv venv
-    venv\Scripts\activate
-    ```
-
-4.  Install dependencies
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-5.  Run the tool
-
-    ```bash
-    python main.py
-    ```
-
-
-
-#### **macOS (Apple Silicon) & Linux (Ubuntu/WSL):**
-1.  Make the installation script executable:
-
-    ```bash
-    chmod +x install_macos_linux_WSL.sh
-    ```
-
-2.  Run the installation script:
-
-    ```bash
-    ./install_macos_linux_WSL.sh
-    ```
-
-    The script will:
-    - ✅ Create and activate a Python 3.11 virtual environment
-    - ✅ Detect your system (macOS or Linux)
-    - ✅ Install required system dependencies (via Homebrew or apt)
-    - ✅Install the appropriate Python packages:
-        * `requirements_macos_silicon.txt` → macOS
-        * `requirements.txt` → Linux
-    - ✅ After installation, it will automatically activate your virtual environment and notify you that it’s ready to use.
-
-3.  Run the Tool
-
-    Once the virtual environment is activated (you’ll see `(venv)` in your terminal prompt):
-
-    ```bash
-    python main.py
-    ```
-
-
-### Configuration ⚙️ 
-
-**API Keys Configuration**:The tool integrates with VirusTotal and Veriphone APIs, and you will need to provide your own API keys to use these features. To update the API keys, go to the Options menu and select API Keys submenu.
-
-
-
-
-## Built With 🧱  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-- [pytsk3](https://pypi.org/project/pytsk3/) - Python bindings for the SleuthKit
-- [libewf-python](https://github.com/libyal/libewf) - Library to access the Expert Witness Compression Format (EWF)
-- [PySide6](https://pypi.org/project/PySide6/) - Used for the GUI components.
-- [Arsenal Image Mounter](https://arsenalrecon.com/products/image-mounter/) - For mounting forensic disk images.
-
-
-## Work in Progress 🧑‍🔧  &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-- **Cross-Platform Image Mounting**: Image mounting currently works only on Windows using the Arsenal Image Mounter executable. The aim is to make this feature work across all platforms without relying on external executables.
-- **File Carving**: The verification of carved files needs improvement, as it may carve data fragments that are not actual files.
-- **Color Issues in Dark Mode**: The software currently has some colour display issues on Linux and macOS systems when using dark mode. Certain UI elements may not be clearly visible or may appear incorrectly.
-
-
-## Contributing 🤝 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-I welcome contributions from the community to help improve TRACE! If you're interested in contributing, here’s how you can get involved:
-
-
-1. **Report Issues**: If you find any bugs or have suggestions for improvements, please [open an issue](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/issues) on GitHub. Provide as much detail as possible to help address the issue effectively.
-2. **Submit a Pull Request**: If you have a fix or feature you’d like to contribute, please [fork the repository](https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/fork), make your changes, and submit a pull request. Ensure your code adheres to the coding standards and includes tests where applicable.
-
-
-## Socials 👨‍💻 &nbsp;&nbsp;&nbsp;&nbsp; [⬆️](#toolkit-for-retrieval-and-analysis-of-cyber-evidence-trace)
-
-
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-%230077B5.svg?logo=linkedin&logoColor=white)](https://linkedin.com/in/radoslav-gadzhovski)
-
-<br>
-
-![Version](https://img.shields.io/badge/version-1.2.0-purple.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-
-
+</div>

@@ -1,0 +1,81 @@
+{
+ "image": "daylight.dd",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 45780,
+     "mtime": 0,
+     "path": "/$FAT1",
+     "size": 4608,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 45781,
+     "mtime": 0,
+     "path": "/$FAT2",
+     "size": 4608,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 45779,
+     "mtime": 0,
+     "path": "/$MBR",
+     "size": 512,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 45782,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 1086048000,
+     "crtime": 1086102001,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 4,
+     "mtime": 1086102004,
+     "path": "/summer.txt",
+     "sha256": "6f0557d22da75fc4829062099e524b65bc93611684fd18912d088dd18d22f07b",
+     "size": 8,
+     "type": "file"
+    },
+    {
+     "atime": 1072915200,
+     "crtime": 1072965601,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 3,
+     "mtime": 1072965602,
+     "path": "/winter.txt",
+     "sha256": "b4bf90867060946ca9985a5a022794982afe1915d1ba5e1e7fe7145944f64141",
+     "size": 8,
+     "type": "file"
+    }
+   ],
+   "fs_type": "FAT12",
+   "offset": 0
+  }
+ ]
+}

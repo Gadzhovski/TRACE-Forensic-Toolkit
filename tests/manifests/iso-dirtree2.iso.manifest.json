@@ -1,0 +1,36 @@
+{
+ "image": "iso-dirtree2.iso",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 3,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "deleted": true,
+     "inode": null,
+     "path": "/$OrphanFiles/OrphanFile-1",
+     "type": null
+    },
+    {
+     "deleted": true,
+     "inode": null,
+     "path": "/$OrphanFiles/OrphanFile-2",
+     "type": null
+    }
+   ],
+   "fs_type": "ISO9660",
+   "offset": 0
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+# Normalise text files in the repository.
+* text=auto
+
+# Shell scripts must keep LF endings: a CRLF shebang line makes the script
+# fail on macOS/Linux with a confusing "bad interpreter" error.
+*.sh text eol=lf
+
+# PowerShell is happiest with CRLF on Windows.
+*.ps1 text eol=crlf

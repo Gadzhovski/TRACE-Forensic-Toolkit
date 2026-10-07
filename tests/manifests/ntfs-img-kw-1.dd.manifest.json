@@ -1,0 +1,319 @@
+{
+ "image": "ntfs-img-kw-1.dd",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 4,
+     "mtime": 1066929179,
+     "path": "/$AttrDef",
+     "sha256": "d7de5b1b2f79f45f235ceb1adbc46908ed64eae174eb90ed66aefe5f25165da3",
+     "size": 2560,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 8,
+     "mtime": 1066929179,
+     "path": "/$BadClus",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 6,
+     "mtime": 1066929179,
+     "path": "/$Bitmap",
+     "sha256": "29279bc79fc748d711dc8d623c6da63c0fb2ebee670414c906ba7815f66530d0",
+     "size": 2008,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 7,
+     "mtime": 1066929179,
+     "path": "/$Boot",
+     "sha256": "7556db0e4e61888de3bfd8a9a7f2cb45bd94901fd63d2ddc48be6222b5993122",
+     "size": 8192,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 11,
+     "mtime": 1066929179,
+     "path": "/$Extend",
+     "size": 344,
+     "type": "dir"
+    },
+    {
+     "atime": 1067012801,
+     "crtime": 1066929187,
+     "ctime": 1066929187,
+     "deleted": false,
+     "inode": 25,
+     "mtime": 1066929187,
+     "path": "/$Extend/$ObjId",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1066929187,
+     "crtime": 1066929187,
+     "ctime": 1066929187,
+     "deleted": false,
+     "inode": 24,
+     "mtime": 1066929187,
+     "path": "/$Extend/$Quota",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1067012794,
+     "crtime": 1066929187,
+     "ctime": 1066929187,
+     "deleted": false,
+     "inode": 26,
+     "mtime": 1066929187,
+     "path": "/$Extend/$Reparse",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 2,
+     "mtime": 1066929179,
+     "path": "/$LogFile",
+     "sha256": "02f5af9bced9461a60c17a83c1de0bbe5755b81ebc6851cbf44b4d362f64d1f5",
+     "size": 2097152,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 0,
+     "mtime": 1066929179,
+     "path": "/$MFT",
+     "sha256": "227c5ac7251393378576925c244b821aa1f04874206fd34fdccdf613ba323e17",
+     "size": 39936,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 1,
+     "mtime": 1066929179,
+     "path": "/$MFTMirr",
+     "sha256": "c26fab3d769392317c72f38ff64948454becc589482c1a5022d5abdf6ae7815a",
+     "size": 4096,
+     "type": "file"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 39,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 9,
+     "mtime": 1066929179,
+     "path": "/$Secure",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 10,
+     "mtime": 1066929179,
+     "path": "/$UpCase",
+     "sha256": "19442bdd7623101de9e217a943b103283406ff96d332f6e7ca4e1fe06e111a53",
+     "size": 131072,
+     "type": "file"
+    },
+    {
+     "atime": 1066929179,
+     "crtime": 1066929179,
+     "ctime": 1066929179,
+     "deleted": false,
+     "inode": 3,
+     "mtime": 1066929179,
+     "path": "/$Volume",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1067012801,
+     "crtime": 1066929355,
+     "ctime": 1067012801,
+     "deleted": false,
+     "inode": 31,
+     "mtime": 1067012801,
+     "path": "/System Volume Information",
+     "size": 440,
+     "type": "dir"
+    },
+    {
+     "atime": 1066929356,
+     "crtime": 1066929355,
+     "ctime": 1066929356,
+     "deleted": false,
+     "inode": 32,
+     "mtime": 1066929356,
+     "path": "/System Volume Information/_restore{A25F48CA-6632-4143-8EF8-3586A84AB5AF}",
+     "size": 48,
+     "type": "dir"
+    },
+    {
+     "atime": 1067012893,
+     "crtime": 1067012800,
+     "ctime": 1067012893,
+     "deleted": false,
+     "inode": 28,
+     "mtime": 1067012893,
+     "path": "/System Volume Information/tracking.log",
+     "sha256": "91652a1fc9625a897b9e822d80f81f8a4708bd7253a0f664863f10d0805c1585",
+     "size": 20480,
+     "type": "file"
+    },
+    {
+     "atime": 1066929570,
+     "crtime": 1066929541,
+     "ctime": 1066929570,
+     "deleted": false,
+     "inode": 38,
+     "mtime": 1066929570,
+     "path": "/dir-n-6",
+     "size": 48,
+     "type": "dir"
+    },
+    {
+     "atime": 1066929379,
+     "crtime": 1066929355,
+     "ctime": 1066929379,
+     "deleted": false,
+     "inode": 30,
+     "mtime": 1066929379,
+     "path": "/dir-r-4",
+     "size": 48,
+     "type": "dir"
+    },
+    {
+     "atime": 1066929478,
+     "crtime": 1066929478,
+     "ctime": 1066929478,
+     "deleted": false,
+     "inode": 33,
+     "mtime": 1066892654,
+     "path": "/file-n-1.dat",
+     "sha256": "4b89332d0940be62eac8b1d7594975aaf4354ec79a6498fbcf2dec18e39c1127",
+     "size": 2000,
+     "type": "file"
+    },
+    {
+     "atime": 1066929638,
+     "crtime": 1066929489,
+     "ctime": 1066929638,
+     "deleted": false,
+     "inode": 35,
+     "mtime": 1066929638,
+     "path": "/file-n-3.dat",
+     "sha256": "338fba5e5037644bc5ab53c26b06a763768b2d05ac95af84b8367e7834327eb2",
+     "size": 2600,
+     "type": "file"
+    },
+    {
+     "atime": 1066929492,
+     "crtime": 1066929492,
+     "ctime": 1066929492,
+     "deleted": false,
+     "inode": 36,
+     "mtime": 1066892260,
+     "path": "/file-n-4.dat",
+     "sha256": "92e41ecc1a52b0b4803e96de340eff8884e31951e750e553a8dfa61a2134c191",
+     "size": 2000,
+     "type": "file"
+    },
+    {
+     "atime": 1066929530,
+     "crtime": 1066929494,
+     "ctime": 1066929530,
+     "deleted": false,
+     "inode": 37,
+     "mtime": 1066929530,
+     "path": "/file-n-5.dat",
+     "sha256": "a91f1e7f30366fb3b8139300f1973036cd51506784c49ad2174eb7214c85c137",
+     "size": 1300,
+     "type": "file"
+    },
+    {
+     "atime": 1066929299,
+     "crtime": 1066929299,
+     "ctime": 1066929299,
+     "deleted": false,
+     "inode": 27,
+     "mtime": 1066892468,
+     "path": "/file-r-1.dat",
+     "sha256": "3307be33588c4027db071aaa3abccf9185d0ff7b3ec9c61316dd5577c1395b2d",
+     "size": 120,
+     "type": "file"
+    },
+    {
+     "deleted": true,
+     "inode": null,
+     "path": "/file-r-2.dat",
+     "type": null
+    },
+    {
+     "atime": 1066929339,
+     "crtime": 1066929313,
+     "ctime": 1066929339,
+     "deleted": false,
+     "inode": 29,
+     "mtime": 1066929339,
+     "path": "/file-r-3.dat",
+     "sha256": "1e2d4507d28d9809a26b71f3c3a4e932a595b77ccacb3f5dc0e1af7dc3bdeabf",
+     "size": 512,
+     "type": "file"
+    }
+   ],
+   "fs_type": "NTFS",
+   "offset": 0
+  }
+ ]
+}

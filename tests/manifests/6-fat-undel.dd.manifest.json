@@ -1,0 +1,207 @@
+{
+ "image": "6-fat-undel.dd",
+ "partitions": [],
+ "stored_hashes": {},
+ "volumes": [
+  {
+   "entries": [
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 191620,
+     "mtime": 0,
+     "path": "/$FAT1",
+     "size": 12288,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 191621,
+     "mtime": 0,
+     "path": "/$FAT2",
+     "size": 12288,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 191619,
+     "mtime": 0,
+     "path": "/$MBR",
+     "size": 512,
+     "type": "virtual"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 191622,
+     "mtime": 0,
+     "path": "/$OrphanFiles",
+     "size": 0,
+     "type": "virtual-dir"
+    },
+    {
+     "atime": 0,
+     "crtime": 0,
+     "ctime": 0,
+     "deleted": false,
+     "inode": 3,
+     "mtime": 1076777188,
+     "path": "/FAT_REC_1   (Volume Label Entry)",
+     "size": 0,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763221,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 11,
+     "mtime": 1076763222,
+     "path": "/System Volume Information",
+     "size": 1024,
+     "type": "dir"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763221,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 905,
+     "mtime": 1076763222,
+     "path": "/System Volume Information/_restore{A25F48CA-6632-4143-8EF8-3586A84AB5AF}",
+     "size": 1024,
+     "type": "dir"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763221,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 933,
+     "mtime": 1076763222,
+     "path": "/System Volume Information/_restore{A25F48CA-6632-4143-8EF8-3586A84AB5AF}/_P1",
+     "size": 1024,
+     "type": "dir"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763246,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 965,
+     "mtime": 1076763268,
+     "path": "/System Volume Information/_restore{A25F48CA-6632-4143-8EF8-3586A84AB5AF}/_P1/frag3.dat",
+     "sha256": "9ac31171d3fd6f509720a2b82516aa7d085279fd57c3ec381834b0576072c60d",
+     "size": 2027,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763124,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 6,
+     "mtime": 1076763126,
+     "path": "/_ing.dat",
+     "sha256": "799f8870dbb8b31511e1cd8102a43c94bd8ba76b987d338d4ba05ee32269490f",
+     "size": 780,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763221,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 8,
+     "mtime": 1076763222,
+     "path": "/_ir1",
+     "size": 1024,
+     "type": "dir"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763228,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 869,
+     "mtime": 1076763230,
+     "path": "/_ir1/dir2",
+     "size": 1024,
+     "type": "dir"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763246,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 965,
+     "mtime": 1076763268,
+     "path": "/_ir1/dir2/frag3.dat",
+     "sha256": "9ac31171d3fd6f509720a2b82516aa7d085279fd57c3ec381834b0576072c60d",
+     "size": 2027,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763260,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 870,
+     "mtime": 1076763262,
+     "path": "/_ir1/mult2.dat",
+     "sha256": "8553e78eb8f13c9639f96c61cfba799bbb094376c5f86ec54cbc0afb8635e138",
+     "size": 1715,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763048,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 4,
+     "mtime": 1076763076,
+     "path": "/_rag1.dat",
+     "sha256": "6c8861e9ebd459ef7e845318dcbc78b97cf9007f20f8ac02686fd473ab465357",
+     "size": 1584,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763061,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 5,
+     "mtime": 1076763174,
+     "path": "/_rag2.dat",
+     "sha256": "d5a526d4d7811b1a844109b4e5cc3580862fe9def8e5790413b14a806278a543",
+     "size": 3873,
+     "type": "file"
+    },
+    {
+     "atime": 1076716800,
+     "crtime": 1076763145,
+     "ctime": 0,
+     "deleted": true,
+     "inode": 7,
+     "mtime": 1076793644,
+     "path": "/_ult1.dat",
+     "sha256": "aada10bcb73925a71b330eaceef5cd9f8484d733b45da70ea39cdb22cddf78c0",
+     "size": 3801,
+     "type": "file"
+    }
+   ],
+   "fs_type": "FAT16",
+   "offset": 0
+  }
+ ]
+}

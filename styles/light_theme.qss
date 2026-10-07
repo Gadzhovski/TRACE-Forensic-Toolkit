@@ -1,6 +1,6 @@
 /* Global Widget Styles */
 QWidget {
-    font-size: 14px;
+    font-size: 13px;
     color: #333333;
     background-color: #FFFFFF;
 }
@@ -8,7 +8,7 @@ QWidget {
 /* Button Styles */
 QPushButton {
     border: 1px solid #ced4da;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 5px 15px;
     background-color: #ffffff;
     margin-left: 8px;
@@ -35,17 +35,56 @@ QCheckBox::indicator:unchecked {
     background-color: #ffffff;
 }
 QCheckBox::indicator:checked {
-    image: url('Icons/icons8-tick-48.png');
+    image: url('Icons/tabler/themed/check-light.svg');
 }
 
 /* ComboBox Styles */
 QComboBox {
     border: 1px solid #ced4da;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 5px 10px;
     background-color: #ffffff;
     selection-background-color: #56CCF2;
 }
+/* The popup list a combo box opens. Qt does not inherit the closed
+   control's styling into it, so without this the list is drawn by the
+   platform: no frame, and on a dark theme, near-invisible. This covers every
+   combo in the application, not just the search examples. */
+QComboBox QAbstractItemView {
+    background-color: #FFFFFF;
+    color: #202124;
+    border: 1px solid #C0C0C0;
+    border-radius: 4px;
+    padding: 2px;
+    outline: none;
+    selection-background-color: #1a73e8;
+    selection-color: #FFFFFF;
+}
+
+QComboBox QAbstractItemView::item {
+    padding: 4px 8px;
+    min-height: 20px;
+    border: none;
+}
+
+/* Selected AND hovered, together. The popup marks its current entry
+   selected, and QListWidget::item:selected elsewhere in this file does not
+   match it -- the popup is a QListView -- so the item fell through to the
+   platform's own colour and rendered near-white on near-white: the current
+   choice was the one entry in the list nobody could read. */
+QComboBox QAbstractItemView::item:selected,
+QComboBox QAbstractItemView::item:hover {
+    background-color: #1a73e8;
+    color: #FFFFFF;
+}
+
+/* Group headings in the search examples: shown, but not choosable. */
+QComboBox QAbstractItemView::item:disabled {
+    color: #9aa0a6;
+    font-weight: 600;
+    background-color: transparent;
+}
+
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
@@ -57,7 +96,7 @@ QComboBox::drop-down {
     border-bottom-right-radius: 4px;
 }
 QComboBox::down-arrow {
-    image: url('Icons/icons8-dropdown-48.png');
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
     width: 16px;
     height: 16px;
 }
@@ -71,7 +110,7 @@ QComboBox::drop-down:hover {
 /* Dock Widget Styles */
 QDockWidget {
     border: 1px solid #E5E5E5;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #ffffff;
 }
 QDockWidget::title {
@@ -83,7 +122,7 @@ QDockWidget::title {
 }
 QDockWidget::close-button, QDockWidget::float-button {
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: 6px;
     background: #f5f5f5;
 }
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {
@@ -99,15 +138,22 @@ QFrame {
     border: none; /* Remove border from all QFrames by default */
 }
 
-/* Only apply borders to specific frames where needed */
-QFrame#search_results_frame, QDockWidget > QFrame {
+/* Only apply borders to specific frames where needed.
+
+   The tree is excluded. A QTreeWidget is a QFrame and sits directly inside a
+   dock, so it matched here -- and this selector outranks a plain QTreeWidget
+   rule, so the border could not be turned off from there. A selected row runs
+   the full width of the viewport, putting that border immediately against the
+   selection colour: being lighter, it read as a white line down the edge of
+   the highlight rather than as the widget's frame. */
+QDockWidget > QFrame:not(QTreeWidget) {
     border: 1px solid #E5E5E5;
 }
 
 /* List and Table Widget Styles */
 QListWidget, QTableWidget {
     border: 1px solid #E5E5E5;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #ffffff;
 }
 QListWidget::item, QTableWidget::item {
@@ -126,7 +172,7 @@ QMenuBar {
 }
 QMenuBar::item {
     padding: 5px 8px;
-    border-radius: 2px;
+    border-radius: 4px;
 }
 QMenuBar::item:selected {
     background-color: #e7e7e7;
@@ -164,79 +210,7 @@ QMessageBox {
     border: 1px solid #E5E5E5;
 }
 
-QScrollBar:vertical {
-    border: none;
-    background: #F8F8F8;
-    width: 10px;
-    margin: 0px;
-    border-radius: 0px;
-}
-
-QScrollBar::handle:vertical {
-    background: #C1C1C1;
-    min-height: 20px;
-    border-radius: 5px;
-}
-
-QScrollBar::add-line:vertical {
-    border: none;
-    background: none;
-    height: 0px;
-    subcontrol-position: bottom;
-    subcontrol-origin: margin;
-}
-
-QScrollBar::sub-line:vertical {
-    border: none;
-    background: none;
-    height: 0px;
-    subcontrol-position: top;
-    subcontrol-origin: margin;
-}
-
-QScrollBar:horizontal {
-    border: none;
-    background: #F8F8F8;
-    height: 10px;
-    margin: 0px;
-    border-radius: 0px;
-}
-
-QScrollBar::handle:horizontal {
-    background: #C1C1C1;
-    min-width: 20px;
-    border-radius: 5px;
-}
-
-QScrollBar::add-line:horizontal {
-    border: none;
-    background: none;
-    width: 0px;
-    subcontrol-position: right;
-    subcontrol-origin: margin;
-}
-
-QScrollBar::sub-line:horizontal {
-    border: none;
-    background: none;
-    width: 0px;
-    subcontrol-position: left;
-    subcontrol-origin: margin;
-}
-
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical,
-QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
-    background: none;
-}
-
-QScrollBar::up-arrow:vertical, QScrollBar::down-arrow:vertical,
-QScrollBar::left-arrow:horizontal, QScrollBar::right-arrow:horizontal {
-    background: none;
-}
-
-QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-    background: none;
-}
+/* Scrollbars are defined once, further down. */
 
 
 
@@ -253,7 +227,7 @@ QSlider::handle:horizontal {
     border: 1px solid #E5E5E5;
     width: 14px;
     margin: -2px 0;
-    border-radius: 7px;
+    border-radius: 6px;
 }
 QSlider::handle:horizontal:hover {
     background: #b7b7b7;
@@ -271,12 +245,13 @@ QSlider::add-page:horizontal {
 /* TabWidget and TabBar Styles */
 QTabWidget {
     border: 1px solid #E5E5E5;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #ffffff;
 }
 
 QTabWidget::pane {
     border-top: 1px solid #E5E5E5;
+    background-color: #FFFFFF;
 }
 
 QTabBar {
@@ -306,11 +281,57 @@ QTabBar::tab:!selected {
     margin-top: 2px; /* Unselected tabs are slightly raised */
 }
 
+
+/* The arrows a tab bar shows when its tabs do not fit (Triage has eleven
+   sub-tabs). Qt draws a pair of grey bevelled buttons; these match the tabs. */
+QTabBar::scroller {
+    width: 48px;
+}
+QTabBar QToolButton {
+    background: #FFFFFF;
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+    margin: 3px 1px 1px 1px;
+    padding: 0;
+}
+QTabBar QToolButton:hover {
+    background: #F5F5F5;
+    border-color: #C2C7CB;
+}
+QTabBar QToolButton:disabled {
+    border-color: #EEEEEE;
+}
+QTabBar QToolButton::left-arrow {
+    image: url('Icons/tabler/themed/chevron-left-light.svg');
+    width: 14px;
+    height: 14px;
+}
+QTabBar QToolButton::left-arrow:disabled {
+    image: url('Icons/tabler/themed/chevron-left-dim-light.svg');
+}
+QTabBar QToolButton::right-arrow {
+    image: url('Icons/tabler/themed/chevron-right-light.svg');
+    width: 14px;
+    height: 14px;
+}
+QTabBar QToolButton::right-arrow:disabled {
+    image: url('Icons/tabler/themed/chevron-right-dim-light.svg');
+}
+/* The tear Qt draws where a tab is cut off is a smudge, not a cue. */
+QTabBar::tear {
+    width: 0;
+    border: none;
+}
+
 /* ToolBar Styles */
 QToolBar {
     background-color: #FFFFFF;
     border-bottom: 1px solid #E5E5E5;
-    padding: 5px;
+    /* Symmetric vertical padding so controls sit centred rather than
+       pushed against the top edge. TOOLBAR_HEIGHT in constants.py is
+       derived from these numbers -- change one and change the other. */
+    padding: 5px 8px;
+    spacing: 6px;
 }
 QToolBar::item:hover {
     background-color: #e7e7e7;
@@ -322,7 +343,7 @@ QToolBar::item:pressed {
 /* Other Widget Styles */
 QLineEdit, QTextEdit, QAudioWidget {
     border: 1px solid #E5E5E5;
-    border-radius: 2px;
+    border-radius: 4px;
     background-color: #ffffff;
 }
 QLineEdit:hover, QTextEdit:hover {
@@ -333,8 +354,12 @@ QLineEdit:focus {
 }
 
 QTreeWidget {
-    border: 1px solid #E5E5E5;
-    border-radius: 2px;
+    /* No frame. A selected row runs the full width of the view, so a border
+       sat directly against the selection colour -- and being lighter than it,
+       read as a white line down the left of the highlight rather than as the
+       widget's edge. The tree lives in a dock, which already separates it from
+       what is beside it. */
+    border: none;
     background-color: #ffffff;
 }
 
@@ -364,7 +389,7 @@ QGroupBox {
 
 #exportButton {
     border: 1px solid #ced4da;
-    border-radius: 2px;
+    border-radius: 4px;
     padding: 5px 30px 5px 5px; /* Adjust right padding to push text more to the left */
     background-color: #ffffff;
     width: 60px; /* Adjust width as necessary to fit text and menu arrow */
@@ -386,7 +411,7 @@ QGroupBox {
 }
 
 #exportButton::menu-arrow {
-    image: url('Icons/icons8-dropdown-48.png');
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
     width: 16px;  /* Adjust the width of the image */
     height: 16px;  /* Adjust the height of the image */
 }
@@ -395,21 +420,23 @@ QGroupBox {
 
 
 /* General styles for all QTableWidgets, QTreeWidgets, and QListWidgets in light theme */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QListWidget, QTableView#activityTable {
     gridline-color: #E5E5E5;  /* Light gridline color */
-    font-size: 12px;
+    font-size: 13px;
     background-color: #FFFFFF;  /* Light background for tables */
     color: #000000;  /* Dark text color */
 }
 
 /* Table items */
-QTableWidget::item, QTreeWidget::item, QListWidget::item {
+QTableWidget::item, QListWidget::item,
+QTableView#activityTable::item {
     padding: 5px;
     color: #000000;  /* Dark text color */
     background-color: #FFFFFF;  /* White background for table rows */
 }
 
-QTableWidget::item:selected, QTreeWidget::item:selected, QListWidget::item:selected {
+QTableWidget::item:selected, QListWidget::item:selected,
+QTableView#activityTable::item:selected {
     background-color: #CCE8FF;  /* Light blue highlight for selected items */
 }
 
@@ -439,7 +466,7 @@ QHeaderView::section:vertical {
 }
 
 /* Set the alternating row colors for better visibility */
-QTableWidget, QTreeWidget, QListWidget {
+QTableWidget, QTreeWidget, QListWidget, QTableView#activityTable {
     alternate-background-color: #F8F8F8;  /* Very light gray for alternating rows */
 }
 
@@ -449,16 +476,41 @@ QHeaderView::section:vertical {
     color: #000000;  /* Dark text color */
 }
 
-/* Styles for scrollbars in light theme */
+/* Scrollbars.
+
+   The handle was #C0C0C0 on an #F0F0F0 track -- 48 points of luminance apart,
+   where the dark theme's handle sits only 30 from its track. That is why this
+   one read as noticeably heavier than the dark one rather than as the same
+   control in a different theme. #D0D0D0 puts it at 32.
+
+   The track is transparent and the handle is a true pill: a radius has to be
+   half the width or the corners clip square, so the 6px radius the old rule
+   asked for did nothing at 10px wide. */
 QScrollBar:vertical, QScrollBar:horizontal {
-    background: #F0F0F0;  /* Light background for scrollbars */
-    width: 10px;
-    height: 10px;
+    background: transparent;
+    width: 12px;
+    height: 12px;
+    margin: 0px;
+    border: none;
 }
 
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    background: #C0C0C0;  /* Scroll handle color */
-    border-radius: 5px;
+    background: #D0D0D0;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: padding;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 32px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 32px;
+}
+
+QScrollBar::handle:hover {
+    background: #B8B8B8;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
@@ -489,47 +541,18 @@ QListWidget::item:selected, QTreeWidget::item:selected {
 }
 
 #softwareInfoLabel {
-    font-size: 16pt;             /* Slightly larger font for the main title */
+    font-size: 19px;             /* Slightly larger font for the main title */
     font-weight: bold;
     color: #333333;              /* Dark text color */
     padding: 10px 0;             /* Add some vertical padding */
 }
 
 #subtitleLabel {
-    font-size: 12pt;
+    font-size: 15px;
     color: #666666;              /* Medium gray for the subtitle */
     padding: 5px 0;              /* Add a little space around the subtitle */
 }
 
-/* Search Results Area Styling for Light Theme */
-#search_results_frame {
-    background-color: #FFFFFF;
-    border: 1px solid #E5E5E5;
-    border-radius: 2px;
-    padding: 1px;
-}
-
-#search_results_title {
-    background-color: #F0F0F0;
-    color: #333333;
-    padding: 2px;
-    border-bottom: 1px solid #D3D3D3;
-}
-
-#search_results_widget {
-    background-color: #FFFFFF;
-    color: #333333;
-    border: none;
-    font-size: 10px;
-}
-
-#search_results_widget::item {
-    padding: 2px;
-}
-
-#search_results_widget::item:selected {
-    background-color: #CCE8FF;
-}
 
 /* Address bar in hex view */
 QLabel[text="Address"] {
@@ -549,29 +572,21 @@ QLabel[text="ASCII"] {
 /* UnifiedViewer Placeholder Label - "No content loaded" message */
 #placeholderLabel {
     background-color: #F0F0F0;  /* Light gray background */
-    font-size: 16px;
+    font-size: 15px;
     color: #888888;  /* Medium gray text */
     padding: 10px;
 }
 
 /* AudioVideoPlayer Audio-Only Label - "Playing Audio" message */
 #audioOnlyLabel {
-    background-color: #E0E0E0;  /* Light gray background */
-    font-size: 18px;
-    color: #444444;  /* Dark gray text */
-    padding: 20px;
+    background-color: #F7F8FA;
+    font-size: 15px;
+    color: #5f6368;
+    padding: 16px;
 }
 
 /* Toolbar Compact Styles - for PictureViewer and PDFViewer */
-QToolBar {
-    spacing: 2px;
-    padding: 1px;
-}
 
-QToolButton {
-    padding: 2px;
-    margin: 1px;
-}
 
 /* Media Player Sliders - Position and Volume */
 QSlider::groove:horizontal {
@@ -585,13 +600,15 @@ QSlider::handle:horizontal {
 }
 
 /* Search Toolbar Styles (Listing View) */
+/* Colour only. Padding, height and radius come from the shared
+   QLineEdit rule, so every search box in the application matches.
+   This block used to set `padding: 6px 10px`, and because an ID
+   selector outranks the generic rule, 12px of vertical padding was
+   applied inside a 24px-tall field -- which clipped the placeholder. */
 QLineEdit#listingSearchBar {
     border: 1px solid #C0C0C0;
-    border-radius: 4px;
-    padding: 6px 10px;
     background-color: #FFFFFF;
     color: #333333;
-    font-size: 13px;
 }
 
 QLineEdit#listingSearchBar:hover {
@@ -599,7 +616,7 @@ QLineEdit#listingSearchBar:hover {
 }
 
 QLineEdit#listingSearchBar:focus {
-    border: 1px solid #1E90FF;
+    border: 1px solid #2F81F7;
 }
 
 QToolButton#clearSearchBtn {
@@ -628,11 +645,1574 @@ QGroupBox#fileTypeGroup {
 
 QGroupBox#fileTypeGroup QCheckBox {
     spacing: 6px;
-    font-size: 12px;
+    font-size: 13px;
     padding: 2px;
     color: #333333;
 }
 
 QGroupBox#fileTypeGroup QCheckBox:hover {
     color: #000000;
+}
+
+/* ==================== Volume information dialog ==================== */
+/* Previously these colours were hardcoded inline in volume_info.py, which
+   made the dialog unreadable in dark mode (dark text on a dark ground). */
+
+QWidget#volumeInfoHeader {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+}
+
+QWidget#volumeInfoCard {
+    background-color: #ffffff;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+/* Rows and legend entries inside the information cards. They set no
+   background of their own, so the global QWidget rule painted each one a
+   panel colour -- a visible block behind every line of text, sitting on top
+   of the card it was meant to be part of. Transparent, so the card shows
+   through. */
+QWidget#volumeInfoRow {
+    background-color: transparent;
+    border: none;
+}
+
+QWidget#volumeInfoCard QLabel {
+    background-color: transparent;
+}
+
+QLabel#volumeInfoTitle {
+    font-size: 19px;
+    font-weight: bold;
+    color: #212529;
+    border: none;
+}
+
+QLabel#volumeInfoSubtitle {
+    font-size: 15px;
+    font-weight: bold;
+    color: #212529;
+    border: none;
+}
+
+QLabel#volumeInfoSectionTitle {
+    font-size: 15px;
+    font-weight: bold;
+    color: #212529;
+    padding-bottom: 10px;
+}
+
+QLabel#volumeInfoFieldLabel {
+    font-weight: bold;
+    color: #495057;
+    font-size: 13px;
+    border: none;
+}
+
+QLabel#volumeInfoFieldValue {
+    color: #212529;
+    font-size: 13px;
+    border: none;
+}
+
+QLabel#volumeInfoLegendLabel {
+    color: #495057;
+    font-size: 11px;
+    border: none;
+}
+
+QChartView#volumeInfoChartView {
+    border: none;
+    background: transparent;
+}
+
+/* ==================== Migrated inline styles ==================== */
+/* These were setStyleSheet() calls in Python, so the widgets could not
+   respond to a theme change at all. Object names let both themes style them. */
+
+/* Panel titles: File System Browser / File Carving / Registry Browser.
+   Previously three copies of the same inline rule using a teal (#37c6d0)
+   that clashed with the blue used for selection. Headings are plain
+   foreground text now -- blue is reserved for selection and progress,
+   where it means something. */
+QLabel#panelTitle {
+    font-size: 13px;
+    font-weight: 600;
+    color: #212529;
+    margin-left: 6px;
+    padding: 2px 0;
+}
+
+QTableWidget#hexTable {
+    gridline-color: transparent;
+    border: none;   /* see QTextEdit#textContentView */
+}
+
+QTableWidget#hexTable::item {
+    padding: 0px;
+    border: none;
+}
+
+QHeaderView#hexTableHeader::section {
+    padding: 2px;
+}
+
+/* Hex view search results: a table beside the hex table, with its header
+   (hexTableHeader) and rows of the same height. */
+QTableWidget#hexSearchResults,
+QTableWidget#hexInspector {
+    gridline-color: transparent;
+    border: none;
+}
+QTableWidget#hexSearchResults::item,
+QTableWidget#hexInspector::item {
+    padding: 0px 6px;
+    border: none;
+}
+/* Under the bytes: the cursor's offset, the selection, and where the
+   byte lies on the image. */
+QLabel#hexStatus {
+    color: #6c757d;
+    font-size: 11px;
+    padding: 3px 6px;
+    border-top: 1px solid #E5E5E5;
+}
+
+QHeaderView#listingTableHeader::section {
+    margin-top: 0px;
+    padding-top: 2px;
+}
+
+QTextEdit#hashResultBox {
+    background-color: #f5f5f5;
+    border: 1px solid #ced4da;
+    color: #212529;
+    font-family: 'Courier New', Courier, monospace;
+}
+
+QProgressBar#verifyProgress {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #f5f5f5;
+    color: #212529;
+}
+
+QProgressBar#verifyProgress::chunk {
+    /* Green because the bar reports a hash verification completing, and the
+       theme's amber [state="warning"] already establishes that colour carries
+       meaning in this app. The previous #2F81F7 was a blue used nowhere else
+       and said nothing about the outcome. */
+    background-color: #2DA44E;
+    border-radius: 4px;
+}
+
+QTextEdit#borderlessView {
+    border: 0px;
+}
+
+/* ==================== Property tables ==================== */
+/* A properties pane is read, not navigated, so it drops the header row, the
+   grid and the row stripes a data table wants. Right-aligned labels against
+   left-aligned values give the eye one clean edge to follow. */
+
+QTableWidget#propertyTable {
+    border: none;
+    background-color: transparent;
+    color: #212529;
+    gridline-color: transparent;
+    outline: none;
+}
+
+QTableWidget#propertyTable::item {
+    padding: 3px 12px 3px 8px;
+    border: none;
+    /* Transparent, so a row shows the pane behind it. The widget was already
+       transparent but its items were not: they still took the shared
+       QTableWidget::item colour, which is a panel grey and sat lighter than
+       the pane around it -- a block behind the properties and nothing behind
+       the filesystem detail below. */
+    background-color: transparent;
+}
+
+QTableWidget#propertyTable::item:selected {
+    background-color: #d7e7fb;
+    color: #212529;
+}
+
+/* Field names: quieter than their values, which carry the information. */
+QTableWidget#propertyTable::item[state="label"] {
+    color: #6b7480;
+}
+
+/* Section headings ("File", "Timestamps", "Hashes"). Set apart from the
+   labels beneath them: at #495057 against the labels' #6b7480 the two were
+   almost the same grey, so the groups did not read as groups. Darker, spaced,
+   and letter-spaced so a heading is recognisable as one at a glance. */
+QTableWidget#propertyTable::item[state="section"] {
+    color: #1f2937;
+    padding-top: 14px;
+    padding-bottom: 5px;
+    letter-spacing: 0.6px;
+}
+
+QTableWidget#propertyTable::item[state="warning"] {
+    color: #b45309;
+}
+
+
+
+QLabel#panelIcon {
+    padding: 0 4px 0 8px;
+}
+
+/* ==================== VirusTotal ==================== */
+/* The verdict is a tinted badge rather than coloured text alone: it is the
+   answer the tab exists to give, and it should be readable from across the
+   room. Each state pairs a pale wash with a strong foreground from the same
+   hue, so the badge never depends on colour alone -- the score is in it. */
+
+QLabel#vtStatus {
+    color: #6b7480;
+}
+
+QLabel#vtScore {
+    font-size: 20px;
+    font-weight: 700;
+    min-width: 64px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background-color: #f1f3f5;
+    color: #6b7480;
+}
+QLabel#vtScore[state="malicious"] { background-color: #fdecec; color: #c02b2b; }
+QLabel#vtScore[state="suspicious"] { background-color: #fff4e5; color: #b45309; }
+QLabel#vtScore[state="error"] { background-color: #fff4e5; color: #b45309; }
+QLabel#vtScore[state="clean"] { background-color: #e9f6ec; color: #1a7f37; }
+
+QLabel#vtVerdict {
+    font-size: 14px;
+    font-weight: 600;
+    color: #212529;
+}
+QLabel#vtVerdict[state="malicious"] { color: #c02b2b; }
+QLabel#vtVerdict[state="suspicious"] { color: #b45309; }
+QLabel#vtVerdict[state="clean"] { color: #1a7f37; }
+
+QLabel#vtVerdictDetail {
+    color: #6b7480;
+}
+
+QPushButton#vtActionButton {
+    padding: 0px 10px;
+}
+
+QTableWidget#vtHistory,
+QTableWidget#vtEngines {
+    gridline-color: #dee2e6;
+}
+
+/* ==================== Application tab ==================== */
+/* Why a file is shown as it is: "Shown as JPEG image: its content does not
+   match the .txt extension", or that an HTML page was rendered offline. A
+   band rather than a dialog -- it describes the evidence on screen, and must
+   not be something to click away. */
+QLabel#viewerNotice {
+    background-color: #fff8e1;
+    color: #7a5200;
+    border-bottom: 1px solid #f0d58c;
+    padding: 5px 10px;
+}
+
+/* Evidence pages and Office documents are shown as paper: they were written
+   for a white background, and a page that sets only its text colour would
+   vanish on the dark theme. The page's own colours come from the document. */
+QTextBrowser#documentPage {
+    background-color: #ffffff;
+    color: #1f2328;
+    border: none;
+    padding: 8px;
+}
+
+/* The close button on the VirusTotal tab -- the only closable viewer tab. */
+QToolButton#tabCloseButton {
+    border: none;
+    border-radius: 3px;
+    padding: 1px;
+    margin-left: 4px;
+    background: transparent;
+}
+QToolButton#tabCloseButton:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* ==================== Metadata pane ==================== */
+/* One scroll area holding the property table and the low-level dump, so the
+   pane has a single scrollbar instead of two competing ones. */
+
+QScrollArea#metadataScroll,
+QWidget#metadataContent {
+    background-color: #ffffff;
+    border: none;
+}
+
+QLabel#detailHeading {
+    font-size: 13px;
+    font-weight: 600;
+    color: #495057;
+    padding: 14px 0 4px 8px;
+    border-top: 1px solid #e9ecef;
+    margin-top: 10px;
+}
+
+QPlainTextEdit#monoDetailView {
+    border: none;
+    background-color: transparent;
+    color: #495057;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 12px;
+    padding: 2px 8px;
+}
+
+QLabel#emptyStateLabel {
+    color: #868e96;
+    font-size: 13px;
+    padding: 12px 8px;
+}
+
+/* ==================== Controls ==================== */
+/* Height is set here and nowhere else. Qt adds padding and border on top of
+   min-height, so these values are chosen to total the same rendered height for
+   every control: 6px padding + 2px border + 16px content = 24px.
+   Python must not also call setFixedHeight, or the two disagree and the larger
+   wins -- which is what left toolbars with 24, 32, 34, 36 and 38px controls
+   sitting side by side. */
+
+QLineEdit, QComboBox, QSpinBox {
+    padding: 0px 8px;
+    border-radius: 4px;
+    min-height: 26px;
+    max-height: 26px;
+}
+
+QPushButton {
+    padding: 0px 14px;
+    border-radius: 4px;
+    min-height: 26px;
+    max-height: 26px;
+    min-width: 80px;
+}
+
+QComboBox::drop-down {
+    width: 20px;
+    border-left: none;
+}
+
+/* Toolbar buttons: square, so an icon sits centred in its hover highlight
+   rather than floating in a wide rectangle. */
+QToolBar QToolButton {
+    /* Transparent until hovered. Without this, Qt paints its default button
+       fill, which is a shade lighter than the bar and put a faint panel behind
+       every icon. */
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px 1px;
+    border-radius: 4px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+
+QToolBar QToolButton:hover {
+    background-color: #e9ecef;
+}
+
+QToolBar QToolButton:pressed {
+    background-color: #dee2e6;
+}
+
+/* Buttons that carry a label need room for it. The square rule above caps
+   width at 28px; these override the minimum and leave the maximum alone.
+   Naming 16777215px here was Qt's own limit, and setting it explicitly made
+   Qt warn "the largest allowed size is (16777215,16777215)" on every such
+   button at startup. */
+QToolBar QToolButton[popupMode="1"],
+QToolBar QToolButton#clearSearchBtn {
+    min-width: 0px;
+    max-width: none;
+}
+
+/* Push buttons in a toolbar size to their label. They are not under the 28px
+   square cap above, so there is nothing to undo -- and sharing the rule above
+   did harm: Qt reads "max-width: none" as a cap at the button's unpadded
+   width, which clipped any label longer than "Start" ("uild Ind"). */
+QToolBar QPushButton {
+    min-width: 0px;
+}
+
+/* Labels inside a toolbar: match the control height so text baselines line up
+   with the fields beside them. */
+QToolBar QLabel {
+    min-height: 26px;
+    max-height: 26px;
+    padding: 0px 2px;
+}
+
+/* ==================== About dialog ==================== */
+QDialog#aboutDialog {
+    background-color: #ffffff;
+}
+
+QLabel#aboutTitle {
+    font-size: 19px;
+    font-weight: 600;
+    color: #212529;
+    padding-bottom: 2px;
+}
+
+QLabel#aboutSubtitle {
+    font-size: 13px;
+    color: #6b7480;
+}
+
+QLabel#aboutMeta {
+    font-size: 13px;
+    color: #495057;
+    padding: 1px 0;
+}
+
+QLabel#aboutMetaQuiet {
+    font-size: 11px;
+    color: #868e96;
+    padding-top: 6px;
+}
+
+/* ============ Universal search ============ */
+
+QLineEdit#universalSearchBar {
+    font-size: 13px;
+    padding: 3px 8px;
+}
+
+QLabel#searchStatus {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+QLabel#searchSummary {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+/* The entity counts are links that run their own query. */
+QLabel#searchSummary a {
+    color: #1a73e8;
+    text-decoration: none;
+}
+
+QTableWidget#searchResults {
+    border: 1px solid #D0D0D0;
+}
+
+/* ============ Archives ============ */
+
+QLabel#archiveTrail {
+    font-size: 12px;
+    font-weight: 600;
+    color: #5f6368;
+}
+
+QLabel#archiveSummary {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+QTableWidget#archiveTable {
+    border: 1px solid #D0D0D0;
+}
+
+/* ============ Notes ============ */
+
+QLabel#notesScope {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 2px 4px;
+}
+
+QTableWidget#notesTableOld {
+    border: 1px solid #D0D0D0;
+}
+
+/* ============ Bookmarks ============ */
+
+QLabel#bookmarksEmpty {
+    font-size: 12px;
+    color: #5f6368;
+    padding: 10px 6px;
+}
+
+QTableWidget#bookmarksTable {
+    border: 1px solid #D0D0D0;
+}
+
+/* ============ Cases ============ */
+
+/* The same white every other dialog uses. #F5F5F5 here made each new
+   dialog read as a grey card sitting on the window. */
+QDialog#casePropertiesDialog {
+    background-color: #ffffff;
+}
+
+QLabel#launcherTitle {
+    font-size: 24px;
+    font-weight: 600;
+    color: #202124;
+}
+
+QLabel#launcherSubtitle {
+    font-size: 12px;
+    color: #5f6368;
+    padding-bottom: 6px;
+}
+
+QLabel#launcherHeading,
+QLabel#caseSectionHeading {
+    font-size: 12px;
+    font-weight: 600;
+    color: #5f6368;
+    padding-top: 4px;
+}
+
+QLabel#caseFolderHint,
+QLabel#casePropertyValue {
+    font-size: 11px;
+    color: #70757a;
+}
+
+QLabel#caseHeadline {
+    font-size: 16px;
+    font-weight: 600;
+    color: #202124;
+    padding: 4px 2px;
+}
+
+/* ============ Multi-select and menu buttons ============ */
+
+/* Shows a text summary, so it is styled like a combo box. */
+QToolButton#multiSelectButton {
+    background-color: #ffffff;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    color: #212529;
+    padding: 0px 10px;
+    min-width: 92px;
+    max-width: 140px;
+    text-align: center;
+}
+
+QToolButton#multiSelectButton:hover {
+    background-color: #f1f3f5;
+}
+
+QToolButton#multiSelectButton:pressed {
+    background-color: #e9ecef;
+}
+
+/* The export button is icon-only, so it must look like the navigation
+   buttons beside it -- no border, no minimum width. It previously shared the
+   rule above, which framed it and forced it 92px wide inside a 28px slot. */
+QToolButton#exportButton {
+    background-color: transparent;
+    border: none;
+    padding: 0px;
+    min-width: 0px;
+    max-width: 16777215px;
+}
+
+QToolButton#exportButton:hover {
+    background-color: #f1f3f5;
+    border-radius: 4px;
+}
+
+QToolButton#exportButton:pressed {
+    background-color: #e9ecef;
+}
+
+/* No arrow overlay: the whole button is the icon. */
+QToolButton#exportButton::menu-indicator,
+QToolButton#multiSelectButton::menu-indicator {
+    image: none;
+    width: 0px;
+}
+
+/* Group divider inside a toolbar. A visible rule makes it obvious where one
+   group of controls ends and the next begins -- the blank spacers these
+   replaced left the bars reading as one long undifferentiated row. */
+/* Group divider inside a toolbar. A visible rule makes it obvious where one
+   group of controls ends and the next begins -- the blank spacers these
+   replaced left the bars reading as one long undifferentiated row.
+
+   Qt builds these as real QToolBarSeparator widgets, so they are targeted by
+   type. The ::separator subcontrol rule does not reach them and leaves Qt
+   drawing its default 17px block instead of a rule. */
+QToolBarSeparator {
+    background-color: #dee2e6;
+    max-width: 1px;
+    min-width: 1px;
+    margin: 6px 8px;
+}
+
+/* The text viewer and the Application tab's placeholder are content surfaces,
+   not input fields. Both previously sat a shade lighter than the other viewer
+   tabs -- the text pane by inheriting the shared QTextEdit rule, the
+   placeholder by setting its own colour -- so switching tabs changed the
+   background under you. */
+QTextEdit#textContentView {
+    background-color: #FFFFFF;
+    color: #212529;
+    /* No frame. This pane fills its tab, so a border round it is not read as
+       the widget's edge -- it is a stray line inset from the dock, and the
+       Application and Metadata tabs, which have no frame, sit flush. */
+    border: none;
+}
+
+#placeholderLabel {
+    background-color: #FFFFFF;
+}
+
+/* Selected text, everywhere it can be selected.
+
+   Qt takes this from the palette when a stylesheet does not set it, and the
+   platform default is a violet that matches nothing else here. Only QComboBox
+   overrode it, so every other pane -- hex, text, metadata, the hash box --
+   highlighted in that violet. These are the same colours the themes already
+   use for a selected row, so selecting text and selecting a row now agree.
+
+   Listed by widget rather than set on QWidget: on QWidget it also reached the
+   tree's branch area, which paints with the selection colour, and drew a solid
+   blue block to the left of every selected row. */
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QAbstractSpinBox {
+    selection-background-color: #CCE8FF;
+    selection-color: #212529;
+}
+
+/* Tree rows sit tighter than table rows: a 5px pad on every side pushed each
+   row's icon away from its expand arrow, on top of the indentation step. The
+   vertical pad stays so rows keep their height; only the horizontal one goes. */
+QTreeWidget::item {
+    padding-left: 1px;
+    padding-right: 4px;
+    /* Transparent, so a row shows the tree's own background. It used to share
+       the table-item rule, which paints a panel colour -- in dark mode that
+       was lighter than the tree behind it, so every unselected row sat on a
+       visible block, and the block next to a selected row's branch strip made
+       the highlight look like it was breaking apart. */
+    background-color: transparent;
+}
+
+/* The branch column carries the expand arrow.
+
+   Styling ::branch at all replaces the arrow the platform style would draw,
+   so the image has to be supplied here -- setting only a background removed
+   the arrows entirely and left no way to tell an expanded row from a
+   collapsed one. Rows with no children get no image, just the transparent
+   background.
+
+   The strip has to take the selection colour itself: it is painted separately
+   from the item cell, so on a selected row it stayed at the tree's background
+   and the highlight appeared to start after the arrow rather than run the
+   width of the row.
+
+   The -branch arrows carry a 2.5 stroke rather than Tabler's 2. On the 24px
+   grid that becomes about 1.2px once fitted into the 14px strip -- thinner
+   than a diagonal can be antialiased at, which is what made them look blocky.
+   Same geometry, drawn for the size it is used at; the toolbar keeps the
+   upstream 2. */
+QTreeWidget::branch {
+    background: transparent;
+}
+
+/* No ::branch:selected rule. Qt applies it once per ancestor level, each
+   cell inset a little, so a selected row showed a row of separate boxes
+   stepping out to its depth. BranchTreeWidget fills the whole strip in one
+   go instead. */
+
+/* No branch image here. Qt rasterises a stylesheet image: without
+   antialiasing, which turned the chevron into a staircase of hard squares --
+   three grey levels across the strip, against eleven when the same vector is
+   painted with QPainter. BranchTreeWidget draws the arrow instead; the
+   :selected rule above still paints the background behind it. */
+
+/* The read-only editor that opens over a property value, so text inside it
+   can be selected. It has to be invisible: the cell should look identical
+   whether or not the editor is open, or clicking a value would make the row
+   appear to change. */
+QLineEdit#propertyCellEditor {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+    color: #212529;
+    selection-background-color: #CCE8FF;
+    selection-color: #212529;
+}
+
+/* ==================== Panel separation ====================
+
+   The light theme was very nearly all #FFFFFF, so adjoining panels ran into
+   one another: no line between the tree and the listing, none between the
+   registry's key tree and its detail pane, and the only visible division was
+   wherever a scrollbar happened to sit.
+
+   Rather than outlining every widget, the window behind them is a shade
+   darker than the panels on it. Panels then read as raised surfaces, and the
+   gaps between them read as deliberate. Splitter handles and dock separators
+   take a visible rule so a boundary the user can drag looks like one. */
+
+QMainWindow {
+    background-color: #F2F3F5;
+}
+
+/* Panels are separated by a rule on the panel itself, not by a darker ground
+   showing through the gaps. Colouring the ground meant colouring every direct
+   child of the window, which also caught the containers holding search fields
+   -- so a field sat on grey while its neighbours sat on white.
+
+   A border on the dock and the tab pane is narrower in scope and does not
+   touch anything inside them. */
+
+
+/* Input controls always sit on white, wherever they are placed. */
+QLineEdit, QComboBox, QSpinBox, QAbstractSpinBox {
+    background-color: #FFFFFF;
+}
+
+QSplitter::handle {
+    background-color: #DDE1E6;
+}
+
+/* A hairline, not a bar. The 3px margins either side of the rule made the
+   handle 7px wide in total, which reads as a thick grey band between panes
+   rather than as the edge between them. The handle keeps a usable grab area
+   because QSplitter widens its hit region beyond what it paints. */
+QSplitter::handle:horizontal {
+    width: 1px;
+    margin: 0px;
+}
+
+QSplitter::handle:vertical {
+    height: 1px;
+    margin: 0px;
+}
+
+QSplitter::handle:hover {
+    background-color: #B9C0C8;
+}
+
+QMainWindow::separator {
+    background-color: #DDE1E6;
+    width: 1px;
+    height: 1px;
+}
+
+QMainWindow::separator:hover {
+    background-color: #B9C0C8;
+}
+
+/* The panels themselves stay white, so content sits on a clean ground and
+   the window colour only shows in the gaps between them. */
+QTreeWidget, QTableWidget, QListWidget, QTextEdit, QPlainTextEdit {
+    background-color: #FFFFFF;
+}
+
+/* The evidence tree needs a visible edge against the listing beside it, or
+   the two panels run together. A right border only -- a full frame reappears
+   as a pale line down the left of a selected row, which is what it was
+   removed for. */
+QTreeWidget#evidenceTree {
+    border-right: 1px solid #DDE1E6;
+}
+
+/* Section heading inside the image-information card ("Acquisition"), and the
+   scroll area that card now sits in. */
+QLabel#volumeInfoSectionHeading {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1f2937;
+    padding-top: 4px;
+    padding-bottom: 2px;
+}
+
+QScrollArea#volumeInfoScroll {
+    background: transparent;
+    border: none;
+}
+
+/* Status bar. Transient progress on the left, the standing selection context
+   on the right. It is built at startup rather than on first use, so the window
+   does not lose 22px the moment something is clicked. */
+QStatusBar {
+    background-color: #F2F3F5;
+    border-top: 1px solid #DDE1E6;
+    color: #495057;
+    padding: 0px 8px;
+}
+
+QStatusBar::item {
+    border: none;   /* Qt draws a sunken frame round each item otherwise */
+}
+
+/* The context label, and the bar's own children. The global QWidget rule
+   paints every widget white, and a QLabel inside the status bar is matched by
+   it directly -- so the label drew a white block over the bar rather than
+   inheriting it. Stated here instead. */
+QStatusBar QLabel, QStatusBar QSizeGrip, QStatusBar QWidget {
+    background-color: transparent;
+    border: none;
+}
+
+QLabel#statusContext {
+    background-color: transparent;
+    color: #6b7480;
+    padding-right: 4px;
+}
+
+/* --- Background jobs, in the status bar ------------------------------- */
+
+QLabel#jobBarLabel {
+    color: #495057;
+    padding-right: 4px;
+}
+
+QProgressBar#jobBarProgress {
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    text-align: center;
+    background-color: #f5f5f5;
+    color: #212529;
+    font-size: 11px;
+}
+
+QProgressBar#jobBarProgress::chunk {
+    /* Blue, not the verification green: this bar reports work in progress,
+       and green here would read as an outcome that has not happened yet. */
+    background-color: #2F6FD0;
+    border-radius: 3px;
+}
+
+QPushButton#jobBarCancel {
+    padding: 1px 10px;
+    font-size: 11px;
+}
+
+/* --- Analysis modules dialog ------------------------------------------ */
+
+QLabel#analysisModulesIntro {
+    color: #212529;
+    padding-bottom: 4px;
+}
+
+QCheckBox#analysisModuleCheck {
+    font-weight: bold;
+    padding-top: 4px;
+}
+
+QLabel#analysisModuleNote {
+    color: #6c757d;
+    padding-bottom: 6px;
+}
+
+QLabel#analysisModulesFooter {
+    color: #868e96;
+    font-size: 11px;
+    padding-top: 6px;
+}
+
+/* --- Triage panel ----------------------------------------------------- */
+
+QLabel#triageStatus,
+QLabel#ntfsStatus {
+    color: #495057;
+}
+
+QTableWidget#triageTable {
+    /* No background declared: the panel sits in the same dock as the other
+       tables and should be the same colour as them, which it already is by
+       inheritance. Declaring one here is how the last mismatch happened. */
+    gridline-color: #dee2e6;
+}
+
+/* Carved files (Triage sub-tab): the Table / Thumbnails switch and status. */
+QPushButton#carvedViewButton {
+    padding: 3px 10px;
+    border: 1px solid #C8C8C8;
+    background: #FFFFFF;
+    color: #3C3C3C;
+}
+QPushButton#carvedViewButton:hover:!checked {
+    background: #EEF5FF;
+}
+QPushButton#carvedViewButton:checked {
+    background: #1E90FF;
+    border-color: #1E90FF;
+    color: #FFFFFF;
+}
+QLabel#carvedStatus {
+    color: #495057;
+    padding: 2px 6px;
+}
+
+/* Why a BitLocker key was refused. */
+QLabel#bitlockerError {
+    color: #C62828;
+}
+
+/* --- Hash sets and report dialogs: titled groups --------------------- */
+
+QDialog#hashSetsDialog QGroupBox,
+QDialog#hashSetImportDialog QGroupBox,
+QDialog#reportDialog QGroupBox {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    margin-top: 16px;
+    padding: 12px 8px 6px 8px;
+}
+QDialog#hashSetsDialog QGroupBox::title,
+QDialog#hashSetImportDialog QGroupBox::title,
+QDialog#reportDialog QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 8px;
+    padding: 0px 4px;
+    color: #495057;
+}
+
+/* The Timeline's histogram strip and detail pane. */
+QWidget#timelineHistogram {
+    border: 1px solid #ced4da;
+}
+QTextBrowser#timelineDetail {
+    border: 1px solid #ced4da;
+}
+QToolButton#timelinePivotChip {
+    border: 1px solid #ced4da;
+    border-radius: 10px;
+    padding: 2px 10px;
+}
+
+/* Menu buttons (Views, Range, the Listing's View): the same chevron as a
+   combo box's drop-down, not Qt's default arrow. Marked with the
+   'dropdown' property in code; named rules too, since a button's own
+   #name rule outranks a property-only one. */
+QPushButton[dropdown="true"]::menu-indicator,
+QToolButton[dropdown="true"]::menu-indicator {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 14px;
+    height: 14px;
+    right: 6px;
+}
+QPushButton[dropdown="true"],
+QPushButton#triageRunButton[dropdown="true"] {
+    padding-right: 26px;
+}
+QToolButton[dropdown="true"],
+QToolButton#timelineRangeButton[dropdown="true"],
+QToolButton#listingViewButton[dropdown="true"] {
+    padding-right: 22px;
+}
+/* Qt applies a tool button's padding only once the stylesheet draws its
+   frame: a transparent border hands it over, flat like its neighbours. */
+QToolButton#timelineRangeButton[dropdown="true"] {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 2px 22px 2px 6px;
+}
+/* Icon-only in a toolbar: the icon, then the chevron, in a button wider
+   than the square ones beside it (toolbars.align_controls sizes it). */
+QToolBar QToolButton#listingViewButton[dropdown="true"] {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0px 18px 0px 2px;
+    min-width: 32px;
+    max-width: 50px;
+}
+QToolBar QToolButton#listingViewButton[dropdown="true"]::menu-indicator {
+    right: 4px;
+}
+QToolButton#timelineRangeButton[dropdown="true"]:hover,
+QToolButton#listingViewButton[dropdown="true"]:hover {
+    background-color: #f1f3f5;
+}
+
+
+
+/* ============ Welcome screen, case wizard, evidence intake ============ */
+/* In the application's own idiom: the standard buttons, plain surfaces,
+   bold labels for headings, small grey help text. No accent colour -- the
+   main window has none. */
+
+QDialog#caseLauncher,
+QDialog#caseWizard {
+    background-color: #FFFFFF;
+}
+
+QFrame#launcherSide {
+    border-right: 1px solid #E5E5E5;
+}
+
+QLabel#launcherVersion,
+QLabel#launcherPath {
+    font-size: 11px;
+    color: #6c757d;
+}
+
+/* A start-screen action: drawn like every other button, but two lines tall
+   -- so the global 26px height is lifted for it alone. */
+QPushButton#launcherAction {
+    min-height: 0px;
+    max-height: 200px;
+    min-width: 0px;
+    margin: 0px;
+    padding: 0px;
+    text-align: left;
+}
+QPushButton#launcherAction QLabel {
+    background-color: transparent;
+}
+QLabel#launcherActionTitle {
+    font-weight: 600;
+}
+QLabel#launcherActionText {
+    font-size: 11px;
+    color: #6c757d;
+}
+
+QLabel#launcherEmpty,
+QLabel#intakeEmpty {
+    color: #6c757d;
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+    padding: 24px;
+}
+
+QTableWidget#recentCaseTable::item:disabled {
+    color: #6c757d;
+}
+
+/* --- wizard frame --- */
+
+QFrame#wizardHeader {
+    border-bottom: 1px solid #E5E5E5;
+}
+QFrame#wizardFooter {
+    border-top: 1px solid #E5E5E5;
+}
+
+QLabel#wizardStep {
+    color: #6c757d;
+    padding: 2px 0px;
+}
+QLabel#wizardStep[state="current"] {
+    color: #212529;
+    font-weight: 600;
+}
+QLabel#wizardStep[state="done"] {
+    color: #212529;
+}
+QFrame#wizardStepRule {
+    color: #E5E5E5;
+}
+
+QLabel#wizardTitle {
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#wizardSubtitle,
+QLabel#wizardProblem,
+QLabel#wizardFieldNote,
+QLabel#wizardTargetPath,
+QLabel#intakeHint,
+QLabel#intakeFieldHint,
+QLabel#intakeDetailsPath,
+QLabel#wizardBanner,
+QLabel#wizardMessage,
+QLabel#moduleProfileNote,
+QLabel#moduleSummary,
+QLabel#moduleCost,
+QLabel#moduleUnavailable {
+    color: #6c757d;
+}
+QLabel#wizardFieldNote,
+QLabel#wizardTargetPath,
+QLabel#intakeHint,
+QLabel#intakeFieldHint,
+QLabel#intakeDetailsPath,
+QLabel#moduleCost,
+QLabel#moduleUnavailable {
+    font-size: 11px;
+}
+QLabel#intakeFieldHint,
+QLabel#moduleUnavailable {
+    font-style: italic;
+}
+
+QLabel#wizardFieldError,
+QLabel#wizardError,
+QLabel#intakeDetailsNotes[state="error"] {
+    color: #D93025;
+}
+
+QPlainTextEdit#wizardField {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}
+
+QTextBrowser#wizardReview,
+QFrame#intakeDetails {
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}
+QFrame#intakeDetails QLabel,
+QFrame#intakeDetails QWidget#intakeDetailsForm {
+    background-color: transparent;
+}
+
+QLabel#intakeDetailsTitle,
+QLabel#moduleProfileLabel {
+    font-weight: 600;
+}
+
+/* --- analysis modules --- */
+
+QLabel#moduleGroupHeading {
+    font-weight: 600;
+    padding-top: 10px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #E5E5E5;
+}
+QLabel#moduleSummary {
+    padding-top: 4px;
+    border-top: 1px solid #E5E5E5;
+}
+
+/* What the media player has loaded: 'Video · 00:58 · 352×240 · ready'. */
+QLabel#mediaStatusLine {
+    color: #6c757d;
+    font-size: 11px;
+    padding: 4px 6px 0px 6px;
+}
+
+/* The media player: a black picture area, times that do not jiggle as they count. */
+QVideoWidget#mediaVideo {
+    background-color: #000000;
+}
+QLabel#mediaTime {
+    font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
+    font-size: 12px;
+    padding: 0px 4px;
+}
+
+/* --- Media player sliders: a slim track, the played part filled in the
+   icons' grey, a round handle ringed in the background colour. Neutral like
+   the rest of the application -- no accent colour. --- */
+QSlider#mediaPosition,
+QSlider#mediaVolume {
+    min-height: 18px;
+    background: transparent;
+}
+QSlider#mediaPosition::groove:horizontal,
+QSlider#mediaVolume::groove:horizontal {
+    height: 4px;
+    margin: 0px;
+    border: none;
+    border-radius: 2px;
+    background: #DDE0E4;
+}
+QSlider#mediaPosition::groove:horizontal:hover {
+    height: 6px;
+    border-radius: 3px;
+}
+QSlider#mediaPosition::sub-page:horizontal,
+QSlider#mediaVolume::sub-page:horizontal {
+    border: none;
+    border-radius: 2px;
+    background: #5F6368;
+}
+QSlider#mediaPosition::add-page:horizontal,
+QSlider#mediaVolume::add-page:horizontal {
+    border: none;
+    border-radius: 2px;
+    background: #DDE0E4;
+}
+QSlider#mediaPosition::handle:horizontal {
+    width: 10px;
+    margin: -5px 0px;
+    border: 2px solid #FFFFFF;
+    border-radius: 7px;
+    background: #5F6368;
+}
+QSlider#mediaVolume::handle:horizontal {
+    width: 8px;
+    margin: -4px 0px;
+    border: 2px solid #FFFFFF;
+    border-radius: 6px;
+    background: #5F6368;
+}
+QSlider#mediaPosition::handle:horizontal:hover,
+QSlider#mediaVolume::handle:horizontal:hover,
+QSlider#mediaPosition::handle:horizontal:pressed,
+QSlider#mediaVolume::handle:horizontal:pressed {
+    background: #202124;
+}
+QSlider#mediaPosition::sub-page:horizontal:disabled,
+QSlider#mediaPosition::add-page:horizontal:disabled,
+QSlider#mediaPosition::groove:horizontal:disabled {
+    background: #ECEEF0;
+}
+QSlider#mediaPosition::handle:horizontal:disabled {
+    background: transparent;
+    border-color: transparent;
+}
+
+
+/* ============ Checkboxes, spin boxes ============ */
+/* A checkbox is a square with a frame whether ticked or not: the ticked
+   state used to draw the tick alone, with no box, and read as a stray
+   mark rather than a control. Item views' checkboxes look the same. */
+QCheckBox::indicator,
+QAbstractItemView::indicator,
+QGroupBox::indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    border: 1px solid #8A949E;
+    background-color: #FFFFFF;
+}
+QCheckBox::indicator:hover,
+QAbstractItemView::indicator:hover {
+    border-color: #495057;
+}
+QCheckBox::indicator:checked,
+QAbstractItemView::indicator:checked,
+QGroupBox::indicator:checked {
+    border-color: #495057;
+    background-color: #F1F3F5;
+    image: url('Icons/tabler/themed/check-light.svg');
+}
+QCheckBox::indicator:indeterminate,
+QAbstractItemView::indicator:indeterminate {
+    border-color: #495057;
+    background-color: #F1F3F5;
+}
+QCheckBox::indicator:disabled,
+QAbstractItemView::indicator:disabled {
+    border-color: #CED4DA;
+}
+QCheckBox:disabled {
+    color: #6c757d;
+}
+
+/* Every spin box, whole-number and decimal alike, drawn by the theme:
+   the whole-number ones had no buttons styled and showed black blocks. */
+QAbstractSpinBox {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+    padding: 0px 22px 0px 8px;
+    min-height: 26px;
+    max-height: 26px;
+}
+QAbstractSpinBox:disabled {
+    color: #6c757d;
+}
+QAbstractSpinBox::up-button,
+QAbstractSpinBox::down-button {
+    subcontrol-origin: border;
+    width: 18px;
+    border: none;
+    border-left: 1px solid #ced4da;
+    background-color: #F1F3F5;
+}
+QAbstractSpinBox::up-button {
+    subcontrol-position: top right;
+    border-top-right-radius: 4px;
+}
+QAbstractSpinBox::down-button {
+    subcontrol-position: bottom right;
+    border-bottom-right-radius: 4px;
+}
+QAbstractSpinBox::up-button:hover,
+QAbstractSpinBox::down-button:hover {
+    background-color: #E2E6EA;
+}
+QAbstractSpinBox::up-arrow {
+    image: url('Icons/tabler/themed/chevron-up-light.svg');
+    width: 10px;
+    height: 10px;
+}
+QAbstractSpinBox::down-arrow {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    width: 10px;
+    height: 10px;
+}
+QAbstractSpinBox::up-arrow:disabled,
+QAbstractSpinBox::down-arrow:disabled {
+    image: none;
+}
+
+/* ============ Settings dialog ============ */
+/* Pages down the side, one page beside them: a title, a line on what it
+   is for, small section headings, and each setting's help under it. */
+QDialog#settingsDialog {
+    background-color: #FFFFFF;
+}
+QListWidget#settingsNav {
+    border: none;
+    border-right: 1px solid #E5E5E5;
+    border-radius: 0px;
+    background-color: #F6F7F9;
+    padding: 10px 6px;
+    outline: 0;
+}
+QListWidget#settingsNav::item {
+    background-color: transparent;
+    border: none;
+    padding: 7px 10px;
+    margin: 1px 0px;
+    border-radius: 4px;
+    color: #212529;
+}
+QListWidget#settingsNav::item:hover {
+    background-color: #ECEEF1;
+}
+QListWidget#settingsNav::item:selected {
+    background-color: #E2E6EA;
+    color: #212529;
+    font-weight: 600;
+}
+QScrollArea#settingsScroll,
+QWidget#settingsPage,
+QWidget#settingsRow {
+    background-color: #FFFFFF;
+    border: none;
+}
+QFrame#settingsFooter {
+    border-top: 1px solid #E5E5E5;
+    background-color: #FFFFFF;
+}
+QLabel#settingsPageTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #212529;
+}
+QLabel#settingsPageIntro {
+    color: #6c757d;
+    padding-top: 3px;
+}
+QLabel#settingsSection {
+    font-weight: 600;
+    color: #212529;
+    padding-top: 20px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #E9ECEF;
+}
+QLabel#settingsLabel {
+    color: #212529;
+}
+QLabel#settingsHint {
+    color: #6c757d;
+    font-size: 11px;
+}
+QLabel#settingsScopeNote {
+    color: #6c757d;
+    background-color: #F6F7F9;
+    border: 1px solid #E9ECEF;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 12px;
+}
+QLabel#settingsScopeTag {
+    color: #6c757d;
+    font-size: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    padding: 0px 5px;
+}
+
+
+/* ============ Icon views (Listing, Carved files) ============ */
+/* The list and icon views were unstyled: a white page in the dark theme,
+   and a selection drawn like a pushed button. */
+QListView#listingIconView {
+    background-color: #FFFFFF;
+    border: none;
+    outline: 0;
+}
+QListView#listingIconView::item {
+    color: #212529;
+    border-radius: 4px;
+    padding: 2px;
+}
+QListView#listingIconView::item:hover {
+    background-color: #F1F3F5;
+}
+QListView#listingIconView::item:selected {
+    background-color: #DCE3EA;
+    color: #212529;
+}
+
+
+/* Text fields' clear button: the style's own icon sat low in its box,
+   touching the bottom of the field. */
+QLineEdit {
+    lineedit-clear-button-icon: url('Icons/tabler/themed/x-light.svg');
+}
+/* ...and the button itself: the toolbars' QToolButton rules reached it and
+   made it 28px tall inside a 24px field. */
+QLineEdit QToolButton {
+    min-width: 0px;
+    min-height: 0px;
+    max-width: 18px;
+    max-height: 18px;
+    padding: 0px;
+    margin: 0px;
+    border: none;
+    background: transparent;
+}
+
+
+/* ============ Case and Notes tabs ============ */
+/* A card at the left -- the case itself, or the note being written --
+   and the tables beside it. */
+QFrame#caseCard, QFrame#notesComposer {
+    background-color: #F6F7F9;
+    border: none;
+    border-right: 1px solid #E5E5E5;
+}
+QScrollArea#caseCardScroll {
+    background-color: #F6F7F9;
+    border: none;
+    border-right: 1px solid #E5E5E5;
+}
+QLabel#caseTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111111;
+    background: transparent;
+}
+QLabel#caseMeta {
+    color: #6c757d;
+    background: transparent;
+}
+QLabel#caseDescription {
+    color: #212529;
+    padding: 4px 0px 0px 0px;
+    background: transparent;
+}
+QLabel#caseDescription[empty="true"] {
+    color: #6c757d;
+    font-style: italic;
+}
+QLabel#caseFactLabel {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
+}
+QLabel#caseFactValue {
+    color: #212529;
+    font-size: 11px;
+    background: transparent;
+}
+QLabel#caseEmpty, QLabel#notesEmpty {
+    color: #6c757d;
+    padding: 24px;
+}
+QLabel#notesHeading {
+    font-weight: 600;
+    color: #111111;
+    background: transparent;
+}
+QLabel#notesHint, QLabel#notesCount {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
+}
+QFrame#notesBar {
+    border: none;
+    border-bottom: 1px solid #E5E5E5;
+}
+QTextEdit#notesEditor {
+    background-color: #FFFFFF;
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+    padding: 4px;
+}
+QTableWidget#notesTable {
+    border: none;
+}
+QTableWidget#notesTable::item {
+    padding: 6px 6px;
+}
+/* The card's buttons: sized to their text, none of the global side
+   margins (they pushed the third button out of the card). */
+QPushButton#caseAction {
+    margin: 0px;
+    min-width: 0px;
+    padding: 0px 10px;
+}
+/* Labels on the cards sit on the card's colour, not on a box of their own. */
+QFrame#caseCard QLabel, QFrame#notesComposer QLabel {
+    background: transparent;
+}
+
+/* The image information's disk layout: its caption, and the table of
+   regions beside the platter (ui/widgets/disk_map.py). */
+QLabel#volumeInfoCaption {
+    color: #6c757d;
+    background: transparent;
+}
+QWidget#diskMap, QWidget#diskPlatter, QWidget#diskBar {
+    background: transparent;
+}
+QTableWidget#diskMapTable {
+    background-color: #FFFFFF;
+    border: none;
+}
+
+/* Image information's overview: section headings as small capitals over
+   a rule, field names muted and plain, values in the text colour. */
+QLabel#volumeInfoSectionHeading {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: #3D6A9E;
+    padding-top: 12px;
+    padding-bottom: 3px;
+    border: none;
+    border-bottom: 1px solid #E3E6EA;
+}
+QLabel#volumeInfoFieldLabel {
+    font-weight: normal;
+    font-size: 12px;
+    color: #6c757d;
+}
+QLabel#volumeInfoFieldValue {
+    font-size: 13px;
+    color: #1F2328;
+}
+QLabel#diskBarCaption {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
 }

@@ -1,77 +1,98 @@
-﻿aiohttp==3.8.5
-aiosignal==1.3.1
-async-timeout==4.0.3
-attrs==23.1.0
-av==16.0.0
-certifi==2023.7.22
-chardet==5.2.0
-charset-normalizer==3.3.0
-comtypes==1.2.0
-docopt==0.6.2
-docx==0.2.4
-enum-compat==0.0.3
-et-xmlfile==1.1.0
-filetype==1.2.0
-frozenlist==1.4.0
-greenlet==3.0.3
-hachoir==3.0a3
-HTMLParser==0.0.2
-hupper==1.12
-idna==3.4
-Jinja2==3.1.2
-libewf-python==20230212
-line-profiler==4.1.1
-line-profiler-pycharm==1.1.0
-lxml==5.1.0
-MarkupSafe==2.1.3
-multidict==6.0.4
-numpy==1.26.3
-olefile==0.46
-opencv-python==4.10.0.84
-openpyxl==3.1.2
-pandas==2.2.0
-PasteDeploy==3.0.1
-Pillow==10.0.0
-plaster==1.1.2
-plaster-pastedeploy==1.0.1
-player==0.6.1
-psutil==5.9.5
-py-ewf-mount==1.0.0
-pycaw==20230407
-pycparser==2.21
-PyMuPDF==1.23.21
-PyMuPDFb==1.23.9
-pypdf==4.0.1
-PyPDF2==3.0.1
-pyramid==2.0.2
-pyramid-jinja2==2.10
-PySide6==6.5.2
-PySide6-Addons==6.5.2
-PySide6-Essentials==6.5.2
-python-dateutil==2.8.2
-python-docx==1.1.0
-python-magic-bin==0.4.14
-python-pptx==0.6.23
-python-registry==1.3.1
-python-vlc==3.0.18122
-pytsk3==20210801
-pytz==2023.3
-requests==2.31.0
-shiboken6==6.5.2
-six==1.16.0
-texttable==1.6.7
-toml==0.10.2
-translationstring==1.4
-typing_extensions==4.9.0
-tzdata==2023.4
-unicodecsv==0.14.1
-urllib3==2.0.5
-venusian==3.0.0
-vulture==2.9.1
-WebOb==1.8.7
-xlrd==2.0.1
-XlsxWriter==3.1.9
-yarg==0.1.9
-yarl==1.9.2
-moviepy~=1.0.3
-pdf2image~=1.17.0
+# TRACE runtime dependencies.
+#
+# One file for every platform: the Windows-only packages carry environment
+# markers, so `pip install -r requirements.txt` is correct on Windows, macOS
+# and Linux alike. (python-magic-bin, and once pycaw and comtypes, used to be
+# declared unconditionally, which made this file fail outright on Linux. The
+# media player no longer sets Windows' master volume, so those two are gone.)
+#
+# Lower bounds rather than exact pins, so the tool keeps working on newer
+# Python versions as wheels appear. Python 3.10 or newer is required: every
+# package here installs from a pre-built wheel on Windows, macOS and Linux,
+# so no compiler is needed anywhere.
+
+# --- GUI -------------------------------------------------------------------
+# Addons supplies QtCharts, QtSvg, QtMultimedia and QtPrintSupport, all used.
+PySide6>=6.5.2
+
+# --- Forensic image access -------------------------------------------------
+# Pre-built wheels for Windows (x64, x86, ARM64), macOS (Apple Silicon and
+# Intel) and Linux (x86_64, aarch64; glibc and musl) on Python 3.10+. These
+# are the first releases that ship them; earlier ones were source-only and
+# needed a C/C++ toolchain on every platform. The Sleuth Kit and libewf are
+# built into the wheels, so no system packages are needed either.
+pytsk3>=20260520
+libewf-python>=20260924
+# The same family (libyal), wheels for the same platforms and Pythons, each
+# the first release to ship them everywhere. LGPL-3.0+, like libewf.
+libvmdk-python>=20260714    # VMware VMDK virtual disks
+libvhdi-python>=20260901    # Hyper-V / Virtual PC VHD and VHDX
+libqcow-python>=20260703    # QEMU QCOW / QCOW2
+libmodi-python>=20260902    # Mac disk images: DMG (compressed too), sparse
+                            # images and sparse bundles
+libbde-python>=20260916     # BitLocker volumes, unlocked with a key given
+libvshadow-python>=20260714 # Volume Shadow Copies (snapshots of NTFS)
+libpff-python>=20260926     # Outlook PST / OST mailboxes
+libfvde-python>=20260923    # FileVault 2 (Core Storage) volumes
+libfsapfs-python>=20260921  # APFS containers and volumes, encrypted too
+libfsxfs-python>=20260901   # XFS, which The Sleuth Kit does not read
+libluksde-python>=20260902  # LUKS-encrypted Linux volumes
+libvslvm-python>=20260901   # Linux LVM volume groups
+libesedb-python>=20260704   # ESE databases: SRUM, Edge/IE WebCache
+libmsiecf-python>=20260525  # Internet Explorer index.dat history
+
+# --- Evidence parsing ------------------------------------------------------
+python-registry>=1.3.1   # Windows registry hives
+PyMuPDF>=1.24.3          # PDF rendering, validation and metadata; 1.24.3
+                         # introduced the `pymupdf` module name (`fitz` is
+                         # deprecated and slated for removal)
+Pillow>=11.3.0           # image decoding and EXIF; 11.3 is the first whose
+                         # wheels decode AVIF, which the Application tab shows
+chardet>=5.2.0           # text encoding detection
+olefile>=0.46            # legacy Office (.doc/.xls/.ppt): authors and encryption
+py7zr>=1.0.0             # 7z archives: browsing, and spotting encrypted ones.
+                         # Wheels for every platform; resolves to 1.0 on
+                         # Python 3.9 and on Intel macOS. LGPL-2.1+.
+rarfile>=4.2             # RAR archives: members, sizes, dates, encryption, and
+                         # stored members -- pure Python. Compressed members
+                         # need an external unrar, which TRACE does not use.
+# HEIC/HEIF (iPhone photos): previews, thumbnails and EXIF/GPS through Pillow.
+# The decode-only build: pillow-heif bundles the GPL x265 encoder, pi-heif does
+# not. Wheels for every platform but Windows on ARM, where HEIC keeps its icon
+# rather than pip attempting a compile. (PEP 508 markers have no `not`.)
+pi-heif>=1.4.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
+# YARA rules (VirusTotal's Rust rewrite; yara-python has no Linux or 3.14
+# wheels). No Windows-on-ARM wheel: there, YARA scanning shows as unavailable
+# (Options > Supported Features) rather than pip attempting a Rust build.
+yara-x>=1.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
+# Sigma rules are YAML. No Windows ARM64 wheel before Python 3.12.
+PyYAML>=6.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.12'
+cryptography>=46.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11'
+                         # AES for encrypted iPhone backups (password given
+                         # by the examiner); Windows on ARM wheels from 3.11
+requests>=2.31.0         # VirusTotal API
+
+# --- libmagic (file type from content) ------------------------------------
+# python-magic is only a binding; libmagic is a C library. Windows: the -bin
+# variant bundles the DLL. macOS: pylibmagic bundles libmagic and its
+# database as a wheel (arm64 + x86_64, any Python 3), so no Homebrew; TRACE
+# imports it before python-magic (trace_app/__init__.py). Pinned exactly: it
+# is unmaintained since 2023, and CI checks it is the library actually
+# loaded. Linux: libmagic1 from apt, needed alongside Qt's libraries anyway.
+python-magic-bin>=0.4.14 ; sys_platform == 'win32'
+python-magic>=0.4.27 ; sys_platform != 'win32'
+pylibmagic==0.5.0 ; sys_platform == 'darwin'
+
+# --- Time zones for display (Options > Settings > Display) ------------------
+# Windows has no system zone database; zoneinfo reads this one there. Pure
+# Python, so every platform takes it.
+tzdata>=2024.1
+
+# --- Tests (python -m pytest) -----------------------------------------------
+# Image handling and the UI are tested on Windows, macOS and Linux in CI; the
+# same suite runs locally. Not needed to run TRACE.
+pytest>=8.0
+
+# --- Building a standalone executable (build_app.py) -----------------------
+# Not needed to run TRACE from source; included so one install covers both.
+pyinstaller>=6.0
