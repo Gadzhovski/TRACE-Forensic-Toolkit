@@ -112,14 +112,14 @@ A standalone app (Windows `.zip`, macOS `.dmg`) is built with
 
 ## Testing
 
-Every push is installed from scratch and tested on Windows, macOS (Apple
-Silicon and Intel) and Linux, against public forensic test images (DFTT,
-DFRWS, NPS, NIST). File carving is scored against the answer keys their
-authors published. Run the suite locally with:
+Every change to `master` is installed from scratch and tested on Windows,
+macOS (Apple Silicon and Intel) and Linux, against public forensic test images
+(DFTT, DFRWS, NPS, NIST). File carving is scored against the answer keys their
+authors published. Run the suite locally, in parallel, with:
 
 ```bash
 python tools/fetch_test_images.py
-python -m pytest
+python -m pytest -n auto --dist loadfile
 ```
 
 ---

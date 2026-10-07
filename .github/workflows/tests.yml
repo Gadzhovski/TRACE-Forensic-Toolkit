@@ -210,7 +210,10 @@ jobs:
           TESTS: ${{ needs.plan.outputs.tests }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" -m pytest -v -rfE --junitxml=test-results.xml $TESTS
+          # One worker per core; a test file stays on one worker, so the UI
+          # tests' shared window and module fixtures behave as in series.
+          # Each worker has its own sandbox (conftest), so none collide.
+          "$PY" -m pytest -n auto --dist loadfile -v -rfE --junitxml=test-results.xml $TESTS
 
       - name: Carving against published answer keys
         if: needs.plan.outputs.carve_score == 'true'
