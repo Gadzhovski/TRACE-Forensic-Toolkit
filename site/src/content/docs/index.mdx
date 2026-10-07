@@ -5,7 +5,7 @@ template: splash
 editUrl: false
 lastUpdated: false
 hero:
-  title: Digital forensics, without the friction.
+  title: Open-source digital forensics software.
   tagline: TRACE opens disk images read-only, organises them into cases, triages what stands out, recovers deleted files and searches inside the evidence – free and open source, on Windows, macOS and Linux.
   image:
     file: ../../assets/repo/logo.png
@@ -40,13 +40,13 @@ import Pillars from '../../components/Pillars.astro';
 	]}
 />
 
-## See it at work
+## Screenshots
 
 One window for the whole investigation: the evidence tree, every timestamp, and a viewer for whatever you select.
 
 <Showcase />
 
-## Everything an examination needs
+## What it does
 
 From the first hash check to the final report, in one application that never writes to the evidence.
 
@@ -64,19 +64,19 @@ From the first hash check to the final report, in one application that never wri
 	]}
 />
 
-## Built the way evidence deserves
+## How it handles evidence
 
 <Pillars
 	columns={4}
 	items={[
 		{ icon: 'padlock', title: 'Read-only', text: 'Images are read, never mounted. A case refers to evidence by path and hash – nothing is copied or changed.' },
-		{ icon: 'notes', title: 'Accountable', text: 'Verification is a history, never overwritten. Every action that matters is an audit line in the case.' },
+		{ icon: 'notes', title: 'Audit trail', text: 'Verification is a history, never overwritten. Every action that matters is an audit line in the case.' },
 		{ icon: 'cloud-download', title: 'Offline by default', text: 'Nothing leaves the machine unless you say so. HTML from evidence is shown without scripts or network.' },
-		{ icon: 'approve-check', title: 'Proven', text: 'Tested against published forensic test images and their answer keys, on four platforms, for every change.' },
+		{ icon: 'approve-check', title: 'Tested', text: 'Tested against published forensic test images and their answer keys, on four platforms, for every change.' },
 	]}
 />
 
-## Opens what you are handed
+## Supported evidence
 
 | | |
 |:--|:--|
@@ -89,7 +89,7 @@ From the first hash check to the final report, in one application that never wri
 
 [Everything TRACE reads →](/TRACE-Forensic-Toolkit/reference/evidence/)
 
-## Tested against the answer keys
+## How it is tested
 
 File carving is scored, not eyeballed: the real carvers run over public test images and are compared with the answer keys their authors published. A change that loses a file fails the build.
 
