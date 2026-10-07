@@ -121,6 +121,18 @@
 	background-clip: text;
 	color: transparent;
 }
+/* The full name, a small line above the headline (inside the h1). */
+[data-has-hero] .hero h1 .fullname {
+	display: block;
+	margin-bottom: 1rem;
+	font-size: clamp(0.8rem, 1.4vw, 0.95rem);
+	font-weight: 600;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	line-height: 1.4;
+	color: var(--sl-color-accent-high);
+	-webkit-text-fill-color: var(--sl-color-accent-high);
+}
 [data-has-hero] .hero .tagline {
 	font-size: clamp(1.1rem, 2vw, 1.3rem);
 	color: var(--sl-color-gray-2);
