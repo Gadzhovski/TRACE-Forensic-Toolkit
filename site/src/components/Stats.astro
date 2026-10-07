@@ -37,12 +37,23 @@ const { items } = Astro.props;
 			grid-column: 1 / -1;
 		}
 	}
+	/* Number in the first row of every cell, label below it from the top:
+	   numbers stay on one line however many lines a label takes. (The dt
+	   comes first in the markup, as a definition list requires.) */
 	.stats div {
-		display: flex;
-		flex-direction: column-reverse;
+		display: grid;
+		grid-template-rows: auto 1fr;
+		align-content: start;
 		padding: 1.3rem 1rem;
 		text-align: center;
 		background: var(--sl-color-black);
+	}
+	.stats dd {
+		grid-row: 1;
+	}
+	.stats dt {
+		grid-row: 2;
+		align-self: start;
 	}
 	dd {
 		margin: 0;
