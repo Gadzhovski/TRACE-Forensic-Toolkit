@@ -50,6 +50,8 @@ export default defineConfig({
 				Footer: './src/components/SiteFooter.astro',
 				// The logo through <Image>, not Starlight's plain <img>.
 				SiteTitle: './src/components/SiteTitle.astro',
+				// Icon buttons rather than the native <select>.
+				ThemeSelect: './src/components/ThemeSelect.astro',
 			},
 			head: [
 				{ tag: 'meta', attrs: { property: 'og:image', content: OG_IMAGE } },
