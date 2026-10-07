@@ -105,6 +105,7 @@ export default defineConfig({
 					label: 'Quality',
 					items: [
 						{ label: 'Testing and validation', slug: 'quality/testing' },
+						{ label: 'Test images and data', slug: 'quality/test-data' },
 						{ label: 'Forensic soundness', slug: 'quality/soundness' },
 						{ label: 'Building the app', slug: 'quality/building' },
 					],
