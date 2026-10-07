@@ -597,7 +597,8 @@ Getting started
 
     text = f"""TRACE {version}
 Toolkit for Retrieval and Analysis of Cyber Evidence
-https://github.com/Gadzhovski/TRACE-Forensic-Toolkit
+Website and documentation: https://trace.gadzhovski.com
+Source code: https://github.com/Gadzhovski/TRACE-Forensic-Toolkit
 
 {first_run}
 
