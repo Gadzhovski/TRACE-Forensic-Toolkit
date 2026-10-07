@@ -14,7 +14,6 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
   <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
-  <a href="https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/actions/workflows/tests.yml"><img src="https://github.com/Gadzhovski/TRACE-Forensic-Toolkit/actions/workflows/tests.yml/badge.svg" alt="Tests"/></a>
 </p>
 
 <a href="#features"><b>Features</b></a> ·
