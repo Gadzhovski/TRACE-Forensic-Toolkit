@@ -166,6 +166,22 @@ def _run(report, images, sandbox):
         from trace_app.infra.preflight import libmagic_identity
         identity = libmagic_identity()
         assert identity, "libmagic did not load"
+        if sys.platform == 'darwin' and getattr(sys, 'frozen', False):
+            # A Mac has no libmagic of its own: the app must load the copy
+            # it carries, never one Homebrew put on the build machine. Asked
+            # of dyld, which lists what is really loaded, by real path.
+            import ctypes
+            dyld = ctypes.CDLL(None)
+            dyld._dyld_get_image_name.restype = ctypes.c_char_p
+            loaded = [os.path.realpath(dyld._dyld_get_image_name(i).decode())
+                      for i in range(dyld._dyld_image_count())]
+            loaded = [p for p in loaded
+                      if os.path.basename(p).startswith('libmagic')]
+            contents = os.path.realpath(
+                os.path.dirname(os.path.dirname(sys.executable)))
+            outside = [p for p in loaded if not p.startswith(contents + os.sep)]
+            assert loaded and not outside, \
+                f"libmagic loaded from {loaded}, not only inside {contents}"
         # TRACE's reader, as the analysis and viewer use it (it names a ZIP
         # libmagic 5.46 calls 'data').
         from trace_app.core.analysis import magic_reader

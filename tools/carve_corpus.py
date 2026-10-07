@@ -30,7 +30,6 @@ import os
 import random
 import sys
 import tarfile
-import urllib.request
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -178,20 +177,16 @@ DECOYS = [
 ]
 
 
-def _download(url, attempts=4):
-    """Fetch with retries: sample hosts are third parties, and a brief
-    outage should not fail a test run."""
-    import time
-    for attempt in range(attempts):
-        try:
-            request = urllib.request.Request(
-                url, headers={'User-Agent': 'TRACE-tests'})
-            with urllib.request.urlopen(request, timeout=120) as response:
-                return response.read()
-        except OSError as exc:
-            if attempt == attempts - 1:
-                raise SystemExit(f"Could not download {url}: {exc}")
-            time.sleep(5 * (attempt + 1))
+def _download(url):
+    """Fetch with retries and mirrors (tools/download.py): sample hosts are
+    third parties, and a brief outage should not fail a test run."""
+    # Imported here: tests load this file by path, without tools/ on sys.path.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from download import download
+    finally:
+        sys.path.pop(0)
+    return download(url)
 
 
 def _unpack(data, unpack):

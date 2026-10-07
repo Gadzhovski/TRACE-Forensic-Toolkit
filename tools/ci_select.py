@@ -19,7 +19,9 @@ This reads the files a change touched and works out:
 Anything it cannot place (an installer, requirements, the shared test setup,
 image access, an unknown path) runs everything, as does a push to the
 default branch, the weekly run and a manual run -- those also catch what
-the narrower rules above let through. CI keeps
+the narrower rules above let through. Where it runs is `matrix`: a branch
+push on Ubuntu with one Python, master and pull requests on every system,
+the weekly and manual runs on every system and Python. CI keeps
 TRACE_REQUIRE_IMAGES=1, so a test that needs an image this script did not
 fetch fails loudly rather than passing by skipping.
 
@@ -39,9 +41,15 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#: Python versions: every one on a full run, the oldest and newest otherwise.
+#: Where the tests run, by how close a change is to master (`matrix`):
+#: a branch push is a quick look on one machine; master and pull requests
+#: get every operating system on the oldest and newest Python; the weekly
+#: and manual runs get everything.
+ALL_OSES = ['windows-latest', 'macos-latest', 'macos-15-intel', 'ubuntu-24.04']
+QUICK_OSES = ['ubuntu-24.04']
 ALL_PYTHONS = ['3.10', '3.12', '3.14']
 EDGE_PYTHONS = ['3.10', '3.14']
+QUICK_PYTHONS = ['3.12']
 
 #: Changes that can break anything: everything runs.
 FULL = (
@@ -52,7 +60,7 @@ FULL = (
     re.compile(r'^main\.py$'),
     re.compile(r'^\.github/workflows/tests\.yml$'),
     re.compile(r'^tests/conftest\.py$'),
-    re.compile(r'^tools/(ci_select|fetch_test_images|fetch_artifact_samples|carve_corpus)\.py$'),
+    re.compile(r'^tools/(ci_select|download|fetch_test_images|fetch_artifact_samples|carve_corpus)\.py$'),
     re.compile(r'^trace_app/(__init__|app)\.py$'),
     re.compile(r'^trace_app/[^/]+/__init__\.py$'),
     re.compile(r'^trace_app/core/(image_handler|background|walk)\.py$'),
@@ -276,7 +284,7 @@ def plan(files, full_reason=None):
     if full_reason is not None:
         return {'full': True, 'reason': full_reason, 'tests': [],
                 'images': catalog(), 'artifacts': True, 'corpus': True,
-                'carve_score': True, 'pythons': ALL_PYTHONS, 'files': files}
+                'carve_score': True, 'files': files}
 
     reached = dependents(graph, changed_modules)
     for module in sorted(changed_modules):
@@ -293,20 +301,33 @@ def plan(files, full_reason=None):
         corpus = True
     return {'full': False, 'reason': '; '.join(reasons), 'tests': test_files,
             'images': images, 'artifacts': artifacts, 'corpus': corpus,
-            'carve_score': carve, 'pythons': EDGE_PYTHONS, 'files': files}
+            'carve_score': carve, 'files': files}
+
+
+def matrix(event, ref, default='master'):
+    """(operating systems, Pythons, why) for a GitHub event."""
+    if event in ('schedule', 'workflow_dispatch'):
+        return ALL_OSES, ALL_PYTHONS, f'a {event.replace("_", " ")} run'
+    if event == 'pull_request' or ref == f'refs/heads/{default}':
+        target = 'a pull request' if event == 'pull_request' else default
+        return ALL_OSES, EDGE_PYTHONS, f'{target}: every system'
+    return QUICK_OSES, QUICK_PYTHONS, ('a branch push: a quick look '
+                                       '(every system once it reaches '
+                                       f'{default} or a pull request)')
 
 
 def summary(result):
-    lines = ['## What this run tests', '']
+    lines = ['## What this run tests', '',
+             f"On {', '.join(result['oses'])} x Python "
+             f"{', '.join(result['pythons'])} -- {result['why']}.", '']
     if result['full']:
         lines += [f"**Everything** -- {result['reason']}.", '']
     elif not result['tests'] and not result['carve_score']:
         lines += ['**Nothing** -- the change touches no tested code '
                   '(documentation, the packaged build).', '']
     else:
-        lines += [f"**{len(result['tests'])} test files** on Python "
-                  f"{', '.join(result['pythons'])}, chosen from what changed:",
-                  '']
+        lines += [f"**{len(result['tests'])} test files**, chosen from what "
+                  "changed:", '']
         lines += [f'- {r}' for r in result['reason'].split('; ') if r]
         lines += ['', 'Test files: ' + ', '.join(
             f"`{os.path.basename(t)}`" for t in result['tests']), '']
@@ -355,6 +376,9 @@ def main(argv=None):
         base = args.base or _git('merge-base', 'origin/master', 'HEAD')
     files = changed_files(base) if base else []
     result = plan(files, full_reason)
+    result['oses'], result['pythons'], result['why'] = matrix(
+        os.environ.get('GITHUB_EVENT_NAME', 'push') if args.github else 'push',
+        os.environ.get('GITHUB_REF', '') if args.github else '')
     text = summary(result)
 
     if not args.github:
@@ -375,6 +399,7 @@ def main(argv=None):
         'corpus': 'true' if result['corpus'] else 'false',
         'carve_score': 'true' if result['carve_score'] else 'false',
         'pythons': json.dumps(result['pythons']),
+        'oses': json.dumps(result['oses']),
     }
     with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
         for key, value in outputs.items():

@@ -92,6 +92,8 @@ tzdata>=2024.1
 # Image handling and the UI are tested on Windows, macOS and Linux in CI; the
 # same suite runs locally. Not needed to run TRACE.
 pytest>=8.0
+pytest-xdist>=3.6          # tests in parallel: python -m pytest -n auto
+                           # --dist loadfile (16 min -> 4 on four cores)
 
 # --- Building a standalone executable (build_app.py) -----------------------
 # Not needed to run TRACE from source; included so one install covers both.
