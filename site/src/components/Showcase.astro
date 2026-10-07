@@ -1,6 +1,7 @@
 ---
 // The README's screenshots as a tabbed tour of the application, framed like
-// a window. Images are Astro-optimised (WebP, sized) from Icons/readme.
+// a window. Images are Astro-optimised (WebP, sized) from Icons/readme,
+// and all lazy: the section starts below the fold.
 import { Image } from 'astro:assets';
 import main from '../assets/repo/main-dark.png';
 import triage from '../assets/repo/triage.png';
@@ -45,7 +46,7 @@ const shots = [
 						alt={`TRACE: ${s.tab.toLowerCase()} view. ${s.text}`}
 						widths={[640, 960, 1280, 1600]}
 						sizes="(max-width: 72rem) 100vw, 72rem"
-						loading={i === 0 ? 'eager' : 'lazy'}
+						loading="lazy"
 					/>
 					<figcaption>{s.text}</figcaption>
 				</figure>

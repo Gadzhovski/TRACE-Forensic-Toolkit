@@ -37,7 +37,6 @@ export default defineConfig({
 			title: 'TRACE',
 			description:
 				'TRACE is open-source digital forensics software for disk images: cases, triage, file carving, timelines, full-text search, YARA and Sigma -- on Windows, macOS and Linux.',
-			logo: { src: './src/assets/repo/logo.png', alt: 'TRACE' },
 			favicon: '/favicon.png',
 			social: [{ icon: 'github', label: 'TRACE on GitHub', href: REPO }],
 			editLink: { baseUrl: `${REPO}/edit/master/site/` },
@@ -49,6 +48,8 @@ export default defineConfig({
 			],
 			components: {
 				Footer: './src/components/SiteFooter.astro',
+				// The logo through <Image>, not Starlight's plain <img>.
+				SiteTitle: './src/components/SiteTitle.astro',
 			},
 			head: [
 				{ tag: 'meta', attrs: { property: 'og:image', content: OG_IMAGE } },
