@@ -23,7 +23,6 @@ import os
 import shutil
 import sys
 import tempfile
-import urllib.request
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -95,9 +94,6 @@ CATALOG = {
                                    '0b1c2edd6bdf37f2efe9c6fa274dd3c100de3fc5152d8a1fd82fb61f41c68e12'),
 }
 
-_USER_AGENT = ('TRACE-test-images/1.0 '
-               '(+https://github.com/Gadzhovski/TRACE-Forensic-Toolkit)')
-
 
 def sha256_of(path):
     digest = hashlib.sha256()
@@ -108,10 +104,14 @@ def sha256_of(path):
 
 
 def _download(url, target):
-    request = urllib.request.Request(url, headers={'User-Agent': _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=300) as response, \
-            open(target, 'wb') as out:
-        shutil.copyfileobj(response, out, 1 << 20)
+    """Fetch with retries and mirrors (tools/download.py): one image host
+    being slow must not fail a test run."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from download import download
+    finally:
+        sys.path.pop(0)
+    download(url, target)
 
 
 def _extract(archive, kind, name, target):

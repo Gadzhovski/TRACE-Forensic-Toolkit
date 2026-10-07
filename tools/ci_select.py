@@ -52,7 +52,7 @@ FULL = (
     re.compile(r'^main\.py$'),
     re.compile(r'^\.github/workflows/tests\.yml$'),
     re.compile(r'^tests/conftest\.py$'),
-    re.compile(r'^tools/(ci_select|fetch_test_images|fetch_artifact_samples|carve_corpus)\.py$'),
+    re.compile(r'^tools/(ci_select|download|fetch_test_images|fetch_artifact_samples|carve_corpus)\.py$'),
     re.compile(r'^trace_app/(__init__|app)\.py$'),
     re.compile(r'^trace_app/[^/]+/__init__\.py$'),
     re.compile(r'^trace_app/core/(image_handler|background|walk)\.py$'),

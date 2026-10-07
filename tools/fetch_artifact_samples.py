@@ -42,9 +42,7 @@ test_images/artifact_samples/ (gitignored, like every test image).
 import hashlib
 import os
 import sys
-import time
 import urllib.parse
-import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FOLDER = os.path.join(ROOT, 'test_images', 'artifact_samples')
@@ -680,17 +678,14 @@ SAMPLES = {
 }
 
 
-def _download(url, attempts=4):
-    for attempt in range(attempts):
-        try:
-            request = urllib.request.Request(
-                url, headers={'User-Agent': 'TRACE-tests'})
-            with urllib.request.urlopen(request, timeout=120) as response:
-                return response.read()
-        except OSError as exc:
-            if attempt == attempts - 1:
-                raise SystemExit(f"Could not download {url}: {exc}")
-            time.sleep(5 * (attempt + 1))
+def _download(url):
+    """Fetch with retries and mirrors (tools/download.py)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from download import download
+    finally:
+        sys.path.pop(0)
+    return download(url)
 
 
 def main():
