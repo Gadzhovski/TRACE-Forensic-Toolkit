@@ -71,6 +71,11 @@ cryptography>=46.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or
                          # AES for encrypted iPhone backups (password given
                          # by the examiner); Windows on ARM wheels from 3.11
 requests>=2.31.0         # VirusTotal API
+# Zstandard in C (PEP 784's backport of 3.14's compression.zstd; PSF). Btrfs
+# volumes are zstd-compressed throughout on Fedora, and TRACE's own decoder
+# (core/zstd_decode.py, still the fallback) reads ~1 MB/s. Wheels for every
+# platform on 3.10-3.13; 3.14 has it built in.
+backports.zstd>=1.0.0 ; python_version < '3.14'
 
 # --- libmagic (file type from content) ------------------------------------
 # python-magic is only a binding; libmagic is a C library. Windows: the -bin

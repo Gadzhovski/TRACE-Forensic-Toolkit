@@ -250,6 +250,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: The image the listing was filled from. A row is read from this
         #: image even after another one became active.
         self._listing_image = None
+        self._evidence_profiles = {}
 
         #: Verification results, keyed by image path. Verification is a fact
         #: about one image, not about the session, so it is stored per image:
@@ -3178,8 +3179,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         is less work than finding what they do. "Just browse" is an answer,
         not a failure.
         """
-        evidence = [(row['id'], row.get('display_name')
-                     or os.path.basename(row['path'])) for row in rows]
+        evidence = []
+        for row in rows:
+            found = self.evidence_profile(row)
+            evidence.append((row['id'], row.get('display_name')
+                             or os.path.basename(row['path']),
+                             found['summary'] if found else '',
+                             self._not_applicable(found)))
         choice = choose_modules(self,
                                 preselected=self._module_preselection(
                                     evidence_id),
@@ -3190,10 +3196,77 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   or row['id'] in choice['evidence_ids']]
         self.queue_choice(chosen, choice)
 
+    def evidence_profile(self, row):
+        """What an image holds (core/evidence_profile), worked out once per
+        image from the handler already open; None if it cannot be read."""
+        from trace_app.core import evidence_profile
+        key = os.path.normpath(row['path'])
+        if key not in self._evidence_profiles:
+            found = None
+            try:
+                handler = self.handler_for(row['path'])
+                if handler is not None and handler.loaded:
+                    found = evidence_profile.profile(handler)
+            except Exception as exc:
+                logger.warning("Could not profile %s: %s", row['path'], exc)
+            self._evidence_profiles[key] = found
+        return self._evidence_profiles[key]
+
+    @staticmethod
+    def _not_applicable(found):
+        from trace_app.core import evidence_profile
+        return evidence_profile.not_applicable(found) if found else {}
+
+    def _applicable_choice(self, row, choice):
+        """`choice` without the modules that cannot find anything in this
+        image, and what was dropped: {key: why}."""
+        from trace_app.ui.dialogs.analysis_modules import MODULE_CARVE
+        dropped = self._not_applicable(self.evidence_profile(row))
+        out = dict(choice)
+        skipped = {}
+        for key, why in dropped.items():
+            if key == MODULE_CARVE:
+                if out.get('carve_types'):
+                    out['carve_types'] = []
+                    skipped[key] = why
+            elif out.get(key):
+                out[key] = False
+                skipped[key] = why
+        return out, skipped
+
     def queue_choice(self, chosen, choice):
         """Queue what a modules choice selects, over the `chosen` evidence
-        rows, in the order the jobs depend on each other."""
-        self._last_choice = dict(choice)
+        rows -- each image its own choice when the dialog gave one
+        (`per_evidence`), and only what can find anything in it: the NTFS
+        job is not queued for a Btrfs disk."""
+        self._last_choice = {k: v for k, v in choice.items()
+                             if k != 'per_evidence'}
+        per = choice.get('per_evidence') or {}
+        groups, skipped_names = [], []
+        for row in chosen:
+            mine, skipped = self._applicable_choice(
+                row, per.get(row['id'], choice))
+            name = row.get('display_name') or os.path.basename(row['path'])
+            for key, why in skipped.items():
+                logger.info("Not running %s on %s: %s", key, name, why)
+            if skipped:
+                skipped_names.append(name)
+            for rows, group_choice in groups:
+                if group_choice == mine:
+                    rows.append(row)
+                    break
+            else:
+                groups.append(([row], mine))
+        for rows, group_choice in groups:
+            self._queue_one_choice(rows, group_choice)
+        if skipped_names:
+            self.set_status(
+                f"Modules that cannot find anything there were left out on "
+                f"{', '.join(skipped_names)} (see the log)")
+
+    def _queue_one_choice(self, chosen, choice):
+        """Queue one choice over rows, in the order the jobs depend on
+        each other."""
         if choice['modules']:
             self.queue_analysis(chosen, choice['modules'])
         if choice.get('index'):
@@ -3202,6 +3275,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_activity(chosen)
         if choice.get('ntfs'):
             self.queue_ntfs(chosen)
+        if choice.get('fstimes'):
+            self.queue_fs_times(chosen)
         if choice.get('hashsets'):
             # Queued after the analysis jobs, so it reads their hashes.
             self.queue_hash_matching([row['id'] for row in chosen])
@@ -3567,6 +3642,54 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             title=f"Reading NTFS records on {name}",
             start=start,
             stop=lambda worker: worker.stop()))
+
+    def queue_fs_times(self, rows):
+        """One job per image: every non-NTFS file system's times, for the
+        timeline (core/fs_times)."""
+        from trace_app.ui.viewers.timeline_panel import FsTimesWorker
+        if not self.case:
+            return 0
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                continue
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+
+            def start(job, row=row, evidence_id=evidence_id, name=name):
+                worker = FsTimesWorker(row['path'], self.case.folder,
+                                       evidence_id, self)
+                worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.progressed.connect(
+                    lambda done, total, path: self.job_bar.report(
+                        done, total, path))
+                worker.finished_fstimes.connect(
+                    lambda count, error: self._fs_times_finished(
+                        name, count, error))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            if self.job_bar.submit(Job(
+                    key=f"fstimes:{evidence_id}",
+                    title=f"Reading file system times on {name}",
+                    start=start, stop=lambda worker: worker.stop())):
+                queued += 1
+        return queued
+
+    def _fs_times_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Reading file system times on {name} failed: "
+                            f"{error}")
+            logger.error("File system times on %s failed: %s", name, error)
+        elif count:
+            self.set_status(f"File system times of {count:,} entries on "
+                            f"{name} are in the timeline")
+        else:
+            self.set_status(f"{name} has no file system other than NTFS "
+                            f"to read times from")
+        self.refresh_analysis_views()
 
     def _ntfs_finished(self, name, count, error):
         if error:
@@ -6874,6 +6997,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         path = os.path.normpath(self.image_handler.image_path)
         self._bitlocker_keys.setdefault(path, {})[start] = dict(
             dialog.secret, _kind=kind)
+        # What the image holds is known now: profile it again.
+        self._evidence_profiles.pop(path, None)
         # The Registry tab searches the unlocked volume too.
         self._refresh_registry_evidence()
         if self.case is not None:
@@ -6960,10 +7085,22 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 file_content, metadata = self.image_handler.get_file_content(self.inode_number, self.offset)
                 if file_content:
                     self.completed.emit(file_content, metadata)
+                elif self._is_empty():
+                    # A volume label, $BadBlockFile, an empty log: read
+                    # correctly, and nothing is in it -- not an error.
+                    self.completed.emit(b'', metadata)
                 else:
                     self.error.emit("Unable to read file content.")
             except Exception as e:
                 self.error.emit(f"Error reading file: {str(e)}")
+
+        def _is_empty(self):
+            try:
+                fs = self.image_handler.get_fs_info(self.offset)
+                return fs is not None and not fs.open_meta(
+                    inode=self.inode_number).info.meta.size
+            except Exception:
+                return False
 
     # Worker thread for opening media files for streaming (doesn't load content into memory)
     class MediaStreamWorker(QThread):
@@ -7192,8 +7329,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             elif data.get("start_offset") is not None:
                 # Handle partitions
-                entries = self.image_handler.get_directory_contents(data["start_offset"],
-                                                                    5)  # 5 is the root inode for NTFS
+                # The root's number is the file system's: NTFS 5, FAT and
+                # ext 2, Btrfs 256 -- never assumed.
+                root_inode = self.image_handler.get_root_inode(
+                    data["start_offset"])
+                entries = self.image_handler.get_directory_contents(
+                    data["start_offset"], root_inode)
 
                 # Reset path to root when viewing partitions
                 self.current_path = "/"
@@ -7201,9 +7342,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Treat partition as a volume for history
                 if "type" not in data:
                     data["type"] = "volume"
-                if "inode_number" not in data:
-                    data["inode_number"] = self.image_handler.get_root_inode(
-                        data["start_offset"])
+                if data.get("inode_number") is None:
+                    data["inode_number"] = root_inode
 
                 if not self.show_listing_entries(entries, data["start_offset"],
                                                  data.get("name") or "This volume"):
@@ -7838,6 +7978,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # The Metadata viewer reads the file itself, so it is the one viewer
         # that still has something to show without loaded content.
         if not file_content and adapter.needs_content():
+            from trace_app.ui.widgets.listing_views import size_in_bytes
+            # Rows carry the Size column's text ('0.00 B') or a number.
+            if file_content is not None and \
+                    size_in_bytes((data or {}).get('size')) == 0:
+                # An empty file, read correctly: nothing to show.
+                adapter.clear()
+                self.set_status(f"{(data or {}).get('name', 'File')}: "
+                                f"empty file (0 bytes)")
+                return
             self.log_error("No content available to display")
             return
 
@@ -8230,8 +8379,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def get_grandparent_inode(self, parent_inode, start_offset):
         """Helper method to determine the grandparent inode"""
-        # Root directory (5 is typically root in NTFS) has no parent
-        if parent_inode == 5:
+        # The root directory has no parent (its number is the file
+        # system's own: NTFS 5, FAT and ext 2, Btrfs 256).
+        if parent_inode == self.image_handler.get_root_inode(start_offset):
             return None
 
         try:
@@ -8529,7 +8679,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Regular substring search
                 files = self.image_handler.search_files(search_query)
 
-            # Clear and populate table
+            # Clear and populate table. The rows are this image's: a result
+            # opened after another image became active (a Triage or
+            # Search-tab preview) must still read this one.
+            self._listing_image = self.current_image_path
             self.listing_table.setRowCount(0)
             self.listing_table.setSortingEnabled(False)
 

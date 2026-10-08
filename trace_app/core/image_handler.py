@@ -248,8 +248,19 @@ class ImageHandler:
                              start_offset)
                 return allocation_map
 
-            block_size = fs_info.info.block_size
             partition_offset = start_offset * self.sector_size
+            from trace_app.core.libyal_fs import is_libyal
+            if is_libyal(fs_info):
+                # XFS (extents of live files) and Btrfs (its extent tree):
+                # no TSK runs to walk.
+                allocation_map = self._merge_ranges(
+                    [(partition_offset + b, partition_offset + e)
+                     for b, e in fs_info.allocated_ranges()])
+                logger.info("Allocation map: %d regions covering %.1f MB",
+                            len(allocation_map),
+                            sum(e - b for b, e in allocation_map) / 1048576)
+                return allocation_map
+            block_size = fs_info.info.block_size
             visited = set()
 
             def record_runs(file_obj):
@@ -323,6 +334,46 @@ class ImageHandler:
             logger.error(f"Error building allocation map: {e}")
 
         return allocation_map
+
+    #: Volumes whose free space TRACE cannot tell from used space: their
+    #: data is not where the partition's bytes are (LVM maps extents,
+    #: LUKS and FileVault encrypt them).
+    _UNMAPPED_KINDS = {'lvm': 'an LVM volume group', 'luks': 'a LUKS volume',
+                       'fvde': 'a FileVault volume'}
+
+    def partition_allocation(self, start_sector):
+        """(allocated byte ranges, note) for carving one partition. The
+        note says why a whole partition counts as used: carving it as
+        "unallocated" would report live files as deleted ones."""
+        kind = self.volume_kind(start_sector)
+        if kind == 'apfs':
+            base, length = self.partition_bytes(start_sector)
+            volumes = self.apfs_volumes(start_sector)
+            if not volumes or any(v['locked'] for v in volumes):
+                return [(base, base + length)], (
+                    f"the APFS container at sector {start_sector} is skipped: "
+                    f"its free space cannot be told from a locked volume's "
+                    f"files")
+            ranges = []
+            for volume in volumes:
+                fs = self.get_fs_info(volume['key'])
+                if fs is None:
+                    return [(base, base + length)], (
+                        f"the APFS container at sector {start_sector} is "
+                        f"skipped: a volume could not be read")
+                # Extents are container offsets.
+                ranges += [(base + b, base + e)
+                           for b, e in fs.allocated_ranges()]
+            return self._merge_ranges(ranges), None
+        if kind in self._UNMAPPED_KINDS:
+            base, length = self.partition_bytes(start_sector)
+            return [(base, base + length)], (
+                f"sector {start_sector} holds {self._UNMAPPED_KINDS[kind]}: "
+                f"its free space cannot be told from used space, so it is "
+                f"skipped -- carve the whole image to read it")
+        if self.has_filesystem(start_sector):
+            return self.build_allocation_map(start_sector), None
+        return [], None
 
     @staticmethod
     def _merge_ranges(ranges):
@@ -905,7 +956,7 @@ class ImageHandler:
                 try:
                     self.fs_info = pytsk3.FS_Info(self.img_info)
                 except Exception:
-                    # What TSK cannot read, libyal may: XFS.
+                    # What TSK cannot read, TRACE may: XFS, Btrfs.
                     self.fs_info = self.get_fs_info(0)
                     # If no volume info and no filesystem, mark as wiped
                     self.is_wiped_image = self.fs_info is None
@@ -940,6 +991,7 @@ class ImageHandler:
         (0x400, b'HX', 'HFSX'),
         (0x20, b'NXSB', 'APFS'),
         (0, b'XFSB', 'XFS'),
+        (0x10040, b'_BHRfS_M', 'Btrfs'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
         # accepted. UFS1 and UFS2 differ only in where the block sits.
@@ -1094,16 +1146,17 @@ class ImageHandler:
                         self.img_info, offset=start_offset * self.sector_size)
                 self.fs_info_cache[start_offset] = fs_info
             except Exception:
-                # What TSK cannot read, libyal may: XFS (core/xfs.py).
-                fs_info = self._xfs_file_system(start_offset)
+                # What TSK cannot read, TRACE may: XFS (core/xfs.py,
+                # libfsxfs) and Btrfs (core/btrfs.py).
+                fs_info = self._other_file_system(start_offset)
                 if fs_info is None:
                     return None
                 self.fs_info_cache[start_offset] = fs_info
         return self.fs_info_cache[start_offset]
 
-    def _xfs_file_system(self, start_offset):
-        """An XFS volume at a partition (or an unpartitioned image), read
-        through libfsxfs, or None."""
+    def _other_file_system(self, start_offset):
+        """An XFS (libfsxfs) or Btrfs (core/btrfs.py) volume at a partition
+        (or an unpartitioned image), or None."""
         if start_offset in self._volumes or \
                 start_offset >= containers.SHADOW_KEY_BASE:
             return None
@@ -1111,8 +1164,9 @@ class ImageHandler:
             window = self._partition_window(start_offset)
         except KeyError:
             return None
+        from trace_app.core.btrfs import open_btrfs
         from trace_app.core.xfs import open_xfs
-        return open_xfs(window)
+        return open_xfs(window) or open_btrfs(window)
 
     # --- one file, read lazily --------------------------------------------------
 
@@ -1476,12 +1530,15 @@ class ImageHandler:
         try:
             fs = self.get_fs_info(start_offset)
             from trace_app.core.apfs import is_apfs
+            from trace_app.core.btrfs import is_btrfs
             from trace_app.core.logical import is_logical
             from trace_app.core.xfs import is_xfs
             if is_apfs(fs):
                 return "APFS"
             if is_xfs(fs):
                 return "XFS"
+            if is_btrfs(fs):
+                return "Btrfs"
             if is_logical(fs):
                 return fs.label
             fs_type = fs.info.ftype
@@ -2016,19 +2073,13 @@ class ImageHandler:
             logger.error(f"Error reading unallocated space: {e}")
             return None
 
-    def open_image(self):
-        if self.get_image_type() == "ewf":
-            filenames = pyewf.glob(self.image_path)
-            ewf_handle = pyewf.handle()
-            ewf_handle.open(filenames)
-            return EWFImgInfo(ewf_handle)
-        else:
-            return pytsk3.Img_Info(self.image_path)
-
-
-
-    def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None, start_offset=0):
-        """Recursively search for files in a directory."""
+    def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None, start_offset=0, visited=None):
+        """Recursively search for files in a directory. Each directory is
+        entered once (`visited`, as core/walk.py does): a deleted entry
+        whose inode now belongs to a folder above it would otherwise
+        recurse until Python gives up."""
+        if visited is None:
+            visited = set()
         for entry in directory:
             if entry.info.name.name in [b".", b".."]:
                 continue
@@ -2043,8 +2094,12 @@ class ImageHandler:
                 if search_query:
                     # If there's a search query, check if the file name contains the query
                     if search_query.startswith('.'):
-                        # If the search query is an extension (e.g., '.jpg')
-                        query_matches = file_extension == search_query.lower()
+                        # An extension ('.jpg') -- or the start of a name
+                        # that begins with a dot ('.bash_history', '.ssh'),
+                        # which an extension match never finds.
+                        query_matches = (
+                            file_extension == search_query.lower() or
+                            file_name.lower().startswith(search_query.lower()))
                         match_reason = f"extension matches '{search_query}'" if query_matches else ""
                     else:
                         # If the search query is a file name or part of it (SUBSTRING MATCH)
@@ -2070,15 +2125,28 @@ class ImageHandler:
                             logger.debug(f"MATCH (DIR): '{file_name}' - {match_reason}")
 
                     # Recursively search subdirectory
+                    address = entry.info.meta.addr
+                    if address in visited:
+                        continue
+                    visited.add(address)
                     try:
-                        sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
+                        sub_directory = fs_info.open_dir(inode=address)
                         self._recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name),
                                                     files_list,
-                                                    extensions, search_query, start_offset)
+                                                    extensions, search_query, start_offset, visited)
                     except IOError as e:
-                        logger.error(f"Unable to open directory: {e}")
+                        # A deleted folder's blocks are often gone: expected,
+                        # as in core/walk.py. A live one failing is not.
+                        allocated = int(entry.info.meta.flags) & \
+                            pytsk3.TSK_FS_META_FLAG_ALLOC
+                        (logger.error if allocated else logger.debug)(
+                            "Unable to open directory %s: %s",
+                            os.path.join(parent_path, file_name), e)
 
-                elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and query_matches:
+                # Every entry the listing shows -- links, devices, sockets
+                # too -- not regular files alone: a link listed in a folder
+                # was never found by its name.
+                elif entry.info.meta and query_matches:
                     file_info = self._get_file_metadata(entry, parent_path, start_offset)
                     files_list.append(file_info)
                     if logger.isEnabledFor(logging.DEBUG):
@@ -2185,41 +2253,37 @@ class ImageHandler:
             }
 
     def search_files(self, search_query=None):
+        """Files (and folders) whose name matches, on every file system of
+        the image -- read through get_fs_info, as everything else is, so a
+        container (QCOW2, VHD, DMG, AFF4...), an unlocked or LVM/APFS
+        volume, logical evidence and the file systems TSK does not read
+        (XFS, Btrfs) are searched too. It used to reopen the image path as
+        a raw image, which only E01 and raw files survived."""
         logger.info(f"ImageHandler.search_files called with query: '{search_query}'")
         files_list = []
-        img_info = self.open_image()
-
-        try:
-            volume_info = pytsk3.Volume_Info(img_info)
-            partition_count = 0
-            for partition in volume_info:
-                if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
-                    partition_count += 1
-                    logger.info(f"Searching partition {partition_count} (offset: {partition.start} sectors)")
-                    # Store offset in SECTORS (not bytes) - get_fs_info will multiply by 512
-                    self.process_partition_search(img_info, partition.start, files_list, search_query)
-            logger.info(f"Searched {partition_count} allocated partitions")
-        except IOError as e:
-            # No volume information, attempt to read as a single filesystem
-            logger.info(f"No volume info, reading as single filesystem: {e}")
-            self.process_partition_search(img_info, 0, files_list, search_query)
-
-        logger.info(f"Total files found: {len(files_list)}")
+        searched = 0
+        for offset in self.volume_offsets():
+            if self.process_partition_search(offset, files_list,
+                                             search_query):
+                searched += 1
+        logger.info("Searched %d file system%s; total files found: %d",
+                    searched, '' if searched == 1 else 's', len(files_list))
         return files_list
 
-    def process_partition_search(self, img_info, offset_sectors, files_list, search_query):
-        """Process partition search - offset_sectors is in sectors, not bytes."""
+    def process_partition_search(self, offset, files_list, search_query):
+        """Search the file system at `offset` (a partition's start in
+        sectors, or a volume key). False if there is none there."""
+        fs_info = self.get_fs_info(offset)
+        if fs_info is None:
+            return False
         try:
-            byte_offset = offset_sectors * self.sector_size
-            logger.info("Opening filesystem at offset %d sectors (%d bytes)",
-                        offset_sectors, byte_offset)
-            fs_info = pytsk3.FS_Info(img_info, offset=byte_offset)
-            logger.info(f"Starting recursive search with query: '{search_query}'")
             initial_count = len(files_list)
-            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset_sectors)
-            logger.info(f"Recursive search complete. Found {len(files_list) - initial_count} files in this partition")
+            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset)
+            logger.info("Searched the file system at %d: %d found", offset,
+                        len(files_list) - initial_count)
         except IOError as e:
-            logger.error(f"Unable to open file system for search: {e}")
+            logger.error(f"Unable to search the file system at {offset}: {e}")
+        return True
 
     def get_file_content(self, inode_number, offset):
         fs = self.get_fs_info(offset)

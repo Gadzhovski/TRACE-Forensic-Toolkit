@@ -131,9 +131,12 @@ GROUPS = ('Evidence images', 'Volumes and encryption', 'File analysis',
 
 def _zstd():
     from trace_app.core import zstd_decode
-    if zstd_decode.standard_library() is not None:
-        return 'Python ' + platform.python_version() + ' standard library'
-    return 'built in'
+    library = zstd_decode.standard_library()
+    if library is None:
+        return 'built in'
+    if library.__name__.startswith('backports'):
+        return 'backports.zstd ' + _dist_version('backports.zstd')
+    return 'Python ' + platform.python_version() + ' standard library'
 
 
 def _built_in(module):
@@ -182,6 +185,9 @@ CAPABILITIES = (
     Capability('xfs', 'Volumes and encryption', "XFS file systems (RHEL, "
                "CentOS, Rocky servers)", 'libfsxfs',
                _module_version('pyfsxfs')),
+    Capability('btrfs', 'Volumes and encryption', "Btrfs file systems "
+               "(Fedora, openSUSE: subvolumes, snapshots, zlib/LZO/zstd)",
+               'TRACE (Python)', lambda: 'built in'),
     Capability('luks', 'Volumes and encryption', "LUKS-encrypted Linux "
                "volumes", 'libluksde', _module_version('pyluksde')),
     Capability('lvm', 'Volumes and encryption', "Linux LVM logical volumes",

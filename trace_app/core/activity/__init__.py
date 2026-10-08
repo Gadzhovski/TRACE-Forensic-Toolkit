@@ -80,7 +80,7 @@ def record(category, source, when, what, subject, detail=None, user='',
 
 class _Entry:
     __slots__ = ('name', 'path', 'inode', 'seq', 'is_dir', 'size', 'deleted',
-                 'created', 'modified')
+                 'created', 'modified', 'is_link')
 
 
 def _volumes(image_handler, offset):
@@ -94,13 +94,17 @@ class Volume:
     """A file system in the image, with case-insensitive path lookups --
     XP writes WINDOWS\\system32, later versions Windows\\System32."""
 
-    def __init__(self, image_handler, offset, root='/'):
+    def __init__(self, image_handler, offset, root='/', mounts=None):
         self.handler = image_handler
         self.offset = offset
         self.fs = image_handler.get_fs_info(offset)
         #: Where the system's file system starts: '/' on a disk; in
-        #: logical evidence, the folder a collector put the drive in.
+        #: logical evidence, the folder a collector put the drive in; on
+        #: Btrfs, the subvolume mounted as / ('/root' on Fedora).
         self.root = root
+        #: Other places mounted from this file system, as its fstab says:
+        #: {'home': '/home', 'var': '/var'} -- Btrfs subvolumes.
+        self.mounts = mounts or {}
         self._cache = {}
 
     @classmethod
@@ -108,10 +112,16 @@ class Volume:
         """The volume at `offset` -- one per system root if it is a
         collection of several (logical evidence)."""
         fs = image_handler.get_fs_info(offset)
+        from trace_app.core.btrfs import is_btrfs, system_layouts
         from trace_app.core.logical import is_logical, system_roots
         if is_logical(fs):
             return [cls(image_handler, offset, root)
                     for root in system_roots(fs)]
+        if is_btrfs(fs):
+            layouts = system_layouts(fs)
+            if layouts:
+                return [cls(image_handler, offset, root, mounts)
+                        for root, mounts in layouts]
         return [cls(image_handler, offset)]
 
     def listdir(self, path):
@@ -136,6 +146,7 @@ class Volume:
                 item.inode = meta.addr
                 item.seq = getattr(meta, 'seq', None)
                 item.is_dir = meta.type == pytsk3.TSK_FS_META_TYPE_DIR
+                item.is_link = meta.type == pytsk3.TSK_FS_META_TYPE_LNK
                 item.size = meta.size
                 item.deleted = not bool(int(meta.flags)
                                         & pytsk3.TSK_FS_META_FLAG_ALLOC)
@@ -144,6 +155,59 @@ class Volume:
                 out.append(item)
         self._cache[key] = out
         return out
+
+    def lookup(self, path, depth=0):
+        """The entry at an absolute POSIX path as the system saw it,
+        following links in every part of it -- Fedora's /usr/sbin and /bin
+        are links to /usr/bin, so /usr/sbin/sshd is not found by `find`.
+        None when nothing is there."""
+        parts = [p for p in path.split('/') if p]
+        entry = None
+        done = []
+        for index, part in enumerate(parts):
+            entry = self.find(*done, part)
+            if entry is None:
+                return None
+            if getattr(entry, 'is_link', False):
+                if depth > 16:
+                    return None
+                entry = self.resolve(entry, depth + 1)
+                if entry is None:
+                    return None
+            done = [p for p in self._system_path(entry.path).split('/')
+                    if p]
+        return entry
+
+    def _system_path(self, path):
+        """An entry's path as the system named it: mount targets and the
+        root's own folder taken off ('/root/usr/bin' on Fedora is
+        '/usr/bin')."""
+        for point, target in sorted(self.mounts.items(),
+                                    key=lambda m: -len(m[1])):
+            if target != '/' and (path == target or
+                                  path.startswith(target.rstrip('/') + '/')):
+                return '/' + point + path[len(target.rstrip('/')):]
+        root = self.root.rstrip('/')
+        if root and (path == root or path.startswith(root + '/')):
+            return path[len(root):] or '/'
+        return path
+
+    def resolve(self, entry, depth=0):
+        """The entry a symbolic link leads to (itself if it is none), or
+        None for a link to nothing here. Linux keeps /etc/os-release, the
+        time zone and every enabled systemd unit as links."""
+        while entry is not None and getattr(entry, 'is_link', False):
+            if depth > 16:
+                return None
+            depth += 1
+            target = self.read(entry).decode('utf-8', 'replace').strip()
+            if not target:
+                return None
+            if not target.startswith('/'):
+                target = posixpath.join(posixpath.dirname(
+                    self._system_path(entry.path)), target)
+            entry = self.lookup(posixpath.normpath(target), depth)
+        return entry
 
     def deleted_entries(self, directory):
         """Deleted entries in a directory entry whose metadata is still
@@ -182,6 +246,7 @@ class Volume:
             item.inode = address
             item.seq = getattr(info.name, 'meta_seq', None)
             item.is_dir = meta.type == pytsk3.TSK_FS_META_TYPE_DIR
+            item.is_link = meta.type == pytsk3.TSK_FS_META_TYPE_LNK
             item.size = meta.size
             item.deleted = True
             item.created = times.unix(getattr(meta, 'crtime', 0) or 0)
@@ -200,11 +265,19 @@ class Volume:
     def find(self, *parts):
         """The entry at a case-insensitive path, or None. A path already
         under the root (an entry's own path, split) is taken as it is."""
-        path = self.root
-        if path != '/':
-            prefix = [p.lower() for p in path.strip('/').split('/')]
-            if [p.lower() for p in parts[:len(prefix)]] == prefix:
-                parts = parts[len(prefix):]
+        for path, rest in self._starts(parts):
+            entry = self._walk(path, rest)
+            if entry is not None:
+                return entry
+        return None
+
+    def _walk(self, path, parts):
+        if not parts:
+            # A mount point itself ('home'): its entry in its parent.
+            if path in ('/', self.root):
+                return None
+            path, parts = posixpath.split(path.rstrip('/'))
+            parts = [parts]
         entry = None
         for part in parts:
             wanted = part.lower()
@@ -216,6 +289,29 @@ class Volume:
             entry = match[0]
             path = entry.path
         return entry
+
+    def _starts(self, parts):
+        """Where to look for `parts`, as (directory, what is left), in
+        order: a mount's target for a path under its mount point (or
+        already under its target), the root with a path already under it
+        stripped -- and, on Btrfs, the root as it is: Fedora's root
+        subvolume is '/root', and so is the root user's home in it."""
+        lowered = [p.lower() for p in parts]
+        places = sorted(self.mounts.items(),
+                        key=lambda mount: -mount[0].count('/'))
+        for point, target in places:
+            for prefix in (target, point):
+                split = [p.lower() for p in prefix.strip('/').split('/') if p]
+                if split and lowered[:len(split)] == split:
+                    yield target, parts[len(split):]
+                    return
+        if self.root != '/':
+            prefix = [p.lower() for p in self.root.strip('/').split('/')]
+            if lowered[:len(prefix)] == prefix:
+                yield self.root, parts[len(prefix):]
+                if not self.mounts:
+                    return
+        yield self.root, parts
 
     def children(self, directory, suffix='', dirs=False):
         """Entries in a directory entry, filtered by name suffix."""

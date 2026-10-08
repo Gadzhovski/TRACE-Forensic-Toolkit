@@ -197,6 +197,71 @@ def test_ufs_is_named_and_read(image, label):
     assert label in probe(sample(image))['contents']
 
 
+@pytest.mark.parametrize('image, unlock', [
+    ('apfs.raw', None),
+    ('xfs.raw', None),
+    ('lvm.raw', None),
+    ('ufs2.raw', None),
+    ('luks1.raw', {0: {'_kind': 'luks', 'password': 'luksde-TEST'}}),
+])
+def test_name_search_and_links_inside_every_volume(image, unlock):
+    """The Listing's search reads the volume TRACE opened -- LVM, APFS,
+    an unlocked LUKS, XFS -- not the image path reopened as a raw image,
+    which found nothing in any of them. A link reads as its target, as
+    TSK reads one: libfsxfs refused to read a link's data, and APFS
+    reported its size as 0."""
+    handler = handler_for(image)
+    try:
+        handler.apply_unlocks(unlock)
+        found = handler.search_files('passwords')
+        assert [r['name'] for r in found] == ['passwords.txt']
+        key, inode = found[0]['start_offset'], found[0]['inode_number']
+        assert handler.get_file_content(inode, key)[0].startswith(
+            PASSWORDS_HEAD)
+        assert {r['name'] for r in handler.search_files('.txt')} == \
+            {'passwords.txt'}
+        link = next(r for r in handler.search_files('a_link'))
+        if image in ('apfs.raw', 'xfs.raw'):
+            target, _meta = handler.get_file_content(link['inode_number'],
+                                                     link['start_offset'])
+            assert target == b'a_directory/another_file'
+            assert link['size'] == len(target)
+    finally:
+        handler.close_resources()
+
+
+@pytest.mark.parametrize('image', ['xfs.raw', 'apfs.raw'])
+def test_carving_does_not_take_live_files_for_free_space(image):
+    """XFS and APFS entries carry no TSK runs, so carving's map was empty
+    (an APFS container was not even a file system to it) and live files
+    were carved as deleted. Their extents are in the map now: the bytes
+    it marks used include passwords.txt's."""
+    from trace_app.core import carving
+    handler = handler_for(image)
+    try:
+        ranges = carving.allocation_map(handler)
+        assert any(PASSWORDS_HEAD in handler.read(begin, end - begin)
+                   for begin, end in ranges)
+        assert sum(e - b for b, e in ranges) < handler.get_size() // 2
+    finally:
+        handler.close_resources()
+
+
+def test_carving_skips_what_it_cannot_map(caplog):
+    """Inside an LVM group free space cannot be told from used: the
+    partition counts as used, and the log says why, rather than carving a
+    live file system as "unallocated"."""
+    import logging
+    from trace_app.core import carving
+    handler = handler_for('lvm.raw')
+    try:
+        caplog.set_level(logging.WARNING, logger='TRACE.Carving')
+        assert carving.allocation_map(handler) == [(0, handler.get_size())]
+        assert 'LVM volume group' in caplog.text
+    finally:
+        handler.close_resources()
+
+
 def test_xfs_is_read_where_tsk_cannot():
     """TSK (4.15) does not read XFS; libfsxfs does, shaped like pytsk3: the
     file system is named, listed with its times, read, and an unpartitioned

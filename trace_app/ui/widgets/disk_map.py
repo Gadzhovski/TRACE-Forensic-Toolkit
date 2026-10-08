@@ -31,7 +31,7 @@ MIN_BAR_PIXELS = 6
 _FAMILIES = (('ntfs', '#3B82C4'), ('exfat', '#2AA198'), ('fat', '#3FA34D'),
              ('ext', '#8E6CC9'), ('hfs', '#D9822B'), ('apfs', '#E0A03A'),
              ('xfs', '#C2507A'), ('iso', '#B08D57'), ('ufs', '#7A8F3A'),
-             ('yaffs', '#5C9EAD'))
+             ('yaffs', '#5C9EAD'), ('btrfs', '#4E8F7A'))
 
 
 def region_colour(region):

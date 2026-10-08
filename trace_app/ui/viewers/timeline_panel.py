@@ -48,8 +48,30 @@ from trace_app.ui.widgets.flow_layout import FlowLayout
 from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
 from trace_app.ui.widgets.context_menus import show_menu
+from trace_app.ui.process_worker import ProcessWorker
 
 logger = logging.getLogger('TRACE.Timeline')
+
+
+class FsTimesWorker(ProcessWorker):
+    """One image's file-system times (core/fs_times) in a child
+    process."""
+
+    progressed = Signal(int, int, str)
+    finished_fstimes = Signal(int, str)
+
+    kind = 'fstimes'
+
+    def __init__(self, image_path, case_folder, evidence_id, parent=None):
+        super().__init__({'image_path': image_path,
+                          'case_folder': case_folder,
+                          'evidence_id': evidence_id}, parent)
+
+    def on_progress(self, done, total, path):
+        self.progressed.emit(done, total, path)
+
+    def on_done(self, count, error):
+        self.finished_fstimes.emit(count, error)
 
 #: Most rows read into the table at once. The histogram always counts all
 #: of them; zooming in or filtering reaches the rest.

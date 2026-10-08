@@ -508,6 +508,19 @@ def _open_vhdi(path):
 
 
 def _open_qcow(path):
+    """A QCOW2 image (backing files chained) through core/qcow2.py, which
+    reads compressed clusters libqcow returns as zeros; libqcow for what
+    that does not read (QCOW 1, encryption, extended L2)."""
+    from trace_app.core import qcow2
+    try:
+        image = qcow2.Qcow2Image(path, sibling=_sibling)
+    except (qcow2.Qcow2Error, OSError, ValueError) as exc:
+        logger.info("%s not read as QCOW2 in Python: %s",
+                    os.path.basename(path), exc)
+    else:
+        count = image.chain_length()
+        note = 'QCOW' if count == 1 else             f'QCOW overlay ({count - 1} backing file'             f'{"s" if count > 2 else ""})'
+        return LibyalImgInfo(image, image.get_media_size()), note
     import pyqcow
     chain = []
     current_path = path

@@ -602,7 +602,10 @@ def is_linux(volume):
 
 
 def collect(volume, step, homes):
+    from trace_app.core.activity import linux_system
     out = system_activity(volume, step)
+    # The system, its accounts, its software and SSH (linux_system.py).
+    out += linux_system.collect(volume, step, homes)
     for user, home in homes:
         out += shell_activity(volume, user, home, step)
         out += recent_files_activity(volume, user, home, step)

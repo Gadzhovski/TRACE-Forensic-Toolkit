@@ -129,6 +129,37 @@ What these established, all measured rather than assumed:
   block pointers. The listing now says which deleted files can actually be
   opened and which are a name and nothing more.
 
+## Btrfs
+
+The Sleuth Kit in the pytsk3 wheels does not read Btrfs; TRACE does, in
+Python (`trace_app/core/btrfs.py`). Five of fox-it/dissect.btrfs's test
+volumes (128 MB each, gzip-packed, pinned to a commit) are in the CI set;
+the values `tests/test_btrfs.py` asserts are the ones dissect's own tests
+publish.
+
+| File | Tests | Source |
+|---|---|---|
+| `btrfs-subvolume-snapshot.raw` | The same small tree in the top-level subvolume, a subvolume, and a snapshot of it written to afterwards | [dissect.btrfs](https://github.com/fox-it/dissect.btrfs/tree/main/tests/_data) |
+| `btrfs-subvolume-nested.raw` | Subvolumes inside a directory and inside another subvolume | dissect.btrfs |
+| `btrfs-compression.raw` | zlib, LZO and zstd files, as extents and inline | dissect.btrfs |
+| `btrfs-sparse.raw` | Holes at the start, middle and end; a snapshot's partly rewritten copies | dissect.btrfs |
+| `btrfs-raid1-1.raw` | One disk of a two-disk RAID1, read alone | dissect.btrfs |
+| `Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2` | **Local only** (583 MB). A real Fedora 44 install: GPT, EFI FAT16, a Btrfs root with root/boot/home/var subvolumes, zstd throughout, in a compressed QCOW2 | [Fedora](https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/) (SHA-256 as Fedora's CHECKSUM file publishes it) |
+
+What the Fedora image established:
+
+- **libqcow misreads compressed QCOW2.** It takes bit 0 of a compressed
+  cluster's L2 entry for the "reads as zeros" flag, but there it is the
+  lowest bit of the host offset: every compressed cluster at an odd offset
+  read as zeros (273 of the first 559 in the Btrfs partition). TRACE now
+  reads QCOW2 itself (`trace_app/core/qcow2.py`), libqcow only for what
+  that does not (QCOW 1, encryption).
+- **Every byte checks out.** All 1,988 tree nodes and all 151,522 data
+  sectors (592 MB) match their stored CRC32C, and 22,831 installed files
+  match the SHA-256 in the RPM database. The ten that differ are files the
+  image build regenerates after install (SELinux policy, the gconv cache),
+  and four are edited config files.
+
 ## Other images
 
 | File | Size | Notes |
@@ -205,6 +236,12 @@ dc6f9ed8ea395c91df33f1b7aae0a50e1e4d54434514efffcb32258a1e2f4a3c  ContainerShip.
 bcde3297ae95cd9df214bfb79821334628dad08f21ef38374a2c091481e391c0  Base-Linear.aff4
 df6c705c15339a53cf86b221858f2cd6b85c56f7078287ae99273145efe567c1  Base-Allocated.aff4
 0b1c2edd6bdf37f2efe9c6fa274dd3c100de3fc5152d8a1fd82fb61f41c68e12  Base-Linear-ReadError.aff4
+ce5b3950c4b6b7200b8b76f795d09340652952bd6bec2b1803af6ecfe219f1f2  btrfs-subvolume-snapshot.raw
+bdc211d245a6bc1adec4540ae9b9041fe88f3583c9663f0aa1fa3ba8f0f1c1c7  btrfs-subvolume-nested.raw
+2088190ca033e2a20c3fb93d2b5d2ca65313fbf32d193cb242d333ca5e0a538f  btrfs-compression.raw
+5d15ae65c1c45cdeb599294d9efacdbdb1d9133dff936200f6265521e089d258  btrfs-sparse.raw
+63a60b87e9c17313610885db8ddd6b54146e88e910bf0bab8d7091605c20add7  btrfs-raid1-1.raw
+28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f  Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01
 a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA-1.E01

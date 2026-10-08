@@ -1306,8 +1306,10 @@ def allocation_map(image_handler):
         # only file systems have allocations, each mapped once.
         offsets = sorted({p[2] for p in partitions}) if partitions else [0]
         for start in offsets:
-            if image_handler.has_filesystem(start):
-                ranges.extend(image_handler.build_allocation_map(start))
+            allocated, note = image_handler.partition_allocation(start)
+            if note:
+                logger.warning("Carving: %s", note)
+            ranges.extend(allocated)
     except Exception as exc:
         logger.warning("Could not build the allocation map (%s); carving "
                        "the whole image", exc)

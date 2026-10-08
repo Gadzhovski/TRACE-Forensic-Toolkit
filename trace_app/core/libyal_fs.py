@@ -84,6 +84,10 @@ class _Meta:
             self.link = entry.symbolic_link_target or ''
         except (OSError, IOError):
             self.link = ''
+        if self.type == pytsk3.TSK_FS_META_TYPE_LNK and self.link:
+            # A link's content is its target, as TSK reads one; APFS
+            # reports such an entry's size as 0.
+            self.size = len(self.link.encode('utf-8', 'surrogateescape'))
 
 
 class _Info:
@@ -108,9 +112,15 @@ class LibyalFile:
 
     @holding_libyal
     def read_random(self, offset, length, *_attribute):
-        size = self.info.meta.size
+        meta = self.info.meta
+        size = meta.size
         if offset >= size or length <= 0:
             return b''
+        if meta.type == pytsk3.TSK_FS_META_TYPE_LNK:
+            # The target lives in the entry, not in data blocks: libfsxfs
+            # refuses to read a link's data at all.
+            target = meta.link.encode('utf-8', 'surrogateescape')
+            return target[offset:offset + length]
         return self._entry.read_buffer_at_offset(min(length, size - offset),
                                                  offset)
 
@@ -218,6 +228,42 @@ class LibyalFileSystem:
         if entry is None:
             raise IOError(f"No such file: {path}")
         return LibyalFile(self, entry)
+
+    #: libyal's extent flag for a range that is not stored (sparse).
+    SPARSE_EXTENT = 0x00000001
+
+    @holding_libyal
+    def allocated_ranges(self):
+        """(begin, end) byte ranges, relative to where the library reads
+        from, that live files' data occupies -- what carving must not call
+        free space. The entries carry no TSK runs, so carving's map used to
+        come back empty and live files were carved as if deleted."""
+        out = []
+        seen = set()
+        pending = [self.volume.get_root_directory()]
+        while pending:
+            entry = pending.pop()
+            identifier = self.identifier(entry)
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            try:
+                for index in range(entry.number_of_extents):
+                    offset, size, flags = entry.get_extent(index)
+                    if size and not flags & self.SPARSE_EXTENT:
+                        out.append((offset, offset + size))
+            except (OSError, IOError, AttributeError):
+                pass
+            try:
+                count = entry.number_of_sub_file_entries
+            except (OSError, IOError, AttributeError):
+                count = 0
+            for index in range(count):
+                try:
+                    pending.append(entry.get_sub_file_entry(index))
+                except (OSError, IOError) as exc:
+                    logger.debug("%s entry unreadable: %s", self.KIND, exc)
+        return out
 
 
 def is_libyal(fs):

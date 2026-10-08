@@ -99,6 +99,11 @@ def main():
     settings.apply_user()
     set_taskbar_identity()
     logging.getLogger('TRACE').info("Starting TRACE %s on %s", __version__, sys.platform)
+    # A crash in C leaves no log line: say so now if the last session did,
+    # and make sure this one leaves its stack (infra/crash_log.py).
+    from trace_app.infra import crash_log
+    crash_log.report_previous()
+    crash_log.enable()
     from trace_app.infra.capabilities import log_unavailable
     log_unavailable()
     magic_id = libmagic_identity()

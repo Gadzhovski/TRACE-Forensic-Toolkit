@@ -66,6 +66,9 @@ def child_main(kind, params, queue, stop):
     root = logging.getLogger()
     root.handlers[:] = [logging.handlers.QueueHandler(_LogChannel(queue))]
     root.setLevel(logging.INFO)
+    # A crash in C here would end the job with only an exit code.
+    from trace_app.infra import crash_log
+    crash_log.enable()
 
     last = [0.0]
 
@@ -209,6 +212,22 @@ def job_ntfs(params, progress, item, should_stop):
         case = Case.open(params['case_folder'])
         handler = _open_image(params['image_path'], params.get('unlock'))
         return ntfs.analyse_evidence(
+            handler, case, params['evidence_id'],
+            progress=lambda done, total, path: progress(done, total, path),
+            should_stop=should_stop)
+    finally:
+        _close(case, handler)
+
+
+def job_fstimes(params, progress, item, should_stop):
+    """File-system times of every non-NTFS volume (core/fs_times)."""
+    from trace_app.core import fs_times
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        return fs_times.analyse_evidence(
             handler, case, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
             should_stop=should_stop)
@@ -485,6 +504,7 @@ JOBS = {
     'analysis': job_analysis,
     'activity': job_activity,
     'ntfs': job_ntfs,
+    'fstimes': job_fstimes,
     'hashsets': job_hashsets,
     'report': job_report,
     'yara': job_yara,

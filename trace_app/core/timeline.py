@@ -2,8 +2,10 @@
 
 Sources, each a table some module filled:
 
-* ``fs``       -- $MFT times: $STANDARD_INFORMATION and $FILE_NAME, MACB
-                  (core/ntfs, ``fs_events``)
+* ``fs``       -- file-system times, MACB (``fs_events``): NTFS's $MFT
+                  $STANDARD_INFORMATION and $FILE_NAME (core/ntfs), every
+                  other file system's entries (core/fs_times; FAT and
+                  exFAT as local time)
 * ``usn``      -- the change journal (``usn_journal``)
 * ``activity`` -- programs run, files opened, USB, logons, web history...
                   (core/activity, ``user_activity``)
@@ -91,8 +93,14 @@ def describe_kind(row):
     if source == 'fs':
         letters, _, attribute = kind.partition(' ')
         words = [MACB_WORDS[c] for c in letters if c in MACB_WORDS]
-        return f"{', '.join(words)} ({'$SI' if attribute == 'SI' else '$FN'})"
+        return f"{', '.join(words)} " \
+               f"({FS_ATTRIBUTES.get(attribute, attribute)})"
     return kind
+
+
+#: What each file-system time source is, in the Type column.
+FS_ATTRIBUTES = {'SI': '$SI', 'FN': '$FN', 'I30': '$I30 slack',
+                 'FS': 'file system', 'FS-local': 'file system, local time'}
 
 
 # --- the query -------------------------------------------------------------------
@@ -172,7 +180,8 @@ def _branches(filters):
             if deleted_only:
                 sql += " AND e.deleted = 1"
             out.append((
-                "SELECT e.time_utc, 0, 'fs', e.macb || ' ' || e.source, "
+                "SELECT e.time_utc, e.source = 'FS-local', 'fs', "
+                "e.macb || ' ' || e.source, "
                 "e.evidence_id, NULL, e.path, NULL, e.artifact_ref, "
                 f"e.deleted, NULL FROM fs_events e WHERE {sql}", params))
 
