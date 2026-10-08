@@ -9,8 +9,8 @@ TRACE is tested on **public** evidence only: forensic test images and real artif
 
 | | Count | Where the list lives |
 |:--|:--:|:--|
-| Disk images downloaded in CI | 23 | `tools/fetch_test_images.py` |
-| Larger images tested locally | 7 | `test_images/README.md` |
+| Disk images downloaded in CI | 28 | `tools/fetch_test_images.py` |
+| Larger images tested locally | 8 | `test_images/README.md` |
 | Artifact samples | 176 | `tools/fetch_artifact_samples.py` |
 | Real files in the carving corpus | 62 | `tools/carve_corpus.py` |
 
@@ -40,6 +40,7 @@ Sixteen of these have a **manifest**: the tests read the whole file system and r
 | `dfr-01-recycle-ntfs.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | files deleted through the Recycle Bin | Recycle Bin records, including those of an emptied bin, linked to the deleted content |
 | `Base-Linear.aff4`, `Base-Allocated.aff4`, `Base-Linear-ReadError.aff4` | [AFF4 standard reference images](https://github.com/aff4/ReferenceImages) | the AFF4 standard's own test images | disk hashes must equal the reference implementation's (pyaff4); symbolic streams; stored stream hashes re-checked |
 | `VP9test.webm`, `ContainerShip.webm`, `Wiki.OrientateEdges.ogg` | [Wikimedia Commons](https://commons.wikimedia.org/) | real video and audio files | the media player: playback, frame stepping, video thumbnails |
+| `btrfs-subvolume-snapshot.raw`, `btrfs-subvolume-nested.raw`, `btrfs-compression.raw`, `btrfs-sparse.raw`, `btrfs-raid1-1.raw` | [dissect.btrfs (fox-it)](https://github.com/fox-it/dissect.btrfs) | Btrfs volumes: a subvolume and a snapshot of it, nested subvolumes, zlib / LZO / zstd files, sparse files, one disk of a two-disk RAID1 | **Btrfs**: contents, times and subvolume layout must equal the values dissect.btrfs's own tests publish; analysis, name search, file-system timeline and carving's free-space map on Btrfs |
 
 ## Larger images (tested locally)
 
@@ -54,6 +55,7 @@ These are too large to download on every CI run. Their tests run on a developer'
 | `dfr-05-nest-ntfs.dd` | [NIST CFReDS](https://cfreds-archive.nist.gov/dfr-test-images.html) | deleted files nested in one another's gaps; `$I30` slack compared with dfir_ntfs |
 | `nps-2009-domexusers.E01` | [NPS / Digital Corpora](https://digitalcorpora.org/corpora/drives/) | a multi-user Windows XP machine, end to end: user activity, persistence, thumbnail caches |
 | `ubnist1.casper-rw.gen3.E01` | [NPS / Digital Corpora](https://digitalcorpora.org/corpora/drives/) | an Ubuntu 8.10 live USB's persistence file: Linux activity end to end |
+| `Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2` | [Fedora](https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/) | a real Fedora 44 install in a compressed QCOW2: GPT, Btrfs with root / boot / home / var subvolumes, zstd throughout. Every tree node and data sector must match its stored checksum, 22,831 installed files their SHA-256 in the RPM database; Linux system records, accounts, software history and systemd persistence |
 
 ## Artifact samples
 

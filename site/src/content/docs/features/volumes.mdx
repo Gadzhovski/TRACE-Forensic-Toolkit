@@ -1,6 +1,6 @@
 ---
 title: Volumes and encryption
-description: TRACE unlocks BitLocker, FileVault 2, LUKS and encrypted APFS in place, browses Volume Shadow Copies, reads LVM, APFS and XFS, opens virtual disks with their parents, Mac disk images, AFF4 and logical images, and previews live disks read-only.
+description: TRACE unlocks BitLocker, FileVault 2, LUKS and encrypted APFS in place, browses Volume Shadow Copies, reads LVM, APFS, XFS and Btrfs, opens virtual disks with their parents, Mac disk images, AFF4 and logical images, and previews live disks read-only.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -29,11 +29,12 @@ TRACE detects BitLocker by asking libbde, not by a signature byte -- BitLocker T
 - **LVM** -- each logical volume of a volume group.
 - **APFS** -- containers and their volumes, read through libfsapfs (The Sleuth Kit's wheels cannot read APFS), with nanosecond times.
 - **XFS** -- read through libfsxfs where The Sleuth Kit cannot.
+- **Btrfs** -- Fedora's and openSUSE's default, read by TRACE's own reader: every subvolume and snapshot where it is linked (Fedora's `root`, `home` and `var` side by side), zlib, LZO and zstd compression, sparse files, and one disk of a RAID1 on its own. User activity reads a Btrfs system as it was mounted, from its own `/etc/fstab`.
 - **NTFS, FAT12/16/32, exFAT, ext2/3/4, HFS+, UFS, ISO 9660** -- through The Sleuth Kit 4.15, including compressed and EFS-encrypted NTFS files.
 
 ## Containers
 
-- **Virtual disks** -- VMDK, VHD, VHDX and QCOW2. A differencing VHD/VHDX or a VMDK snapshot chains its parents from the same folder by name, since the recorded path is the original machine's; a missing parent is named, not guessed.
+- **Virtual disks** -- VMDK, VHD, VHDX and QCOW2. QCOW2 is read by TRACE's own reader, compressed images and backing files included -- libqcow returns about half of a compressed image's data as zeros. A differencing VHD/VHDX or a VMDK snapshot chains its parents from the same folder by name, since the recorded path is the original machine's; a missing parent is named, not guessed.
 - **Mac disk images** -- DMG (zlib, bzip2, LZFSE, LZMA, ADC compression), sparseimage and sparsebundle.
 - **AFF4** -- read by TRACE's own pure-Python reader (maps, image streams, Snappy, LZ4 and deflate); the disk hashes match the reference implementation's on the AFF4 standard reference images, and the container's recorded stream hashes are re-checked on verification.
 - **E01 / Ex01**, split raw (`.001`), ISO.

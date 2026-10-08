@@ -15,7 +15,7 @@ import timeline from '../../../assets/repo/timeline.png';
 
 ## Targeted, not a walk
 
-The activity module does not crawl the disk. It looks up the paths where each operating system keeps its records -- case-insensitively, wherever the system root is -- and reads only those. A full Windows XP image is read in a few seconds.
+The activity module does not crawl the disk. It looks up the paths where each operating system keeps its records -- case-insensitively, wherever the system root is -- and reads only those. A full Windows XP image is read in a few seconds. A Linux system on Btrfs is read as it was mounted: `/` from its root subvolume, `/home` and `/var` from theirs, as its own `/etc/fstab` says.
 
 Every record has the same shape: **category, source, time, what happened, subject, user**, details, and the file it came from -- so a single click previews the source artifact and a double-click goes to it.
 
@@ -30,7 +30,7 @@ Not every time is *when it happened*. Where it is not, the record says so in its
 | **Programs** | Prefetch (Windows XP to 11, compressed included), Amcache, Shimcache, UserAssist, BAM, RunMRU, PowerShell history and script-block logging (event 4104), bash / zsh / fish history |
 | **Files and folders** | ShellBags, LNK shortcuts, Jump Lists, RecentDocs, TypedPaths, Office recent files, macOS recent items and shared file lists, FSEvents, `recently-used.xbel` |
 | **USB devices** | USBSTOR, DeviceClasses, MountPoints2, setupapi logs |
-| **Logons** | Windows event logs (logons, sessions; service and machine accounts left out), Linux journal, syslog, wtmp/utmpx |
+| **Logons** | Windows event logs (logons, sessions; service and machine accounts left out), Linux journal, syslog, wtmp/utmpx; SSH hosts connected to (`known_hosts`) and keys allowed to log in (`authorized_keys`) |
 | **Browsers** | Chrome, Edge, Brave, Vivaldi and other Chromium browsers, Firefox, Safari, Internet Explorer (WebCache and `index.dat`) -- history and downloads |
 | **Searches** | WordWheelQuery (what was typed into Explorer's search box) and search-engine searches from browser history |
 | **Network** | NetworkList profiles, SRUM connectivity, Wi-Fi networks on iOS and Android |
@@ -39,7 +39,7 @@ Not every time is *when it happened*. Where it is not, the record says so in its
 | **Cloud** | OneDrive, Google Drive |
 | **Antivirus** | Microsoft Defender detection history, MPLog, and quarantined files (decrypted in memory) |
 | **Recycle Bin** | `$I` / `$R` (including deleted `$I` records of an emptied bin) and XP's INFO2 |
-| **System** | time zone, installed programs, Windows version, macOS install history, phone accounts and builds |
+| **System** | time zone, installed programs, Windows version, macOS install history, phone accounts and builds; Linux release, host name, time zone, user accounts (and who may use sudo), and software installed and removed (dnf, apt) |
 
 Windows Timeline (ActivitiesCache.db), SRUM and WebCache are read from their own databases -- ESE through libesedb, SQLite through TRACE's reader, which applies a write-ahead log's committed frames first.
 
@@ -58,7 +58,7 @@ Prefetch's LZXPRESS Huffman compression, EVTX binary XML, shell items and LNK fi
 <figcaption>The timeline: every source together, with a histogram to find the busy hours.</figcaption>
 </figure>
 
-The timeline merges eight sources into one list: **file-system times** (`$STANDARD_INFORMATION` and `$FILE_NAME` separately on NTFS), the **change journal** (`$UsnJrnl`), **user activity**, **photo** EXIF times, **document** metadata times, **carved files**, **Sigma detections** and the case's own **events**. Filter by time range, source, user, folder and text -- or only deleted files, only timestomped ones, or without known-good files -- with a histogram on a square-root scale so quiet days still show. **Add to Report** picks rows for the [report](/features/reports/).
+The timeline merges eight sources into one list: **file-system times** (`$STANDARD_INFORMATION` and `$FILE_NAME` separately on NTFS; created, modified, accessed and changed on every other file system -- ext, Btrfs, XFS, HFS+, APFS, FAT and exFAT, the last two shown as local time since they store no zone), the **change journal** (`$UsnJrnl`), **user activity**, **photo** EXIF times, **document** metadata times, **carved files**, **Sigma detections** and the case's own **events**. Filter by time range, source, user, folder and text -- or only deleted files, only timestomped ones, or without known-good files -- with a histogram on a square-root scale so quiet days still show. **Add to Report** picks rows for the [report](/features/reports/).
 
 ## The Recycle Bin, linked
 
