@@ -50,6 +50,7 @@ _FORMATS = {
     '.l01': 'EnCase logical evidence (L01)',
     '.lx01': 'EnCase logical evidence (Lx01)', '.zip': 'ZIP archive',
     '.tar': 'TAR archive',
+    '.trace-assembly': 'Assembled volume (RAID / multi-disk)',
 }
 
 

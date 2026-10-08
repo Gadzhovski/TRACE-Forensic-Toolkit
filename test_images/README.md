@@ -132,7 +132,7 @@ What these established, all measured rather than assumed:
 ## Btrfs
 
 The Sleuth Kit in the pytsk3 wheels does not read Btrfs; TRACE does, in
-Python (`trace_app/core/btrfs.py`). Five of fox-it/dissect.btrfs's test
+Python (`trace_app/core/btrfs.py`). Thirteen of fox-it/dissect.btrfs's test
 volumes (128 MB each, gzip-packed, pinned to a commit) are in the CI set;
 the values `tests/test_btrfs.py` asserts are the ones dissect's own tests
 publish.
@@ -144,7 +144,9 @@ publish.
 | `btrfs-compression.raw` | zlib, LZO and zstd files, as extents and inline | dissect.btrfs |
 | `btrfs-sparse.raw` | Holes at the start, middle and end; a snapshot's partly rewritten copies | dissect.btrfs |
 | `btrfs-raid1-1.raw` | One disk of a two-disk RAID1, read alone | dissect.btrfs |
+| `btrfs-raid1-2.raw`, `btrfs-raid0-1/2.raw`, `btrfs-raid5-1/2.raw`, `btrfs-raid6-1/2/3.raw` | Multi-disk pools, one image per device: assembled (`core/assembly.py`) whole, RAID6 with a device missing, RAID0's devices alone (`tests/test_assembly.py`) | dissect.btrfs |
 | `btrfs-deleted.raw` (+ `.json` answer key) | **Built, not downloaded**: `tools/make_btrfs_deleted.py` has the Linux kernel write and delete known files (plain, inline, zstd, no-checksum, a folder, a subvolume; one overwritten for certain). CI builds it on Ubuntu; elsewhere run the script in a privileged Linux container (its docstring) | Deleted-file recovery: every file back byte for byte, the overwritten one never called recoverable |
+| `md-<array>-<n>.raw` (+ `md-raid.json` answer key) | **Built, not downloaded**: `tools/make_md_raid.py` has mdadm make Linux software RAID arrays -- RAID0/1/5/6/10, superblocks 0.90, 1.0 and 1.2, left-symmetric and right-asymmetric RAID5, a member inside a GPT partition -- each with ext4 and known files. Linux CI builds them; elsewhere a privileged container (its docstring) | md arrays read across their members' images, and with a member missing where the level allows (`core/mdraid.py`) |
 | `Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2` | **Local only** (583 MB). A real Fedora 44 install: GPT, EFI FAT16, a Btrfs root with root/boot/home/var subvolumes, zstd throughout, in a compressed QCOW2 | [Fedora](https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/) (SHA-256 as Fedora's CHECKSUM file publishes it) |
 
 What the Fedora image established:
@@ -242,6 +244,14 @@ bdc211d245a6bc1adec4540ae9b9041fe88f3583c9663f0aa1fa3ba8f0f1c1c7  btrfs-subvolum
 2088190ca033e2a20c3fb93d2b5d2ca65313fbf32d193cb242d333ca5e0a538f  btrfs-compression.raw
 5d15ae65c1c45cdeb599294d9efacdbdb1d9133dff936200f6265521e089d258  btrfs-sparse.raw
 63a60b87e9c17313610885db8ddd6b54146e88e910bf0bab8d7091605c20add7  btrfs-raid1-1.raw
+236e3d135601e0d12d2268943a08b772ab3d0443111280e0c74634072f3da2f6  btrfs-raid1-2.raw
+50df8801d6e5ba9d2eff6d5eae77f5d20289b56de1954abd418c5f648e4abb7f  btrfs-raid0-1.raw
+e8e8a50e7f92c112cea0750eb857e2091dfafe207b96ee2266986176fee0ae79  btrfs-raid0-2.raw
+a70fe168247374bf8fa49f61d7dba18f776a780a4f9cf5fb6c4cc8f74fa2fd4c  btrfs-raid5-1.raw
+4017c940e5c6ebab590ee74f5efb9239d94a367155b91632352204b4542e97aa  btrfs-raid5-2.raw
+8362b35dee600402e8bb2707609d9d6911752890339bc02550cd3bdb79cae7a6  btrfs-raid6-1.raw
+2ee5262ef2e22dea37abbdce6489c1448de40e8fa3932753de88afa348739fa7  btrfs-raid6-2.raw
+25f51d61b044b96c221a46850a61928a8eb351aa505001c1b1e77aaedba76461  btrfs-raid6-3.raw
 28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f  Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01

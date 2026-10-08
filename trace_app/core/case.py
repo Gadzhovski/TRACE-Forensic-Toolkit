@@ -404,10 +404,14 @@ class Case:
         if existing:
             return existing['id']
 
+        from trace_app.core import assembly
         from trace_app.core.live_disk import is_device_path
         live = is_device_path(path)
+        # An assembled volume's file is a descriptor; its media is the
+        # members', so no size is recorded for it.
+        assembled = assembly.is_assembly(path)
         try:
-            size = None if live else os.path.getsize(path)
+            size = None if live or assembled else os.path.getsize(path)
         except OSError:
             size = None
 
@@ -428,6 +432,15 @@ class Case:
             recorded = '; '.join(filter(None, (
                 'live disk, read-only through an administrator helper; '
                 'not an image, and not verifiable', recorded)))
+        if assembled:
+            try:
+                members = ', '.join(
+                    f"{m['image']} (sector {m['start_sector']})"
+                    for m in assembly.read_descriptor(path)['members'])
+            except assembly.AssemblyError:
+                members = 'members unreadable'
+            recorded = '; '.join(filter(None, (
+                f"assembled from {members}", recorded)))
         self._record_activity('evidence added',
                               path + (f" ({recorded})" if recorded else ''))
         return cursor.lastrowid

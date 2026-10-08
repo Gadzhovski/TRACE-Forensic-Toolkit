@@ -149,6 +149,10 @@ class ImageHandler:
         self._shadows = {}          # start sector -> (pyvshadow volume, stores)
         self._bitlocker_checked = {}
         self._kinds = {}            # start sector -> containers.volume_kind
+        #: start sector -> mdraid.Array (or None: not a member, or one
+        #: whose array needs disks this image does not hold); see md_array.
+        self._md = {}
+        self._md_member = {}        # start sector -> mdraid.Member
         self._lvm = {}              # start sector -> (handle, group, [lv])
         self._apfs = {}             # start sector -> (container, [volume])
         #: Logical evidence (core/logical.py): an AD1 or L01 image, a
@@ -339,13 +343,29 @@ class ImageHandler:
     #: data is not where the partition's bytes are (LVM maps extents,
     #: LUKS and FileVault encrypt them).
     _UNMAPPED_KINDS = {'lvm': 'an LVM volume group', 'luks': 'a LUKS volume',
-                       'fvde': 'a FileVault volume'}
+                       'fvde': 'a FileVault volume',
+                       'mdraid': 'a Linux RAID member whose other disks '
+                                 'are not in this image'}
 
     def partition_allocation(self, start_sector):
         """(allocated byte ranges, note) for carving one partition. The
         note says why a whole partition counts as used: carving it as
         "unallocated" would report live files as deleted ones."""
         kind = self.volume_kind(start_sector)
+        array = self.md_array(start_sector)
+        if array is not None:
+            base, length = self.partition_bytes(start_sector)
+            member = self.md_member(start_sector)
+            if array.level != 1 or kind is not None:
+                return [(base, base + length)], (
+                    f"sector {start_sector} is a RAID{array.level} member "
+                    f"holding {kind or 'a file system'}: its free space is "
+                    f"not mapped to the member's bytes, so it is skipped")
+            # A mirror member's data is the array's, data_offset in.
+            shift = member.data_offset
+            return [(base, base + shift)] + [
+                (b + shift, e + shift)
+                for b, e in self.build_allocation_map(start_sector)], None
         if kind == 'apfs':
             base, length = self.partition_bytes(start_sector)
             volumes = self.apfs_volumes(start_sector)
@@ -498,9 +518,11 @@ class ImageHandler:
 
     def get_image_type(self):
         """Determine the type of the image based on its extension."""
-        from trace_app.core import live_disk, logical_sources
+        from trace_app.core import assembly, live_disk, logical_sources
         if live_disk.is_device_path(self.image_path):
             return "live"
+        if assembly.is_assembly(self.image_path):
+            return "assembled"
         if logical_sources.kind_of(self.image_path):
             return "logical"
         _, extension = os.path.splitext(self.image_path.rstrip('/\\'))
@@ -670,7 +692,7 @@ class ImageHandler:
                 finally:
                     ewf_handle.close()
 
-            elif image_type in ("virtual", "aff4", "live") or (
+            elif image_type in ("virtual", "aff4", "live", "assembled") or (
                     image_type == "raw" and
                     self.image_path.lower().endswith('.001')):
                 # A split raw image (x.001, x.002...) is read by TSK as one
@@ -925,6 +947,12 @@ class ImageHandler:
                 from trace_app.core.aff4 import open_aff4
                 self.img_info, self.container_note = open_aff4(
                     self.image_path)
+            elif image_type == "assembled":
+                # Several member disks as one: an md array, a multi-disk
+                # Btrfs file system (core/assembly.py).
+                from trace_app.core.assembly import open_assembly
+                self.img_info, self.container_note, self._btrfs_others, \
+                    self._members = open_assembly(self.image_path)
             elif image_type == "virtual":
                 try:
                     self.img_info, self.container_note = \
@@ -991,6 +1019,9 @@ class ImageHandler:
         (0x400, b'HX', 'HFSX'),
         (0x20, b'NXSB', 'APFS'),
         (0, b'XFSB', 'XFS'),
+        # Linux RAID (md) members: superblock 1.2 at 4 KiB, 1.1 at 0.
+        (4096, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
+        (0, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
         (0x10040, b'_BHRfS_M', 'Btrfs'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
@@ -1085,9 +1116,17 @@ class ImageHandler:
         partitions = []
         if self.volume_info:
             for partition in self.volume_info:
-                if not partition.desc:
-                    continue
-                partitions.append((partition.addr, partition.desc, partition.start, partition.len))
+                description = partition.desc
+                if not description:
+                    # A GPT partition's description is its name, which is
+                    # optional: an unnamed one was dropped here, and every
+                    # file on it with it. Only unnamed table entries go.
+                    if not int(partition.flags) & \
+                            pytsk3.TSK_VS_PART_FLAG_ALLOC:
+                        continue
+                    description = b'Unnamed partition'
+                partitions.append((partition.addr, description,
+                                   partition.start, partition.len))
         return partitions
 
     #: Root inode to fall back on when a filesystem will not say. 5 is NTFS's,
@@ -1151,6 +1190,11 @@ class ImageHandler:
                 return self._apfs_file_system(start_offset, *apfs)
             if logical is not None and start_offset not in self._volumes:
                 return None
+            if start_offset < containers.SHADOW_KEY_BASE and \
+                    shadow is None:
+                # A Linux RAID member: what is inside the array, as the
+                # kernel presents /dev/mdN (md_array).
+                self.md_array(start_offset)
             try:
                 if start_offset in self._volumes:
                     fs_info = pytsk3.FS_Info(self._volumes[start_offset],
@@ -1172,17 +1216,25 @@ class ImageHandler:
 
     def _other_file_system(self, start_offset):
         """An XFS (libfsxfs) or Btrfs (core/btrfs.py) volume at a partition
-        (or an unpartitioned image), or None."""
-        if start_offset in self._volumes or \
-                start_offset >= containers.SHADOW_KEY_BASE:
+        (or an unpartitioned image), or inside a volume TRACE opened there
+        -- an md array, an unlocked LUKS volume, an LVM logical volume
+        (RHEL's default install is XFS on LVM) -- or None."""
+        volume = self._volumes.get(start_offset)
+        if volume is not None:
+            window = containers.ByteWindow(volume.read, 0, volume.get_size())
+        elif start_offset >= containers.SHADOW_KEY_BASE:
             return None
-        try:
-            window = self._partition_window(start_offset)
-        except KeyError:
-            return None
+        else:
+            try:
+                window = self._partition_window(start_offset)
+            except KeyError:
+                return None
         from trace_app.core.btrfs import open_btrfs
         from trace_app.core.xfs import open_xfs
-        return open_xfs(window) or open_btrfs(window)
+        # An assembled Btrfs file system: the other devices, by device.
+        others = getattr(self, '_btrfs_others', ()) \
+            if start_offset == 0 else ()
+        return open_xfs(window) or open_btrfs(window, others)
 
     # --- one file, read lazily --------------------------------------------------
 
@@ -1237,6 +1289,12 @@ class ImageHandler:
         raise KeyError(start_sector)
 
     def _partition_window(self, start_sector):
+        """The bytes a partition holds -- an md array's when it is a
+        member TRACE can read as one, so LVM or LUKS inside md opens as it
+        would on the machine."""
+        array = self._md.get(start_sector)
+        if array is not None:
+            return containers.ByteWindow(array.read, 0, array.size)
         offset, length = self.partition_bytes(start_sector)
         return containers.ByteWindow(self.read, offset, length)
 
@@ -1269,7 +1327,60 @@ class ImageHandler:
                         self._partition_window(start_sector))
                 except Exception:
                     self._kinds[start_sector] = None
+                if self._kinds[start_sector] is None and \
+                        self.md_member(start_sector) is not None and \
+                        self.md_array(start_sector) is None:
+                    self._kinds[start_sector] = 'mdraid'
         return self._kinds[start_sector]
+
+    # --- Linux software RAID ----------------------------------------------
+
+    def md_member(self, start_sector):
+        """The md superblock of a partition (or an unpartitioned image at
+        0), or None."""
+        if start_sector not in self._md_member:
+            member = None
+            if start_sector < containers.SHADOW_KEY_BASE and \
+                    self.logical_fs is None:
+                try:
+                    from trace_app.core import mdraid
+                    offset, length = self.partition_bytes(start_sector)
+                    member = mdraid.superblock(
+                        lambda o, n, base=offset: self.read(base + o, n),
+                        length)
+                except Exception as exc:
+                    logger.debug("No md superblock at %s: %s",
+                                 start_sector, exc)
+            self._md_member[start_sector] = member
+        return self._md_member[start_sector]
+
+    def md_array(self, start_sector):
+        """The md array a partition is a member of, when this image alone
+        holds enough of it -- one member of a mirror is the whole array;
+        striped levels need their other disks (an assembled evidence
+        item, core/assembly.py). Its bytes become the partition's: every
+        reader opens what is inside, as the kernel presents /dev/mdN."""
+        if start_sector in self._md:
+            return self._md[start_sector]
+        self._md[start_sector] = None
+        member = self.md_member(start_sector)
+        if member is None:
+            return None
+        from trace_app.core import mdraid
+        offset, _length = self.partition_bytes(start_sector)
+        try:
+            array = mdraid.Array([(member, lambda o, n, base=offset:
+                                   self.read(base + o, n))])
+        except mdraid.MdError as exc:
+            logger.info("RAID member at sector %s: %s (%s)", start_sector,
+                        member.describe(), exc)
+            return None
+        self._md[start_sector] = array
+        if start_sector not in self._volumes:
+            self._volumes[start_sector] = mdraid.MdImgInfo(array)
+        logger.info("RAID member at sector %s read as its array: %s",
+                    start_sector, array.describe())
+        return array
 
     def encryption(self, start_sector):
         """The kind of an encrypted volume at a partition, or None."""

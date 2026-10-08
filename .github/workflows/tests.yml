@@ -72,6 +72,7 @@ jobs:
       artifacts: ${{ steps.select.outputs.artifacts }}
       corpus: ${{ steps.select.outputs.corpus }}
       btrfs_deleted: ${{ steps.select.outputs.btrfs_deleted }}
+      md_raid: ${{ steps.select.outputs.md_raid }}
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
       oses: ${{ steps.select.outputs.oses }}
@@ -197,6 +198,17 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends btrfs-progs >/dev/null
           sudo python3 tools/make_btrfs_deleted.py
           sudo chown "$USER" test_images/btrfs-deleted.raw*
+
+      # Linux software RAID arrays made by mdadm (tools/make_md_raid.py:
+      # every level, three superblock versions, a member in a partition).
+      # Loop devices again, so Linux only; tests/test_assembly.py's md
+      # tests skip on Windows and macOS.
+      - name: Build the md RAID arrays
+        if: runner.os == 'Linux' && needs.plan.outputs.md_raid == 'true'
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends mdadm >/dev/null
+          sudo python3 tools/make_md_raid.py
+          sudo chown "$USER" test_images/md-*
 
       # Real Windows and browser artifacts for the activity tests, pinned by
       # SHA-256 (tools/fetch_artifact_samples.py).

@@ -55,10 +55,18 @@ def _ci_images():
 def _built_images():
     """Images CI makes rather than downloads: the carving corpus
     everywhere, and on Linux the Btrfs volume the kernel deletes files on
-    (tools/make_btrfs_deleted.py loop-mounts it)."""
+    (tools/make_btrfs_deleted.py loop-mounts it) and the md RAID arrays
+    mdadm builds (tools/make_md_raid.py)."""
     built = {'carve-corpus.dd'}
     if sys.platform.startswith('linux'):
         built.add('btrfs-deleted.raw')
+        # tools/make_md_raid.py's arrays: the key and every member.
+        built.add('md-raid.json')
+        for name, members in (('raid1', 2), ('raid1v090', 2),
+                              ('raid1v10', 2), ('raid0', 2), ('raid5', 3),
+                              ('raid5ra', 3), ('raid6', 4), ('raid10', 4),
+                              ('raid1part', 2)):
+            built.update(f'md-{name}-{n}.raw' for n in range(members))
     return built
 
 

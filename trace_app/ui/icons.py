@@ -48,6 +48,7 @@ VERIFY_OK = "Icons/tabler/shield-check-filled.svg"
 EVIDENCE_FOLDER = "Icons/tabler/folder-plus.svg"
 DISPLAY = "Icons/tabler/eye.svg"
 LIVE_DISK = "Icons/tabler/trace/live-disk.svg"
+ASSEMBLE = "Icons/tabler/stack-2.svg"
 IMAGE_INFO = "Icons/tabler/info-circle.svg"
 
 # --- Menu commands -----------------------------------------------------------

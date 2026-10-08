@@ -98,8 +98,8 @@ CATALOG = {
     # Btrfs, which TSK does not read (core/btrfs.py): fox-it/dissect.btrfs's
     # test volumes (128 MB each, ~1 MB packed but for compression's 5 MB),
     # whose expected contents its tests publish -- subvolumes and a
-    # snapshot, nested subvolumes, zlib/LZO/zstd, sparse files, and one
-    # disk of a two-disk RAID1.
+    # snapshot, nested subvolumes, zlib/LZO/zstd, sparse files, and
+    # multi-disk pools (RAID0/1/5/6) read whole, degraded or one disk alone.
     'btrfs-subvolume-snapshot.raw': (_BTRFS + 'btrfs-subvolume-snapshot.bin.gz', 'gz',
                                      'ce5b3950c4b6b7200b8b76f795d09340652952bd6bec2b1803af6ecfe219f1f2'),
     'btrfs-subvolume-nested.raw': (_BTRFS + 'btrfs-subvolume-nested.bin.gz', 'gz',
@@ -110,6 +110,22 @@ CATALOG = {
                          '5d15ae65c1c45cdeb599294d9efacdbdb1d9133dff936200f6265521e089d258'),
     'btrfs-raid1-1.raw': (_BTRFS + 'btrfs-raid1-1.bin.gz', 'gz',
                           '63a60b87e9c17313610885db8ddd6b54146e88e910bf0bab8d7091605c20add7'),
+    'btrfs-raid1-2.raw': (_BTRFS + 'btrfs-raid1-2.bin.gz', 'gz',
+                          '236e3d135601e0d12d2268943a08b772ab3d0443111280e0c74634072f3da2f6'),
+    'btrfs-raid0-1.raw': (_BTRFS + 'btrfs-raid0-1.bin.gz', 'gz',
+                          '50df8801d6e5ba9d2eff6d5eae77f5d20289b56de1954abd418c5f648e4abb7f'),
+    'btrfs-raid0-2.raw': (_BTRFS + 'btrfs-raid0-2.bin.gz', 'gz',
+                          'e8e8a50e7f92c112cea0750eb857e2091dfafe207b96ee2266986176fee0ae79'),
+    'btrfs-raid5-1.raw': (_BTRFS + 'btrfs-raid5-1.bin.gz', 'gz',
+                          'a70fe168247374bf8fa49f61d7dba18f776a780a4f9cf5fb6c4cc8f74fa2fd4c'),
+    'btrfs-raid5-2.raw': (_BTRFS + 'btrfs-raid5-2.bin.gz', 'gz',
+                          '4017c940e5c6ebab590ee74f5efb9239d94a367155b91632352204b4542e97aa'),
+    'btrfs-raid6-1.raw': (_BTRFS + 'btrfs-raid6-1.bin.gz', 'gz',
+                          '8362b35dee600402e8bb2707609d9d6911752890339bc02550cd3bdb79cae7a6'),
+    'btrfs-raid6-2.raw': (_BTRFS + 'btrfs-raid6-2.bin.gz', 'gz',
+                          '2ee5262ef2e22dea37abbdce6489c1448de40e8fa3932753de88afa348739fa7'),
+    'btrfs-raid6-3.raw': (_BTRFS + 'btrfs-raid6-3.bin.gz', 'gz',
+                          '25f51d61b044b96c221a46850a61928a8eb351aa505001c1b1e77aaedba76461'),
 }
 
 

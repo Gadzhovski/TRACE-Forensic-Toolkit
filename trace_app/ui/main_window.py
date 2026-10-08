@@ -904,12 +904,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "Read a disk attached to this computer, read-only, without "
             "imaging it (asks for administrator rights)")
         self.add_disk_action.triggered.connect(self.add_live_disk)
+        self.assemble_action = icons.action(
+            icons.ASSEMBLE, "Assemble RAID or Multi-Disk Volume...", self)
+        self.assemble_action.setToolTip(
+            "Read a Linux RAID array or a Btrfs file system across the "
+            "member disks' images")
+        self.assemble_action.triggered.connect(self.assemble_volume)
         self.remove_evidence_action = icons.action(
             icons.EVIDENCE_REMOVE, "Remove Evidence File...", self)
         self.remove_evidence_action.triggered.connect(
             self.remove_image_evidence)
         for action in (self.add_evidence_action, self.add_folder_action,
-                       self.add_disk_action, self.remove_evidence_action):
+                       self.add_disk_action, self.assemble_action,
+                       self.remove_evidence_action):
             file_menu.addAction(action)
         file_menu.addSeparator()
         exit_action = icons.action(icons.EXIT, "Exit", self)
@@ -6259,6 +6266,45 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.add_evidence_to_case(paths=[device])
         else:
             self.open_evidence_image(device)
+
+    def assemble_volume(self):
+        """File > Assemble RAID or Multi-Disk Volume: members among the
+        open evidence grouped (core/assembly.py); the chosen one is saved
+        as a descriptor -- in the case folder, or the user's data folder in
+        quick triage -- and added like any other evidence."""
+        from trace_app.core import assembly
+        from trace_app.infra.paths import user_data_dir
+        from trace_app.ui.dialogs.assemble import choose_group
+        handlers = dict(self._image_handlers)
+        try:
+            groups = assembly.find_groups(handlers)
+        except Exception as exc:
+            logger.exception("Looking for multi-disk volumes failed")
+            message.critical(self, "Assemble Volume",
+                             f"The open evidence could not be examined: "
+                             f"{exc}")
+            return
+        names = {}
+        if self.case:
+            for path in handlers:
+                row = self.case.evidence_for_path(path)
+                if row and row.get('display_name'):
+                    names[path] = row['display_name']
+        group = choose_group(groups, names, self)
+        if group is None:
+            return
+        folder = (os.path.join(self.case.folder, 'assembled') if self.case
+                  else os.path.join(user_data_dir(), 'assembled'))
+        try:
+            path = assembly.write(folder, group)
+        except OSError as exc:
+            message.critical(self, "Assemble Volume",
+                             f"The descriptor could not be saved: {exc}")
+            return
+        if self.case:
+            self.add_evidence_to_case(paths=[path])
+        else:
+            self.open_evidence_image(path)
 
     def add_evidence_to_case(self, paths=None):
         """The Add Evidence wizard: items checked and described, modules

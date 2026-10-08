@@ -57,7 +57,8 @@ def profile(image_handler):
             kind = None
         fs = image_handler.get_fs_info(key)
         if fs is None:
-            if kind in ('bitlocker', 'fvde', 'luks', 'apfs', 'ios_backup'):
+            if kind in ('bitlocker', 'fvde', 'luks', 'apfs', 'ios_backup',
+                        'mdraid'):
                 unreadable = True           # locked: what is inside is unknown
             elif image_handler.detect_filesystems(key):
                 unreadable = True           # a file system TRACE cannot open
