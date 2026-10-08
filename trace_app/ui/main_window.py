@@ -6960,10 +6960,22 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 file_content, metadata = self.image_handler.get_file_content(self.inode_number, self.offset)
                 if file_content:
                     self.completed.emit(file_content, metadata)
+                elif self._is_empty():
+                    # A volume label, $BadBlockFile, an empty log: read
+                    # correctly, and nothing is in it -- not an error.
+                    self.completed.emit(b'', metadata)
                 else:
                     self.error.emit("Unable to read file content.")
             except Exception as e:
                 self.error.emit(f"Error reading file: {str(e)}")
+
+        def _is_empty(self):
+            try:
+                fs = self.image_handler.get_fs_info(self.offset)
+                return fs is not None and not fs.open_meta(
+                    inode=self.inode_number).info.meta.size
+            except Exception:
+                return False
 
     # Worker thread for opening media files for streaming (doesn't load content into memory)
     class MediaStreamWorker(QThread):
@@ -7192,8 +7204,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             elif data.get("start_offset") is not None:
                 # Handle partitions
-                entries = self.image_handler.get_directory_contents(data["start_offset"],
-                                                                    5)  # 5 is the root inode for NTFS
+                # The root's number is the file system's: NTFS 5, FAT and
+                # ext 2, Btrfs 256 -- never assumed.
+                root_inode = self.image_handler.get_root_inode(
+                    data["start_offset"])
+                entries = self.image_handler.get_directory_contents(
+                    data["start_offset"], root_inode)
 
                 # Reset path to root when viewing partitions
                 self.current_path = "/"
@@ -7201,9 +7217,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Treat partition as a volume for history
                 if "type" not in data:
                     data["type"] = "volume"
-                if "inode_number" not in data:
-                    data["inode_number"] = self.image_handler.get_root_inode(
-                        data["start_offset"])
+                if data.get("inode_number") is None:
+                    data["inode_number"] = root_inode
 
                 if not self.show_listing_entries(entries, data["start_offset"],
                                                  data.get("name") or "This volume"):
@@ -7838,6 +7853,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # The Metadata viewer reads the file itself, so it is the one viewer
         # that still has something to show without loaded content.
         if not file_content and adapter.needs_content():
+            from trace_app.ui.widgets.listing_views import size_in_bytes
+            # Rows carry the Size column's text ('0.00 B') or a number.
+            if file_content is not None and \
+                    size_in_bytes((data or {}).get('size')) == 0:
+                # An empty file, read correctly: nothing to show.
+                adapter.clear()
+                self.set_status(f"{(data or {}).get('name', 'File')}: "
+                                f"empty file (0 bytes)")
+                return
             self.log_error("No content available to display")
             return
 
@@ -8230,8 +8254,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def get_grandparent_inode(self, parent_inode, start_offset):
         """Helper method to determine the grandparent inode"""
-        # Root directory (5 is typically root in NTFS) has no parent
-        if parent_inode == 5:
+        # The root directory has no parent (its number is the file
+        # system's own: NTFS 5, FAT and ext 2, Btrfs 256).
+        if parent_inode == self.image_handler.get_root_inode(start_offset):
             return None
 
         try:
@@ -8529,7 +8554,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # Regular substring search
                 files = self.image_handler.search_files(search_query)
 
-            # Clear and populate table
+            # Clear and populate table. The rows are this image's: a result
+            # opened after another image became active (a Triage or
+            # Search-tab preview) must still read this one.
+            self._listing_image = self.current_image_path
             self.listing_table.setRowCount(0)
             self.listing_table.setSortingEnabled(False)
 

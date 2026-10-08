@@ -84,6 +84,10 @@ class _Meta:
             self.link = entry.symbolic_link_target or ''
         except (OSError, IOError):
             self.link = ''
+        if self.type == pytsk3.TSK_FS_META_TYPE_LNK and self.link:
+            # A link's content is its target, as TSK reads one; APFS
+            # reports such an entry's size as 0.
+            self.size = len(self.link.encode('utf-8', 'surrogateescape'))
 
 
 class _Info:
@@ -108,9 +112,15 @@ class LibyalFile:
 
     @holding_libyal
     def read_random(self, offset, length, *_attribute):
-        size = self.info.meta.size
+        meta = self.info.meta
+        size = meta.size
         if offset >= size or length <= 0:
             return b''
+        if meta.type == pytsk3.TSK_FS_META_TYPE_LNK:
+            # The target lives in the entry, not in data blocks: libfsxfs
+            # refuses to read a link's data at all.
+            target = meta.link.encode('utf-8', 'surrogateescape')
+            return target[offset:offset + length]
         return self._entry.read_buffer_at_offset(min(length, size - offset),
                                                  offset)
 

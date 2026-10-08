@@ -2022,19 +2022,13 @@ class ImageHandler:
             logger.error(f"Error reading unallocated space: {e}")
             return None
 
-    def open_image(self):
-        if self.get_image_type() == "ewf":
-            filenames = pyewf.glob(self.image_path)
-            ewf_handle = pyewf.handle()
-            ewf_handle.open(filenames)
-            return EWFImgInfo(ewf_handle)
-        else:
-            return pytsk3.Img_Info(self.image_path)
-
-
-
-    def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None, start_offset=0):
-        """Recursively search for files in a directory."""
+    def _recursive_file_search(self, fs_info, directory, parent_path, files_list, extensions, search_query=None, start_offset=0, visited=None):
+        """Recursively search for files in a directory. Each directory is
+        entered once (`visited`, as core/walk.py does): a deleted entry
+        whose inode now belongs to a folder above it would otherwise
+        recurse until Python gives up."""
+        if visited is None:
+            visited = set()
         for entry in directory:
             if entry.info.name.name in [b".", b".."]:
                 continue
@@ -2049,8 +2043,12 @@ class ImageHandler:
                 if search_query:
                     # If there's a search query, check if the file name contains the query
                     if search_query.startswith('.'):
-                        # If the search query is an extension (e.g., '.jpg')
-                        query_matches = file_extension == search_query.lower()
+                        # An extension ('.jpg') -- or the start of a name
+                        # that begins with a dot ('.bash_history', '.ssh'),
+                        # which an extension match never finds.
+                        query_matches = (
+                            file_extension == search_query.lower() or
+                            file_name.lower().startswith(search_query.lower()))
                         match_reason = f"extension matches '{search_query}'" if query_matches else ""
                     else:
                         # If the search query is a file name or part of it (SUBSTRING MATCH)
@@ -2076,15 +2074,28 @@ class ImageHandler:
                             logger.debug(f"MATCH (DIR): '{file_name}' - {match_reason}")
 
                     # Recursively search subdirectory
+                    address = entry.info.meta.addr
+                    if address in visited:
+                        continue
+                    visited.add(address)
                     try:
-                        sub_directory = fs_info.open_dir(inode=entry.info.meta.addr)
+                        sub_directory = fs_info.open_dir(inode=address)
                         self._recursive_file_search(fs_info, sub_directory, os.path.join(parent_path, file_name),
                                                     files_list,
-                                                    extensions, search_query, start_offset)
+                                                    extensions, search_query, start_offset, visited)
                     except IOError as e:
-                        logger.error(f"Unable to open directory: {e}")
+                        # A deleted folder's blocks are often gone: expected,
+                        # as in core/walk.py. A live one failing is not.
+                        allocated = int(entry.info.meta.flags) & \
+                            pytsk3.TSK_FS_META_FLAG_ALLOC
+                        (logger.error if allocated else logger.debug)(
+                            "Unable to open directory %s: %s",
+                            os.path.join(parent_path, file_name), e)
 
-                elif entry.info.meta and entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_REG and query_matches:
+                # Every entry the listing shows -- links, devices, sockets
+                # too -- not regular files alone: a link listed in a folder
+                # was never found by its name.
+                elif entry.info.meta and query_matches:
                     file_info = self._get_file_metadata(entry, parent_path, start_offset)
                     files_list.append(file_info)
                     if logger.isEnabledFor(logging.DEBUG):
@@ -2191,41 +2202,37 @@ class ImageHandler:
             }
 
     def search_files(self, search_query=None):
+        """Files (and folders) whose name matches, on every file system of
+        the image -- read through get_fs_info, as everything else is, so a
+        container (QCOW2, VHD, DMG, AFF4...), an unlocked or LVM/APFS
+        volume, logical evidence and the file systems TSK does not read
+        (XFS, Btrfs) are searched too. It used to reopen the image path as
+        a raw image, which only E01 and raw files survived."""
         logger.info(f"ImageHandler.search_files called with query: '{search_query}'")
         files_list = []
-        img_info = self.open_image()
-
-        try:
-            volume_info = pytsk3.Volume_Info(img_info)
-            partition_count = 0
-            for partition in volume_info:
-                if partition.flags == pytsk3.TSK_VS_PART_FLAG_ALLOC:
-                    partition_count += 1
-                    logger.info(f"Searching partition {partition_count} (offset: {partition.start} sectors)")
-                    # Store offset in SECTORS (not bytes) - get_fs_info will multiply by 512
-                    self.process_partition_search(img_info, partition.start, files_list, search_query)
-            logger.info(f"Searched {partition_count} allocated partitions")
-        except IOError as e:
-            # No volume information, attempt to read as a single filesystem
-            logger.info(f"No volume info, reading as single filesystem: {e}")
-            self.process_partition_search(img_info, 0, files_list, search_query)
-
-        logger.info(f"Total files found: {len(files_list)}")
+        searched = 0
+        for offset in self.volume_offsets():
+            if self.process_partition_search(offset, files_list,
+                                             search_query):
+                searched += 1
+        logger.info("Searched %d file system%s; total files found: %d",
+                    searched, '' if searched == 1 else 's', len(files_list))
         return files_list
 
-    def process_partition_search(self, img_info, offset_sectors, files_list, search_query):
-        """Process partition search - offset_sectors is in sectors, not bytes."""
+    def process_partition_search(self, offset, files_list, search_query):
+        """Search the file system at `offset` (a partition's start in
+        sectors, or a volume key). False if there is none there."""
+        fs_info = self.get_fs_info(offset)
+        if fs_info is None:
+            return False
         try:
-            byte_offset = offset_sectors * self.sector_size
-            logger.info("Opening filesystem at offset %d sectors (%d bytes)",
-                        offset_sectors, byte_offset)
-            fs_info = pytsk3.FS_Info(img_info, offset=byte_offset)
-            logger.info(f"Starting recursive search with query: '{search_query}'")
             initial_count = len(files_list)
-            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset_sectors)
-            logger.info(f"Recursive search complete. Found {len(files_list) - initial_count} files in this partition")
+            self._recursive_file_search(fs_info, fs_info.open_dir(path="/"), "/", files_list, None, search_query, offset)
+            logger.info("Searched the file system at %d: %d found", offset,
+                        len(files_list) - initial_count)
         except IOError as e:
-            logger.error(f"Unable to open file system for search: {e}")
+            logger.error(f"Unable to search the file system at {offset}: {e}")
+        return True
 
     def get_file_content(self, inode_number, offset):
         fs = self.get_fs_info(offset)

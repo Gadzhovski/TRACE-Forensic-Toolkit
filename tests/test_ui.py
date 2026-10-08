@@ -186,6 +186,66 @@ def test_a_listing_row_reads_its_own_image_after_another_is_active(
     assert shown and shown[-1] == expected
 
 
+def test_partitions_search_and_empty_files_on_any_file_system(
+        qapp, stubbed_dialogs, caplog):
+    """A GPT disk with exFAT (root inode 2, not NTFS's 5): clicking the
+    partition lists its root; the Listing search finds a name starting
+    with a dot; an empty file (the volume label entry) is no error; and a
+    search result opened after another image became active reads the
+    image it was found on -- the search never recorded which that was."""
+    import logging
+    from PySide6.QtCore import Qt
+    from trace_app.ui.main_window import MainWindow
+    caplog.set_level(logging.WARNING)
+    xfat = image_path('dfr-01-xfat.dd')
+    window = MainWindow()
+    try:
+        assert window.open_evidence_image(xfat)
+        assert window.open_evidence_image(image_path(SECOND))
+        root = _root(window, 'dfr-01-xfat.dd')
+        root.setExpanded(True)
+        window.on_item_expanded(root)
+        volume = next(root.child(i) for i in range(root.childCount())
+                      if (root.child(i).data(0, Qt.UserRole) or {})
+                      .get('start_offset') == 2048)
+        window.on_item_clicked(volume, 0)
+        pump(qapp, 0.5)
+        names = {window.listing_table.item(r, 0).text(): r
+                 for r in range(window.listing_table.rowCount())}
+        assert {'Alcor.TXT', 'Betelgeuse.txt'} <= set(names)
+        label = window.listing_table.item(
+            names['exFat (Volume Label Entry)'], 0)
+        window.on_listing_table_item_clicked(label, navigate=False)
+        pump(qapp, 1.0)
+
+        window.perform_search('._.Trashes')
+        assert [window.listing_table.item(r, 0).text()
+                for r in range(window.listing_table.rowCount())] == \
+            ['._.Trashes']
+        window.perform_search('Alcor')
+        assert window.listing_table.rowCount() == 1
+        window.activate_image(image_path(SECOND))
+        shown = _capture_viewer(window)
+        window.on_listing_table_item_clicked(
+            window.listing_table.item(0, 0), navigate=False)
+        pump(qapp, 10, lambda: bool(shown))
+        assert os.path.basename(window.current_image_path) == \
+            'dfr-01-xfat.dd'
+        from trace_app.core.image_handler import ImageHandler
+        truth = ImageHandler(xfat)
+        try:
+            data = window.listing_table.item(0, 0).data(Qt.UserRole)
+            expected, _ = truth.get_file_content(data['inode_number'], 2048)
+        finally:
+            truth.close_resources()
+        assert shown and shown[-1] == expected and b'Alcor.TXT' in expected
+        assert not [r for r in caplog.records
+                    if r.levelno >= logging.WARNING], \
+            [r.getMessage() for r in caplog.records]
+    finally:
+        window.cleanup_resources()
+
+
 def test_a_finding_from_the_other_image_shows_that_images_bytes(
         qapp, window, truth):
     from trace_app.core.case import parse_artifact_ref
