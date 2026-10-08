@@ -1203,15 +1203,31 @@ class Case:
     # --- NTFS internals ------------------------------------------------
 
     def clear_ntfs(self, evidence_id):
-        for table in ('fs_events', 'usn_journal'):
-            self._db.execute(f"DELETE FROM {table} WHERE evidence_id = ?",
-                             (evidence_id,))
+        # Only NTFS's own rows: the other file systems' times
+        # (core/fs_times, sources 'FS' / 'FS-local') are another module's.
+        self._db.execute("DELETE FROM fs_events WHERE evidence_id = ? AND "
+                         "source IN ('SI', 'FN', 'I30')", (evidence_id,))
+        self._db.execute("DELETE FROM usn_journal WHERE evidence_id = ?",
+                         (evidence_id,))
         self._db.execute("DELETE FROM file_findings WHERE evidence_id = ? "
                          "AND module = 'ntfs'", (evidence_id,))
         self._db.commit()
 
+    def clear_fs_times(self, evidence_id):
+        """Drop core/fs_times' rows for one image (not NTFS's)."""
+        self._db.execute("DELETE FROM fs_events WHERE evidence_id = ? AND "
+                         "source IN ('FS', 'FS-local')", (evidence_id,))
+        self._db.commit()
+
+    def fs_times_count(self, evidence_id):
+        return self._db.execute(
+            "SELECT COUNT(*) FROM fs_events WHERE evidence_id = ? AND "
+            "source IN ('FS', 'FS-local')", (evidence_id,)).fetchone()[0]
+
     def add_fs_events(self, evidence_id, rows):
-        """rows: (ref, path, time, macb, source 'SI'|'FN', deleted)."""
+        """rows: (ref, path, time, macb, source, deleted) -- source 'SI',
+        'FN' or 'I30' from NTFS; 'FS' or 'FS-local' (no zone) from
+        core/fs_times for every other file system."""
         self._db.executemany(
             "INSERT INTO fs_events (evidence_id, artifact_ref, path, time_utc, "
             "macb, source, deleted) VALUES (?,?,?,?,?,?,?)",

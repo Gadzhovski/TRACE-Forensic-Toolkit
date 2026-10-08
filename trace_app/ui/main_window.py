@@ -3202,6 +3202,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_activity(chosen)
         if choice.get('ntfs'):
             self.queue_ntfs(chosen)
+        if choice.get('fstimes'):
+            self.queue_fs_times(chosen)
         if choice.get('hashsets'):
             # Queued after the analysis jobs, so it reads their hashes.
             self.queue_hash_matching([row['id'] for row in chosen])
@@ -3567,6 +3569,54 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             title=f"Reading NTFS records on {name}",
             start=start,
             stop=lambda worker: worker.stop()))
+
+    def queue_fs_times(self, rows):
+        """One job per image: every non-NTFS file system's times, for the
+        timeline (core/fs_times)."""
+        from trace_app.ui.viewers.timeline_panel import FsTimesWorker
+        if not self.case:
+            return 0
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                continue
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+
+            def start(job, row=row, evidence_id=evidence_id, name=name):
+                worker = FsTimesWorker(row['path'], self.case.folder,
+                                       evidence_id, self)
+                worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.progressed.connect(
+                    lambda done, total, path: self.job_bar.report(
+                        done, total, path))
+                worker.finished_fstimes.connect(
+                    lambda count, error: self._fs_times_finished(
+                        name, count, error))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            if self.job_bar.submit(Job(
+                    key=f"fstimes:{evidence_id}",
+                    title=f"Reading file system times on {name}",
+                    start=start, stop=lambda worker: worker.stop())):
+                queued += 1
+        return queued
+
+    def _fs_times_finished(self, name, count, error):
+        self.job_bar.job_finished()
+        if error:
+            self.set_status(f"Reading file system times on {name} failed: "
+                            f"{error}")
+            logger.error("File system times on %s failed: %s", name, error)
+        elif count:
+            self.set_status(f"File system times of {count:,} entries on "
+                            f"{name} are in the timeline")
+        else:
+            self.set_status(f"{name} has no file system other than NTFS "
+                            f"to read times from")
+        self.refresh_analysis_views()
 
     def _ntfs_finished(self, name, count, error):
         if error:

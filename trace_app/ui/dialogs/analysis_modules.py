@@ -56,6 +56,10 @@ MODULE_ACTIVITY = 'activity'
 #: journal directly, so it is a job of its own too.
 MODULE_NTFS = 'ntfs'
 
+#: File-system times of every other file system (core/fs_times): a walk of
+#: names and times, no file contents -- what the timeline lacked off NTFS.
+MODULE_FSTIMES = 'fstimes'
+
 #: Matching against the examiner's hash sets (core/hashsets): reads the
 #: digests the hash module stores, so it is queued after the analysis.
 MODULE_HASHSETS = 'hashsets'
@@ -85,7 +89,8 @@ MODULE_DELETED = 'deleted'
 
 #: The modules that are jobs of their own, each a boolean in a choice; the
 #: rest (analysis.MODULES) are listed under 'modules'.
-JOB_MODULES = (MODULE_INDEX, MODULE_ACTIVITY, MODULE_NTFS, MODULE_HASHSETS,
+JOB_MODULES = (MODULE_INDEX, MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
+               MODULE_HASHSETS,
                MODULE_YARA, MODULE_SIGMA, MODULE_PERSISTENCE,
                MODULE_KEYWORDS, MODULE_THUMBNAILS, MODULE_DELETED)
 
@@ -148,16 +153,19 @@ DESCRIPTIONS = {
         "Reads every file in full; replaces a previous index of the same "
         "image.", EVERY_FILE),
     MODULE_ACTIVITY: (
-        "Windows activity and browser history",
-        "What the users did: programs run (Prefetch, Amcache, Shimcache, "
+        "User activity and browser history",
+        "What the users did. Windows: programs run (Prefetch, Amcache, Shimcache, "
         "UserAssist, BAM, Run dialog), files and folders opened (shortcuts, "
         "Jump Lists, RecentDocs, ShellBags, Windows Timeline), USB devices and "
         "the shares each user mounted, the Recycle Bin, logons and remote "
         "desktop, networks joined, app and network use (SRUM), installed "
         "programs and the time zone, and Chrome, Edge, Internet Explorer, "
-        "Firefox and Safari history, downloads and searches (Activity tab).",
-        "Reads the places Windows and the browsers keep these, not every "
-        "file.", FAST),
+        "Firefox and Safari history, downloads and searches. Linux: shell "
+        "histories, logons and sudo, the journal, the system, its accounts, "
+        "software installed (dnf, apt) and SSH hosts and keys. macOS, "
+        "phones, chat and cloud sync too (Activity tab).",
+        "Reads the places each system and the browsers keep these, not "
+        "every file.", FAST),
     MODULE_NTFS: (
         "NTFS: $MFT times, change journal and streams",
         "Both sets of NTFS times for every file — including deleted ones "
@@ -166,12 +174,21 @@ DESCRIPTIONS = {
         "recorded; alternate data streams, and where downloaded files came "
         "from (Mark of the Web). All of it feeds the Timeline.",
         "Reads the $MFT and the journal, not every file.", FAST),
+    MODULE_FSTIMES: (
+        "File system timeline",
+        "Created, modified, accessed and changed times of every file and "
+        "folder — deleted ones too, while their metadata is still theirs — "
+        "on every file system but NTFS (which the NTFS module covers): ext, "
+        "Btrfs, XFS, HFS+, APFS, FAT and exFAT (their times have no zone and "
+        "are shown as local). All of it feeds the Timeline.",
+        "Reads names and times, not file contents.", FAST),
     MODULE_PERSISTENCE: (
         "Persistence (autoruns)",
-        "Everything set to start by itself — Run keys, services and drivers, "
-        "scheduled tasks, Startup folders, Winlogon, IFEO debuggers, WMI "
-        "consumers — each graded by the file it starts: present or missing, "
-        "signed or not, in a hash set, disguised as a Windows program.",
+        "Everything set to start by itself — Windows: Run keys, services "
+        "and drivers, scheduled tasks, Startup folders, Winlogon, IFEO "
+        "debuggers, WMI consumers. Linux: systemd units, cron, SysV and "
+        "Upstart, rc.local, ld.so.preload, autostart, SSH keys. macOS: "
+        "launch agents and daemons. Each graded by what it starts.",
         "Reads the hives and task files, then each started file once.", FAST),
     MODULE_THUMBNAILS: (
         "Thumbnail caches",
@@ -230,7 +247,7 @@ GROUPS = (
     ("File analysis", (MODULE_MAGIC, MODULE_HASH, MODULE_ENTROPY,
                        MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
                        MODULE_EXECUTABLES, MODULE_INDEX)),
-    ("Activity and system", (MODULE_ACTIVITY, MODULE_NTFS,
+    ("Activity and system", (MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
                              MODULE_PERSISTENCE, MODULE_THUMBNAILS)),
     ("Rules and lists", (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
                          MODULE_KEYWORDS)),
@@ -241,7 +258,7 @@ GROUPS = (
 #: whatever the profile says.
 QUICK, STANDARD, FULL, CUSTOM = 'quick', 'standard', 'full', 'custom'
 _QUICK = {MODULE_MAGIC, MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
-          MODULE_ACTIVITY, MODULE_NTFS, MODULE_PERSISTENCE,
+          MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES, MODULE_PERSISTENCE,
           MODULE_THUMBNAILS, MODULE_DELETED, MODULE_SIGMA}
 _STANDARD = _QUICK | {MODULE_HASH, MODULE_EXECUTABLES, MODULE_INDEX,
                       MODULE_HASHSETS, MODULE_YARA, MODULE_KEYWORDS}
@@ -276,7 +293,8 @@ def default_choice(modules=None):
     """What the dialog offers before the examiner has chosen anything."""
     return {'modules': list(modules or ()), 'evidence_ids': None,
             'index': bool(modules), 'activity': bool(modules),
-            'ntfs': bool(modules), 'hashsets': False,
+            'ntfs': bool(modules), 'fstimes': bool(modules),
+            'hashsets': False,
             'persistence': bool(modules), 'thumbnails': bool(modules),
             'deleted': bool(modules),
             'carve_types': [], 'unallocated_only': True}
@@ -686,6 +704,7 @@ class AnalysisModulesDialog(QDialog):
         for name, key in (('index_box', MODULE_INDEX),
                           ('activity_box', MODULE_ACTIVITY),
                           ('ntfs_box', MODULE_NTFS),
+                          ('fstimes_box', MODULE_FSTIMES),
                           ('hash_sets_box', MODULE_HASHSETS),
                           ('persistence_box', MODULE_PERSISTENCE),
                           ('deleted_box', MODULE_DELETED),

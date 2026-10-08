@@ -219,6 +219,22 @@ def job_ntfs(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_fstimes(params, progress, item, should_stop):
+    """File-system times of every non-NTFS volume (core/fs_times)."""
+    from trace_app.core import fs_times
+    from trace_app.core.case import Case
+    case = handler = None
+    try:
+        case = Case.open(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        return fs_times.analyse_evidence(
+            handler, case, params['evidence_id'],
+            progress=lambda done, total, path: progress(done, total, path),
+            should_stop=should_stop)
+    finally:
+        _close(case, handler)
+
+
 def job_hashsets(params, progress, item, should_stop):
     """Match the case's digests against the examiner's hash sets
     (core/hashsets). Reads the case and the library, never the image."""
@@ -488,6 +504,7 @@ JOBS = {
     'analysis': job_analysis,
     'activity': job_activity,
     'ntfs': job_ntfs,
+    'fstimes': job_fstimes,
     'hashsets': job_hashsets,
     'report': job_report,
     'yara': job_yara,

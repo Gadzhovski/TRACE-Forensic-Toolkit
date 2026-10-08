@@ -498,7 +498,8 @@ def grade(entry):
 
 def collect(image_handler, case=None, evidence_id=None, hash_lookup=None,
             should_stop=None, progress=None):
-    """Every autostart on every Windows volume of the image, graded."""
+    """Every autostart on every volume of the image, graded: Windows
+    here, Linux and macOS in core/persistence_unix.py."""
     from trace_app.core.activity import (_hive, _profiles, _sid_names,
                                          _split, _volumes, lnk)
     from trace_app.core.walk import volume_offsets
@@ -507,16 +508,22 @@ def collect(image_handler, case=None, evidence_id=None, hash_lookup=None,
                            for v in _volumes(image_handler, o)):
         if volume.fs is None:
             continue
-        windows = volume.find('Windows') or volume.find('WINNT')
-        if windows is None:
-            continue
         found = []
 
-        def tick(label):
+        def tick(label, found=found):
             if should_stop and should_stop():
                 raise PersistenceCancelled()
             if progress:
                 progress(len(found), 0, label)
+
+        windows = volume.find('Windows') or volume.find('WINNT')
+        if windows is None:
+            # Linux and macOS: systemd, cron, launchd... (persistence_unix)
+            from trace_app.core import persistence_unix
+            from trace_app.core.activity import _homes
+            out += persistence_unix.collect(volume, _homes(volume),
+                                            hash_lookup, tick)
+            continue
 
         config = (windows.name, 'System32', 'config')
         for hive_name, reader in (('SOFTWARE', from_software),
@@ -701,7 +708,8 @@ def analyse_evidence(image_handler, case, evidence_id, library=None,
         ref = item.get('target_ref') or item.get('source_ref') or ''
         path = item.get('target_path') or item.get('source') or ''
         findings.append((
-            ref, (item.get('target') or item['name']).rsplit('\\', 1)[-1],
+            ref, re.split(r'[\\/]', item.get('target') or item['name'])[-1]
+            or item['name'],
             path, item.get('target_size'), item['location'], item['grade'],
             f"{item['location']}: {item['name']} -- "
             + '; '.join(item['reasons']),

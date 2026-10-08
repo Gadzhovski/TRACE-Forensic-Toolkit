@@ -80,7 +80,7 @@ def record(category, source, when, what, subject, detail=None, user='',
 
 class _Entry:
     __slots__ = ('name', 'path', 'inode', 'seq', 'is_dir', 'size', 'deleted',
-                 'created', 'modified')
+                 'created', 'modified', 'is_link')
 
 
 def _volumes(image_handler, offset):
@@ -146,6 +146,7 @@ class Volume:
                 item.inode = meta.addr
                 item.seq = getattr(meta, 'seq', None)
                 item.is_dir = meta.type == pytsk3.TSK_FS_META_TYPE_DIR
+                item.is_link = meta.type == pytsk3.TSK_FS_META_TYPE_LNK
                 item.size = meta.size
                 item.deleted = not bool(int(meta.flags)
                                         & pytsk3.TSK_FS_META_FLAG_ALLOC)
@@ -154,6 +155,59 @@ class Volume:
                 out.append(item)
         self._cache[key] = out
         return out
+
+    def lookup(self, path, depth=0):
+        """The entry at an absolute POSIX path as the system saw it,
+        following links in every part of it -- Fedora's /usr/sbin and /bin
+        are links to /usr/bin, so /usr/sbin/sshd is not found by `find`.
+        None when nothing is there."""
+        parts = [p for p in path.split('/') if p]
+        entry = None
+        done = []
+        for index, part in enumerate(parts):
+            entry = self.find(*done, part)
+            if entry is None:
+                return None
+            if getattr(entry, 'is_link', False):
+                if depth > 16:
+                    return None
+                entry = self.resolve(entry, depth + 1)
+                if entry is None:
+                    return None
+            done = [p for p in self._system_path(entry.path).split('/')
+                    if p]
+        return entry
+
+    def _system_path(self, path):
+        """An entry's path as the system named it: mount targets and the
+        root's own folder taken off ('/root/usr/bin' on Fedora is
+        '/usr/bin')."""
+        for point, target in sorted(self.mounts.items(),
+                                    key=lambda m: -len(m[1])):
+            if target != '/' and (path == target or
+                                  path.startswith(target.rstrip('/') + '/')):
+                return '/' + point + path[len(target.rstrip('/')):]
+        root = self.root.rstrip('/')
+        if root and (path == root or path.startswith(root + '/')):
+            return path[len(root):] or '/'
+        return path
+
+    def resolve(self, entry, depth=0):
+        """The entry a symbolic link leads to (itself if it is none), or
+        None for a link to nothing here. Linux keeps /etc/os-release, the
+        time zone and every enabled systemd unit as links."""
+        while entry is not None and getattr(entry, 'is_link', False):
+            if depth > 16:
+                return None
+            depth += 1
+            target = self.read(entry).decode('utf-8', 'replace').strip()
+            if not target:
+                return None
+            if not target.startswith('/'):
+                target = posixpath.join(posixpath.dirname(
+                    self._system_path(entry.path)), target)
+            entry = self.lookup(posixpath.normpath(target), depth)
+        return entry
 
     def deleted_entries(self, directory):
         """Deleted entries in a directory entry whose metadata is still
@@ -192,6 +246,7 @@ class Volume:
             item.inode = address
             item.seq = getattr(info.name, 'meta_seq', None)
             item.is_dir = meta.type == pytsk3.TSK_FS_META_TYPE_DIR
+            item.is_link = meta.type == pytsk3.TSK_FS_META_TYPE_LNK
             item.size = meta.size
             item.deleted = True
             item.created = times.unix(getattr(meta, 'crtime', 0) or 0)
