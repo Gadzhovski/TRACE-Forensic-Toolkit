@@ -1,14 +1,17 @@
 """Assemble a RAID array or multi-disk Btrfs file system (core/assembly.py).
 
-Lists the multi-disk volumes whose members are among the open evidence --
-each member imaged on its own -- with how many members were found and
-whether that is enough to read it. Choosing one saves a descriptor that
-opens as evidence of its own; the members stay evidence too.
+Two tabs. *Found on the disks*: the multi-disk volumes that describe
+themselves (Linux md, Btrfs), with how many members were found and whether
+that is enough to read them. *Hardware RAID*: disks of a controller RAID,
+which describe nothing, rebuilt from parameters given or detected
+(ui/dialogs/hardware_raid.py). Either way a descriptor is saved that opens
+as evidence of its own; the members stay evidence too.
 """
 
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
                                QHeaderView, QLabel, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout)
+                               QTableWidgetItem, QTabWidget, QVBoxLayout,
+                               QWidget)
 
 from trace_app.core import assembly
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
@@ -44,7 +47,7 @@ class AssembleDialog(QDialog):
 
     COLUMNS = ['Volume', 'Members', 'Found', 'Readable']
 
-    def __init__(self, groups, names=None, parent=None):
+    def __init__(self, groups, names=None, parent=None, handlers=None):
         super().__init__(parent)
         self.setWindowTitle("Assemble RAID or Multi-Disk Volume")
         self.setObjectName("assembleDialog")
@@ -53,9 +56,20 @@ class AssembleDialog(QDialog):
         self.groups = list(groups)
         names = names or {}
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 12)
-        layout.setSpacing(10)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 14, 16, 12)
+        outer.setSpacing(10)
+        self.tabs = QTabWidget()
+        outer.addWidget(self.tabs, 1)
+        found = QWidget()
+        layout = QVBoxLayout(found)
+        layout.setContentsMargins(0, 8, 0, 0)
+        self.tabs.addTab(found, "Found on the disks")
+        from trace_app.ui.dialogs.hardware_raid import HardwareRaidPanel
+        self.hardware = HardwareRaidPanel(handlers or {}, names, self)
+        self.tabs.addTab(self.hardware, "Hardware RAID")
+        if not self.groups and self.hardware.handlers:
+            self.tabs.setCurrentWidget(self.hardware)
         intro = QLabel(
             "Disks imaged one by one that belonged to one Linux RAID array "
             "or one Btrfs file system. Assembling one adds it as evidence "
@@ -97,8 +111,9 @@ class AssembleDialog(QDialog):
         layout.addWidget(self.table, 1)
         if not self.groups:
             empty = QLabel(
-                "No RAID or multi-disk Btrfs members were found among the "
-                "open evidence. Add every member disk's image first.")
+                "No Linux RAID or multi-disk Btrfs members were found among "
+                "the open evidence. For a controller RAID (HP, Adaptec, a "
+                "motherboard RAID), use the Hardware RAID tab.")
             empty.setObjectName("wizardFieldNote")
             empty.setWordWrap(True)
             layout.addWidget(empty)
@@ -109,31 +124,48 @@ class AssembleDialog(QDialog):
         buttons.addButton(QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        self.resize(760, 300)
+        outer.addWidget(buttons)
+        self.resize(900, 520)
         if self.groups:
             self.table.selectRow(0)
+        self.tabs.currentChanged.connect(self._update)
         self._update()
 
     def _selected(self):
         rows = self.table.selectionModel().selectedRows()
         return self.groups[rows[0].row()] if rows else None
 
-    def _update(self):
+    def _update(self, *_args):
+        if self.tabs.currentWidget() is self.hardware:
+            self.assemble_button.setEnabled(bool(self.hardware.handlers))
+            return
         group = self._selected()
         self.assemble_button.setEnabled(
             group is not None and readable(group)[0])
 
     def _accept(self):
+        if self.tabs.currentWidget() is self.hardware:
+            from trace_app.core import hwraid
+            try:
+                self.group = self.hardware.group()
+            except hwraid.RaidError as exc:
+                self.hardware.status.setText(f"Not assembled: {exc}")
+                return
+            self.accept()
+            return
         group = self._selected()
         if group is not None and readable(group)[0]:
             self.group = group
             self.accept()
 
+    def done(self, result):
+        self.hardware.stop()
+        super().done(result)
 
-def choose_group(groups, names=None, parent=None):
+
+def choose_group(groups, names=None, parent=None, handlers=None):
     """Run the dialog: the chosen group, or None."""
-    dialog = AssembleDialog(groups, names, parent)
+    dialog = AssembleDialog(groups, names, parent, handlers)
     if dialog.exec() == QDialog.Accepted:
         return dialog.group
     return None

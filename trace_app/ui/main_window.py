@@ -6298,7 +6298,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 row = self.case.evidence_for_path(path)
                 if row and row.get('display_name'):
                     names[path] = row['display_name']
-        group = choose_group(groups, names, self)
+        group = choose_group(groups, names, self, handlers)
         if group is None:
             return
         folder = (os.path.join(self.case.folder, 'assembled') if self.case

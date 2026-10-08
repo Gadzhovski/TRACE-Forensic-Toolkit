@@ -23,7 +23,7 @@ logger = logging.getLogger('TRACE.Assembly')
 
 EXTENSION = '.trace-assembly'
 VERSION = 1
-MDRAID, BTRFS = 'mdraid', 'btrfs'
+MDRAID, BTRFS, HWRAID = 'mdraid', 'btrfs', 'hwraid'
 
 
 class AssemblyError(Exception):
@@ -109,7 +109,22 @@ def find_groups(handlers):
     return out
 
 
+def hardware_group(paths, params, name='Hardware RAID'):
+    """A group for `write` from images without RAID metadata, rebuilt
+    with core/hwraid.Params (its order indexes `paths`)."""
+    import uuid as uuid_module
+    return {'kind': HWRAID, 'id': uuid_module.uuid4().hex, 'name': name,
+            'level': params.level, 'needed': len(params.order or paths),
+            'params': params.as_dict(),
+            'members': [{'image': path, 'start_sector': None, 'slot': index}
+                        for index, path in enumerate(paths)]}
+
+
 def describe(group):
+    if group['kind'] == HWRAID:
+        from trace_app.core import hwraid
+        return (f"{group['name']}: "
+                f"{hwraid.Params.from_dict(group['params']).describe()}")
     found = len({m['slot'] for m in group['members']})
     what = (f"RAID{group['level']}" if group['kind'] == MDRAID
             else 'Btrfs file system')
@@ -128,6 +143,7 @@ def write(folder, group):
         json.dump({'trace_assembly': VERSION, 'kind': group['kind'],
                    'name': group['name'], 'id': group['id'],
                    'level': group['level'], 'needed': group['needed'],
+                   'params': group.get('params'),
                    'members': [{'image': os.path.abspath(m['image']),
                                 'start_sector': m['start_sector'],
                                 'slot': m['slot']}
@@ -145,7 +161,7 @@ def read_descriptor(path):
     except (OSError, ValueError) as exc:
         raise AssemblyError(f"Unreadable descriptor: {exc}") from exc
     if data.get('trace_assembly') != VERSION or \
-            data.get('kind') not in (MDRAID, BTRFS):
+            data.get('kind') not in (MDRAID, BTRFS, HWRAID):
         raise AssemblyError("Not a TRACE assembly descriptor")
     return data
 
@@ -178,9 +194,25 @@ def open_assembly(path):
                     raise AssemblyError(
                         f"Member image {os.path.basename(image)} would not "
                         f"open: {handler.load_error}")
-            offset, length = handler.partition_bytes(member['start_sector'])
+            if member['start_sector'] is None:
+                # The whole disk (a hardware RAID member).
+                offset, length = 0, handler.get_size()
+            else:
+                offset, length = handler.partition_bytes(
+                    member['start_sector'])
             windows.append((handler, offset, length))
         keep = list(handlers.values())
+        if data['kind'] == HWRAID:
+            from trace_app.core import hwraid
+            params = hwraid.Params.from_dict(data['params'])
+            members = [((lambda o, n, h=h, b=b: h.read(b + o, n)), n)
+                       for h, b, n in windows]
+            try:
+                volume = hwraid.build(members, params)
+            except hwraid.RaidError as exc:
+                raise AssemblyError(str(exc)) from exc
+            return (_Kept(_Reader(volume), keep),
+                    f"{data['name']}: {params.describe()}", (), keep)
         if data['kind'] == MDRAID:
             from trace_app.core import mdraid
             members = []
@@ -245,6 +277,18 @@ try:
             for handler in self._keep:
                 handler.close_resources()
 
+    class _Reader:
+        """read/get_size over a reader with read/size."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def read(self, offset, length):
+            return self._inner.read(offset, length)
+
+        def get_size(self):
+            return self._inner.size
+
     class _Kept(pytsk3.Img_Info):
         """An image whose member handlers close with it."""
 
@@ -263,4 +307,4 @@ try:
             for handler in self._keep:
                 handler.close_resources()
 except ImportError:                                   # pragma: no cover
-    _Concat = _Kept = None
+    _Concat = _Kept = _Reader = None
