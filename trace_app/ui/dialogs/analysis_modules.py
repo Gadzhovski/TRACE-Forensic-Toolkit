@@ -27,7 +27,8 @@ import logging
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFrame, QGridLayout,
-                               QHBoxLayout, QLabel, QScrollArea, QVBoxLayout,
+                               QHBoxLayout, QLabel, QListWidget,
+                               QListWidgetItem, QScrollArea, QVBoxLayout,
                                QWidget)
 
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
@@ -370,6 +371,13 @@ class ModuleSelector(QWidget):
         super().__init__(parent)
         self.setObjectName("moduleSelector")
         self.unavailable = dict(unavailable or {})
+        #: Modules that cannot find anything in the image(s) shown, and
+        #: notes on those that apply to some of them only.
+        self.not_applicable = {}
+        self._partly = {}
+        #: What the examiner wants of a module while it is greyed out here.
+        self._wanted = {}
+        self._why = {}
         self._evidence_bytes = None
         self._applying = False
 
@@ -457,19 +465,69 @@ class ModuleSelector(QWidget):
         note.setIndent(22)
         grid.addWidget(note, 1, 0, 1, 2)
         grid.setColumnStretch(0, 1)
-        reason = self.unavailable.get(key)
-        if reason:
-            box.setEnabled(False)
-            box.setToolTip(reason)
-            why = QLabel(reason)
-            why.setObjectName("moduleUnavailable")
-            why.setWordWrap(True)
-            why.setIndent(22)
-            grid.addWidget(why, 2, 0, 1, 2)
-            note.setEnabled(False)
+        # Why it cannot run (the case: no rules in use) or cannot find
+        # anything (this image: no NTFS volume) -- or applies to some
+        # images only. Updated as the image shown changes.
+        why = QLabel()
+        why.setObjectName("moduleUnavailable")
+        why.setWordWrap(True)
+        why.setIndent(22)
+        grid.addWidget(why, 2, 0, 1, 2)
+        self._why[key] = why
         layout.addWidget(row)
         self._notes[key] = note
+        self._show_reason(key, box)
         return box
+
+    def _blocked(self):
+        return {**self.not_applicable, **self.unavailable}
+
+    def _show_reason(self, key, box):
+        reason = self.unavailable.get(key) or self.not_applicable.get(key)
+        note = self._partly.get(key) if not reason else None
+        why = self._why[key]
+        box.setEnabled(not reason)
+        box.setToolTip(reason or note or '')
+        why.setText(reason or note or '')
+        why.setProperty('partial', bool(note))
+        why.style().unpolish(why)
+        why.style().polish(why)
+        why.setVisible(bool(reason or note))
+        if key in self._notes:
+            self._notes[key].setEnabled(not reason)
+
+    def set_not_applicable(self, reasons, partly=None):
+        """Grey out the modules that cannot find anything in the image(s)
+        shown ({key: why}), and note those that apply to some only
+        ({key: note}). A module greyed out here is unticked, and ticked
+        again when shown for an image it applies to, if it was wanted."""
+        reasons = {k: v for k, v in (reasons or {}).items()
+                   if k in self.boxes}
+        self._applying = True
+        try:
+            for key, box in self.boxes.items():
+                was = key in self._blocked()
+                now = key in reasons or key in self.unavailable
+                if now and not was:
+                    self._wanted[key] = box.isChecked()
+                    box.setChecked(False)
+                elif was and not now and key in self._wanted:
+                    box.setChecked(self._wanted.pop(key))
+            self.not_applicable = reasons
+            self._partly = dict(partly or {})
+            for key, box in self.boxes.items():
+                self._show_reason(key, box)
+        finally:
+            self._applying = False
+        self._set_combo(self._matching_profile())
+        self._refresh()
+
+    def wanted(self):
+        """The modules ticked, greyed-out wishes included: what applies
+        elsewhere when the examiner moves to another image."""
+        return {key for key, box in self.boxes.items()
+                if (box.isChecked() and box.isEnabled())
+                or self._wanted.get(key)}
 
     def _carve_options(self):
         self.carve_options = QWidget()
@@ -508,9 +566,11 @@ class ModuleSelector(QWidget):
             return
         self._applying = True
         try:
+            blocked = self._blocked()
             for key, box in self.boxes.items():
-                box.setChecked(key in PROFILES[name]
-                               and key not in self.unavailable)
+                box.setChecked(key in PROFILES[name] and key not in blocked)
+                if key in self.not_applicable:
+                    self._wanted[key] = key in PROFILES[name]
         finally:
             self._applying = False
         self._set_combo(name)
@@ -523,8 +583,11 @@ class ModuleSelector(QWidget):
         keys = selected_keys(choice)
         self._applying = True
         try:
+            blocked = self._blocked()
             for key, box in self.boxes.items():
-                box.setChecked(key in keys and key not in self.unavailable)
+                box.setChecked(key in keys and key not in blocked)
+                if key in self.not_applicable:
+                    self._wanted[key] = key in keys
         finally:
             self._applying = False
         if choice.get('carve_types'):
@@ -586,8 +649,9 @@ class ModuleSelector(QWidget):
 
     def _matching_profile(self):
         on = {key for key, box in self.boxes.items() if box.isChecked()}
+        blocked = self._blocked()
         for name, keys in PROFILES.items():
-            if on == {k for k in keys if k not in self.unavailable}:
+            if on == {k for k in keys if k not in blocked}:
                 return name
         return CUSTOM
 
@@ -642,25 +706,13 @@ class AnalysisModulesDialog(QDialog):
         heading.setWordWrap(True)
         layout.addWidget(heading)
 
-        # Which evidence: the whole case unless the examiner narrows it. One
-        # image needs no choosing.
-        self.evidence_combo = QComboBox()
-        self.evidence_combo.setObjectName("analysisEvidenceCombo")
-        if len(evidence) > 1:
-            self.evidence_combo.addItem(f"All {len(evidence)} images", None)
-        for evidence_id, name in evidence:
-            self.evidence_combo.addItem(name, evidence_id)
+        # Each image: (id, name, what it holds, {module: why it cannot find
+        # anything there}) -- or (id, name) from an older caller.
+        self.evidence = [tuple(e) + ('', {})[len(e) - 2:] for e in evidence]
+        self.not_applicable = {e[0]: dict(e[3] or {}) for e in self.evidence}
+        self._choices = {}
+        self._shown = None
         wanted = choice.get('evidence_ids')
-        if wanted and len(wanted) == 1:
-            index = self.evidence_combo.findData(wanted[0])
-            self.evidence_combo.setCurrentIndex(max(index, 0))
-        if len(evidence) > 1:
-            row = QHBoxLayout()
-            label = QLabel("Evidence:")
-            label.setObjectName("analysisEvidenceLabel")
-            row.addWidget(label)
-            row.addWidget(self.evidence_combo, 1)
-            layout.addLayout(row)
 
         # What cannot run, from the host (the window knows the case's rule
         # libraries); libmagic is checked here, as it always was.
@@ -697,7 +749,52 @@ class AnalysisModulesDialog(QDialog):
             if self.screen() is not None else 800
         self.selector.scroll.setMinimumHeight(
             max(260, min(620, int(screen * 0.88) - 260)))
-        layout.addWidget(self.selector, 1)
+
+        # Several images: the list on the left (ticked = analysed, with
+        # what each holds), the modules of the one selected on the right.
+        self.evidence_list = QListWidget()
+        self.evidence_list.setObjectName("analysisEvidenceList")
+        self.same_box = QCheckBox("Same modules for every image (each runs "
+                                  "only what applies to it)")
+        self.same_box.setObjectName("analysisSameModules")
+        self.same_box.setChecked(True)
+        for evidence_id, name, summary, _na in self.evidence:
+            item = QListWidgetItem(f"{name}\n{summary}" if summary else name)
+            item.setData(Qt.UserRole, evidence_id)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if not wanted or evidence_id in
+                               wanted else Qt.Unchecked)
+            item.setToolTip(summary)
+            self.evidence_list.addItem(item)
+        self.modules_heading = QLabel()
+        self.modules_heading.setObjectName("moduleGroupHeading")
+        if len(self.evidence) > 1:
+            columns = QHBoxLayout()
+            columns.setSpacing(12)
+            left = QVBoxLayout()
+            label = QLabel("Images")
+            label.setObjectName("moduleGroupHeading")
+            left.addWidget(label)
+            left.addWidget(self.evidence_list, 1)
+            left.addWidget(self.same_box)
+            columns.addLayout(left, 2)
+            right = QVBoxLayout()
+            right.addWidget(self.modules_heading)
+            right.addWidget(self.selector, 1)
+            columns.addLayout(right, 3)
+            layout.addLayout(columns, 1)
+            self.setMinimumWidth(980)
+            start = next((i for i, e in enumerate(self.evidence)
+                          if wanted and e[0] in wanted), 0)
+            self.evidence_list.setCurrentRow(start)
+            self.evidence_list.currentRowChanged.connect(self._image_chosen)
+            self.evidence_list.itemChanged.connect(
+                lambda _item: self._show_applicability())
+            self.same_box.toggled.connect(self._same_toggled)
+        else:
+            self.modules_heading.hide()
+            layout.addWidget(self.selector, 1)
+        self._show_applicability()
 
         # The old attribute names, which callers and tests address.
         self.boxes = self.selector.boxes
@@ -748,10 +845,95 @@ class AnalysisModulesDialog(QDialog):
         self.run_button.setToolTip(
             '' if chosen else "Select at least one module, or just browse.")
 
+    # --- several images --------------------------------------------------
+
+    def checked_ids(self):
+        if len(self.evidence) <= 1:
+            return [e[0] for e in self.evidence]
+        return [self.evidence_list.item(i).data(Qt.UserRole)
+                for i in range(self.evidence_list.count())
+                if self.evidence_list.item(i).checkState() == Qt.Checked]
+
+    def _current_id(self):
+        row = self.evidence_list.currentRow()
+        return self.evidence[row][0] if 0 <= row < len(self.evidence) \
+            else None
+
+    def _show_applicability(self):
+        """Grey out what cannot find anything: in every ticked image (one
+        selection for all), or in the image selected (one each)."""
+        names = {e[0]: e[1] for e in self.evidence}
+        if len(self.evidence) <= 1:
+            only = self.evidence[0][0] if self.evidence else None
+            self.selector.set_not_applicable(self.not_applicable.get(only))
+            return
+        if self.same_box.isChecked():
+            ids = self.checked_ids() or [e[0] for e in self.evidence]
+            reasons, partly = {}, {}
+            for key in self.selector.boxes:
+                missing = [i for i in ids if key in self.not_applicable[i]]
+                if missing and len(missing) == len(ids):
+                    reasons[key] = self.not_applicable[ids[0]][key] \
+                        if len(ids) == 1 else (
+                            "Applies to none of the selected images: "
+                            + self.not_applicable[ids[0]][key])
+                elif missing:
+                    partly[key] = "Skipped on " + '; '.join(
+                        f"{names[i]} "
+                        f"({self.not_applicable[i][key].rstrip('.')})"
+                        for i in missing)
+            self.selector.set_not_applicable(reasons, partly)
+            self.modules_heading.setText(
+                f"Modules for the {len(ids)} ticked image"
+                f"{'s' if len(ids) != 1 else ''}")
+        else:
+            current = self._current_id()
+            self.selector.set_not_applicable(self.not_applicable.get(current))
+            self.modules_heading.setText(f"Modules for {names.get(current)}")
+
+    def _image_chosen(self, _row):
+        if self.same_box.isChecked():
+            return
+        if self._shown is not None:
+            self._choices[self._shown] = self.selector.choice()
+        current = self._current_id()
+        self._shown = current
+        self.selector.set_not_applicable(self.not_applicable.get(current))
+        if current in self._choices:
+            self.selector.set_choice(self._choices[current])
+        self._show_applicability()
+
+    def _same_toggled(self, same):
+        if same:
+            self._shown = None
+        else:
+            # Each image starts from the one selection, then its own.
+            base = self.selector.choice()
+            self._choices = {e[0]: dict(base) for e in self.evidence}
+            self._shown = self._current_id()
+        self._show_applicability()
+
+    def image_choice(self, evidence_id):
+        """What will run on one image, as things stand."""
+        if self.same_box.isChecked() or len(self.evidence) <= 1:
+            return self.selector.choice()
+        if evidence_id == self._shown:
+            return self.selector.choice()
+        return self._choices.get(evidence_id, self.selector.choice())
+
     def _accept(self):
-        target = self.evidence_combo.currentData()
-        self.choice = dict(self.selector.choice(),
-                           evidence_ids=None if target is None else [target])
+        ids = self.checked_ids()
+        if not ids:
+            return
+        everything = len(ids) == len(self.evidence)
+        if len(self.evidence) > 1 and not self.same_box.isChecked():
+            per = {i: self.image_choice(i) for i in ids}
+            self.choice = dict(self.selector.choice(),
+                               evidence_ids=None if everything else ids,
+                               per_evidence=per)
+        else:
+            self.choice = dict(self.selector.choice(),
+                               evidence_ids=None if everything else ids)
         remember_profile(self.choice['profile'])
         self.accept()
 
@@ -759,8 +941,12 @@ class AnalysisModulesDialog(QDialog):
 def choose_modules(parent=None, preselected=None, evidence=None):
     """Ask; return the choice, or None for "just browse".
 
-    `evidence` is [(evidence_id, name)]. The choice is a dict: `modules`
+    `evidence` is [(evidence_id, name)] or [(evidence_id, name, what it
+    holds, {module: why it cannot find anything there})]
+    (core/evidence_profile). The choice is a dict: `modules`
     (analysis.MODULES to run), `evidence_ids` (None for every image),
+    `per_evidence` ({evidence_id: choice} when each image was given its
+    own),
     `index` (build the search index), `activity` (read Windows activity and
     browser history), `ntfs` ($MFT, change journal, streams), the other
     JOB_MODULES as booleans, `carve_types` (empty: no carving),

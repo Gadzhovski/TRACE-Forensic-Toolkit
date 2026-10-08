@@ -250,6 +250,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: The image the listing was filled from. A row is read from this
         #: image even after another one became active.
         self._listing_image = None
+        self._evidence_profiles = {}
 
         #: Verification results, keyed by image path. Verification is a fact
         #: about one image, not about the session, so it is stored per image:
@@ -3178,8 +3179,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         is less work than finding what they do. "Just browse" is an answer,
         not a failure.
         """
-        evidence = [(row['id'], row.get('display_name')
-                     or os.path.basename(row['path'])) for row in rows]
+        evidence = []
+        for row in rows:
+            found = self.evidence_profile(row)
+            evidence.append((row['id'], row.get('display_name')
+                             or os.path.basename(row['path']),
+                             found['summary'] if found else '',
+                             self._not_applicable(found)))
         choice = choose_modules(self,
                                 preselected=self._module_preselection(
                                     evidence_id),
@@ -3190,10 +3196,77 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   or row['id'] in choice['evidence_ids']]
         self.queue_choice(chosen, choice)
 
+    def evidence_profile(self, row):
+        """What an image holds (core/evidence_profile), worked out once per
+        image from the handler already open; None if it cannot be read."""
+        from trace_app.core import evidence_profile
+        key = os.path.normpath(row['path'])
+        if key not in self._evidence_profiles:
+            found = None
+            try:
+                handler = self.handler_for(row['path'])
+                if handler is not None and handler.loaded:
+                    found = evidence_profile.profile(handler)
+            except Exception as exc:
+                logger.warning("Could not profile %s: %s", row['path'], exc)
+            self._evidence_profiles[key] = found
+        return self._evidence_profiles[key]
+
+    @staticmethod
+    def _not_applicable(found):
+        from trace_app.core import evidence_profile
+        return evidence_profile.not_applicable(found) if found else {}
+
+    def _applicable_choice(self, row, choice):
+        """`choice` without the modules that cannot find anything in this
+        image, and what was dropped: {key: why}."""
+        from trace_app.ui.dialogs.analysis_modules import MODULE_CARVE
+        dropped = self._not_applicable(self.evidence_profile(row))
+        out = dict(choice)
+        skipped = {}
+        for key, why in dropped.items():
+            if key == MODULE_CARVE:
+                if out.get('carve_types'):
+                    out['carve_types'] = []
+                    skipped[key] = why
+            elif out.get(key):
+                out[key] = False
+                skipped[key] = why
+        return out, skipped
+
     def queue_choice(self, chosen, choice):
         """Queue what a modules choice selects, over the `chosen` evidence
-        rows, in the order the jobs depend on each other."""
-        self._last_choice = dict(choice)
+        rows -- each image its own choice when the dialog gave one
+        (`per_evidence`), and only what can find anything in it: the NTFS
+        job is not queued for a Btrfs disk."""
+        self._last_choice = {k: v for k, v in choice.items()
+                             if k != 'per_evidence'}
+        per = choice.get('per_evidence') or {}
+        groups, skipped_names = [], []
+        for row in chosen:
+            mine, skipped = self._applicable_choice(
+                row, per.get(row['id'], choice))
+            name = row.get('display_name') or os.path.basename(row['path'])
+            for key, why in skipped.items():
+                logger.info("Not running %s on %s: %s", key, name, why)
+            if skipped:
+                skipped_names.append(name)
+            for rows, group_choice in groups:
+                if group_choice == mine:
+                    rows.append(row)
+                    break
+            else:
+                groups.append(([row], mine))
+        for rows, group_choice in groups:
+            self._queue_one_choice(rows, group_choice)
+        if skipped_names:
+            self.set_status(
+                f"Modules that cannot find anything there were left out on "
+                f"{', '.join(skipped_names)} (see the log)")
+
+    def _queue_one_choice(self, chosen, choice):
+        """Queue one choice over rows, in the order the jobs depend on
+        each other."""
         if choice['modules']:
             self.queue_analysis(chosen, choice['modules'])
         if choice.get('index'):
@@ -6924,6 +6997,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         path = os.path.normpath(self.image_handler.image_path)
         self._bitlocker_keys.setdefault(path, {})[start] = dict(
             dialog.secret, _kind=kind)
+        # What the image holds is known now: profile it again.
+        self._evidence_profiles.pop(path, None)
         # The Registry tab searches the unlocked volume too.
         self._refresh_registry_evidence()
         if self.case is not None:
