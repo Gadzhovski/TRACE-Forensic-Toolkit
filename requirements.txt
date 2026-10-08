@@ -13,7 +13,11 @@
 
 # --- GUI -------------------------------------------------------------------
 # Addons supplies QtCharts, QtSvg, QtMultimedia and QtPrintSupport, all used.
-PySide6>=6.5.2
+# Not 6.12.0: its QTableWidgetItem.setTextAlignment releases a reference to
+# None on every call. Python 3.10 and 3.11 then abort ("none_dealloc:
+# deallocating None") a few pages into the hex view; 3.12+ make None immortal
+# and never notice. tests/test_hex.py guards against it coming back.
+PySide6>=6.5.2,!=6.12.0
 
 # --- Forensic image access -------------------------------------------------
 # Pre-built wheels for Windows (x64, x86, ARM64), macOS (Apple Silicon and

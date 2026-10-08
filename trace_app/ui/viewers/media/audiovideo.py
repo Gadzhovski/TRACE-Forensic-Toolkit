@@ -386,6 +386,12 @@ class AudioVideoPlayer(QWidget):
 
     def update_play_state(self, state):
         self._is_playing = (state == QMediaPlayer.PlayingState)
+        if getattr(self, '_shutting_down', False):
+            # safe_stop's stop() delivers this signal synchronously, with
+            # the FFmpeg backend mid-stop: redrawing the controls from
+            # inside it deadlocked (macOS CI, setIcon never returned), and
+            # a player being destroyed has no controls worth updating.
+            return
         self.update_controls()
         self._describe()
 

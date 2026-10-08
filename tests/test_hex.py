@@ -349,3 +349,27 @@ def test_the_ascii_column_fills_the_width_it_is_given(qapp, viewer):
     pump(qapp, 0.3)
     assert table.columnWidth(last) > fitted
     assert table.horizontalHeader().length() <= table.viewport().width()
+
+
+def test_the_qt_calls_each_hex_cell_makes_keep_none_alive(qapp):
+    """PySide6 6.12.0's QTableWidgetItem.setTextAlignment released a
+    reference to None on every call. The hex view makes it for every cell,
+    so on Python 3.10 and 3.11 None's count reached zero a few pages in and
+    the interpreter aborted -- CI's Linux 3.10 workers died four times. On
+    3.12+ None is immortal and its count never moves, so this only bites
+    (and only checks) where it can happen."""
+    import sys
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+    table = QTableWidget(1, 2)
+    font = QFont()
+    before = sys.getrefcount(None)
+    for _ in range(500):
+        cell = QTableWidgetItem('00')
+        cell.setTextAlignment(Qt.AlignCenter)
+        cell.setFont(font)
+        cell.setData(Qt.UserRole + 1, True)
+        table.setItem(0, 1, cell)
+    assert sys.getrefcount(None) > before - 50, \
+        "PySide6 is releasing references to None (see requirements.txt)"
