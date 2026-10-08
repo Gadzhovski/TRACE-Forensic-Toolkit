@@ -13,7 +13,11 @@
   (Fedora 41+), dnf's history.sqlite (Fedora, RHEL 8/9), apt's
   history.log (Debian, Ubuntu; local time with no zone, as apt writes
   it), each transaction one record with its command line and the
-  packages asked for.
+  packages asked for. dpkg.log too -- it alone sees a package installed
+  with `dpkg -i` from a downloaded .deb, which apt never hears of -- one
+  record per dpkg run (its 'startup' line), and yum.log (RHEL / CentOS
+  7, no year: the file's, stepped back where months run backwards).
+  Rotated copies (.1, .gz) included.
 * SSH: the hosts each user connected to (known_hosts; hashed host names
   stay hashed -- the key is still evidence) and the keys allowed to log in
   as them (authorized_keys).
@@ -268,6 +272,121 @@ def apt_history(text):
     return out
 
 
+_DPKG_LINE = re.compile(
+    r'^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (\S+) (.*)$')
+_DPKG_ACTIONS = {'install': 'installed', 'upgrade': 'upgraded',
+                 'remove': 'removed', 'purge': 'purged'}
+
+
+def dpkg_runs(text):
+    """[{start, command, installed, upgraded, removed, purged}] from
+    dpkg.log: one per dpkg run, which begins with a 'startup' line.
+    Times are local with no zone, as dpkg writes them."""
+    runs, current = [], None
+    for line in text.splitlines():
+        match = _DPKG_LINE.match(line)
+        if not match:
+            continue
+        stamp, action, rest = match.groups()
+        if action == 'startup' or current is None:
+            try:
+                start = datetime.datetime.strptime(stamp, _APT_TIME)
+            except ValueError:
+                start = None
+            current = {'start': start, 'command': rest
+                       if action == 'startup' else '',
+                       **{v: [] for v in _DPKG_ACTIONS.values()}}
+            runs.append(current)
+            if action == 'startup':
+                continue
+        kind = _DPKG_ACTIONS.get(action)
+        if kind:
+            # "pkg:amd64 1.0-1 1.0-2" / "pkg:amd64 <none> 1.0-1"
+            current[kind].append(rest.split()[0].split(':', 1)[0])
+    return [run for run in runs
+            if any(run[k] for k in _DPKG_ACTIONS.values())]
+
+
+_YUM_LINE = re.compile(r'^(\w{3}) +(\d{1,2}) (\d\d):(\d\d):(\d\d) '
+                       r'(Installed|Updated|Erased|Obsoleted): (\S+)')
+_MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep',
+           'Oct', 'Nov', 'Dec')
+
+
+def yum_log(text, year):
+    """[(when, action, package)] from yum.log, which records no year:
+    the newest line is in `year` (the file's), and the year steps back
+    each time the months run backwards going up the file. Local time."""
+    rows = [m.groups() for m in map(_YUM_LINE.match, text.splitlines())
+            if m]
+    out, current, later = [], year, None
+    for month, day, hour, minute, second, action, package in \
+            reversed(rows):
+        number = _MONTHS.index(month) + 1 if month in _MONTHS else None
+        if number is None:
+            continue
+        if later is not None and number > later:
+            current -= 1
+        later = number
+        try:
+            when = datetime.datetime(current, number, int(day), int(hour),
+                                     int(minute), int(second))
+        except ValueError:
+            when = None
+        out.append((when, action, package))
+    out.reverse()
+    return out
+
+
+def _package_logs(volume, step):
+    """dpkg.log and yum.log records, rotated copies included."""
+    from trace_app.core.activity.linux import log_bytes
+    out = []
+    log = volume.find('var', 'log')
+    for entry in volume.children(log):
+        name = entry.name.lower()
+        if entry.is_dir or not entry.size:
+            continue
+        if name.startswith('dpkg.log'):
+            step(entry.path)
+            for run in dpkg_runs(log_bytes(volume, entry).decode(
+                    'utf-8', 'replace')):
+                changed = run['installed'] + run['upgraded']
+                gone = run['removed'] + run['purged']
+                what = ('Software removed' if gone and not changed else
+                        'Software installed' if run['installed'] else
+                        'Software changed')
+                out.append(record(
+                    'system', 'dpkg log', run['start'], what,
+                    ', '.join((run['installed'] or gone or
+                               run['upgraded'])[:20]),
+                    {'command': run['command'],
+                     'installed': len(run['installed']) or None,
+                     'upgraded': len(run['upgraded']) or None,
+                     'removed': len(gone) or None,
+                     'packages': ', '.join(run['installed'] + gone +
+                                           run['upgraded']) or None},
+                    path=entry.path, ref=volume.ref(entry), local=True))
+        elif name.startswith('yum.log'):
+            step(entry.path)
+            year = (entry.modified or
+                    datetime.datetime.now(times.UTC)).year
+            for when, action, package in yum_log(
+                    log_bytes(volume, entry).decode('utf-8', 'replace'),
+                    year):
+                what = {'Installed': 'Software installed',
+                        'Updated': 'Software changed'}.get(
+                            action, 'Software removed')
+                out.append(record(
+                    'system', 'yum log', when, what, package,
+                    {'action': action.lower(),
+                     'basis': "yum.log has no year: taken from the file's "
+                              "last change, stepped back where months run "
+                              "backwards"},
+                    path=entry.path, ref=volume.ref(entry), local=True))
+    return out
+
+
 def _apt_packages(value):
     # "pkg:amd64 (1.2-3), other:amd64 (4.5, automatic)"
     return [p.split(':', 1)[0].strip()
@@ -422,6 +541,7 @@ def collect(volume, step, homes):
     out = system_facts(volume, step)
     out += account_activity(volume, step)
     out += software_activity(volume, step)
+    out += _package_logs(volume, step)
     for user, home in homes:
         out += ssh_activity(volume, user, home, step)
     return out
