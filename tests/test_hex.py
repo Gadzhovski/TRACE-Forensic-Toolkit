@@ -172,6 +172,32 @@ def test_each_search_kind_selects_exactly_its_bytes(qapp, viewer):
                - left) <= 1
 
 
+def test_search_results_are_shown_on_the_gui_thread(qapp, viewer):
+    """The search runs on a worker moved to a QThread. Its result used
+    to reach the viewer through a lambda, which PySide runs in the
+    *sender's* thread -- so the results table and the hex page were
+    filled from the worker while the GUI thread painted them, and macOS
+    Intel CI crashed (segfault in QTableWidgetItem::data). Where the
+    result is handled is checked directly: not only when the race hits."""
+    from PySide6.QtCore import QThread
+    viewer.display_hex_content(DATA)
+    threads = []
+    original = viewer.handle_search_results
+
+    def recording(matches, length):
+        threads.append(QThread.currentThread())
+        original(matches, length)
+    viewer.handle_search_results = recording
+    for kind, text in (('text', 'exif'), ('hex', 'FF D8'),
+                       ('utf16', 'SECRET')):
+        viewer.search_kind.setCurrentIndex(viewer.search_kind.findData(kind))
+        viewer.search_bar.setText(text)
+        viewer.trigger_search()
+        count = len(threads)
+        assert pump(qapp, 5, lambda: len(threads) > count)
+    assert threads and all(t == qapp.thread() for t in threads)
+
+
 def test_inspector_status_and_layout_follow_the_cursor(qapp, viewer):
     data = bytearray(64)
     data[16:20] = (1_600_000_000).to_bytes(4, 'little')

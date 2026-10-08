@@ -27,7 +27,7 @@ import bisect
 import logging
 
 from PySide6.QtCore import (QEvent, QObject, QRect, QSize, Qt, QThread,
-                            QTimer, Signal)
+                            QTimer, Signal, Slot)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont,
                            QFontMetrics, QKeySequence, QPalette,
                            QResizeEvent, QShortcut)
@@ -120,13 +120,19 @@ def printable(data):
 
 
 class _SearchWorker(QObject):
-    finished = Signal(list, int)
+    """Searches on a QThread it is moved to. `finished` carries the
+    matches, the needle's length and the search's generation, and must be
+    connected to bound methods of GUI objects only: a lambda or partial
+    connected to it runs in *this* object's thread, the worker's (the
+    results table was once filled from here and crashed)."""
+    finished = Signal(list, int, int)
 
-    def __init__(self, source, query_bytes, fold):
+    def __init__(self, source, query_bytes, fold, generation=0):
         super().__init__()
         self.source = source
         self.query_bytes = query_bytes
         self.fold = fold
+        self.generation = generation
         self.stopped = False
 
     def run(self):
@@ -138,7 +144,8 @@ class _SearchWorker(QObject):
             logger.warning("Hex search failed: %s", exc)
             matches = []
         if not self.stopped:
-            self.finished.emit(matches, len(self.query_bytes))
+            self.finished.emit(matches, len(self.query_bytes),
+                               self.generation)
 
 
 #: The theme's selection colour, for the ASCII characters of selected
@@ -1356,27 +1363,33 @@ class HexViewer(QWidget):
             return
         self._set_result_count(None, searching=True)
         thread = QThread(self)
+        self._search_generation += 1
         worker = _SearchWorker(reader, query_bytes,
-                               fold=kind in (SEARCH_TEXT, SEARCH_UTF16))
+                               fold=kind in (SEARCH_TEXT, SEARCH_UTF16),
+                               generation=self._search_generation)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        self._search_generation += 1
-        worker.finished.connect(
-            lambda found, length, g=self._search_generation:
-            self._search_finished(g, found, length))
+        # Bound methods of this (GUI) widget, never lambdas: Qt queues
+        # them to the GUI thread, where widgets may be touched.
+        worker.finished.connect(self._search_finished)
         worker.finished.connect(thread.quit)
+        # Before the deleteLaters, so it is posted first and sender() is
+        # still the thread when it runs.
+        thread.finished.connect(self._search_done)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda t=thread: self._search_done(t))
         self._search_thread, self._search_worker = thread, worker
         thread.start()
 
-    def _search_finished(self, generation, matches, length):
+    @Slot(list, int, int)
+    def _search_finished(self, matches, length, generation):
         if generation == self._search_generation:
             self.handle_search_results(matches, length)
 
-    def _search_done(self, thread):
-        if self._search_thread is thread:
+    @Slot()
+    def _search_done(self):
+        if self._search_thread is not None and \
+                self._search_thread is self.sender():
             self._search_thread = self._search_worker = None
 
     def _stop_search(self):
