@@ -248,8 +248,19 @@ class ImageHandler:
                              start_offset)
                 return allocation_map
 
-            block_size = fs_info.info.block_size
             partition_offset = start_offset * self.sector_size
+            from trace_app.core.libyal_fs import is_libyal
+            if is_libyal(fs_info):
+                # XFS (extents of live files) and Btrfs (its extent tree):
+                # no TSK runs to walk.
+                allocation_map = self._merge_ranges(
+                    [(partition_offset + b, partition_offset + e)
+                     for b, e in fs_info.allocated_ranges()])
+                logger.info("Allocation map: %d regions covering %.1f MB",
+                            len(allocation_map),
+                            sum(e - b for b, e in allocation_map) / 1048576)
+                return allocation_map
+            block_size = fs_info.info.block_size
             visited = set()
 
             def record_runs(file_obj):
@@ -323,6 +334,46 @@ class ImageHandler:
             logger.error(f"Error building allocation map: {e}")
 
         return allocation_map
+
+    #: Volumes whose free space TRACE cannot tell from used space: their
+    #: data is not where the partition's bytes are (LVM maps extents,
+    #: LUKS and FileVault encrypt them).
+    _UNMAPPED_KINDS = {'lvm': 'an LVM volume group', 'luks': 'a LUKS volume',
+                       'fvde': 'a FileVault volume'}
+
+    def partition_allocation(self, start_sector):
+        """(allocated byte ranges, note) for carving one partition. The
+        note says why a whole partition counts as used: carving it as
+        "unallocated" would report live files as deleted ones."""
+        kind = self.volume_kind(start_sector)
+        if kind == 'apfs':
+            base, length = self.partition_bytes(start_sector)
+            volumes = self.apfs_volumes(start_sector)
+            if not volumes or any(v['locked'] for v in volumes):
+                return [(base, base + length)], (
+                    f"the APFS container at sector {start_sector} is skipped: "
+                    f"its free space cannot be told from a locked volume's "
+                    f"files")
+            ranges = []
+            for volume in volumes:
+                fs = self.get_fs_info(volume['key'])
+                if fs is None:
+                    return [(base, base + length)], (
+                        f"the APFS container at sector {start_sector} is "
+                        f"skipped: a volume could not be read")
+                # Extents are container offsets.
+                ranges += [(base + b, base + e)
+                           for b, e in fs.allocated_ranges()]
+            return self._merge_ranges(ranges), None
+        if kind in self._UNMAPPED_KINDS:
+            base, length = self.partition_bytes(start_sector)
+            return [(base, base + length)], (
+                f"sector {start_sector} holds {self._UNMAPPED_KINDS[kind]}: "
+                f"its free space cannot be told from used space, so it is "
+                f"skipped -- carve the whole image to read it")
+        if self.has_filesystem(start_sector):
+            return self.build_allocation_map(start_sector), None
+        return [], None
 
     @staticmethod
     def _merge_ranges(ranges):

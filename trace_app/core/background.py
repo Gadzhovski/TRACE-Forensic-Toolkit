@@ -66,6 +66,9 @@ def child_main(kind, params, queue, stop):
     root = logging.getLogger()
     root.handlers[:] = [logging.handlers.QueueHandler(_LogChannel(queue))]
     root.setLevel(logging.INFO)
+    # A crash in C here would end the job with only an exit code.
+    from trace_app.infra import crash_log
+    crash_log.enable()
 
     last = [0.0]
 

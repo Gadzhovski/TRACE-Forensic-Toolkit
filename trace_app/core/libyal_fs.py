@@ -229,6 +229,42 @@ class LibyalFileSystem:
             raise IOError(f"No such file: {path}")
         return LibyalFile(self, entry)
 
+    #: libyal's extent flag for a range that is not stored (sparse).
+    SPARSE_EXTENT = 0x00000001
+
+    @holding_libyal
+    def allocated_ranges(self):
+        """(begin, end) byte ranges, relative to where the library reads
+        from, that live files' data occupies -- what carving must not call
+        free space. The entries carry no TSK runs, so carving's map used to
+        come back empty and live files were carved as if deleted."""
+        out = []
+        seen = set()
+        pending = [self.volume.get_root_directory()]
+        while pending:
+            entry = pending.pop()
+            identifier = self.identifier(entry)
+            if identifier in seen:
+                continue
+            seen.add(identifier)
+            try:
+                for index in range(entry.number_of_extents):
+                    offset, size, flags = entry.get_extent(index)
+                    if size and not flags & self.SPARSE_EXTENT:
+                        out.append((offset, offset + size))
+            except (OSError, IOError, AttributeError):
+                pass
+            try:
+                count = entry.number_of_sub_file_entries
+            except (OSError, IOError, AttributeError):
+                count = 0
+            for index in range(count):
+                try:
+                    pending.append(entry.get_sub_file_entry(index))
+                except (OSError, IOError) as exc:
+                    logger.debug("%s entry unreadable: %s", self.KIND, exc)
+        return out
+
 
 def is_libyal(fs):
     return isinstance(fs, LibyalFileSystem)
