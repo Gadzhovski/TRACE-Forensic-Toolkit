@@ -31,6 +31,9 @@ SHA-256 before it is kept:
   XML it was written from
 * logical evidence: AD1 images (pyad1, dissect.evidence) and EnCase L01
   files (ggeng2/Logical_Image_DataSet)
+* macOS Background Task Management files: hewigovens/BTMParser's
+  BackgroundItems-v13.btm and puffyCid/macos-loginitems' (MIT) v4 and
+  pre-Ventura backgrounditems.btm, one with PoisonApple's login item
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -88,6 +91,12 @@ _REGIPY = ('https://raw.githubusercontent.com/mkorman90/regipy/'
 
 _ATTACK = ('https://raw.githubusercontent.com/sbousseaden/'
            'EVTX-ATTACK-SAMPLES/4ceed2f4706daf601c212a8f91c113dd85349a2c/')
+
+_BTMPARSER = ('https://raw.githubusercontent.com/hewigovens/BTMParser/'
+              '14d5a6ed816a11d674d965061e48df12f1d5328a/Tests/'
+              'BTMParserTests/Resources/')
+_LOGINITEMS = ('https://raw.githubusercontent.com/puffyCid/macos-loginitems/'
+               '75658db42a9adab87e9be6ef7d0e30d91d35fa7d/tests/test_data/')
 
 #: local name -> (URL, SHA-256)
 SAMPLES = {
@@ -487,6 +496,19 @@ SAMPLES = {
     'hfsplus.sparseimage': (
         _DFVFS + 'hfsplus.sparseimage',
         'f36c72c0571b2a9be9174ea2c12007808e1dbbee932652b1eb530f8536d01814'),
+    # macOS Background Task Management (activity/btm.py).
+    'BackgroundItems-v13.btm': (
+        _BTMPARSER + 'BackgroundItems-v13.btm',
+        'a7d58d9f15c9bb876e0f64a3b7010f7b5349fdcc5f829b869d4c4b8f19b7d022'),
+    'BackgroundItems-v4.btm': (
+        _LOGINITEMS + 'BackgroundItems-v4.btm',
+        '5ed2ea43f0f7877a5fa568ee854379e8749a82d41e865362da2239ee15d04792'),
+    'backgrounditems_sierra.btm': (
+        _LOGINITEMS + 'backgrounditems_sierra.btm',
+        '8056ff7c70430866c5311c86def1cc9c10d46aa3881ac3cd43e7cd52ca6d22a6'),
+    'backgrounditemsPoisonApple.btm': (
+        _LOGINITEMS + 'backgrounditemsPoisonApple.btm',
+        '270395bc9ad1f262194da0ebd35682072f09ab4ec79ecbe0f31335c114ad8639'),
     # Dirty hives with their transaction logs (regipy's test data, MIT;
     # xz-compressed, read in memory by the tests).
     'regipy-transactions_NTUSER.DAT.xz': (
