@@ -55,7 +55,7 @@ def test_simple_and_spanned_volumes():
 
 
 def test_striped_raid5_and_a_missing_disk():
-    from tests.test_hwraid import stripe
+    from tests.disk_builders import stripe
     from trace_app.core import ldm
     rng = random.Random(5)
     data = bytes(rng.getrandbits(8) for _ in range(CHUNK * 24))

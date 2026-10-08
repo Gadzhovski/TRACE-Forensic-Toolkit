@@ -159,6 +159,8 @@ class _HandlerOpener(QThread):
                 handler.encryption(start)
                 if handler.get_fs_info(start) is not None:
                     handler.get_directory_contents(start, None)
+            # Searched here, off the UI thread: the tree shows them.
+            handler.lost_partitions()
         except Exception as exc:
             logger.debug("Warming %s: %s", handler.image_path, exc)
 
@@ -6859,6 +6861,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                       self.db_manager.get_icon_path('file', 'unknown'),
                                       {"is_unallocated": True, "start_offset": 0,
                                        "end_offset": size_in_bytes // self.image_handler.sector_size})
+                self._add_lost_partition_nodes(root_item_tree)
             return
 
         sector_size = self.image_handler.sector_size
@@ -6945,6 +6948,43 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 else:
                     item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
                 self._add_shadow_copy_nodes(root_item_tree, start, label)
+        self._add_lost_partition_nodes(root_item_tree)
+
+    def _add_lost_partition_nodes(self, parent):
+        """A node per file system no partition table entry points at
+        (ImageHandler.lost_partitions): a wiped table, a broken extended
+        chain, a deleted GPT entry. Browsed like any volume."""
+        try:
+            lost = self.image_handler.lost_partitions()
+        except Exception as exc:
+            logger.warning("Lost partition scan failed: %s", exc)
+            return
+        for partition in lost:
+            start = partition['start']
+            size = self.image_handler.get_readable_size(partition['size'])
+            text = f"Lost partition @ {start} ({partition['fs']}, {size})"
+            if partition.get('overlaps') is not None:
+                text += f" -- inside the one @ {partition['overlaps']}"
+            item = self.create_tree_item(
+                parent, text,
+                self.db_manager.get_icon_path('device', 'drive-harddisk'),
+                {"inode_number": None, "start_offset": start,
+                 "is_lost_partition": True,
+                 "volume_label": f"Lost partition @ {start}"})
+            item.setToolTip(0, (
+                f"{'An' if partition['fs'][:1] in 'AEIOUN' else 'A'} "
+                f"{partition['fs']} file system at sector {start:,} that "
+                f"no partition table entry points at -- the table was "
+                f"wiped or rewritten, or the entry deleted. It opens and "
+                f"is read like any volume."
+                + (f" It lies inside the lost partition at sector "
+                   f"{partition['overlaps']:,}: an older partition partly "
+                   f"written over by a newer one."
+                   if partition.get('overlaps') is not None else '')))
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ShowIndicator
+                if self.image_handler.check_partition_contents(start)
+                else QTreeWidgetItem.DontShowIndicator)
 
     # --- volumes inside partitions ---------------------------------------
 

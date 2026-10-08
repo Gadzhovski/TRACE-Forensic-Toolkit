@@ -1317,6 +1317,10 @@ def allocation_map(image_handler):
         # GPT headers too (offsets 0, 1, 2, 34...), several at one offset:
         # only file systems have allocations, each mapped once.
         offsets = sorted({p[2] for p in partitions}) if partitions else [0]
+        # A file system no table points at holds live files too.
+        if hasattr(image_handler, 'lost_partitions'):
+            offsets = sorted(set(offsets) | {
+                lost['start'] for lost in image_handler.lost_partitions()})
         for start in offsets:
             allocated, note = image_handler.partition_allocation(start)
             if note:

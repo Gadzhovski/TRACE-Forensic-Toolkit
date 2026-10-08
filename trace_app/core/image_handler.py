@@ -1288,7 +1288,12 @@ class ImageHandler:
                     logger.debug("GPT entries not read: %s", exc)
         if description is None:
             description = next((d for _a, d, s, _l in self.get_partitions()
-                                if s == start_sector), b'')
+                                if s == start_sector), None)
+            if description is None and any(
+                    lost['start'] == start_sector
+                    for lost in self.lost_partitions()):
+                return f"Lost partition @ {start_sector}"
+            description = description or b''
         return partition_names.label(description, start_sector,
                                      self._gpt_entries)
 
@@ -1517,6 +1522,49 @@ class ImageHandler:
             except Exception:
                 self._kinds[key] = None
         return self._kinds[key]
+
+    # --- partitions no table points at (core/lost_partitions.py) -----------
+
+    def lost_partitions(self):
+        """File systems found where no partition table entry points:
+        [{'start', 'fs', 'size'}], start in sectors -- a wiped table, a
+        broken extended chain, a deleted GPT entry. Searched once, outside
+        the partitions the table lists (an extended container is searched:
+        its logical partitions are what goes missing)."""
+        if hasattr(self, '_lost'):
+            return self._lost
+        self._lost = []
+        if self.logical_fs is not None or self.img_info is None:
+            return self._lost
+        from trace_app.core import lost_partitions, partition_names
+        partitions = self.get_partitions()
+        if not partitions and self.get_fs_info(0) is not None:
+            return self._lost                     # a volume image
+        known = []
+        for _addr, desc, start, length in partitions:
+            text = desc.decode('utf-8', 'replace') if isinstance(
+                desc, bytes) else str(desc)
+            if partition_names.bookkeeping(text) is not None or \
+                    'Extended' in text:
+                continue
+            known.append((start, length))
+
+        def opens(start):
+            try:
+                fs = pytsk3.FS_Info(self.img_info,
+                                    offset=start * self.sector_size)
+            except IOError:
+                return None
+            self.fs_info_cache.setdefault(start, fs)
+            return (self.get_fs_type(start),
+                    fs.info.block_count * fs.info.block_size)
+        try:
+            self._lost = lost_partitions.scan(
+                self.read, self.get_size() // self.sector_size, known,
+                opens)
+        except Exception as exc:
+            logger.warning("Lost partition scan failed: %s", exc)
+        return self._lost
 
     # --- Windows dynamic disks (core/ldm.py) -------------------------------
 
@@ -1808,6 +1856,8 @@ class ImageHandler:
         only). What analysis, indexing, activity and NTFS walk."""
         partitions = self.get_partitions()
         starts = [p[2] for p in partitions] if partitions else [0]
+        # File systems no partition table points at: read like the others.
+        starts += [lost['start'] for lost in self.lost_partitions()]
         out = []
         for start in dict.fromkeys(starts):
             kind = self.volume_kind(start)
