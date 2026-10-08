@@ -23,7 +23,10 @@ logger = logging.getLogger('TRACE.EvidenceProfile')
 #: File systems The Sleuth Kit reads, whose deleted entries it lists.
 _TSK_FILE_SYSTEMS = ('NTFS', 'FAT12', 'FAT16', 'FAT32', 'ExFAT', 'Ext2',
                      'Ext3', 'Ext4', 'HFS', 'HFS+', 'HFSX', 'ISO9660',
-                     'UFS1', 'UFS2', 'YAFFS2')
+                     'UFS1', 'UFS2', 'YAFFS2',
+                     # Not TSK: its deleted files come from the older
+                     # leaves copy-on-write leaves (core/btrfs_recover).
+                     'Btrfs')
 
 
 def profile(image_handler):

@@ -529,3 +529,118 @@ def test_identifiers_read_as_inode_and_subvolume():
         assert '(subvolume 256)' in handler.inode_label(0, inner)
     finally:
         handler.close_resources()
+
+
+# --- deleted files ---------------------------------------------------------
+
+DELETED = 'btrfs-deleted.raw'
+
+
+def _deleted_key():
+    import json
+    with open(image_path(DELETED) + '.json', encoding='utf-8') as handle:
+        return json.load(handle)
+
+
+def test_deleted_files_come_back_byte_for_byte(tmp_path):
+    """A volume the Linux kernel itself wrote and deleted files on
+    (tools/make_btrfs_deleted.py): plain, inline, zstd-compressed and
+    no-checksum files, a deleted folder and a deleted subvolume all come
+    back with the bytes the answer key records -- read the way the window
+    reads them, by reference through a fresh handler."""
+    import hashlib
+    from trace_app.core import deleted
+    from trace_app.core.case import Case, parse_artifact_ref
+    from trace_app.core.image_handler import ImageHandler
+    key = _deleted_key()
+    path = image_path(DELETED)
+    case = Case.create(str(tmp_path / 'case'), 'btrfs deleted')
+    handler = handler_for(DELETED)
+    try:
+        evidence_id = case.add_evidence(path)
+        deleted.analyse_evidence(handler, case, evidence_id)
+        rows = [dict(r) for r in case._db.execute(
+            "SELECT * FROM deleted_files WHERE evidence_id = ?",
+            (evidence_id,))]
+    finally:
+        case.close()
+        handler.close_resources()
+    by_name = {r['path'].rsplit('/', 1)[-1]: r for r in rows}
+    reader = ImageHandler(path)
+    try:
+        for want in key['deleted']:
+            row = by_name.get(want['path'].rsplit('/', 1)[-1])
+            assert row is not None or want.get('optional'), want['path']
+            if row is None:
+                continue
+            ref = parse_artifact_ref(row['artifact_ref'])
+            data, _meta = reader.get_file_content(ref['inode'],
+                                                  ref['start_offset'])
+            same = hashlib.sha256(data or b'').hexdigest() == want['sha256']
+            if want.get('overwritten'):
+                # Its space was filled after it was deleted: never called
+                # recoverable, and its checksums say so.
+                assert row['state'] == deleted.OVERWRITTEN, row
+                assert not same
+            else:
+                assert same, (want['path'], row['state'])
+                assert row['state'] in (deleted.RECOVERABLE,
+                                        deleted.RESIDENT), row
+                assert row['size'] == want['size']
+        # Where each one was, from the names its leaves recorded.
+        assert by_name['a.txt']['path'] == '/project/a.txt'
+        assert by_name['project']['is_dir']
+        assert by_name['note.txt']['state'] == deleted.RESIDENT  # inline
+        assert by_name['secret.txt']['path'].startswith(
+            '/[deleted subvolume ')
+        # Nothing live is listed as deleted.
+        assert not {'keep.txt', 'filler.bin'} & set(by_name)
+    finally:
+        reader.close_resources()
+
+
+def test_a_recovered_file_is_marked_deleted():
+    """Opened by its reference, a recovered file reads as deleted, as a
+    TSK file system's deleted entry does."""
+    import pytsk3
+    handler = handler_for(DELETED)
+    try:
+        fs = handler.get_fs_info(0)
+        scan = fs.deleted_scan()
+        report = next(f for f in scan.found.values()
+                      if f.name()[1] == b'report.bin')
+        from trace_app.core import btrfs
+        handle = fs.open_meta(btrfs.identifier(report.tree, report.inode))
+        assert not int(handle.info.meta.flags) & \
+            pytsk3.TSK_FS_META_FLAG_ALLOC
+        assert handle.info.name.name == b'report.bin'
+        assert handle.read_random(0, 16) == \
+            __import__('hashlib').sha256(b'report:0').digest()[:16]
+    finally:
+        handler.close_resources()
+
+
+def test_a_checksum_written_after_deletion_proves_nothing():
+    """Once a deleted file's space holds new data, the newest checksum of
+    each sector is the new data's -- and matches. Only the sum recorded
+    while the file owned the sector proves it intact."""
+    from trace_app.core import btrfs_recover
+
+    class Volume:
+        sector_size = 4096
+        csum_type = 0
+        node_size = 16384
+        _chunks = []
+
+        @staticmethod
+        def read(logical, length):
+            return b'NEW' * 2000 if logical == 0 else b''
+    scan = btrfs_recover.DeletedScan.__new__(btrfs_recover.DeletedScan)
+    scan.volume = Volume
+    scan.csum_size = 4
+    old = btrfs_recover.checksum(0, b'OLD' * 2000 + b'\0' * 96)
+    new = btrfs_recover.checksum(0, (b'NEW' * 2000)[:4096])
+    scan.sums = {0: {5: old, 9: new}}
+    assert scan._sum_for(0, deleted_in=6) == old      # the file's own
+    assert scan._sum_for(0, deleted_in=4) is None     # none of its time
+    assert scan._sum_for(0, deleted_in=12) == new

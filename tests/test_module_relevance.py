@@ -37,7 +37,7 @@ def _profile(path):
 def test_what_each_image_rules_out():
     found, ruled_out = _profile(image_path(BTRFS))
     assert found['filesystems'] == ['Btrfs'] and not found['unreadable']
-    assert set(ruled_out) == {'ntfs', 'deleted', 'persistence'}
+    assert set(ruled_out) == {'ntfs', 'persistence'}   # deleted: leaves
     assert 'No NTFS volume' in ruled_out['ntfs']
 
     found, ruled_out = _profile(image_path(NTFS))
@@ -128,7 +128,7 @@ def test_the_queue_runs_on_each_image_only_what_applies(qapp):
         window.queue_choice(window.case.evidence(), choice)
         assert calls['queue_ntfs'] == [NTFS]
         assert calls['queue_fs_times'] == [BTRFS]
-        assert calls['queue_deleted'] == [NTFS]
+        assert sorted(calls['queue_deleted']) == sorted([BTRFS, NTFS])
         assert 'queue_persistence' not in calls     # neither has a system
         assert sorted(calls['queue_activity']) == sorted([BTRFS, NTFS])
     finally:

@@ -144,6 +144,7 @@ publish.
 | `btrfs-compression.raw` | zlib, LZO and zstd files, as extents and inline | dissect.btrfs |
 | `btrfs-sparse.raw` | Holes at the start, middle and end; a snapshot's partly rewritten copies | dissect.btrfs |
 | `btrfs-raid1-1.raw` | One disk of a two-disk RAID1, read alone | dissect.btrfs |
+| `btrfs-deleted.raw` (+ `.json` answer key) | **Built, not downloaded**: `tools/make_btrfs_deleted.py` has the Linux kernel write and delete known files (plain, inline, zstd, no-checksum, a folder, a subvolume; one overwritten for certain). CI builds it on Ubuntu; elsewhere run the script in a privileged Linux container (its docstring) | Deleted-file recovery: every file back byte for byte, the overwritten one never called recoverable |
 | `Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2` | **Local only** (583 MB). A real Fedora 44 install: GPT, EFI FAT16, a Btrfs root with root/boot/home/var subvolumes, zstd throughout, in a compressed QCOW2 | [Fedora](https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/) (SHA-256 as Fedora's CHECKSUM file publishes it) |
 
 What the Fedora image established:

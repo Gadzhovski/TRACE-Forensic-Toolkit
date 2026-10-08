@@ -299,6 +299,8 @@ class BtrfsVolume:
         (self.sector_size, self.node_size, _leaf, _stripe,
          array_size) = struct.unpack_from('<IIIII', sb, 0x90)
         self.incompat = struct.unpack_from('<Q', sb, 0xbc)[0]
+        #: crc32c 0, xxhash64 1, sha256 2, blake2b 3 (core/btrfs_recover).
+        self.csum_type = struct.unpack_from('<H', sb, 0xc4)[0]
         self.devid = struct.unpack_from('<Q', sb, 0xc9)[0]
         self.label = sb[0x12b:0x22b].split(b'\0', 1)[0].decode(
             'utf-8', 'replace')
@@ -627,7 +629,8 @@ class BtrfsVolume:
 class BtrfsEntry:
     """A file or directory, answering what libyal_fs asks a file entry."""
 
-    def __init__(self, volume, tree, inode, name='', parent=0, empty=False):
+    def __init__(self, volume, tree, inode, name='', parent=0, empty=False,
+                 recovered=None):
         self._volume = volume
         self.tree = tree
         self.inode_number = inode
@@ -637,7 +640,15 @@ class BtrfsEntry:
         self._children = None
         self._extents = None
         self._cached = (None, None, b'')
-        meta = None if empty else volume.inode(tree, inode)
+        #: A deleted file, read from the leaves it survives in
+        #: (core/btrfs_recover.py): its inode and extents as they were.
+        self.deleted = recovered is not None
+        if recovered is not None:
+            meta = recovered.meta
+            self._extents = sorted(recovered.extents.values())
+            self._children = []
+        else:
+            meta = None if empty else volume.inode(tree, inode)
         if meta is None:
             # A snapshot's placeholder for a nested subvolume.
             self._meta = None
@@ -813,7 +824,19 @@ class BtrfsFileSystem(LibyalFileSystem):
         return identifier(FS_TREE, ROOT_DIR)
 
     def _by_identifier(self, value):
-        return self.volume.entry(value)
+        entry = self.volume.entry(value)
+        if entry is None:
+            # Not in the live trees: a deleted file, read from the leaves
+            # it survives in (scanned once per volume, then kept).
+            entry = self.deleted_scan().entry(value)
+        return entry
+
+    def deleted_scan(self, should_stop=None):
+        """core/btrfs_recover's scan of this volume, made once."""
+        if getattr(self, '_deleted', None) is None:
+            from trace_app.core.btrfs_recover import DeletedScan
+            self._deleted = DeletedScan(self.btrfs, should_stop)
+        return self._deleted
 
     def allocated_ranges(self):
         """Every extent the extent tree records, on this device (not the

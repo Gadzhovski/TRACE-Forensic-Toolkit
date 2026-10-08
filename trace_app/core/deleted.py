@@ -131,6 +131,12 @@ def deleted_files(image_handler, allocated=None, should_stop=None):
         fs = image_handler.get_fs_info(offset)
         if fs is None:
             continue
+        from trace_app.core.btrfs import is_btrfs
+        if is_btrfs(fs):
+            # No deleted names in a Btrfs directory: the files survive in
+            # the older leaves copy-on-write leaves (core/btrfs_recover).
+            yield from fs.deleted_scan(should_stop).records(offset, base)
+            continue
         block_size = fs.info.block_size
         seen_dirs, seen_files = set(), set()
 
