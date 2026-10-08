@@ -6867,45 +6867,58 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             size_in_bytes = length * sector_size
             readable_size = self.image_handler.get_readable_size(size_in_bytes)
             desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+            # A name as forensic tools give it -- 'EFI System Partition @
+            # 2048', 'GPT Header' -- not the table's slot number; where it
+            # is and what The Sleuth Kit called it go in the tooltip.
+            label = self.image_handler.partition_label(start, desc)
+            where = (f"{desc_str} -- sectors {start:,}-{end:,} "
+                     f"({length:,} sectors), table slot {addr}")
             kind = self.image_handler.volume_kind(start)
             if self.image_handler.encryption(start):
                 self._add_bitlocker_node(
-                    root_item_tree, start, f"vol{addr}", size_in_bytes,
-                    f"{desc_str}: {start}-{end}", end)
+                    root_item_tree, start, label, size_in_bytes, '', end)
                 continue
             if kind in ('lvm', 'apfs'):
                 group = QTreeWidgetItem(root_item_tree)
-                group.setText(0, f"vol{addr} ({desc_str}: {start}-{end}, "
-                                 f"Size: {readable_size}, "
-                                 f"{'LVM volume group' if kind == 'lvm' else 'APFS container'})")
+                group.setText(0, f"{label} ({'LVM volume group' if kind == 'lvm' else 'APFS container'}, "
+                                 f"{readable_size})")
+                group.setToolTip(0, where)
                 group.setIcon(0, QIcon(self.db_manager.get_icon_path(
                     'device', 'drive-harddisk')))
                 group.setData(0, Qt.UserRole, {
                     "inode_number": None, "start_offset": start,
                     "end_offset": end, "is_volume_group": True})
                 (self._add_lvm_nodes if kind == 'lvm' else
-                 self._add_apfs_nodes)(group, start, f"vol{addr}")
+                 self._add_apfs_nodes)(group, start, label)
                 group.setExpanded(True)
                 continue
             layers = self.image_handler.fs_layers(start)
             if layers:
                 group = QTreeWidgetItem(root_item_tree)
-                group.setText(0, f"vol{addr} ({desc_str}: {start}-{end}, "
-                                 f"Size: {readable_size}, "
-                                 f"{len(layers)} file systems layered)")
+                group.setText(0, f"{label} ({len(layers)} file systems "
+                                 f"layered, {readable_size})")
                 group.setIcon(0, QIcon(self.db_manager.get_icon_path(
                     'device', 'drive-harddisk')))
                 group.setData(0, Qt.UserRole, {
                     "inode_number": None, "start_offset": start,
                     "end_offset": end, "is_volume_group": True})
-                self._add_layer_nodes(group, start, f"vol{addr}")
+                self._add_layer_nodes(group, start, label)
+                group.setToolTip(0, f"{where}\n{group.toolTip(0)}")
                 group.setExpanded(True)
                 continue
             fs_type = self.image_handler.get_fs_type(start)
-            item_text = f"vol{addr} ({desc_str}: {start}-{end}, Size: {readable_size}, FS: {fs_type})"
+            from trace_app.core.partition_names import bookkeeping
+            if bookkeeping(desc_str or '') is not None:
+                item_text = f"{label} ({readable_size})"
+            else:
+                item_text = f"{label} ({fs_type}, {readable_size})" \
+                    if fs_type and fs_type != 'N/A' else \
+                    f"{label} ({readable_size})"
             icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
-            data = {"inode_number": None, "start_offset": start, "end_offset": end}
+            data = {"inode_number": None, "start_offset": start,
+                    "end_offset": end, "volume_label": label}
             item = self.create_tree_item(root_item_tree, item_text, icon_path, data)
+            item.setToolTip(0, where)
 
             # Determine if the partition is special or contains unallocated space
             special_partitions = ["Primary Table", "Safety Table", "GPT Header"]
@@ -6925,8 +6938,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
                 else:
                     item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
-                self._add_shadow_copy_nodes(root_item_tree, start,
-                                            f"vol{addr}")
+                self._add_shadow_copy_nodes(root_item_tree, start, label)
 
     # --- volumes inside partitions ---------------------------------------
 
@@ -7863,8 +7875,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     logger.warning("Could not read block size at offset %s: %s", start, e)
                     block_size = "N/A"
 
-                # Volume name
-                volume_name = f"vol{addr}"
+                # Volume name, as the tree gives it
+                volume_name = self.image_handler.partition_label(start,
+                                                                 desc)
                 name_item = QTableWidgetItem(volume_name)
                 icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
                 name_item.setIcon(QIcon(icon_path))

@@ -1267,6 +1267,26 @@ class ImageHandler:
         """Retrieve partitions from the loaded image, or indicate unpartitioned space."""
         return self.partitions
 
+    def partition_label(self, start_sector, description=None):
+        """What the examiner sees for the slot at `start_sector`: 'EFI
+        System Partition @ 2048', 'Linux Filesystem @ 4198400', 'GPT
+        Header' (core/partition_names.py). The GPT's own entries -- type
+        and name -- are read once."""
+        from trace_app.core import partition_names
+        if not hasattr(self, '_gpt_entries'):
+            self._gpt_entries = {}
+            if self.img_info is not None and self.logical_fs is None:
+                try:
+                    self._gpt_entries = partition_names.gpt_entries(
+                        self.read, self.sector_size)
+                except Exception as exc:
+                    logger.debug("GPT entries not read: %s", exc)
+        if description is None:
+            description = next((d for _a, d, s, _l in self.get_partitions()
+                                if s == start_sector), b'')
+        return partition_names.label(description, start_sector,
+                                     self._gpt_entries)
+
     def _get_partitions(self):
         """Internal method to actually retrieve partitions."""
         partitions = []

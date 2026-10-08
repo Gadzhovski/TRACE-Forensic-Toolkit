@@ -332,10 +332,7 @@ class VolumeInfoMixin:
             icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
 
             # Column 0: Volume (with icon)
-            desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
-            volume_text = f"vol{addr}"
-            if desc_str and desc_str.strip():
-                volume_text += f" ({desc_str})"
+            volume_text = self.image_handler.partition_label(start, desc)
 
             volume_item = QTableWidgetItem(volume_text)
             volume_item.setIcon(QIcon(icon_path))

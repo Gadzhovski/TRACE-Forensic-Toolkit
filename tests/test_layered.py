@@ -117,8 +117,10 @@ def test_the_tree_shows_both_layers(qapp):
         assert all('2 file systems layered' in g.text(0) for g in groups)
         labels = [[g.child(i).text(0) for i in range(g.childCount())]
                   for g in groups]
-        assert labels == [['vol2 — NTFS (layered)', 'vol2 — Ext2 (layered)'],
-                          ['vol3 — NTFS (layered)', 'vol3 — UFS2 (layered)']]
+        assert labels == [['NTFS / exFAT (0x07) @ 63 — NTFS (layered)',
+                           'NTFS / exFAT (0x07) @ 63 — Ext2 (layered)'],
+                          ['NTFS / exFAT (0x07) @ 96390 — NTFS (layered)',
+                           'NTFS / exFAT (0x07) @ 96390 — UFS2 (layered)']]
         assert 'formatted again' in groups[0].toolTip(0)
     finally:
         window.cleanup_resources()
