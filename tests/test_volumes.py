@@ -247,17 +247,47 @@ def test_carving_does_not_take_live_files_for_free_space(image):
         handler.close_resources()
 
 
-def test_carving_skips_what_it_cannot_map(caplog):
-    """Inside an LVM group free space cannot be told from used: the
-    partition counts as used, and the log says why, rather than carving a
-    live file system as "unallocated"."""
-    import logging
+def test_lvm_is_carved_volume_by_volume():
+    """An LVM partition's raw bytes are extents in the group's order, not
+    any volume's: they count as used, and each logical volume is carved in
+    its own address range instead, its live files skipped there -- read
+    back through the handler like any other offset."""
     from trace_app.core import carving
     handler = handler_for('lvm.raw')
     try:
+        volumes = carving.carve_volumes(handler)
+        assert [v['label'] for v in volumes] == [
+            'LVM volume test_volume_group/test_logical_volume1',
+            'LVM volume test_volume_group/test_logical_volume2']
+        assert all(v['base'] >= handler.CARVE_SPACE for v in volumes)
+        ranges = carving.allocation_map(handler)
+        assert ranges[0] == (0, handler.get_size())
+        first = volumes[0]
+        inside = [(b, e) for b, e in ranges
+                  if first['base'] <= b < first['base'] + first['size']]
+        assert inside                      # ext2's live blocks
+        lv = handler._volumes[first['key']]
+        begin, end = inside[0]
+        assert handler.read(begin, end - begin) == \
+            lv.read(begin - first['base'], end - begin)
+        assert carving.carve_extent(handler) == handler.get_size() + sum(
+            v['size'] for v in volumes)
+    finally:
+        handler.close_resources()
+
+
+def test_a_locked_volume_is_not_carved_and_says_so(caplog):
+    import logging
+    from trace_app.core import carving
+    handler = handler_for('luks1.raw')
+    try:
         caplog.set_level(logging.WARNING, logger='TRACE.Carving')
         assert carving.allocation_map(handler) == [(0, handler.get_size())]
-        assert 'LVM volume group' in caplog.text
+        assert 'unlock it to carve' in caplog.text
+        assert carving.carve_volumes(handler) == []
+        handler.unlock_volume(0, 'luks', password='luksde-TEST')
+        (volume,) = carving.carve_volumes(handler)
+        assert volume['label'] == 'decrypted LUKS volume at sector 0'
     finally:
         handler.close_resources()
 

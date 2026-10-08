@@ -71,8 +71,7 @@ jobs:
       images_key: ${{ steps.select.outputs.images_key }}
       artifacts: ${{ steps.select.outputs.artifacts }}
       corpus: ${{ steps.select.outputs.corpus }}
-      btrfs_deleted: ${{ steps.select.outputs.btrfs_deleted }}
-      md_raid: ${{ steps.select.outputs.md_raid }}
+      linux_images: ${{ steps.select.outputs.linux_images }}
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
       oses: ${{ steps.select.outputs.oses }}
@@ -189,26 +188,21 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           "$PY" tools/carve_corpus.py
 
-      # A Btrfs volume with known deleted files, made by the Linux kernel
-      # itself (tools/make_btrfs_deleted.py: loop-mounted, so root and
-      # Linux only). The tests that read it skip on Windows and macOS.
-      - name: Build the Btrfs volume with deleted files
-        if: runner.os == 'Linux' && needs.plan.outputs.btrfs_deleted == 'true'
+      # Images made by the Linux kernel and its own tools, on loop devices
+      # (so root, and Linux only; the tests reading them skip elsewhere):
+      # a Btrfs volume with known deleted files (make_btrfs_deleted.py),
+      # md RAID arrays of every level and superblock (make_md_raid.py),
+      # and GPT -> LUKS1/LUKS2 -> LVM -> ext4 disks (make_luks_lvm.py).
+      - name: Build the Linux images
+        if: runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
         run: |
-          sudo apt-get install -y -qq --no-install-recommends btrfs-progs >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends btrfs-progs \
+            mdadm cryptsetup-bin lvm2 >/dev/null
           sudo python3 tools/make_btrfs_deleted.py
-          sudo chown "$USER" test_images/btrfs-deleted.raw*
-
-      # Linux software RAID arrays made by mdadm (tools/make_md_raid.py:
-      # every level, three superblock versions, a member in a partition).
-      # Loop devices again, so Linux only; tests/test_assembly.py's md
-      # tests skip on Windows and macOS.
-      - name: Build the md RAID arrays
-        if: runner.os == 'Linux' && needs.plan.outputs.md_raid == 'true'
-        run: |
-          sudo apt-get install -y -qq --no-install-recommends mdadm >/dev/null
           sudo python3 tools/make_md_raid.py
-          sudo chown "$USER" test_images/md-*
+          sudo python3 tools/make_luks_lvm.py
+          sudo chown "$USER" test_images/btrfs-deleted.raw* test_images/md-* \
+            test_images/luks*
 
       # Real Windows and browser artifacts for the activity tests, pinned by
       # SHA-256 (tools/fetch_artifact_samples.py).

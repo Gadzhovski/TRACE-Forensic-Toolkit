@@ -520,7 +520,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # file's own icon, which still has to say what kind of file it is.
         if self._bookmarked_refs:
             ref = make_artifact_ref(offset, inode_number,
-                                    entry.get('sequence'))                 if inode_number is not None else None
+                                    entry.get('sequence')) \
+                if inode_number is not None else None
             if ref and (self.evidence_id_for_path(self._listing_image), ref) \
                     in self._bookmarked_refs:
                 type_cell = self.listing_table.item(row_position, 2)
@@ -844,7 +845,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         inode = data.get('inode_number')
         if inode is not None:
             label = self.image_handler.inode_label(
-                data.get('start_offset'), inode) if self.image_handler                 else inode
+                data.get('start_offset'), inode) if self.image_handler \
+                else inode
             parts.append(f"inode {label}")
 
         if data.get('is_deleted'):
@@ -6633,7 +6635,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         demand from the image the listing was filled from, never whole."""
         from trace_app.core.stream_device import PyTsk3StreamDevice
         from PySide6.QtCore import QIODevice
-        path = os.path.normpath(self._listing_image)             if self._listing_image else None
+        path = os.path.normpath(self._listing_image) \
+            if self._listing_image else None
         handler = self._image_handlers.get(path) if path else None
         handler = handler or self.image_handler
         if handler is None or data.get('inode_number') is None:
@@ -6910,8 +6913,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             or 'bitlocker'
         name = containers.ENCRYPTION_NAMES.get(kind, kind)
         unlocked = handler.is_unlocked(start)
-        state = (f"FS: {handler.get_fs_type(start)}, {name} unlocked"
-                 if unlocked else f"{name}, locked -- right-click to unlock")
+        inner_lvm = unlocked and handler.inner_kind(start) == 'lvm'
+        holds = ('LVM volume group' if inner_lvm
+                 else f"FS: {handler.get_fs_type(start)}")
+        state = (f"{holds}, {name} unlocked" if unlocked
+                 else f"{name}, locked -- right-click to unlock")
         size = (f"Size: {handler.get_readable_size(size_in_bytes)}, "
                 if size_in_bytes else '')
         text = f"{label} ({where + ', ' if where else ''}{size}{state})"
@@ -6926,6 +6932,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         item.setToolTip(0, f"Encrypted with {name}. Right-click ▸ Unlock "
                            f"{name}… with a key for it." if not unlocked
                         else f"{name} volume, unlocked for this session.")
+        if inner_lvm:
+            # The usual encrypted Linux install: LVM inside LUKS, its
+            # logical volumes under the unlocked volume.
+            data['is_volume_group'] = True
+            item.setData(0, Qt.UserRole, data)
+            self._add_lvm_nodes(item, start, label)
+            return item
         item.setChildIndicatorPolicy(
             QTreeWidgetItem.ShowIndicator if unlocked
             and handler.check_partition_contents(start)

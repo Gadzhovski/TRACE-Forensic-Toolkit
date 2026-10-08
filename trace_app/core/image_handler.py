@@ -221,13 +221,100 @@ class ImageHandler:
             raise AttributeError("Image not loaded or unsupported format.")
 
     def read(self, offset, size):
-        """Reads data from the image starting at `offset` for `size` bytes."""
+        """Reads data from the image starting at `offset` for `size` bytes.
+        Offsets from CARVE_SPACE up are inside a volume (carve_volumes)."""
+        if offset >= self.CARVE_SPACE:
+            return self._read_volume_space(offset, size)
         if self.img_info and hasattr(self.img_info, 'read'):
             return self.img_info.read(offset, size)
         else:
             raise NotImplementedError("The image format does not support direct reading.")
 
-    def build_allocation_map(self, start_offset):
+    # --- carving inside volumes ---------------------------------------------
+
+    #: Carving reaches what the image's own bytes do not show plainly: an
+    #: unlocked encrypted volume (decrypted), an LVM logical volume (its
+    #: extents in order), a RAID array kept in one image. Each has a fixed
+    #: range of addresses above any image -- CARVE_SPACE + slot *
+    #: CARVE_SPAN, the slot from the partition's place among the image's
+    #: partitions and the volume's index in it -- so a carve's offset reads
+    #: back through read(), and its span ref stays valid after a reopen
+    #: (an encrypted volume's once it is unlocked again).
+    CARVE_SPACE = 1 << 61
+    CARVE_SPAN = 1 << 44              # 16 TiB per volume
+    _SLOTS_PER_PARTITION = 128        # the volume itself, then 64 LVs
+
+    def carve_volumes(self):
+        """[{'base', 'size', 'key', 'label'}] -- the volumes carving reads
+        in their own address range, in address order."""
+        if self.logical_fs is not None or self.img_info is None:
+            return []
+        partitions = self.get_partitions()
+        starts = sorted({p[2] for p in partitions}) if partitions else [0]
+        out = []
+        for position, start in enumerate(starts):
+            entries = []
+            try:
+                if start in self._bitlocker:
+                    if self.inner_kind(start) == 'lvm':
+                        entries = self._lv_entries(start)
+                    else:
+                        name = containers.ENCRYPTION_NAMES.get(
+                            self._unlocked_kind.get(start), 'encrypted')
+                        entries = [(0, start, f"decrypted {name} volume at "
+                                              f"sector {start}")]
+                elif self.volume_kind(start) == 'lvm':
+                    entries = self._lv_entries(start)
+                else:
+                    array = self.md_array(start)
+                    if array is not None and array.level != 1:
+                        entries = [(0, start, f"RAID{array.level} array at "
+                                              f"sector {start}")]
+            except Exception as exc:
+                logger.warning("Volumes at sector %s not carved: %s", start,
+                               exc)
+                continue
+            for index, key, label in entries:
+                image = self._volumes.get(key)
+                if image is None:
+                    continue
+                size = image.get_size()
+                if size > self.CARVE_SPAN:
+                    logger.warning("%s is larger than %d bytes: not carved",
+                                   label, self.CARVE_SPAN)
+                    continue
+                slot = position * self._SLOTS_PER_PARTITION + index
+                out.append({'base': self.CARVE_SPACE + slot * self.CARVE_SPAN,
+                            'size': size, 'key': key, 'label': label})
+        self._carve_space = {v['base']: v for v in out}
+        return out
+
+    def _lv_entries(self, start):
+        return [(1 + v['index'], v['key'],
+                 f"LVM volume {v['group']}/{v['name']}")
+                for v in self.logical_volumes(start)]
+
+    def _read_volume_space(self, offset, size):
+        base = self.CARVE_SPACE + ((offset - self.CARVE_SPACE)
+                                   // self.CARVE_SPAN * self.CARVE_SPAN)
+        volume = getattr(self, '_carve_space', {}).get(base)
+        if volume is None:
+            self.carve_volumes()
+            volume = self._carve_space.get(base)
+        if volume is None:
+            # Locked again, or no longer there: nothing to read.
+            return b''
+        within = offset - base
+        if within >= volume['size']:
+            return b''
+        return self._volumes[volume['key']].read(
+            within, min(size, volume['size'] - within))
+
+    def volume_allocation(self, volume):
+        """A carve volume's allocated ranges, in its own address range."""
+        return self.build_allocation_map(volume['key'], base=volume['base'])
+
+    def build_allocation_map(self, start_offset, base=None):
         """Byte ranges occupied by allocated files, for carving to skip.
 
         The ranges come from each file's data runs -- the blocks the
@@ -252,7 +339,10 @@ class ImageHandler:
                              start_offset)
                 return allocation_map
 
-            partition_offset = start_offset * self.sector_size
+            # Where the file system's offset 0 is: the partition, or (for
+            # a volume carved in its own range) `base`.
+            partition_offset = (start_offset * self.sector_size
+                                if base is None else base)
             from trace_app.core.libyal_fs import is_libyal
             if is_libyal(fs_info):
                 # XFS (extents of live files) and Btrfs (its extent tree):
@@ -352,15 +442,19 @@ class ImageHandler:
         note says why a whole partition counts as used: carving it as
         "unallocated" would report live files as deleted ones."""
         kind = self.volume_kind(start_sector)
+        if start_sector in self._bitlocker or kind == 'lvm':
+            # Encrypted bytes, or extents mapped elsewhere: the decrypted
+            # volume and the logical volumes are carved in their own
+            # ranges (carve_volumes), so the raw bytes are skipped.
+            base, length = self.partition_bytes(start_sector)
+            return [(base, base + length)], None
         array = self.md_array(start_sector)
         if array is not None:
             base, length = self.partition_bytes(start_sector)
             member = self.md_member(start_sector)
             if array.level != 1 or kind is not None:
-                return [(base, base + length)], (
-                    f"sector {start_sector} is a RAID{array.level} member "
-                    f"holding {kind or 'a file system'}: its free space is "
-                    f"not mapped to the member's bytes, so it is skipped")
+                # The array is carved in its own range (carve_volumes).
+                return [(base, base + length)], None
             # A mirror member's data is the array's, data_offset in.
             shift = member.data_offset
             return [(base, base + shift)] + [
@@ -385,6 +479,11 @@ class ImageHandler:
                 ranges += [(base + b, base + e)
                            for b, e in fs.allocated_ranges()]
             return self._merge_ranges(ranges), None
+        if kind in ('luks', 'fvde'):
+            base, length = self.partition_bytes(start_sector)
+            return [(base, base + length)], (
+                f"sector {start_sector} holds {self._UNMAPPED_KINDS[kind]}, "
+                f"locked: unlock it to carve what is inside")
         if kind in self._UNMAPPED_KINDS:
             base, length = self.partition_bytes(start_sector)
             return [(base, base + length)], (
@@ -1311,6 +1410,21 @@ class ImageHandler:
         self._directory_cache.clear()
 
     @containers.holding_libyal
+    def inner_kind(self, start_sector):
+        """What an unlocked encrypted volume holds that The Sleuth Kit
+        cannot open by itself -- 'lvm' for the usual Linux install, LVM
+        inside LUKS -- or None (a file system, or still locked)."""
+        if start_sector not in self._bitlocker:
+            return None
+        key = ('inner', start_sector)
+        if key not in self._kinds:
+            try:
+                self._kinds[key] = containers.volume_kind(
+                    self._volume_stream(start_sector))
+            except Exception:
+                self._kinds[key] = None
+        return self._kinds[key]
+
     def volume_kind(self, start_sector):
         """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
         partition (or an unpartitioned image at 0)."""
@@ -1455,8 +1569,9 @@ class ImageHandler:
         'size', 'group'}]."""
         if start_sector not in self._lvm:
             try:
+                # Decrypted, when LVM is inside an unlocked LUKS volume.
                 handle, group, volumes = containers.open_lvm(
-                    self._partition_window(start_sector))
+                    self._volume_stream(start_sector))
             except Exception as exc:
                 logger.warning("LVM at %s unreadable: %s", start_sector, exc)
                 self._lvm[start_sector] = (_Closed(), None, [])
@@ -1540,7 +1655,7 @@ class ImageHandler:
         out = []
         for start in dict.fromkeys(starts):
             kind = self.volume_kind(start)
-            if kind == 'lvm':
+            if kind == 'lvm' or self.inner_kind(start) == 'lvm':
                 out += [v['key'] for v in self.logical_volumes(start)]
             elif kind == 'apfs':
                 out += [v['key'] for v in self.apfs_volumes(start)

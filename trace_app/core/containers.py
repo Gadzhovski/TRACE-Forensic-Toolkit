@@ -340,7 +340,23 @@ def unlock_fvde(window, password=None, recovery_password=None):
 
 
 def unlock_luks(window, password=None, key=None):
-    """A LUKS volume, unlocked: the decrypting volume."""
+    """A LUKS volume, unlocked: the decrypting volume. LUKS2 is read by
+    core/luks2.py (libluksde reads LUKS1 only)."""
+    from trace_app.core import luks2
+    window.seek(0)
+    if luks2.is_luks2(window.read(8)):
+        def read(offset, length):
+            window.seek(offset)
+            return window.read(length)
+        try:
+            return luks2.unlock(read, window.get_size(), password,
+                                bytes.fromhex(key) if isinstance(key, str)
+                                else key)
+        except (luks2.Luks2Error, ValueError) as exc:
+            raise ContainerError(str(exc)) from exc
+        except ImportError as exc:
+            raise ContainerError(f"LUKS2 needs the cryptography library: "
+                                 f"{exc}") from exc
     import pyluksde
     volume = pyluksde.volume()
     try:

@@ -1139,6 +1139,14 @@ class HexViewer(QWidget):
         """'  ·  Image offset 0x…  ·  sector N', or why there is none."""
         source = self.source
         image = source.image_offset(offset)
+        from trace_app.core.image_handler import ImageHandler
+        if image is not None and image >= ImageHandler.CARVE_SPACE:
+            # Carved inside a decrypted, logical or RAID volume: its own
+            # address range (ImageHandler.carve_volumes), not the image's.
+            within = (image - ImageHandler.CARVE_SPACE) % \
+                ImageHandler.CARVE_SPAN
+            return (f"  ·  Volume offset {self._number(within)} (inside a "
+                    f"decrypted, LVM or RAID volume, not on the image)")
         if image is not None:
             sector = image // max(1, getattr(source, 'sector_size', 512))
             return (f"  ·  Image offset {self._number(image)}  ·  "

@@ -163,6 +163,10 @@ class Carver:
         #: every carve to what the chunk holds.
         self._reader = reader
         self._image_size = image_size
+        #: (begin, end) of each volume carved in its own address range
+        #: (ImageHandler.carve_volumes): a read never runs past the end of
+        #: the one it starts in.
+        self.regions = []
         #: Byte ranges already carved, sorted, by carver family. A signature
         #: inside a file of its own family is part of that file -- an MPEG
         #: repeats its pack header every 2 KB, an MP4 nests atoms -- not the
@@ -266,6 +270,14 @@ class Carver:
         index = bisect.bisect_left(spans, (offset, -1))
         return index < len(spans) and spans[index][0] == offset
 
+    def _end(self, offset):
+        """Where the bytes holding `offset` end: the image, or the volume
+        carved in its own range that `offset` is in."""
+        for begin, end in self.regions:
+            if begin <= offset < end:
+                return end
+        return self._image_size
+
     def reassemble_fragmented(self, allocated=None, should_stop=None):
         """Try each remembered header nothing was carved from as a file in
         two fragments. With `allocated`, a rebuild that would take a piece
@@ -295,7 +307,7 @@ class Carver:
                                 self.MAX_REASSEMBLY_ATTEMPTS)
                     return
                 source = formats.Source(b'', offset, self._reader,
-                                        self._image_size)
+                                        self._end(offset))
                 try:
                     rebuilt = reassemble(source, offset, cap)
                 except (struct.error, ValueError, IndexError, OverflowError,
@@ -563,8 +575,8 @@ class Carver:
         each costing seven scans of the rest of a 36 MB chunk.
         """
         cap = max(CARVE_MAX_SIZE.get('mov', 0), CARVE_MAX_SIZE.get('mp4', 0))
-        more = (self._image_size is not None and
-                base_offset + len(chunk) < self._image_size)
+        end = self._end(base_offset)
+        more = end is not None and base_offset + len(chunk) < end
         cursor = 0
         for match in self._ATOM_ANCHOR_RE.finditer(chunk, 4):
             anchor = match.start() - 4
@@ -1046,7 +1058,7 @@ class Carver:
         if it validates.
         """
         source = formats.Source(chunk, base_offset, self._reader,
-                                self._image_size)
+                                self._end(base_offset))
         for signature in signatures:
             cursor = 0
             while True:
@@ -1163,7 +1175,7 @@ class Carver:
         """Pre-POSIX tars have no magic to search for: every sector start
         whose block passes a tar header's own checksum is tried instead."""
         source = formats.Source(chunk, base_offset, self._reader,
-                                self._image_size)
+                                self._end(base_offset))
         first = -base_offset % formats.SECTOR
         for rel in range(first, len(chunk) - 511, formats.SECTOR):
             if chunk[rel + 257:rel + 263] != b'\x00' * 6 or \
@@ -1310,6 +1322,9 @@ def allocation_map(image_handler):
             if note:
                 logger.warning("Carving: %s", note)
             ranges.extend(allocated)
+        # Volumes carved in their own address range: their live files.
+        for volume in carve_volumes(image_handler):
+            ranges.extend(image_handler.volume_allocation(volume))
     except Exception as exc:
         logger.warning("Could not build the allocation map (%s); carving "
                        "the whole image", exc)
@@ -1317,6 +1332,26 @@ def allocation_map(image_handler):
     # Merge, not just sort: is_offset_allocated binary searches this list,
     # which is only valid if the ranges are ordered AND do not overlap.
     return ImageHandler._merge_ranges(ranges)
+
+
+def carve_volumes(image_handler):
+    """The volumes carved in their own address range (decrypted, LVM,
+    RAID): ImageHandler.carve_volumes, or none for a reader without it."""
+    if not hasattr(image_handler, 'carve_volumes'):
+        return []
+    try:
+        return image_handler.carve_volumes()
+    except Exception as exc:
+        logger.warning("Volumes not carved: %s", exc)
+        return []
+
+
+def carve_extent(image_handler):
+    """Bytes a full carve walks: the image and every volume carved in its
+    own range. Progress and resume positions run over this, image first,
+    so a position below the image's size is that image offset."""
+    return image_handler.get_size() + sum(
+        v['size'] for v in carve_volumes(image_handler))
 
 
 #: Where a carve looks: free space between live files, the slack at the
@@ -1384,27 +1419,65 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
     carver = Carver(sink, wanted=wanted, reader=image_handler.read,
                     image_size=size)
     carver._seen.update(seen)
-    offset = (start_offset // CHUNK_SIZE) * CHUNK_SIZE
-    if offset:
-        # Resuming: what was carved before is kept, but reassembly works
-        # from the fragment headers the scan noted -- so the part already
-        # done is read once more for those alone, carving nothing.
-        for skipped in range(0, offset, CHUNK_SIZE):
-            if should_stop and should_stop():
-                raise CarvingCancelled()
-            for begin, end in free_ranges(skipped,
-                                          min(skipped + CHUNK_SIZE, size),
-                                          allocated):
-                chunk = image_handler.read(begin, end - begin)
-                if chunk:
-                    carver.note_unfinished(chunk, begin, families,
-                                           limit=end - begin)
-    while offset < size:
+    # The image, then each volume carved in its own address range (an
+    # unlocked encrypted volume, LVM's logical volumes, a RAID array):
+    # (where it starts, where it ends, its position in the walk).
+    volumes = carve_volumes(image_handler)
+    carver.regions = [(v['base'], v['base'] + v['size']) for v in volumes]
+    spans, walked = [], 0
+    for begin, end in [(0, size)] + carver.regions:
+        spans.append((begin, end, walked))
+        walked += end - begin
+    for volume in volumes:
+        logger.info("Carving inside the %s", volume['label'])
+    for begin_span, end_span, position in spans:
+        if start_offset >= position + (end_span - begin_span):
+            _note_done(image_handler, carver, families, allocated,
+                       begin_span, end_span, should_stop)
+            continue
+        resume = begin_span + max(0, start_offset - position)
+        _carve_span(image_handler, carver, families, allocated, run,
+                    begin_span, end_span, position, walked, resume,
+                    progress, should_stop)
+
+    carver.reassemble_fragmented(allocated, should_stop)
+    if progress:
+        progress(walked, walked, carver.found)
+    return carver.found
+
+
+def _note_done(image_handler, carver, families, allocated, begin_span,
+               end_span, should_stop):
+    """Resuming: what was carved before is kept, but reassembly works from
+    the fragment headers the scan noted -- so a part already done is read
+    once more for those alone, carving nothing."""
+    for skipped in range(begin_span, end_span, CHUNK_SIZE):
+        if should_stop and should_stop():
+            raise CarvingCancelled()
+        for begin, end in free_ranges(skipped,
+                                      min(skipped + CHUNK_SIZE, end_span),
+                                      allocated):
+            chunk = image_handler.read(begin, end - begin)
+            if chunk:
+                carver.note_unfinished(chunk, begin, families,
+                                       limit=end - begin)
+
+
+def _carve_span(image_handler, carver, families, allocated, run, begin_span,
+                end_span, position, walked, resume, progress, should_stop):
+    """Carve [begin_span, end_span) -- the image, or one volume in its own
+    range -- from `resume`; progress is reported as the walk's position
+    (`position` where this span starts, `walked` in all)."""
+    offset = begin_span + (resume - begin_span) // CHUNK_SIZE * CHUNK_SIZE
+    if offset > begin_span:
+        _note_done(image_handler, carver, families, allocated, begin_span,
+                   offset, should_stop)
+    while offset < end_span:
         if should_stop and should_stop():
             raise CarvingCancelled()
         if progress:
-            progress(offset, size, carver.found)
-        chunk_end = min(offset + CHUNK_SIZE, size)
+            progress(position + offset - begin_span, walked, carver.found)
+        chunk_end = min(offset + CHUNK_SIZE, end_span)
         # Every free stretch of the chunk is carved; the live files between
         # them are not read. (Skipping a whole 4 MB chunk for one allocated
         # cluster in it, as before, left most of a real disk's deleted data
@@ -1416,7 +1489,7 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
             # Read on past the chunk for a file that crosses its end -- but
             # never into the next live file.
             limit = Carver.next_allocated_start(begin, allocated)
-            read_end = min(chunk_end + CARVE_OVERLAP, size)
+            read_end = min(chunk_end + CARVE_OVERLAP, end_span)
             if limit is not None:
                 read_end = min(read_end, limit)
             chunk = image_handler.read(begin, read_end - begin)
@@ -1438,11 +1511,6 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
         run['bytes_skipped'] += (chunk_end - offset) - sum(
             e - b for b, e in free_ranges(offset, chunk_end, allocated))
         offset += CHUNK_SIZE
-
-    carver.reassemble_fragmented(allocated, should_stop)
-    if progress:
-        progress(size, size, carver.found)
-    return carver.found
 
 
 def _carve_ranges(image_handler, ranges, families, wanted, sink, progress,
@@ -1906,8 +1974,11 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     """
     from trace_app.core import carve_origin
     types = [t.lower() for t in file_types]
-    size = image_handler.get_size()
     source = source or ('unallocated' if unallocated_only else 'image')
+    # Slack is the image's own; the other sources also walk the volumes
+    # carved in their own range (decrypted, LVM, RAID).
+    size = (image_handler.get_size() if source == 'slack'
+            else carve_extent(image_handler))
     previous = case.carving_state(evidence_id) if resume else None
     start_offset, seen, already = 0, set(), 0
     if previous and previous.get('status') != 'done':

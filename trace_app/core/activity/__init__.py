@@ -646,7 +646,8 @@ def _srum(volume, windows, step, sids):
     out = []
     for item in entries:
         user = item['user']
-        user = sids.get(str(user).upper(), user) if isinstance(user, str)             else str(user or '')
+        user = sids.get(str(user).upper(), user) if isinstance(user, str) \
+            else str(user or '')
         subject = str(item['application'] or '')
         if item['table'] == 'network':
             out.append(record(

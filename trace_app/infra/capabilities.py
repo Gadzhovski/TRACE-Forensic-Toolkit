@@ -188,8 +188,17 @@ CAPABILITIES = (
     Capability('btrfs', 'Volumes and encryption', "Btrfs file systems "
                "(Fedora, openSUSE: subvolumes, snapshots, zlib/LZO/zstd)",
                'TRACE (Python)', lambda: 'built in'),
-    Capability('luks', 'Volumes and encryption', "LUKS-encrypted Linux "
-               "volumes", 'libluksde', _module_version('pyluksde')),
+    Capability('luks', 'Volumes and encryption', "LUKS1-encrypted Linux "
+               "volumes (LVM inside them too)", 'libluksde',
+               _module_version('pyluksde')),
+    Capability('luks2', 'Volumes and encryption', "LUKS2-encrypted Linux "
+               "volumes (PBKDF2, Argon2i/Argon2id; LVM inside them too)",
+               'cryptography', _module_version('cryptography',
+                                               '__version__')),
+    Capability('mdraid', 'Volumes and encryption', "Linux software RAID "
+               "(md) arrays and multi-disk Btrfs, assembled from the "
+               "member disks' images", 'TRACE (Python)',
+               _built_in('trace_app.core.mdraid')),
     Capability('lvm', 'Volumes and encryption', "Linux LVM logical volumes",
                'libvslvm', _module_version('pyvslvm')),
     Capability('vss', 'Volumes and encryption', "Volume Shadow Copies",

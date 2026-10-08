@@ -55,8 +55,9 @@ def _ci_images():
 def _built_images():
     """Images CI makes rather than downloads: the carving corpus
     everywhere, and on Linux the Btrfs volume the kernel deletes files on
-    (tools/make_btrfs_deleted.py loop-mounts it) and the md RAID arrays
-    mdadm builds (tools/make_md_raid.py)."""
+    (tools/make_btrfs_deleted.py loop-mounts it), the md RAID arrays
+    mdadm builds (tools/make_md_raid.py) and the LUKS + LVM disks
+    (tools/make_luks_lvm.py)."""
     built = {'carve-corpus.dd'}
     if sys.platform.startswith('linux'):
         built.add('btrfs-deleted.raw')
@@ -67,6 +68,7 @@ def _built_images():
                               ('raid5ra', 3), ('raid6', 4), ('raid10', 4),
                               ('raid1part', 2)):
             built.update(f'md-{name}-{n}.raw' for n in range(members))
+        built.update({'luks-lvm.json', 'luks1-lvm.raw', 'luks2-lvm.raw'})
     return built
 
 
@@ -81,7 +83,8 @@ def image_path(name):
     if not os.path.exists(path):
         message = (f"{name} is not in test_images/ -- run "
                    f"'python tools/fetch_test_images.py'")
-        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1' and                 name in _ci_images():
+        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1' and \
+                name in _ci_images():
             pytest.fail(message)
         pytest.skip(message)
     return path
