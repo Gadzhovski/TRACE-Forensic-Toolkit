@@ -496,6 +496,12 @@ SAMPLES = {
     'hfsplus.sparseimage': (
         _DFVFS + 'hfsplus.sparseimage',
         'f36c72c0571b2a9be9174ea2c12007808e1dbbee932652b1eb530f8536d01814'),
+    # Apple's unified log: a Mac's /private/var/db log tree (Persist,
+    # Special, Signpost, timesync, uuidtext, dsc) on APFS in a DMG --
+    # plaso's, whose tests give its entry counts and messages.
+    'unified_logging1.dmg': (
+        _PLASO + 'unified_logging1.dmg',
+        'e38da79f6eb911baf347ffc24650c7c6d22dea07139aca6a404b965e5419af08'),
     # macOS Background Task Management (activity/btm.py).
     'BackgroundItems-v13.btm': (
         _BTMPARSER + 'BackgroundItems-v13.btm',

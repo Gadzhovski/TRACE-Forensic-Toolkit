@@ -396,6 +396,13 @@ def _other_systems(volume, step):
     # Any Mac-formatted volume keeps FSEvents, an external drive too.
     from trace_app.core.activity import fsevents
     out += fsevents.activity(volume, step)
+    # Apple's unified log wherever it is: a Mac's /private/var/db, an
+    # iPhone's file system, a collection or a .logarchive.
+    from trace_app.core.activity import unified_log
+    try:
+        out += unified_log.collect(volume, step)
+    except Exception as exc:
+        logger.warning("Unified log not read: %s", exc)
     out += chat.collect(volume, step, homes)
     # Phones: an iPhone backup or file system, an Android extraction.
     from trace_app.core.activity import mobile
