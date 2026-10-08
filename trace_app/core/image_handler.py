@@ -149,6 +149,7 @@ class ImageHandler:
         self._shadows = {}          # start sector -> (pyvshadow volume, stores)
         self._bitlocker_checked = {}
         self._kinds = {}            # start sector -> containers.volume_kind
+        self._layers = {}           # start sector -> fs_layers()
         #: start sector -> mdraid.Array (or None: not a member, or one
         #: whose array needs disks this image does not hold); see md_array.
         self._md = {}
@@ -212,6 +213,7 @@ class ImageHandler:
         # Clear caches
         self.fs_info_cache.clear()
         self._directory_cache.clear()
+        self._layers.clear()
 
     def get_size(self):
         """Returns the size of the disk image."""
@@ -490,6 +492,13 @@ class ImageHandler:
                 f"sector {start_sector} holds {self._UNMAPPED_KINDS[kind]}: "
                 f"its free space cannot be told from used space, so it is "
                 f"skipped -- carve the whole image to read it")
+        layers = self.fs_layers(start_sector)
+        if layers:
+            # Live in either file system is live: both are skipped.
+            base = start_sector * self.sector_size
+            return self._merge_ranges(
+                [r for layer in layers for r in
+                 self.build_allocation_map(layer['key'], base=base)]), None
         if self.has_filesystem(start_sector):
             return self.build_allocation_map(start_sector), None
         return [], None
@@ -1133,6 +1142,54 @@ class ImageHandler:
         (65536 + 1372, _UFS2_MAGIC_BE, 'UFS2'),
     )
 
+    #: The Sleuth Kit's type to force for each signature detect_filesystems
+    #: names, so a layered partition's file systems open one at a time.
+    _TSK_TYPES = {'NTFS': 'NTFS_DETECT', 'FAT': 'FAT_DETECT',
+                  'FAT12': 'FAT_DETECT', 'FAT16': 'FAT_DETECT',
+                  'FAT32': 'FAT_DETECT', 'ExFAT': 'EXFAT',
+                  'ISO9660': 'ISO9660_DETECT', 'Ext2/3/4': 'EXT_DETECT',
+                  'HFS+': 'HFS_DETECT', 'HFSX': 'HFS_DETECT',
+                  'UFS1': 'FFS_DETECT', 'UFS2': 'FFS_DETECT'}
+
+    def fs_layers(self, start_sector):
+        """The file systems layered in one partition -- formatted again
+        without being wiped, so both sets of structures are intact (DFTT
+        #10: NTFS under Ext2, NTFS under UFS) -- each opened on its own:
+        [{'key', 'name', 'index'}], or [] when there is one or none. The
+        Sleuth Kit's own detection refuses such a partition outright, and
+        showing it empty hides both."""
+        if start_sector in self._layers:
+            return self._layers[start_sector]
+        layers = []
+        if self.logical_fs is None and \
+                start_sector < containers.SHADOW_KEY_BASE and \
+                start_sector not in self._volumes:
+            kinds = list(dict.fromkeys(
+                self._TSK_TYPES[name]
+                for name in self.detect_filesystems(start_sector)
+                if name in self._TSK_TYPES))
+            if len(kinds) > 1:
+                for index, kind in enumerate(kinds):
+                    try:
+                        fs = pytsk3.FS_Info(
+                            self.img_info, start_sector * self.sector_size,
+                            getattr(pytsk3, 'TSK_FS_TYPE_' + kind))
+                    except Exception:
+                        continue
+                    key = containers.layer_key(start_sector, index)
+                    self.fs_info_cache[key] = fs
+                    layers.append({'key': key, 'index': index})
+                if len(layers) < 2:
+                    layers = []
+                for layer in layers:
+                    layer['name'] = self.get_fs_type(layer['key'])
+                if layers:
+                    logger.info("Sector %d holds %d file systems layered: %s",
+                                start_sector, len(layers),
+                                ', '.join(l['name'] for l in layers))
+        self._layers[start_sector] = layers
+        return layers
+
     def detect_filesystems(self, start_offset):
         """Every filesystem signature present at this partition offset.
 
@@ -1278,6 +1335,11 @@ class ImageHandler:
         if self.logical_fs is not None:
             return self.logical_fs if start_offset == 0 else None
         if start_offset not in self.fs_info_cache:
+            layer = containers.split_layer_key(start_offset)
+            if layer is not None:
+                # Opened by fs_layers, which forces each type in turn.
+                self.fs_layers(layer[0])
+                return self.fs_info_cache.get(start_offset)
             shadow = containers.split_shadow_key(start_offset)
             if shadow is not None and start_offset not in self._volumes:
                 self.shadow_copies(shadow[0])
@@ -1657,6 +1719,8 @@ class ImageHandler:
             kind = self.volume_kind(start)
             if kind == 'lvm' or self.inner_kind(start) == 'lvm':
                 out += [v['key'] for v in self.logical_volumes(start)]
+            elif self.fs_layers(start):
+                out += [layer['key'] for layer in self.fs_layers(start)]
             elif kind == 'apfs':
                 out += [v['key'] for v in self.apfs_volumes(start)
                         if not v['locked']]

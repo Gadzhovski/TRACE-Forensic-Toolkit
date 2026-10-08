@@ -290,6 +290,24 @@ def split_apfs_key(key):
     return _split(key, _APFS_BASE, 2 ** 51)
 
 
+#: A file system layered under another in one partition (formatted again
+#: without wiping, both sets of structures intact): each is opened on its
+#: own, keyed above APFS's range like the other volumes.
+_LAYER_BASE = 2 ** 51
+LAYERS_PER_PARTITION = 8
+
+
+def layer_key(start_sector, index):
+    return _LAYER_BASE + start_sector * LAYERS_PER_PARTITION + index
+
+
+def split_layer_key(key):
+    """(partition start, layer index) or None."""
+    if not isinstance(key, int) or not _LAYER_BASE <= key < 2 ** 52:
+        return None
+    return divmod(key - _LAYER_BASE, LAYERS_PER_PARTITION)
+
+
 def volume_kind(window):
     """What a partition holds that The Sleuth Kit cannot open by itself:
     'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', or None."""

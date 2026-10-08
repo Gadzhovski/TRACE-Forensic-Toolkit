@@ -6844,6 +6844,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self._add_lvm_nodes(root_item_tree, 0, "Volume")
             elif kind == 'apfs':
                 self._add_apfs_nodes(root_item_tree, 0, "Volume")
+            elif self.image_handler.fs_layers(0):
+                self._add_layer_nodes(root_item_tree, 0, "Volume")
             elif self.image_handler.has_filesystem(0):
                 # The image has a filesystem but no partitions, populate root directory
                 self.populate_contents(root_item_tree, {"start_offset": 0})
@@ -6883,6 +6885,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     "end_offset": end, "is_volume_group": True})
                 (self._add_lvm_nodes if kind == 'lvm' else
                  self._add_apfs_nodes)(group, start, f"vol{addr}")
+                group.setExpanded(True)
+                continue
+            layers = self.image_handler.fs_layers(start)
+            if layers:
+                group = QTreeWidgetItem(root_item_tree)
+                group.setText(0, f"vol{addr} ({desc_str}: {start}-{end}, "
+                                 f"Size: {readable_size}, "
+                                 f"{len(layers)} file systems layered)")
+                group.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                    'device', 'drive-harddisk')))
+                group.setData(0, Qt.UserRole, {
+                    "inode_number": None, "start_offset": start,
+                    "end_offset": end, "is_volume_group": True})
+                self._add_layer_nodes(group, start, f"vol{addr}")
                 group.setExpanded(True)
                 continue
             fs_type = self.image_handler.get_fs_type(start)
@@ -7007,6 +7023,34 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             item.setChildIndicatorPolicy(
                 QTreeWidgetItem.ShowIndicator if self.image_handler
                 .check_partition_contents(volume['key'])
+                else QTreeWidgetItem.DontShowIndicator)
+
+    def _add_layer_nodes(self, parent, start, label):
+        """A node per file system layered in the partition at `start`
+        (ImageHandler.fs_layers): formatted again without being wiped, both
+        are intact, and which one the machine last used is not something
+        the bytes say -- so both are shown, each read on its own."""
+        layers = self.image_handler.fs_layers(start)
+        names = ' and '.join(layer['name'] for layer in layers)
+        parent.setToolTip(0, f"Two or more file systems are intact in this "
+                             f"partition ({names}): it was formatted again "
+                             f"without being wiped. Each is shown below and "
+                             f"read on its own; analysis reads them all.")
+        for layer in layers:
+            item = QTreeWidgetItem(parent)
+            item.setText(0, f"{label} — {layer['name']} (layered)")
+            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                'device', 'drive-harddisk')))
+            item.setData(0, Qt.UserRole, {
+                "inode_number": None, "start_offset": layer['key'],
+                "is_fs_layer": True,
+                "volume_label": f"{label} {layer['name']}"})
+            item.setToolTip(0, f"The {layer['name']} file system in this "
+                               f"partition, one of {len(layers)} layered "
+                               f"here ({names})")
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ShowIndicator if self.image_handler
+                .check_partition_contents(layer['key'])
                 else QTreeWidgetItem.DontShowIndicator)
 
     def _add_apfs_nodes(self, parent, start, label):

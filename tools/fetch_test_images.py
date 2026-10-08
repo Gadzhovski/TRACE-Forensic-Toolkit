@@ -54,6 +54,12 @@ CATALOG = {
                        'zip', 'e6f1f3bc53d426ae6f81b2d7b75598bc95f7447853e38b8f9ca1d1b65f7b3512'),
     '7-ntfs-undel.dd': (_DFTT + '7_%20NTFS%20File%20Recovery%20%28and%20Leap%20Year%29%20%231/7-undel-ntfs.zip',
                         'zip', '4138cc42148e3381e3c66eb50090f4a30416ae8c20247c2b9bad27cf8c764d88'),
+    # Two file systems layered in each partition (NTFS under Ext2, UFS2,
+    # UFS1); 10b's archive holds all four images.
+    '10-ntfs-disk.dd': (_DFTT + '10_%20NTFS%20Autodetect%20%231/10b-ntfs-autodetect.zip',
+                        'zip', '4d2edfe4a8ee0079720a4b9e258ecf59ffa17783465a5a013101614b4ac64049'),
+    '10-ntfs-part3.dd': (_DFTT + '10_%20NTFS%20Autodetect%20%231/10b-ntfs-autodetect.zip',
+                         'zip', '8e6c7b7709d52e6a41080002c0589ac3204f0e77d834f75b58d8f249d391d7bb'),
     '8-jpeg-search.dd': (_DFTT + '8_%20JPEG%20Search%20%231/8-jpeg-search.zip',
                          'zip', '9c43d6a2dd5132cf6afc29e5c644cde0cb747c64998a68e73f2efb787887b126'),
     '9-fat-label.dd': (_DFTT + '9_%20FAT%20Volume%20Label%20%231/9-fat-label.zip',

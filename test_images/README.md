@@ -73,6 +73,7 @@ what a tool is expected to do with it.
 | `10-ntfs-disk.dd` | 94 MB | Two file systems layered in one partition | [#10](https://dftt.sourceforge.net/test10/index.html) |
 | `10-ntfs-part1.dd` | 47 MB | Partition 1 of the above: NTFS under Ext2 | [#10](https://dftt.sourceforge.net/test10/index.html) |
 | `10-ntfs-part2.dd` | 47 MB | Partition 2 of the above: NTFS under UFS2 | [#10](https://dftt.sourceforge.net/test10/index.html) |
+| `10-ntfs-part3.dd` | 78 MB | A third partition (10b's archive): NTFS under UFS1 | [#10](https://dftt.sourceforge.net/test10/index.html) |
 | `iso-dirtree1.iso` | 366 KB | ISO9660 directory structure | [#14](https://dftt.sourceforge.net/test14/index.html) |
 | `iso-dirtree2.iso` | 366 KB | ISO9660 directory structure, variant | [#14](https://dftt.sourceforge.net/test14/index.html) |
 | `iso-endian.iso` | 366 KB | ISO9660 byte-order handling | [#14](https://dftt.sourceforge.net/test14/index.html) |
@@ -91,7 +92,9 @@ Three of these earn particular attention:
   UFS, leaving both signature sets intact. In the authors' words: "The test is
   whether your tool will warn you that there are two valid file systems or if
   it will show you only one and hide the other." Showing an empty partition is
-  worse than either.
+  worse than either -- and was what TRACE did, since The Sleuth Kit's
+  detection refuses such a partition. Each file system is now opened on its
+  own (`ImageHandler.fs_layers`, `tests/test_layered.py`).
 
 ## Filesystems beyond FAT and NTFS
 
@@ -221,6 +224,7 @@ e6f1f3bc53d426ae6f81b2d7b75598bc95f7447853e38b8f9ca1d1b65f7b3512  6-fat-undel.dd
 4d2edfe4a8ee0079720a4b9e258ecf59ffa17783465a5a013101614b4ac64049  10-ntfs-disk.dd
 d6739c45d652c0eb67e59536e7b9c02b25ca99aaabf500fe9c374bb7f2ae8bc3  10-ntfs-part1.dd
 529c607152f8ca25a6f2645e6894a80b303b4f2b352b89bdfef0fde549e3c6e2  10-ntfs-part2.dd
+8e6c7b7709d52e6a41080002c0589ac3204f0e77d834f75b58d8f249d391d7bb  10-ntfs-part3.dd
 0418d266405e1baf1334a014b9fba984962e81ec65003f34b67a7f5c7b28e6ad  iso-dirtree1.iso
 5f4fe2707eb4227b2d8e35482f492c888a44937abca05b67a0b63f2a2e34e074  iso-dirtree2.iso
 70231746c40640efc6ea5a926ef9184910c44b43b0716d72026db41b40966b9c  iso-endian.iso
