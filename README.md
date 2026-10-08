@@ -10,7 +10,7 @@ Open disk images read-only, organise them into cases, triage what stands out,<br
 search inside the evidence and recover deleted files — on Windows, macOS and Linux.
 
 <p>
-  <img src="https://img.shields.io/badge/version-2.0.0-4c8eda?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-2.1.0-4c8eda?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
@@ -48,7 +48,8 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 - **Viewers** — pictures, video, PDF, Office, mail, SQLite, registry hives,
   a hex editor with a data inspector, and HTML shown offline.
 - **Under the hood** — NTFS $MFT, $UsnJrnl and $LogFile, shadow copies,
-  BitLocker / FileVault / LUKS unlocking, APFS, LVM and XFS volumes.
+  BitLocker / FileVault / LUKS unlocking, APFS, LVM, XFS and Btrfs
+  volumes.
 
 ## Screenshots
 
@@ -80,7 +81,7 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 | **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2 |
 | **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups |
 | **Live disks** | an attached disk, read-only, without imaging it first |
-| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, UFS, ISO 9660 |
+| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, Btrfs, UFS, ISO 9660 |
 | **Encrypted volumes** | BitLocker, FileVault 2, LUKS, encrypted APFS and iOS backups |
 | **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
 

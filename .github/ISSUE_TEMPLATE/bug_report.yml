@@ -70,7 +70,7 @@ body:
     attributes:
       label: TRACE version
       description: Help ▸ About shows it.
-      placeholder: "2.0.0"
+      placeholder: "2.1.0"
     validations:
       required: true
 
