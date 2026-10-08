@@ -1607,6 +1607,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # display()/clear() interface, so nothing below has to dispatch on a
         # tab index. Tab order comes from this list alone.
         self.case_panel = CasePanel()
+        self.case_panel.profile_for = lambda row: (
+            self.evidence_profile(row) or {}).get('summary')
         self.case_panel.set_case(self.case)
         self.case_panel.verify_requested.connect(
             lambda rows: self.queue_verification(rows, summary=True)
@@ -3212,15 +3214,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         image from the handler already open; None if it cannot be read."""
         from trace_app.core import evidence_profile
         key = os.path.normpath(row['path'])
-        if key not in self._evidence_profiles:
+        if self._evidence_profiles.get(key) is None:
             found = None
             try:
-                handler = self.handler_for(row['path'])
+                # Only an image already open: a profile never opens one.
+                handler = self._image_handlers.get(key)
                 if handler is not None and handler.loaded:
                     found = evidence_profile.profile(handler)
             except Exception as exc:
                 logger.warning("Could not profile %s: %s", row['path'], exc)
-            self._evidence_profiles[key] = found
+            # Not kept when None: the image may simply not be open yet.
+            if found is not None:
+                self._evidence_profiles[key] = found
+            return found
         return self._evidence_profiles[key]
 
     @staticmethod
@@ -6810,6 +6816,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if self.image_handler.container_note:
             root_item_tree.setToolTip(
                 0, f"{image_path}\n{self.image_handler.container_note}")
+        found = self.evidence_profile({'path': image_path})
+        if found:
+            root_item_tree.setToolTip(
+                0, f"{root_item_tree.toolTip(0)}\n{found['summary']}")
 
         partitions = self.image_handler.get_partitions()
 
@@ -7060,6 +7070,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             dialog.secret, _kind=kind)
         # What the image holds is known now: profile it again.
         self._evidence_profiles.pop(path, None)
+        if getattr(self, 'case_panel', None):
+            self.case_panel.refresh()
         # The Registry tab searches the unlocked volume too.
         self._refresh_registry_evidence()
         if self.case is not None:

@@ -193,3 +193,17 @@ def test_an_unlocked_luks2_node_lists_its_logical_volumes(qapp, monkeypatch):
         assert 'data' in [t for t, _d in children(home)]
     finally:
         window.cleanup_resources()
+
+
+def test_the_profile_names_a_locked_volume_then_what_is_inside():
+    """What the Case tab and the tree say the image holds."""
+    from trace_app.core import evidence_profile
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(image_path('luks2-lvm.raw'))
+    try:
+        assert evidence_profile.profile(handler)['summary'] == \
+            'GPT · a locked LUKS volume'
+        handler.unlock_volume(START, 'luks', password='PASSWORD')
+        assert evidence_profile.profile(handler)['summary'] == 'GPT · Ext4'
+    finally:
+        handler.close_resources()

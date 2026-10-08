@@ -58,7 +58,7 @@ STATUS_ICON = {STATUS_VERIFIED: icons.VERIFY_OK, STATUS_MISSING: icons.ERROR,
                STATUS_CHANGED: icons.ERROR, STATUS_LIVE: icons.ALERT}
 #: Evidence table columns.
 EVIDENCE_COLUMNS = ['Name', 'Exhibit', 'Status', 'Last checked', 'Size',
-                    'MD5', 'SHA-256', 'Path']
+                    'Contains', 'MD5', 'SHA-256', 'Path']
 
 
 def format_utc(text, seconds=False):
@@ -146,6 +146,9 @@ class CasePanel(QWidget):
         super().__init__(parent)
         self.setObjectName("casePanel")
         self.case = None
+        #: row -> what the image holds ('GPT · Btrfs · Linux'), or None
+        #: while it is not open; set by the window.
+        self.profile_for = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -386,6 +389,7 @@ class CasePanel(QWidget):
             name = item.get('display_name') or os.path.basename(item['path'])
             custody = '\n'.join(f"{label}: {item[key]}" for key, label in
                                 EVIDENCE_DETAILS.items() if item.get(key))
+            contents = self._contents(item)
             cells = [
                 QTableWidgetItem(name),
                 QTableWidgetItem(item.get('exhibit_number') or '—'),
@@ -393,6 +397,7 @@ class CasePanel(QWidget):
                 QTableWidgetItem(format_utc(item.get('verified_utc'))),
                 QTableWidgetItem(FileSystemUtils.get_readable_size(size)
                                  if size is not None else '—'),
+                QTableWidgetItem(contents or '—'),
                 QTableWidgetItem(short_hash(item.get('md5'))),
                 QTableWidgetItem(short_hash(item.get('sha256'))),
                 QTableWidgetItem(item['path']),
@@ -402,12 +407,25 @@ class CasePanel(QWidget):
             cells[1].setToolTip(custody)
             if size is not None:
                 cells[4].setToolTip(f"{size:,} bytes")
-            cells[5].setToolTip(item.get('md5') or '')
-            cells[6].setToolTip(item.get('sha256') or '')
-            cells[7].setToolTip(item['path'])
+            cells[5].setToolTip(contents or "Not read yet: the image is not "
+                                            "open")
+            cells[6].setToolTip(item.get('md5') or '')
+            cells[7].setToolTip(item.get('sha256') or '')
+            cells[8].setToolTip(item['path'])
             for column, cell in enumerate(cells):
                 table.setItem(row, column, cell)
-        fit_columns(table, {7: 360})
+        fit_columns(table, {5: 260, 8: 360})
+
+    def _contents(self, item):
+        """What the image holds -- 'GPT · NTFS, Ext4 · Windows + Linux'
+        (core/evidence_profile) -- from the window, or None."""
+        if self.profile_for is None:
+            return None
+        try:
+            return self.profile_for(item)
+        except Exception as exc:
+            logger.debug("No profile for %s: %s", item.get('path'), exc)
+            return None
 
     def _evidence_row(self, index):
         item = self.evidence_table.item(index, 0)
