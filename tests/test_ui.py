@@ -21,6 +21,12 @@ pytestmark = [pytest.mark.ui, pytest.mark.images]
 
 FIRST, SECOND = 'ntfs1-gen2.E01', '8-jpeg-search.dd'
 
+#: How long a test waits for a carving job on the job bar. A full carve of
+#: 11-carve-fat.dd takes ~20 s on a desktop; CI's macOS Intel runner, on a
+#: busy day, took more than the 120 s these waits used to allow. pump()
+#: returns the moment the job is done, so the margin costs nothing.
+JOB_SECONDS = 600
+
 
 # --- the case and the window ---------------------------------------------------
 
@@ -773,7 +779,7 @@ def test_carving_is_a_triage_tab_with_its_findings(qapp, window, truth):
     evidence = next(r for r in window.case.evidence()
                     if r['path'].endswith(SECOND))
     window.start_carving([evidence['id']], ['jpg'], False)
-    assert pump(qapp, 120, lambda: not window.job_bar.busy)
+    assert pump(qapp, JOB_SECONDS, lambda: not window.job_bar.busy)
     pump(qapp, 0.5)
 
     rows = window.case.carved_files(evidence['id'])
@@ -803,7 +809,7 @@ def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs,
     try:
         assert window.open_evidence_image(image_path('11-carve-fat.dd'))
         window.start_carving(None, [t.lower() for t in CARVABLE_TYPES], True)
-        assert pump(qapp, 120, lambda: not window.job_bar.busy
+        assert pump(qapp, JOB_SECONDS, lambda: not window.job_bar.busy
                     and window.carved_panel.count)
         pump(qapp, 0.5)
         assert window.case is None
@@ -865,7 +871,7 @@ def test_carving_an_image_added_to_a_case_carves_only_that_image(
         assert window.carved_panel.target_combo.currentData() == new_id
 
         window.carved_panel._request()
-        assert pump(qapp, 120, lambda: not window.job_bar.busy)
+        assert pump(qapp, JOB_SECONDS, lambda: not window.job_bar.busy)
         pump(qapp, 0.5)
         assert window.case.carving_state(new_id)['status'] == 'done'
         others = [r['id'] for r in window.case.evidence() if r['id'] != new_id]
@@ -899,7 +905,7 @@ def test_a_carved_archive_is_browsed_like_a_folder(qapp, stubbed_dialogs):
     try:
         assert window.open_evidence_image(image_path('11-carve-fat.dd'))
         window.start_carving(None, ['zip'], True)
-        assert pump(qapp, 120, lambda: not window.job_bar.busy
+        assert pump(qapp, JOB_SECONDS, lambda: not window.job_bar.busy
                     and window.carved_panel.count)
         row = next(r for r in window.carved_panel._rows if r['type'] == 'zip')
 
@@ -1377,7 +1383,7 @@ def test_hash_sets_hide_known_good_flag_known_bad(qapp, window,
     assert window.case.activity()[0]['action'] == 'hash set options changed'
 
     assert window.queue_hash_matching()
-    assert pump(qapp, 120, lambda: not window.job_bar.busy)
+    assert pump(qapp, JOB_SECONDS, lambda: not window.job_bar.busy)
     counts = window.case.hash_match_counts(first_id)
     assert counts == {'known-bad': 1, 'known-good': 2}
 
@@ -1779,7 +1785,7 @@ def test_keyword_lists_are_a_job_a_triage_tab_and_findings(qapp, window,
     window.case.set_setting('keywords', dict(keywords.default_options(),
                                              enabled=True))
     assert window.queue_keywords()
-    assert pump(qapp, 120, lambda: not window.job_bar.busy)
+    assert pump(qapp, JOB_SECONDS, lambda: not window.job_bar.busy)
     found = window.case.findings(None, 'keywords', limit=10000)
     assert found and {f['detail']['term'] for f in found} == {'jpg'}
     panel = window.keywords_panel
