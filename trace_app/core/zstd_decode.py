@@ -2,10 +2,10 @@
 with it: systemd journal fields since systemd 246, and anything else that
 turns up. Decoding only.
 
-Python 3.14's standard library has a zstd decoder in C (compression.zstd);
-`decompress` uses it when it is there, because it is faster. This module is
-what every other Python -- 3.10 to 3.13, and the packaged builds -- uses,
-with no compiled library and no wheel to go missing on a platform.
+Python 3.14's standard library has a zstd decoder in C (compression.zstd),
+and backports.zstd is the same module for 3.10 to 3.13 (requirements.txt);
+`decompress` uses either when it is there, because it is ~100 times faster.
+This module is the fallback, with no compiled library to go missing.
 
 The format: frames (magic 28 B5 2F FD; skippable frames skipped), each a
 header and blocks -- raw, RLE or compressed. A compressed block holds
@@ -33,7 +33,10 @@ def standard_library():
     try:
         from compression import zstd   # Python 3.14+
     except ImportError:
-        return None
+        try:
+            from backports import zstd  # the same module, 3.10-3.13
+        except ImportError:
+            return None
     return zstd
 
 
@@ -46,6 +49,26 @@ def decompress(data, max_output=MAX_OUTPUT):
         except library.ZstdError as exc:
             raise ZstdError(str(exc)) from exc
     return decompress_python(data, max_output)
+
+
+def decompress_frame(data, max_output=MAX_OUTPUT):
+    """The first frame of `data`, whatever follows it -- Btrfs pads a
+    compressed extent with zeros to the end of its sector."""
+    library = standard_library()
+    if library is not None:
+        try:
+            return library.ZstdDecompressor().decompress(bytes(data))
+        except library.ZstdError as exc:
+            raise ZstdError(str(exc)) from exc
+    data = memoryview(bytes(data))
+    out = bytearray()
+    try:
+        if len(data) < 4 or struct.unpack_from('<I', data, 0)[0] != MAGIC:
+            raise ZstdError("Not a Zstandard frame")
+        _frame(data, 4, out, max_output)
+    except (IndexError, struct.error, ValueError) as exc:
+        raise ZstdError(f"Corrupt Zstandard data ({exc})") from exc
+    return bytes(out)
 
 
 # --- bit readers -----------------------------------------------------------------

@@ -18,6 +18,7 @@ can overwrite evidence an examiner already has.
 
 import argparse
 import bz2
+import gzip
 import hashlib
 import os
 import shutil
@@ -34,6 +35,8 @@ _NIST = "https://cfreds-archive.nist.gov/dfr-images/"
 _COMMONS = "https://upload.wikimedia.org/wikipedia/commons/"
 _AFF4 = ("https://raw.githubusercontent.com/aff4/ReferenceImages/"
          "84773b088bf6cce551a515d8ebb486bad69b58b8/AFF4Std/")
+_BTRFS = ("https://media.githubusercontent.com/media/fox-it/dissect.btrfs/"
+          "0549eb04f44df66ee51533c6356d824c1bbd4db3/tests/_data/")
 
 #: name -> (source URL, how it is packed, SHA-256 of the image itself).
 #: Checksums are those in test_images/README.md, taken when each image was
@@ -92,6 +95,21 @@ CATALOG = {
                             'df6c705c15339a53cf86b221858f2cd6b85c56f7078287ae99273145efe567c1'),
     'Base-Linear-ReadError.aff4': (_AFF4 + 'Base-Linear-ReadError.aff4', 'raw',
                                    '0b1c2edd6bdf37f2efe9c6fa274dd3c100de3fc5152d8a1fd82fb61f41c68e12'),
+    # Btrfs, which TSK does not read (core/btrfs.py): fox-it/dissect.btrfs's
+    # test volumes (128 MB each, ~1 MB packed but for compression's 5 MB),
+    # whose expected contents its tests publish -- subvolumes and a
+    # snapshot, nested subvolumes, zlib/LZO/zstd, sparse files, and one
+    # disk of a two-disk RAID1.
+    'btrfs-subvolume-snapshot.raw': (_BTRFS + 'btrfs-subvolume-snapshot.bin.gz', 'gz',
+                                     'ce5b3950c4b6b7200b8b76f795d09340652952bd6bec2b1803af6ecfe219f1f2'),
+    'btrfs-subvolume-nested.raw': (_BTRFS + 'btrfs-subvolume-nested.bin.gz', 'gz',
+                                   'bdc211d245a6bc1adec4540ae9b9041fe88f3583c9663f0aa1fa3ba8f0f1c1c7'),
+    'btrfs-compression.raw': (_BTRFS + 'btrfs-compression.bin.gz', 'gz',
+                              '2088190ca033e2a20c3fb93d2b5d2ca65313fbf32d193cb242d333ca5e0a538f'),
+    'btrfs-sparse.raw': (_BTRFS + 'btrfs-sparse.bin.gz', 'gz',
+                         '5d15ae65c1c45cdeb599294d9efacdbdb1d9133dff936200f6265521e089d258'),
+    'btrfs-raid1-1.raw': (_BTRFS + 'btrfs-raid1-1.bin.gz', 'gz',
+                          '63a60b87e9c17313610885db8ddd6b54146e88e910bf0bab8d7091605c20add7'),
 }
 
 
@@ -120,6 +138,9 @@ def _extract(archive, kind, name, target):
         shutil.move(archive, target)
     elif kind == 'bz2':
         with bz2.open(archive, 'rb') as src, open(target, 'wb') as out:
+            shutil.copyfileobj(src, out, 1 << 20)
+    elif kind == 'gz':
+        with gzip.open(archive, 'rb') as src, open(target, 'wb') as out:
             shutil.copyfileobj(src, out, 1 << 20)
     elif kind == 'zip':
         with zipfile.ZipFile(archive) as package:

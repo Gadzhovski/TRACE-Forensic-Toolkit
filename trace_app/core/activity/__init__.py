@@ -94,13 +94,17 @@ class Volume:
     """A file system in the image, with case-insensitive path lookups --
     XP writes WINDOWS\\system32, later versions Windows\\System32."""
 
-    def __init__(self, image_handler, offset, root='/'):
+    def __init__(self, image_handler, offset, root='/', mounts=None):
         self.handler = image_handler
         self.offset = offset
         self.fs = image_handler.get_fs_info(offset)
         #: Where the system's file system starts: '/' on a disk; in
-        #: logical evidence, the folder a collector put the drive in.
+        #: logical evidence, the folder a collector put the drive in; on
+        #: Btrfs, the subvolume mounted as / ('/root' on Fedora).
         self.root = root
+        #: Other places mounted from this file system, as its fstab says:
+        #: {'home': '/home', 'var': '/var'} -- Btrfs subvolumes.
+        self.mounts = mounts or {}
         self._cache = {}
 
     @classmethod
@@ -108,10 +112,16 @@ class Volume:
         """The volume at `offset` -- one per system root if it is a
         collection of several (logical evidence)."""
         fs = image_handler.get_fs_info(offset)
+        from trace_app.core.btrfs import is_btrfs, system_layouts
         from trace_app.core.logical import is_logical, system_roots
         if is_logical(fs):
             return [cls(image_handler, offset, root)
                     for root in system_roots(fs)]
+        if is_btrfs(fs):
+            layouts = system_layouts(fs)
+            if layouts:
+                return [cls(image_handler, offset, root, mounts)
+                        for root, mounts in layouts]
         return [cls(image_handler, offset)]
 
     def listdir(self, path):
@@ -200,11 +210,19 @@ class Volume:
     def find(self, *parts):
         """The entry at a case-insensitive path, or None. A path already
         under the root (an entry's own path, split) is taken as it is."""
-        path = self.root
-        if path != '/':
-            prefix = [p.lower() for p in path.strip('/').split('/')]
-            if [p.lower() for p in parts[:len(prefix)]] == prefix:
-                parts = parts[len(prefix):]
+        for path, rest in self._starts(parts):
+            entry = self._walk(path, rest)
+            if entry is not None:
+                return entry
+        return None
+
+    def _walk(self, path, parts):
+        if not parts:
+            # A mount point itself ('home'): its entry in its parent.
+            if path in ('/', self.root):
+                return None
+            path, parts = posixpath.split(path.rstrip('/'))
+            parts = [parts]
         entry = None
         for part in parts:
             wanted = part.lower()
@@ -216,6 +234,29 @@ class Volume:
             entry = match[0]
             path = entry.path
         return entry
+
+    def _starts(self, parts):
+        """Where to look for `parts`, as (directory, what is left), in
+        order: a mount's target for a path under its mount point (or
+        already under its target), the root with a path already under it
+        stripped -- and, on Btrfs, the root as it is: Fedora's root
+        subvolume is '/root', and so is the root user's home in it."""
+        lowered = [p.lower() for p in parts]
+        places = sorted(self.mounts.items(),
+                        key=lambda mount: -mount[0].count('/'))
+        for point, target in places:
+            for prefix in (target, point):
+                split = [p.lower() for p in prefix.strip('/').split('/') if p]
+                if split and lowered[:len(split)] == split:
+                    yield target, parts[len(split):]
+                    return
+        if self.root != '/':
+            prefix = [p.lower() for p in self.root.strip('/').split('/')]
+            if lowered[:len(prefix)] == prefix:
+                yield self.root, parts[len(prefix):]
+                if not self.mounts:
+                    return
+        yield self.root, parts
 
     def children(self, directory, suffix='', dirs=False):
         """Entries in a directory entry, filtered by name suffix."""
