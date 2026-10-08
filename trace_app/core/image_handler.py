@@ -1095,6 +1095,22 @@ class ImageHandler:
     #: wrong guess shows an empty volume rather than an error.
     DEFAULT_ROOT_INODE = 5
 
+    def inode_label(self, start_offset, inode):
+        """An entry's number as the examiner should read it: Btrfs
+        identifiers carry their subvolume in the high bits (core/btrfs.py)
+        and read '4122 (subvolume 256)'; every other file system's number
+        is shown as it is."""
+        if inode is None or inode == '':
+            return ''
+        try:
+            from trace_app.core.btrfs import identifier_label, is_btrfs
+            if int(inode) >> 48 and start_offset is not None and \
+                    is_btrfs(self.get_fs_info(start_offset)):
+                return identifier_label(int(inode))
+        except (TypeError, ValueError):
+            pass
+        return str(inode)
+
     def get_root_inode(self, start_offset):
         """The root directory's inode for the volume at `start_offset`.
 

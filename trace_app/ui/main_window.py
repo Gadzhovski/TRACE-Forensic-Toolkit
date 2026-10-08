@@ -843,7 +843,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         inode = data.get('inode_number')
         if inode is not None:
-            parts.append(f"inode {inode}")
+            label = self.image_handler.inode_label(
+                data.get('start_offset'), inode) if self.image_handler                 else inode
+            parts.append(f"inode {label}")
 
         if data.get('is_deleted'):
             # Two very different situations both read as "deleted": one where
@@ -7925,7 +7927,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             })
 
             self.listing_table.setItem(row_position, 0, name_item)
-            self.listing_table.setItem(row_position, 1, QTableWidgetItem(str(entry_inode)))
+            self.listing_table.setItem(row_position, 1, QTableWidgetItem(
+                self.image_handler.inode_label(offset, entry_inode)))
             self.listing_table.setItem(row_position, 2, QTableWidgetItem(description))
             self.listing_table.setItem(row_position, 3, QTableWidgetItem(str(size)))
             self.listing_table.setItem(row_position, 4, QTableWidgetItem(
@@ -8733,7 +8736,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         name_item.setData(Qt.UserRole, file_data)
 
         # Create other items
-        inode_item = QTableWidgetItem(str(file_data.get('inode_number', '')))
+        inode_item = QTableWidgetItem(self.image_handler.inode_label(
+            file_data.get('start_offset'), file_data.get('inode_number', '')))
         type_item = QTableWidgetItem("Folder" if is_directory else "File")
         size_item = SizeTableWidgetItem(self.image_handler.get_readable_size(file_data.get('size', 0)))
         size_item.setData(Qt.UserRole, file_data.get('size', 0))

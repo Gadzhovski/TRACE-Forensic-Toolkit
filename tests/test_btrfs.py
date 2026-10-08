@@ -513,3 +513,19 @@ def _bad_nodes(volume):
                     '<Q', data, btrfs._HEADER + 33 * i + 17)[0])
     assert len(seen) > 100
     return bad
+
+
+def test_identifiers_read_as_inode_and_subvolume():
+    """A Btrfs identifier keeps the subvolume in its high bits; the
+    Listing shows '258 (subvolume 256)', not 72057594037928194, and a
+    top-level entry its plain inode number."""
+    handler = handler_for(SNAPSHOT)
+    try:
+        top = entry(handler, 'small.txt')['inode_number']
+        inner = entry(handler, 'subvol/small.txt')['inode_number']
+        assert handler.inode_label(0, top) == str(top)
+        assert handler.inode_label(0, inner) == \
+            f"{inner & ((1 << 48) - 1)} (subvolume {inner >> 48})"
+        assert '(subvolume 256)' in handler.inode_label(0, inner)
+    finally:
+        handler.close_resources()

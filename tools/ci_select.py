@@ -50,6 +50,11 @@ QUICK_OSES = ['ubuntu-24.04']
 ALL_PYTHONS = ['3.10', '3.12', '3.14']
 EDGE_PYTHONS = ['3.10', '3.14']
 QUICK_PYTHONS = ['3.12']
+#: One more job beside the full grid wherever every system runs: Python
+#: 3.11 on Linux. 3.10 and 3.11 are the Pythons where None is still
+#: reference-counted, so a binding that drops a reference to it (PySide6
+#: 6.12.0's setTextAlignment did) aborts the interpreter there only.
+EXTRA_JOBS = [{'os': 'ubuntu-24.04', 'python': '3.11'}]
 
 #: Changes that can break anything: everything runs.
 FULL = (
@@ -403,6 +408,8 @@ def main(argv=None):
         'carve_score': 'true' if result['carve_score'] else 'false',
         'pythons': json.dumps(result['pythons']),
         'oses': json.dumps(result['oses']),
+        'include': json.dumps(EXTRA_JOBS if result['pythons'] != QUICK_PYTHONS
+                              else []),
     }
     with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
         for key, value in outputs.items():

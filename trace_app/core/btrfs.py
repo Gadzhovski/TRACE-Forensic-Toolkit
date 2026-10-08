@@ -108,6 +108,14 @@ def identifier(tree, inode):
     return inode if tree == FS_TREE else (tree << TREE_SHIFT) | inode
 
 
+def identifier_label(value):
+    """How an identifier reads to an examiner: the inode as `ls -i` shows
+    it, and the subvolume it is in when that is not the top level --
+    '4122 (subvolume 256)' rather than 72057594037928218."""
+    tree, inode = split_identifier(value)
+    return str(inode) if tree == FS_TREE else f"{inode} (subvolume {tree})"
+
+
 def split_identifier(value):
     value = int(value)
     if value >> TREE_SHIFT:

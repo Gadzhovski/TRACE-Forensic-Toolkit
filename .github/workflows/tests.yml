@@ -74,6 +74,7 @@ jobs:
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
       oses: ${{ steps.select.outputs.oses }}
+      include: ${{ steps.select.outputs.include }}
     steps:
       # Whole history: a branch is compared with where it left the default
       # branch, so a push cancelled by a newer one loses nothing.
@@ -101,6 +102,8 @@ jobs:
         # ubuntu-24.04.
         os: ${{ fromJSON(needs.plan.outputs.oses) }}
         python: ${{ fromJSON(needs.plan.outputs.pythons) }}
+        # Python 3.11 on Linux beside the grid (ci_select.EXTRA_JOBS).
+        include: ${{ fromJSON(needs.plan.outputs.include) }}
 
     env:
       QT_QPA_PLATFORM: offscreen
