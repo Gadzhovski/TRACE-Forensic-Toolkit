@@ -2282,6 +2282,8 @@ def test_videos_get_thumbnails_in_the_listing_and_the_gallery(qapp,
                   'status': 'valid'}
         panel.add_record(record)
         panel.show()
+        # Carves are drawn in batches (FLUSH_MS): the row first.
+        assert pump(qapp, 5, lambda: panel.table.rowCount() == 1)
         index = panel.table.model().index(0, 0)
         assert pump(qapp, 15, lambda: panel.gallery.thumbnail_for(index))
         # A frame, play-badged, in the view the Listing uses.

@@ -48,8 +48,18 @@ def _ci_images():
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
                 getattr(t, 'id', '') == 'CATALOG' for t in node.targets):
-            return {key.value for key in node.value.keys} | {'carve-corpus.dd'}
-    return {'carve-corpus.dd'}
+            return {key.value for key in node.value.keys} | _built_images()
+    return _built_images()
+
+
+def _built_images():
+    """Images CI makes rather than downloads: the carving corpus
+    everywhere, and on Linux the Btrfs volume the kernel deletes files on
+    (tools/make_btrfs_deleted.py loop-mounts it)."""
+    built = {'carve-corpus.dd'}
+    if sys.platform.startswith('linux'):
+        built.add('btrfs-deleted.raw')
+    return built
 
 
 def image_path(name):

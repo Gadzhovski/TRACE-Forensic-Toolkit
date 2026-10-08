@@ -21,7 +21,7 @@ not the copy on disk -- what is examined is the evidence.
 import logging
 import os
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QHeaderView, QLabel, QPushButton,
                                QSizePolicy, QStackedWidget, QTableWidget,
@@ -214,6 +214,10 @@ class _SortItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+#: How long carves gather before they are drawn together (milliseconds).
+FLUSH_MS = 250
+
+
 class CarvedFilesPanel(QWidget):
     """Carve, and list what was carved."""
 
@@ -244,6 +248,15 @@ class CarvedFilesPanel(QWidget):
         #: Quick triage's results, which live only as long as the window.
         self._session = []
         self._rows = []
+        #: Carves that arrived since the table was last drawn: shown a
+        #: batch at a time (`_flush`), never one by one -- each row
+        #: re-sorted the table and re-counted the status, so a carve
+        #: of a few thousand files froze the window for minutes.
+        self._pending = []
+        self._flush_timer = QTimer(self)
+        self._flush_timer.setSingleShot(True)
+        self._flush_timer.setInterval(FLUSH_MS)
+        self._flush_timer.timeout.connect(self._flush)
         self.view = 'details'
 
         layout = QVBoxLayout(self)
@@ -495,7 +508,8 @@ class CarvedFilesPanel(QWidget):
             self.target_combo.setCurrentIndex(index)
 
     def add_record(self, record):
-        """A file just carved: shown at once, before the job finishes."""
+        """A file just carved: shown within FLUSH_MS, before the job
+        finishes -- with the others that arrived meanwhile."""
         if self.case is None:
             self._session.append(record)
         if self._shown(record):
@@ -503,9 +517,26 @@ class CarvedFilesPanel(QWidget):
             digest = record.get('sha256')
             if digest:
                 self._duplicates[digest] = self._duplicates.get(digest, 0) + 1
-            if self._filtered([record]):
-                self._add_table_row(record)
-            self._update_status()
+            self._pending.append(record)
+            if not self._flush_timer.isActive():
+                self._flush_timer.start()
+
+    def _flush(self):
+        """Draw the carves that arrived since the last batch: one sort and
+        one status line for all of them."""
+        pending, self._pending = self._pending, []
+        shown = self._filtered(pending)
+        if shown:
+            sorting = self.table.isSortingEnabled()
+            self.table.setSortingEnabled(False)
+            self.table.setUpdatesEnabled(False)
+            try:
+                for record in shown:
+                    self._add_table_row(record, fit=False)
+            finally:
+                self.table.setUpdatesEnabled(True)
+                self.table.setSortingEnabled(sorting)
+        self._update_status()
 
     def forget(self, key):
         """Drop one image's earlier results as it is carved again.
@@ -545,6 +576,9 @@ class CarvedFilesPanel(QWidget):
         self._duplicates = counts
 
     def _show(self, rows):
+        # A full redraw covers whatever was waiting for the next batch.
+        self._pending = []
+        self._flush_timer.stop()
         self._count_copies(rows)
         shown = self._filtered(rows)
         self._visible = shown

@@ -71,9 +71,11 @@ jobs:
       images_key: ${{ steps.select.outputs.images_key }}
       artifacts: ${{ steps.select.outputs.artifacts }}
       corpus: ${{ steps.select.outputs.corpus }}
+      btrfs_deleted: ${{ steps.select.outputs.btrfs_deleted }}
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
       oses: ${{ steps.select.outputs.oses }}
+      include: ${{ steps.select.outputs.include }}
     steps:
       # Whole history: a branch is compared with where it left the default
       # branch, so a push cancelled by a newer one loses nothing.
@@ -101,6 +103,8 @@ jobs:
         # ubuntu-24.04.
         os: ${{ fromJSON(needs.plan.outputs.oses) }}
         python: ${{ fromJSON(needs.plan.outputs.pythons) }}
+        # Python 3.11 on Linux beside the grid (ci_select.EXTRA_JOBS).
+        include: ${{ fromJSON(needs.plan.outputs.include) }}
 
     env:
       QT_QPA_PLATFORM: offscreen
@@ -183,6 +187,16 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           "$PY" tools/carve_corpus.py
+
+      # A Btrfs volume with known deleted files, made by the Linux kernel
+      # itself (tools/make_btrfs_deleted.py: loop-mounted, so root and
+      # Linux only). The tests that read it skip on Windows and macOS.
+      - name: Build the Btrfs volume with deleted files
+        if: runner.os == 'Linux' && needs.plan.outputs.btrfs_deleted == 'true'
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends btrfs-progs >/dev/null
+          sudo python3 tools/make_btrfs_deleted.py
+          sudo chown "$USER" test_images/btrfs-deleted.raw*
 
       # Real Windows and browser artifacts for the activity tests, pinned by
       # SHA-256 (tools/fetch_artifact_samples.py).

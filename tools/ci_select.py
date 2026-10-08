@@ -50,6 +50,11 @@ QUICK_OSES = ['ubuntu-24.04']
 ALL_PYTHONS = ['3.10', '3.12', '3.14']
 EDGE_PYTHONS = ['3.10', '3.14']
 QUICK_PYTHONS = ['3.12']
+#: One more job beside the full grid wherever every system runs: Python
+#: 3.11 on Linux. 3.10 and 3.11 are the Pythons where None is still
+#: reference-counted, so a binding that drops a reference to it (PySide6
+#: 6.12.0's setTextAlignment did) aborts the interpreter there only.
+EXTRA_JOBS = [{'os': 'ubuntu-24.04', 'python': '3.11'}]
 
 #: Changes that can break anything: everything runs.
 FULL = (
@@ -60,7 +65,7 @@ FULL = (
     re.compile(r'^main\.py$'),
     re.compile(r'^\.github/workflows/tests\.yml$'),
     re.compile(r'^tests/conftest\.py$'),
-    re.compile(r'^tools/(ci_select|download|fetch_test_images|fetch_artifact_samples|carve_corpus)\.py$'),
+    re.compile(r'^tools/(ci_select|download|fetch_test_images|fetch_artifact_samples|carve_corpus|make_btrfs_deleted)\.py$'),
     re.compile(r'^trace_app/(__init__|app)\.py$'),
     re.compile(r'^trace_app/[^/]+/__init__\.py$'),
     re.compile(r'^trace_app/core/(image_handler|background|walk)\.py$'),
@@ -218,8 +223,9 @@ def catalog():
 
 
 def needs(test_files, graph):
-    """(images, artifact samples?, carving corpus?) the test files read --
-    named in them, or in the test modules they import."""
+    """(images, artifact samples?, carving corpus?, the Btrfs volume with
+    deleted files?) the test files read -- named in them, or in the test
+    modules they import."""
     modules = {_module_of(path) for path in test_files}
     todo = list(modules)
     while todo:
@@ -240,7 +246,8 @@ def needs(test_files, graph):
             os.path.join(ROOT, 'tests', 'manifests'))) if name.endswith('.json')
             and name[:-len('.json')] in catalog()]
     return (sorted(set(images)), 'artifact_samples' in text,
-            'carve-corpus' in text or 'carve_samples' in text)
+            'carve-corpus' in text or 'carve_samples' in text,
+            'btrfs-deleted' in text)
 
 
 # -- the plan ------------------------------------------------------------
@@ -287,7 +294,7 @@ def plan(files, full_reason=None):
     if full_reason is not None:
         return {'full': True, 'reason': full_reason, 'tests': [],
                 'images': catalog(), 'artifacts': True, 'corpus': True,
-                'carve_score': True, 'files': files}
+                'btrfs_deleted': True, 'carve_score': True, 'files': files}
 
     reached = dependents(graph, changed_modules)
     for module in sorted(changed_modules):
@@ -298,13 +305,14 @@ def plan(files, full_reason=None):
     carve = carve or any(CARVING_MODULES.search(m) for m in reached)
 
     test_files = sorted(f"{m.replace('.', '/')}.py" for m in selected)
-    images, artifacts, corpus = needs(test_files, graph)
+    images, artifacts, corpus, btrfs_deleted = needs(test_files, graph)
     if carve:
         images = sorted(set(images) | set(CARVE_SCORE_IMAGES))
         corpus = True
     return {'full': False, 'reason': '; '.join(reasons), 'tests': test_files,
             'images': images, 'artifacts': artifacts, 'corpus': corpus,
-            'carve_score': carve, 'files': files}
+            'btrfs_deleted': btrfs_deleted, 'carve_score': carve,
+            'files': files}
 
 
 def matrix(event, ref, default='master'):
@@ -400,9 +408,12 @@ def main(argv=None):
                              .hexdigest()[:12],
         'artifacts': 'true' if result['artifacts'] else 'false',
         'corpus': 'true' if result['corpus'] else 'false',
+        'btrfs_deleted': 'true' if result['btrfs_deleted'] else 'false',
         'carve_score': 'true' if result['carve_score'] else 'false',
         'pythons': json.dumps(result['pythons']),
         'oses': json.dumps(result['oses']),
+        'include': json.dumps(EXTRA_JOBS if result['pythons'] != QUICK_PYTHONS
+                              else []),
     }
     with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
         for key, value in outputs.items():
