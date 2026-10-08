@@ -23,7 +23,7 @@ logger = logging.getLogger('TRACE.Assembly')
 
 EXTENSION = '.trace-assembly'
 VERSION = 1
-MDRAID, BTRFS, HWRAID = 'mdraid', 'btrfs', 'hwraid'
+MDRAID, BTRFS, HWRAID, LDM = 'mdraid', 'btrfs', 'hwraid', 'ldm'
 
 
 class AssemblyError(Exception):
@@ -97,6 +97,7 @@ def find_groups(handlers):
                 group['members'].append({'image': path,
                                          'start_sector': start,
                                          'slot': devid})
+    _ldm_groups(handlers, groups)
     out = []
     for group in groups.values():
         images = {m['image'] for m in group['members']}
@@ -107,6 +108,38 @@ def find_groups(handlers):
         group['members'].sort(key=lambda m: m['slot'])
         out.append(group)
     return out
+
+
+def _ldm_groups(handlers, groups):
+    """Windows dynamic volumes spread over several disks (core/ldm.py):
+    one group per volume, its members the open images that are disks of
+    its disk group (slot = the disk's GUID). A mirror reads from one disk
+    already, and is not offered."""
+    for path, handler in handlers.items():
+        if handler is None or is_assembly(path):
+            continue
+        try:
+            database = handler.ldm_database()
+        except Exception:
+            database = None
+        if database is None:
+            continue
+        for volume in database.volume_list():
+            if len(volume['disks']) < 2 or volume['kind'] == 'mirror':
+                continue
+            key = (LDM, database.group_name, volume['id'])
+            group = groups.setdefault(key, {
+                'kind': LDM, 'id': f"{database.group_name}:{volume['id']}",
+                'name': volume['name'], 'level': volume['kind'],
+                'needed': len(volume['disks']), 'members': [],
+                'params': {'volume': volume['id'],
+                           'group': database.group_name}})
+            if database.disk_guid in volume['disks'] and \
+                    database.disk_guid not in {m['slot']
+                                               for m in group['members']}:
+                group['members'].append({'image': path,
+                                         'start_sector': None,
+                                         'slot': database.disk_guid})
 
 
 def hardware_group(paths, params, name='Hardware RAID'):
@@ -125,6 +158,11 @@ def describe(group):
         from trace_app.core import hwraid
         return (f"{group['name']}: "
                 f"{hwraid.Params.from_dict(group['params']).describe()}")
+    if group['kind'] == LDM:
+        found = len(group['members'])
+        return (f"Windows dynamic {group['level']} volume "
+                f"'{group['name']}': {found} of {group['needed']} disks "
+                f"found")
     found = len({m['slot'] for m in group['members']})
     what = (f"RAID{group['level']}" if group['kind'] == MDRAID
             else 'Btrfs file system')
@@ -161,7 +199,7 @@ def read_descriptor(path):
     except (OSError, ValueError) as exc:
         raise AssemblyError(f"Unreadable descriptor: {exc}") from exc
     if data.get('trace_assembly') != VERSION or \
-            data.get('kind') not in (MDRAID, BTRFS, HWRAID):
+            data.get('kind') not in (MDRAID, BTRFS, HWRAID, LDM):
         raise AssemblyError("Not a TRACE assembly descriptor")
     return data
 
@@ -202,6 +240,32 @@ def open_assembly(path):
                     member['start_sector'])
             windows.append((handler, offset, length))
         keep = list(handlers.values())
+        if data['kind'] == LDM:
+            from trace_app.core import hwraid, ldm
+            disks, volume = {}, None
+            for handler, base, size in windows:
+                database = ldm.Database(
+                    lambda o, n, h=handler, b=base: h.read(b + o, n), size)
+                disks[database.disk_guid] = (
+                    lambda o, n, h=handler, b=base: h.read(b + o, n),
+                    database.data_start * 512)
+                volume = volume or next(
+                    (v for v in database.volume_list()
+                     if v['id'] == data['params']['volume']), None)
+            if volume is None:
+                raise AssemblyError("The volume is not in the disks' LDM "
+                                    "database")
+            try:
+                reader = ldm.volume_reader(volume, disks)
+            except (ldm.LdmError, hwraid.RaidError) as exc:
+                raise AssemblyError(str(exc)) from exc
+            missing = volume['disks'] and len(
+                set(volume['disks']) - set(disks))
+            return (_Kept(_Reader(reader), keep),
+                    f"Windows dynamic {volume['kind']} volume "
+                    f"'{volume['name']}' over {len(volume['disks'])} disks"
+                    + (f" ({missing} rebuilt from parity)" if missing
+                       else ''), (), keep)
         if data['kind'] == HWRAID:
             from trace_app.core import hwraid
             params = hwraid.Params.from_dict(data['params'])

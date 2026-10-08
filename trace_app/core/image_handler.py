@@ -267,6 +267,11 @@ class ImageHandler:
                                               f"sector {start}")]
                 elif self.volume_kind(start) == 'lvm':
                     entries = self._lv_entries(start)
+                elif self.volume_kind(start) == 'ldm':
+                    entries = [(1 + v['index'], v['key'],
+                                f"dynamic volume {v['name']}")
+                               for v in self.dynamic_volumes(start)
+                               if v['readable']]
                 else:
                     array = self.md_array(start)
                     if array is not None and array.level != 1:
@@ -444,7 +449,7 @@ class ImageHandler:
         note says why a whole partition counts as used: carving it as
         "unallocated" would report live files as deleted ones."""
         kind = self.volume_kind(start_sector)
-        if start_sector in self._bitlocker or kind == 'lvm':
+        if start_sector in self._bitlocker or kind in ('lvm', 'ldm'):
             # Encrypted bytes, or extents mapped elsewhere: the decrypted
             # volume and the logical volumes are carved in their own
             # ranges (carve_volumes), so the raw bytes are skipped.
@@ -1366,6 +1371,12 @@ class ImageHandler:
             logical = containers.split_lvm_key(start_offset)
             if logical is not None and start_offset not in self._volumes:
                 self.logical_volumes(logical[0])
+            dynamic = containers.split_ldm_key(start_offset)
+            if dynamic is not None:
+                if start_offset not in self._volumes:
+                    self.dynamic_volumes(dynamic[0])
+                if start_offset not in self._volumes:
+                    return None
             apfs = containers.split_apfs_key(start_offset)
             if apfs is not None:
                 return self._apfs_file_system(start_offset, *apfs)
@@ -1507,8 +1518,68 @@ class ImageHandler:
                 self._kinds[key] = None
         return self._kinds[key]
 
+    # --- Windows dynamic disks (core/ldm.py) -------------------------------
+
+    def _ldm_starts(self):
+        """Starts of the partitions that are a dynamic disk's data area:
+        MBR type 0x42, or GPT's 'LDM data partition'."""
+        from trace_app.core import ldm
+        if not hasattr(self, '_ldm_slots'):
+            self.partition_label(0)                      # the GPT entries
+            gpt = getattr(self, '_gpt_entries', {}) or {}
+            self._ldm_slots = [
+                start for _a, desc, start, _l in self.get_partitions()
+                if b'(0x42)' in (desc or b'') or
+                gpt.get(start, ('',))[0] == ldm.GPT_LDM_DATA]
+        return self._ldm_slots
+
+    def ldm_database(self):
+        """This disk's copy of its disk group's LDM database, or None."""
+        from trace_app.core import ldm
+        if not hasattr(self, '_ldm_db'):
+            self._ldm_db = None
+            if self.logical_fs is None and self.img_info is not None and \
+                    self._ldm_starts():
+                try:
+                    self._ldm_db = ldm.Database(
+                        self.read, self.get_size(),
+                        getattr(self, '_gpt_entries', None))
+                except (ldm.LdmError, IndexError, ValueError) as exc:
+                    logger.info("No LDM database: %s", exc)
+        return self._ldm_db
+
+    def dynamic_volumes(self, start_sector):
+        """The disk group's volumes, from the dynamic disk at
+        `start_sector`: [{'key', 'index', 'name', 'kind', 'size', 'disks',
+        'readable', 'why'}] -- 'readable' when every extent it needs is on
+        this disk (simple volumes, a mirror's plex); the others need the
+        group's other disks (File > Assemble)."""
+        from trace_app.core import hwraid, ldm
+        database = self.ldm_database()
+        if database is None or start_sector not in self._ldm_starts():
+            return []
+        here = {database.disk_guid: (self.read,
+                                     database.data_start * self.sector_size)}
+        out = []
+        for index, volume in enumerate(database.volume_list()):
+            key = containers.ldm_key(start_sector, index)
+            readable, why = False, ''
+            if key not in self._volumes:
+                try:
+                    reader = ldm.volume_reader(volume, here)
+                    self._volumes[key] = hwraid._Image(reader)
+                except (ldm.LdmError, hwraid.RaidError) as exc:
+                    why = str(exc)
+            readable = key in self._volumes
+            out.append({'key': key, 'index': index, 'name': volume['name'],
+                        'kind': volume['kind'], 'size': volume['size'],
+                        'disks': len(volume['disks']),
+                        'readable': readable,
+                        'group': database.group_name, 'why': why})
+        return out
+
     def volume_kind(self, start_sector):
-        """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
+        """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', 'ldm' or None for a
         partition (or an unpartitioned image at 0)."""
         if self.logical_fs is not None:
             # An encrypted iOS backup is locked until its password is given.
@@ -1517,6 +1588,9 @@ class ImageHandler:
         if start_sector not in self._kinds:
             if start_sector >= containers.SHADOW_KEY_BASE:
                 self._kinds[start_sector] = None
+            elif start_sector in self._ldm_starts() and \
+                    self.ldm_database() is not None:
+                self._kinds[start_sector] = 'ldm'
             else:
                 try:
                     self._kinds[start_sector] = containers.volume_kind(
@@ -1739,6 +1813,9 @@ class ImageHandler:
             kind = self.volume_kind(start)
             if kind == 'lvm' or self.inner_kind(start) == 'lvm':
                 out += [v['key'] for v in self.logical_volumes(start)]
+            elif kind == 'ldm':
+                out += [v['key'] for v in self.dynamic_volumes(start)
+                        if v['readable']]
             elif self.fs_layers(start):
                 out += [layer['key'] for layer in self.fs_layers(start)]
             elif kind == 'apfs':

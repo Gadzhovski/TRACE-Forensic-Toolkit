@@ -269,7 +269,9 @@ class _Image:
                 return reader.read(offset, length)
 
             def get_size(self):
-                return reader.size
+                # A reader's size, or anything with get_size (a handler).
+                size = getattr(reader, 'size', None)
+                return size if size is not None else reader.get_size()
         return Img()
 
 

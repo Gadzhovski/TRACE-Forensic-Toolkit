@@ -301,6 +301,19 @@ def layer_key(start_sector, index):
     return _LAYER_BASE + start_sector * LAYERS_PER_PARTITION + index
 
 
+#: A Windows dynamic disk's volumes (core/ldm.py), above the layers.
+_LDM_BASE = 2 ** 52
+
+
+def ldm_key(start_sector, index):
+    return _LDM_BASE + start_sector * VOLUMES_PER_CONTAINER + index
+
+
+def split_ldm_key(key):
+    """(dynamic disk partition start, volume index) or None."""
+    return _split(key, _LDM_BASE, 2 ** 53)
+
+
 def split_layer_key(key):
     """(partition start, layer index) or None."""
     if not isinstance(key, int) or not _LAYER_BASE <= key < 2 ** 52:

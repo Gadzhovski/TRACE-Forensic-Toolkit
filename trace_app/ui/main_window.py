@@ -6878,18 +6878,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self._add_bitlocker_node(
                     root_item_tree, start, label, size_in_bytes, '', end)
                 continue
-            if kind in ('lvm', 'apfs'):
+            if kind in ('lvm', 'apfs', 'ldm'):
                 group = QTreeWidgetItem(root_item_tree)
-                group.setText(0, f"{label} ({'LVM volume group' if kind == 'lvm' else 'APFS container'}, "
-                                 f"{readable_size})")
+                what = {'lvm': 'LVM volume group', 'apfs': 'APFS container'}
+                if kind == 'ldm':
+                    database = self.image_handler.ldm_database()
+                    what = (f"Windows dynamic disk, disk group "
+                            f"{database.group_name}")
+                else:
+                    what = what[kind]
+                group.setText(0, f"{label} ({what}, {readable_size})")
                 group.setToolTip(0, where)
                 group.setIcon(0, QIcon(self.db_manager.get_icon_path(
                     'device', 'drive-harddisk')))
                 group.setData(0, Qt.UserRole, {
                     "inode_number": None, "start_offset": start,
                     "end_offset": end, "is_volume_group": True})
-                (self._add_lvm_nodes if kind == 'lvm' else
-                 self._add_apfs_nodes)(group, start, label)
+                {'lvm': self._add_lvm_nodes, 'apfs': self._add_apfs_nodes,
+                 'ldm': self._add_ldm_nodes}[kind](group, start, label)
                 group.setExpanded(True)
                 continue
             layers = self.image_handler.fs_layers(start)
@@ -7010,6 +7016,49 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                f"was then, read-only. Files deleted or "
                                f"changed since are here as they were.")
             item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+
+    def _add_ldm_nodes(self, parent, start, label):
+        """A node per volume of the dynamic disk's group (core/ldm.py):
+        the ones on this disk open here; one spread over other disks says
+        so -- File > Assemble reads it from all of them."""
+        try:
+            volumes = self.image_handler.dynamic_volumes(start)
+        except Exception as exc:
+            logger.warning("Could not read the LDM database at %s: %s",
+                           start, exc)
+            return
+        for volume in volumes:
+            size = self.image_handler.get_readable_size(volume['size'])
+            item = QTreeWidgetItem(parent)
+            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                'device', 'drive-harddisk')))
+            if volume['readable']:
+                fs_type = self.image_handler.get_fs_type(volume['key'])
+                item.setText(0, f"{volume['name']} ({volume['kind']} "
+                                f"volume, {fs_type}, {size})")
+                item.setData(0, Qt.UserRole, {
+                    "inode_number": None, "start_offset": volume['key'],
+                    "is_logical_volume": True,
+                    "volume_label": f"{label} {volume['name']}"})
+                item.setToolTip(0, f"Dynamic volume {volume['name']} of "
+                                   f"disk group {volume['group']}")
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.ShowIndicator if self.image_handler
+                    .check_partition_contents(volume['key'])
+                    else QTreeWidgetItem.DontShowIndicator)
+            else:
+                item.setText(0, f"{volume['name']} ({volume['kind']} volume "
+                                f"over {volume['disks']} disks, {size}) -- "
+                                f"needs the other disks")
+                item.setData(0, Qt.UserRole, {
+                    "inode_number": None, "start_offset": start,
+                    "is_volume_group": True})
+                item.setToolTip(0, f"Its data is spread over the disk "
+                                   f"group's other disks: open their images "
+                                   f"too, then File > Assemble RAID or "
+                                   f"Multi-Disk Volume.\n{volume['why']}")
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.DontShowIndicator)
 
     def _add_lvm_nodes(self, parent, start, label):
         """A node per logical volume of the LVM group at `start`."""

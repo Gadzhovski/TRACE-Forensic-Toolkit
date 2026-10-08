@@ -33,6 +33,12 @@ def readable(group):
         return True, (f"{missing} device{'s' if missing != 1 else ''} "
                       f"missing: what is mirrored or covered by parity is "
                       f"read; anything only on the missing device is not")
+    if group['kind'] == assembly.LDM:
+        if group['level'] == 'raid5' and missing == 1:
+            return True, "1 missing; rebuilt from parity"
+        return False, (f"{missing} missing: a {group['level']} volume "
+                       f"cannot be read without "
+                       f"{'them' if missing != 1 else 'it'}")
     spare = _SPARE.get(group['level'], 0)
     if spare is None or missing <= spare:
         return True, (f"{missing} missing; rebuilt from the others"
@@ -92,7 +98,8 @@ class AssembleDialog(QDialog):
         for row, group in enumerate(self.groups):
             ok, why = readable(group)
             what = (f"RAID{group['level']}" if group['kind'] ==
-                    assembly.MDRAID else 'Btrfs')
+                    assembly.MDRAID else f"Dynamic {group['level']}"
+                    if group['kind'] == assembly.LDM else 'Btrfs')
             members = ', '.join(
                 names.get(m['image']) or m['image'].replace('\\', '/')
                 .rsplit('/', 1)[-1] for m in group['members'])
