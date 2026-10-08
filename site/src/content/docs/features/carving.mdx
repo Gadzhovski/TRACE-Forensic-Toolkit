@@ -11,7 +11,7 @@ Carving finds files by their content where the file system no longer records the
 
 | Source | |
 |:--|:--|
-| **Unallocated space** | every free stretch of each volume -- not just chunks that happen to be wholly free |
+| **Unallocated space** | every free stretch of each volume -- not just chunks that happen to be wholly free -- taken from the file system's own records, APFS, XFS and Btrfs included. Inside LVM, LUKS or FileVault, where free space cannot be told from used, the partition is skipped and the log says why |
 | **Slack** | the bytes after the end of each live file in its last cluster |
 | **Whole image** | everything, allocated or not |
 

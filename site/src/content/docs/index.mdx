@@ -33,7 +33,7 @@ import Pillars from '../../components/Pillars.astro';
 <Stats
 	items={[
 		{ value: '70', label: 'file types carved' },
-		{ value: '9', label: 'file systems read' },
+		{ value: '10', label: 'file systems read' },
 		{ value: '5', label: 'kinds of encryption unlocked' },
 		{ value: '4', label: 'platforms tested' },
 		{ value: 'MIT', label: 'free and open source' },
@@ -58,9 +58,9 @@ From the first hash check to the final report, in one application that never wri
 		{ icon: 'puzzle', title: 'File carving', text: '70 file types from unallocated space or slack, each checked for completeness. Fragmented ZIP and PDF files are rebuilt.', href: 'features/carving/' },
 		{ icon: 'clock', title: 'User activity', text: 'Programs run, files opened, USB devices, logons, browser history, chats and phone backups – on one timeline.', href: 'features/activity/' },
 		{ icon: 'list-format', title: 'Search', text: 'Full-text search inside documents, mail and archives, with e-mails, URLs, phone, card and IBAN numbers found automatically.', href: 'features/search/' },
-		{ icon: 'warning', title: 'Detection', text: 'YARA rules over files, Sigma rules over event logs, keyword lists, hash sets (NSRL) and persistence graded by risk.', href: 'features/detection/' },
+		{ icon: 'warning', title: 'Detection', text: 'YARA rules over files, Sigma rules over event logs, keyword lists, hash sets (NSRL) and persistence on Windows, Linux and macOS graded by risk.', href: 'features/detection/' },
 		{ icon: 'document', title: 'Viewers', text: 'Pictures, video, PDF, Office, mail, SQLite, registry hives, a hex editor with a data inspector, and HTML shown offline.', href: 'features/viewers/' },
-		{ icon: 'padlock', title: 'Encrypted volumes', text: 'BitLocker, FileVault 2, LUKS and encrypted APFS unlocked in place; shadow copies, LVM and XFS read too.', href: 'features/volumes/' },
+		{ icon: 'padlock', title: 'Encrypted volumes', text: 'BitLocker, FileVault 2, LUKS and encrypted APFS unlocked in place; shadow copies, LVM, XFS and Btrfs read too.', href: 'features/volumes/' },
 	]}
 />
 
@@ -83,7 +83,7 @@ From the first hash check to the final report, in one application that never wri
 | **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2 |
 | **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups |
 | **Live disks** | an attached disk, read-only, without imaging it first |
-| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, UFS, ISO 9660 |
+| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, Btrfs, UFS, ISO 9660 |
 | **Encrypted volumes** | BitLocker, FileVault 2, LUKS, encrypted APFS and iOS backups |
 | **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
 

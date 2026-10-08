@@ -1,6 +1,6 @@
 ---
 title: Supported evidence
-description: Every disk image, logical image, file system, volume system, encrypted volume and container format TRACE reads – E01, AFF4, raw, DMG, VMDK, VHDX, QCOW2, AD1, L01, NTFS, APFS, ext4, BitLocker, FileVault, LUKS and more.
+description: Every disk image, logical image, file system, volume system, encrypted volume and container format TRACE reads – E01, AFF4, raw, DMG, VMDK, VHDX, QCOW2, AD1, L01, NTFS, APFS, ext4, Btrfs, BitLocker, FileVault, LUKS and more.
 ---
 
 ## Disk images
@@ -14,7 +14,7 @@ description: Every disk image, logical image, file system, volume system, encryp
 | **DMG** | UDIF with zlib, bzip2, LZFSE, LZMA or ADC compression; `.sparseimage`; `.sparsebundle` folders |
 | **VMDK** | VMware disks, snapshots chained to their parents |
 | **VHD / VHDX** | Hyper-V and Virtual PC disks, differencing disks chained to their parents |
-| **QCOW / QCOW2** | QEMU disks |
+| **QCOW / QCOW2** | QEMU disks; QCOW2 read by TRACE itself, compressed (deflate or zstd) and with backing files |
 
 ## Logical images and collections
 
@@ -46,6 +46,7 @@ DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels; **
 | ISO 9660 | The Sleuth Kit |
 | APFS (encrypted too) | libfsapfs |
 | XFS | libfsxfs |
+| Btrfs (subvolumes and snapshots; zlib, LZO, zstd) | TRACE (Python) |
 
 Unpartitioned images -- a single file system with no partition table -- are read too.
 
