@@ -81,6 +81,12 @@ def text_of(data):
     UTF-16LE runs, and UTF-16 in a non-Latin alphabet in either byte order
     (text_extract.script_runs), one per line, in the order they lie."""
     from trace_app.core.text_extract import script_runs
+    if not data.strip(b'\x00'):
+        # Zeroed space holds no text, and is most of an image's free space
+        # (2,634 of the 2,639 pieces of ntfs1-gen2's): checked in C, rather
+        # than by four regular expressions a byte at a time -- indexing it
+        # took four times as long as indexing the files.
+        return ''
     found = [(m.start(), m.group().decode('ascii', 'replace').strip())
              for m in _ASCII.finditer(data)]
     found += [(m.start(), m.group().decode('utf-16-le', 'replace').strip())
