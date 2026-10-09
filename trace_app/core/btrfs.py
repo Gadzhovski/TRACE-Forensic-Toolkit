@@ -62,6 +62,11 @@ FS_TREE = 5
 ROOT_TREE_DIR = 6
 FIRST_FREE = 256
 ROOT_DIR = 256              # every subvolume's root directory
+#: The inode Linux gives a snapshot's placeholder for a nested subvolume
+#: (BTRFS_EMPTY_SUBVOL_DIR_OBJECTID): no item has it, so it is an empty
+#: directory -- and, unlike the 0 it had, it is not the root's identifier
+#: (opening one listed the volume's root again, snapshot and all).
+EMPTY_SUBVOL_DIR = 2
 CHUNK_TREE_DEVICES = 1      # DEV_ITEMs live under objectid 1
 
 # Chunk profile bits (block group flags).
@@ -789,9 +794,15 @@ class BtrfsEntry:
 
     def get_sub_file_entry(self, index):
         name, tree, inode = self._list()[index]
+        if tree is None:
+            # A snapshot's copy of a nested subvolume: an empty directory
+            # in this tree, as Linux shows it.
+            return BtrfsEntry(self._volume, self.tree, EMPTY_SUBVOL_DIR,
+                              name.decode('utf-8', 'surrogateescape'),
+                              self.identifier, empty=True)
         return BtrfsEntry(self._volume, tree, inode,
                           name.decode('utf-8', 'surrogateescape'),
-                          self.identifier, empty=tree is None)
+                          self.identifier)
 
     # --- data --------------------------------------------------------------------
 

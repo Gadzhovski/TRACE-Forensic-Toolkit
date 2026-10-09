@@ -911,15 +911,26 @@ class ImageHandler:
                 f"The image's tables describe {chunk_map.media_size:,} "
                 f"bytes; libewf reads {total:,}")
         damaged = []
-
-        def chunks():
-            for offset, data, ok in ewf_chunks.read_media(chunk_map):
-                if not ok:
-                    damaged.append(offset)
-                yield data
-
-        digests = evidence_hash.hash_stream(chunks(), total,
-                                            progress_callback)
+        hashers = evidence_hash.new_hashers()
+        position = 0
+        for offset, data, ok in ewf_chunks.read_media(chunk_map):
+            if not ok:
+                damaged.append(offset)
+            for hasher in hashers.values():
+                hasher.update(data)
+            position += len(data)
+            if progress_callback is not None:
+                progress_callback(min(position, total), total)
+        # The media counts whole sectors; a source that was not a whole
+        # number of them keeps its last bytes in the last chunk, and the
+        # hash the image stores covers them: they are hashed too.
+        if not total <= position <= total + ewf_chunks.TAIL_SLACK:
+            raise evidence_hash.HashingError(
+                f"The image gave {position:,} bytes; its media is "
+                f"{total:,}")
+        digests = evidence_hash.digests(hashers, position)
+        if position > total:
+            result['beyond_media'] = position - total
         if damaged:
             result['damaged'] = ewf_chunks.damaged_ranges(
                 damaged, chunk_map.chunk_size, self.sector_size or 512)
@@ -1335,8 +1346,14 @@ class ImageHandler:
                 except Exception as exc:
                     logger.debug("GPT entries not read: %s", exc)
         if description is None:
-            description = next((d for _a, d, s, _l in self.get_partitions()
-                                if s == start_sector), None)
+            # Several slots can start at one sector (the MBR's own table
+            # and a partition at sector 0): the partition names it.
+            found = [d for _a, d, s, _l in self.get_partitions()
+                     if s == start_sector]
+            real = [d for d in found if partition_names.bookkeeping(
+                d.decode('utf-8', 'replace') if isinstance(d, bytes)
+                else d or '') is None]
+            description = (real or found or [None])[0]
             if description is None and any(
                     lost['start'] == start_sector
                     for lost in self.lost_partitions()):

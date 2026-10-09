@@ -19,6 +19,12 @@ EWF version 1 (E01), per libewf's format documentation:
   a stored chunk is its bytes followed by their Adler-32
 * a chunk ends where the next one starts; a table's last chunk at the
   end of the 'sectors' section that holds it
+* the media size counts whole sectors; a source that was not a whole
+  number of sectors (a 50,000,000-byte file) keeps its last bytes in the
+  last chunk, beyond the media, and the hash the image stores covers
+  them (sleuthkit_test_data's btrfs_testimage_50MB.E01: 128 bytes). That
+  chunk may hold up to a sector more than the media implies (TAIL_SLACK)
+  -- not damage; the bytes are yielded, and hashed.
 * EnCase 6.7 and earlier could let offsets run past 2**31 within one
   table; the 31-bit offset then wraps, and bit 31 is part of the offset.
   As in libewf, a wrap is taken as the start of that overflow.
@@ -36,6 +42,10 @@ from concurrent.futures import ThreadPoolExecutor
 #: differently; libewf hashes those.
 SIGNATURES = (b'EVF\x09\x0d\x0a\xff\x00',)
 DESCRIPTOR = 76
+#: How much more than the media implies the last chunk may hold: less
+#: than a sector, the acquired bytes the sector count leaves out.
+TAIL_SLACK = 511
+
 #: Chunks decompressed per task: zlib releases the interpreter lock, so
 #: batches decompress in parallel while the hash is fed in order.
 BATCH = 64
@@ -178,15 +188,17 @@ class ChunkMap:
         return self.media_size - self.chunk_size * (len(self.chunks) - 1)
 
 
-def _decode(raw, compressed, expected):
+def _decode(raw, compressed, expected, last=False):
     """(data, ok) for one chunk's stored bytes. A chunk that fails its
     checksum (or does not inflate to its size) reads as zeros of the
-    expected length -- what libewf returns -- with ok False."""
+    expected length -- what libewf returns -- with ok False. The last
+    chunk may carry up to TAIL_SLACK bytes past the media: kept."""
+    most = expected + (TAIL_SLACK if last else 0)
     if compressed:
         try:
             inflater = zlib.decompressobj()
-            data = inflater.decompress(raw, expected + 1)
-            if inflater.eof and len(data) == expected:
+            data = inflater.decompress(raw, most + 1)
+            if inflater.eof and expected <= len(data) <= most:
                 return data, True
         except zlib.error:
             pass
@@ -194,7 +206,7 @@ def _decode(raw, compressed, expected):
     data, stored = raw[:-4], raw[-4:]
     if len(data) >= expected and len(stored) == 4 and \
             struct.unpack('<I', stored)[0] == _adler(data):
-        return data[:expected], True
+        return data[:most], True
     return bytes(expected), False
 
 
@@ -215,7 +227,8 @@ def read_media(chunk_map, should_stop=None, workers=None):
                 raise EwfDamage(
                     f"{os.path.basename(chunk.path)} ends inside chunk "
                     f"{index:,}")
-            return raw, chunk.compressed, chunk_map.expected_size(index)
+            return (raw, chunk.compressed, chunk_map.expected_size(index),
+                    index == len(chunk_map.chunks) - 1)
 
         def decode_batch(batch):
             return [_decode(*item) for item in batch]

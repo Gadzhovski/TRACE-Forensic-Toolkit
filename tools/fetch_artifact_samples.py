@@ -66,6 +66,11 @@ _ZEEK = ('https://raw.githubusercontent.com/zeek/zeek/'
          'b5bf5e5e42e9015d78be5105d2fd1e41eb75361f/testing/btest/Traces/')
 _CPYTHON39 = ('https://raw.githubusercontent.com/python/cpython/'
               'v3.9.0/Lib/distutils/command/')
+_TSKDATA = ('https://raw.githubusercontent.com/sleuthkit/sleuthkit_test_data/'
+            'abcb05bd7f01313115d213dcd83826989fe93535/')
+_TSKDATA_LFS = ('https://media.githubusercontent.com/media/sleuthkit/'
+                'sleuthkit_test_data/'
+                'abcb05bd7f01313115d213dcd83826989fe93535/')
 _ZSTD = ('https://raw.githubusercontent.com/facebook/zstd/'
          '01b7154f1172432f8abe9b3bb9909e14a1176b7d/tests/')
 _CPYTHON = ('https://raw.githubusercontent.com/python/cpython/'
@@ -883,6 +888,60 @@ SAMPLES = {
     'cpython-wininst-14.0-amd64.exe': (
         _CPYTHON39 + 'wininst-14.0-amd64.exe',
         '0cf9864ae3a8679ed503f954a453452c93fa44f99ca6f39bbc5860abde7fd35e'),
+    # The Sleuth Kit's own test images (sleuthkit/sleuthkit_test_data; Git
+    # LFS objects) with the DFXML fiwalk wrote for some -- every file's
+    # path, size and MD5 (tests/test_sleuthkit_data.py).
+    'tsk-apfs-apfs_pool.E01': (
+        _TSKDATA_LFS + 'apfs/apfs_pool.E01',
+        'f08a7bb7565ee1778faa95a279215f3aca5fabfbffe0e34b96e0887059548400'),
+    'tsk-btrfs-btrfs_testimage_50MB.E01': (
+        _TSKDATA_LFS + 'btrfs/btrfs_testimage_50MB.E01',
+        '42c5bda5e887002eaf6292fb0d20e022187837553bcdf4e84bf2c222b1e70b93'),
+    'tsk-btrfs-btrfs_testimage_50MB.E01.xml': (
+        _TSKDATA + 'btrfs/btrfs_testimage_50MB.E01.xml',
+        'eb7808af05a4c93ea01f3efd467f592aad75ff527b2117fc0d6465da63547046'),
+    'tsk-btrfs-btrfs_zstd.E01': (
+        _TSKDATA_LFS + 'btrfs/btrfs_zstd.E01',
+        'c404949c4a72760dc7e394053aec06b3776903c52b442cc686977addc0e31942'),
+    'tsk-exfat-exfat1.E01': (
+        _TSKDATA_LFS + 'exfat/exfat1.E01',
+        '9249cbb06fef129cc411b5e1e65a6780cafad4dfa9f3566c583b5968504e5153'),
+    'tsk-from_brian-6-fat-undel.E01': (
+        _TSKDATA_LFS + 'from_brian/6-fat-undel.E01',
+        'a45d1ab4038cfb0d9be21c86e2d224789dff8b4f62671575cb5ba50027818960'),
+    'tsk-from_brian-6-fat-undel.dd.xml': (
+        _TSKDATA + 'from_brian/6-fat-undel.dd.xml',
+        '558750947abc3cb5ed33b0899350ccabdad07d38e788d9cff4c5cbb8a41f442d'),
+    'tsk-from_brian-fat32_with_efs_file.E01': (
+        _TSKDATA_LFS + 'from_brian/fat32_with_efs_file.E01',
+        '705109dfc554eceec4dc588bb489a8fc0cecd877eb9cd4a7044549338caa1f71'),
+    'tsk-from_brian-imageformat_mmls_1.E01': (
+        _TSKDATA_LFS + 'from_brian/imageformat_mmls_1.E01',
+        '5125bbc40154a6acdf96b7aded0fc28686e9c0882afb5b95ddf2dc8345ccf44e'),
+    'tsk-from_brian-imageformat_mmls_1.E01.xml': (
+        _TSKDATA + 'from_brian/imageformat_mmls_1.E01.xml',
+        'f02fc57a59ed75267e3cd2373d78c36a179329c3b943dee07b4552f052ac9f36'),
+    'tsk-from_brian-1-extend-part.zip': (
+        _TSKDATA + 'from_brian/1-extend-part.zip',
+        '771cc763798ed23d85f6362de4adff503bf83c33c56c5ac8dea689a3996c8ce3'),
+    'tsk-fuzzing-lvm_test_issue_3235.E01': (
+        _TSKDATA_LFS + 'fuzzing/lvm_test_issue_3235.E01',
+        '2209ee278d79031079923647283b425e8e425af3c082a6d3dba81abb3d688f97'),
+    'tsk-fuzzing-clusterfuzz-testcase-minimized-sleuthkit_fls_ntfs_fuzzer-5124116049166336': (
+        _TSKDATA + 'fuzzing/clusterfuzz-testcase-minimized-sleuthkit_fls_ntfs_fuzzer-5124116049166336',
+        'cde563ddb5efb41c31bd34e6fd49b56f82d33eac97e5b8fa417edf7f3ec63ee6'),
+    'tsk-gpt-gpt_130_partitions.E01': (
+        _TSKDATA_LFS + 'gpt/gpt_130_partitions.E01',
+        'c2ca9d37af9c8f249a9667b2a319bc25861d3b80ebdbdb7f4c74863e410a490f'),
+    'tsk-ufs-image.E01': (
+        _TSKDATA_LFS + 'ufs/image.E01',
+        'e94dfb49e8a6dc72b952127ebd32eba01396b4dfb62f359a38b89f360cbbbf30'),
+    'tsk-ufs-image_dd.xml': (
+        _TSKDATA + 'ufs/image_dd.xml',
+        '6dfba3511ad0fe855dd3e727f9e87e2d49dc4d537353ab755f442a003f05f6bc'),
+    'tsk-xfs-xfs-raw-2GB.E01': (
+        _TSKDATA_LFS + 'xfs/xfs-raw-2GB.E01',
+        '48397462ad7af18d4ac74534769fcbbe081712080918a0ca16e7063f62d5d772'),
 }
 
 
