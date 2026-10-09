@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import (QByteArray, QEventLoop, Qt, QSize, QThread,
-                            Signal, QTimer, QUrl)
+                            Signal, Slot, QTimer, QUrl)
 from PySide6.QtGui import (QIcon, QPalette, QAction, QActionGroup, QColor, QCursor,
                            QDesktopServices)
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTabWidget, QFileDialog,
@@ -7308,7 +7308,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     # correctly, and nothing is in it -- not an error.
                     self.completed.emit(b'', metadata)
                 else:
-                    self.error.emit("Unable to read file content.")
+                    self.error.emit(
+                        getattr(self.image_handler, 'last_read_error', None)
+                        or "Unable to read file content.")
             except Exception as e:
                 self.error.emit(f"Error reading file: {str(e)}")
 
@@ -7488,9 +7490,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 return
 
             if data.get("is_unallocated"):
-                # Handle unallocated space in background
-                self.unallocated_worker = self.UnallocatedSpaceWorker(
-                    self.image_handler, data["start_offset"], data["end_offset"])
+                # Handle unallocated space in background. A read still
+                # running from the last click is retained, never dropped:
+                # rebinding the attribute freed a running QThread, and Qt
+                # aborted the process ("QThread: Destroyed while thread is
+                # still running") -- clicking through the Unallocated
+                # Space nodes of a disk did it.
+                self._cancel_worker('unallocated_worker')
+                self.unallocated_worker = self._retain_worker(
+                    self.UnallocatedSpaceWorker(
+                        self.image_handler, data["start_offset"],
+                        data["end_offset"]))
                 self.unallocated_worker.completed.connect(
                     lambda content: self.update_viewer_with_file_content(content, data))
                 self.unallocated_worker.error.connect(
@@ -8327,8 +8337,22 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not hasattr(self, '_active_workers'):
             self._active_workers = set()
         self._active_workers.add(worker)
-        worker.finished.connect(lambda: self._active_workers.discard(worker))
+        # A bound slot, found again through sender(): a lambda holding the
+        # worker made a reference cycle only the garbage collector frees,
+        # at any later moment.
+        worker.finished.connect(self._worker_finished)
         return worker
+
+    @Slot()
+    def _worker_finished(self):
+        """A retained worker's finished: let it go once its thread has
+        really ended. `finished` is emitted from the thread just before it
+        returns; wait() covers that last stretch, so the last reference is
+        never dropped while it still runs."""
+        worker = self.sender()
+        if worker in getattr(self, '_active_workers', ()):
+            worker.wait()
+            self._active_workers.discard(worker)
 
     def _cancel_worker(self, attr_name):
         """Ask the worker held on `attr_name` to stop, if it is still running."""
@@ -8452,7 +8476,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             progress_dialog.setValue(0)
             progress_dialog.show()
 
-            # Create and configure the worker
+            # Create and configure the worker (retained: a second export
+            # started before the first ends must not free it)
             self.export_worker = ExportWorker(
                 self.image_handler,
                 data["inode_number"],
@@ -8477,6 +8502,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             progress_dialog.canceled.connect(self.export_worker.requestInterruption)
 
             # Start the worker
+            self._retain_worker(self.export_worker)
             self.export_worker.start()
 
         except Exception as e:
