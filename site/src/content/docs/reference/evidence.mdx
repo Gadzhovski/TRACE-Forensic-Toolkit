@@ -7,14 +7,17 @@ description: Every disk image, logical image, file system, volume system, encryp
 
 | Format | Notes |
 |:--|:--|
-| **E01 / Ex01** (EnCase) | segments found automatically; stored MD5/SHA-1 verified; custody details read from the header |
+| **E01 / Ex01** (EnCase) | segments found automatically; every chunk's checksum checked; an incomplete set says where its data ends; stored MD5/SHA-1 verified; custody details read from the header |
 | **AFF4** | maps and image streams, Snappy / LZ4 / deflate; symbolic streams; stored stream hashes re-checked |
-| **Raw / dd** | single files and split images (`.001`, `.002`, …), hashed across all segments |
+| **Raw / dd** | single files and split images (`.000` or `.001`, `.002`, …), hashed across all segments |
 | **ISO** | ISO 9660 images |
 | **DMG** | UDIF with zlib, bzip2, LZFSE, LZMA or ADC compression; `.sparseimage`; `.sparsebundle` folders |
 | **VMDK** | VMware disks, snapshots chained to their parents |
 | **VHD / VHDX** | Hyper-V and Virtual PC disks, differencing disks chained to their parents |
 | **QCOW / QCOW2** | QEMU disks; QCOW2 read by TRACE itself, compressed (deflate or zstd) and with backing files |
+| **Parallels** | `.hdd` bundles and `.hds` disks |
+
+A folder holding only an image's segments -- with the imager's log, or a report named after the image -- is added as that image.
 
 ## Logical images and collections
 
@@ -32,7 +35,7 @@ An attached physical disk -- `\\.\PhysicalDriveN` on Windows, `/dev/…` on macO
 
 ## Volume systems
 
-DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels; **LVM** volume groups; **APFS** containers; **Volume Shadow Copies** of NTFS volumes.
+DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels, Sun VTOC; **LVM** volume groups (inside LUKS too); **APFS** containers; **Core Storage**; **Linux md RAID**, **Windows dynamic disks** and **hardware RAID** across their member images; **lost partitions**; **Volume Shadow Copies** of NTFS volumes.
 
 ## File systems
 
@@ -56,7 +59,7 @@ Unpartitioned images -- a single file system with no partition table -- are read
 |:--|:--|
 | **BitLocker** and BitLocker To Go | recovery key, password or `.BEK` startup key |
 | **FileVault 2** | password or recovery key |
-| **LUKS** | passphrase |
+| **LUKS1 / LUKS2** | passphrase |
 | **APFS** | password or recovery key |
 | **iOS backups** | backup password |
 
@@ -64,9 +67,10 @@ Unpartitioned images -- a single file system with no partition table -- are read
 
 | | |
 |:--|:--|
-| **Archives** | ZIP (and every ZIP-based format), 7z, RAR (all members listed; stored members read), TAR, GZIP, BZIP2, XZ -- nested, bomb-guarded, encrypted members reported as encrypted |
-| **Mail** | Outlook PST / OST (with orphan items), EML, mbox |
-| **Windows** | registry hives with transaction logs, EVTX and XP `.evt` event logs, Prefetch, LNK, Jump Lists, ESE databases, thumbcache and Thumbs.db, Defender quarantine, RDP bitmap cache |
+| **Archives** | ZIP (and every ZIP-based format), 7z, RAR (all members listed; stored members read), TAR, GZIP, BZIP2, XZ, CAB, LHA / LZH, ALZip, CPIO, Unix `.Z`, uuencode, raw LZMA and zlib streams -- nested, bomb-guarded, encrypted members reported as encrypted; a damaged gzip read as far as it goes |
+| **Mail** | Outlook PST / OST (with orphan items) and `.msg`, EML, mbox |
+| **Windows** | registry hives with transaction logs (and their deleted keys and values), EVTX and XP `.evt` event logs, Prefetch, LNK, Jump Lists, ESE databases, thumbcache and Thumbs.db, Defender quarantine, RDP bitmap cache |
 | **Databases** | SQLite with WAL, including deleted records |
-| **Documents** | PDF, Office (old and new), OpenDocument, RTF, EPUB, XPS, CBZ, FB2, MOBI |
+| **Documents** | PDF, Office (old and new; password-protected ones opened with the password; VBA macros shown), OpenDocument, RTF, EPUB, XPS, CBZ, FB2, MOBI |
+| **Network captures** | pcap / pcapng: conversations, hosts, DNS, HTTP requests, TLS server names |
 | **Pictures** | all common formats plus HEIC, AVIF, JPEG 2000, PSD, PCX and camera raws |

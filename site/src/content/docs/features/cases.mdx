@@ -37,6 +37,7 @@ Verifying evidence **appends** a result; nothing is ever overwritten.
 - An image that stores its own hashes (E01, AFF4, AD1, L01) is checked against **every** hash it stores; all must match.
 - An image with none is hashed and that becomes its **baseline**; later checks compare with it.
 - Each image is hashed the way it was recorded: an E01 by its media contents, a split raw image across all segments, a virtual disk by the disk it presents rather than its container files.
+- Hashing reads **every byte or fails**: a read error or a short read is an error, never a hash of half the image. Every E01 chunk's own checksum is checked on the way, and damaged chunks are named.
 - A live disk is recorded as *what was read, when* -- never as verified, since a running disk changes.
 
 Verification runs as a job beside analysis (before, after or alongside -- your choice), and **Verify All** checks every image in the case.
@@ -44,6 +45,8 @@ Verification runs as a job beside analysis (before, after or alongside -- your c
 ## The audit trail
 
 The Case tab's **Activity log** records every action that matters: case created, evidence added or removed (with its recorded hashes), verification outcomes, volumes unlocked (*with a recovery key* -- never the key itself), files exported, settings changed (old value to new), anything sent to VirusTotal, map tiles fetched.
+
+The trail is **chained**: each entry carries the hash of the one before, and the case database refuses to change or delete an entry -- an edited trail shows on the case card and in the report.
 
 ## Bookmarks and notes
 

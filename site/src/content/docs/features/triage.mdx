@@ -24,7 +24,7 @@ The file analysis modules want the same bytes, so a run reads **each file once**
 | **Hidden data** | deceptive names, bytes after a file's real end, encryption, possible encrypted volumes |
 | **Photo metadata** | EXIF, including GPS -- every located photo goes on the map |
 | **Document authors** | authors and editors recorded in Office, ODF and PDF files |
-| **Executables** | PE, ELF and Mach-O: architecture, libraries, signer, overlays |
+| **Executables** | PE, ELF and Mach-O: architecture, libraries, signer, overlays, imphash and Rich hash |
 
 ## Graded, not flagged
 
@@ -41,6 +41,7 @@ Entropy is judged by type first: a ZIP at 7.99 bits per byte is a ZIP, and flagg
 - **Bytes after the end** of a JPEG, PNG or PDF -- found by parsing the format, not by searching for the last end marker.
 - **Deceptive names**: double extensions such as `invoice.pdf.exe`, and right-to-left override characters that make a name read backwards.
 - **Encrypted documents and archives**, and files that look like **encrypted volumes**.
+- **Office macros** -- VBA in Word, Excel and PowerPoint files, old and new, and Excel 4.0 macro sheets. The source is shown with the document, and a macro that runs on opening *and* downloads, writes or starts something is suspicious.
 
 ## Executables
 
@@ -56,6 +57,17 @@ The **NTFS** module reads the raw `$MFT` and `$UsnJrnl:$J` into events with 100-
 
 Paths of deleted entries are rebuilt the way `libfsntfs` does; orphans go under `$Orphan`.
 
+## Deleted files
+
+The **Deleted files** module lists every file the file systems still remember deleting -- and says how much of each is left: **recoverable**, **partly overwritten**, **overwritten**, **resident** (kept in the MFT entry), **possibly overwritten**, **start only**, **entry reused**, or **no data recorded**. It reads further than the file system's own entries:
+
+- **NTFS** -- files whose MFT entry now holds another file are named from `$LogFile`; of two deleted files over the same clusters, the one freed later owns them.
+- **exFAT** -- a deleted file keeps its FAT chain, which TRACE follows; on FAT, where deletion clears the chain, only the start is known and the state says so.
+- **ext3 / ext4** -- deletion empties the inode; its earlier copy in the **journal** gives back where the data was, and blocks a later file took are counted as overwritten.
+- **Btrfs** -- see [Volumes](/features/volumes/).
+
+None of it is called recoverable when it is not: NIST's Deleted File Recovery set, scored against NIST's own answer key, gives no file called recoverable that was overwritten on ext, FAT, exFAT or NTFS.
+
 ## Thumbnail caches
 
 Windows `thumbcache_*.db` and `Thumbs.db`, the Windows Search index's thumbnail IDs (Windows.edb and the Windows 11 Windows.db), and the RDP bitmap cache. Each picture is checked against its original: still **present**, **deleted**, or **absent** -- a picture of a file that no longer exists is a finding.
@@ -69,5 +81,5 @@ See [Detection](/features/detection/): autoruns graded by the file they start, a
 Photo GPS and activity records that carry coordinates are drawn on **Triage ▸ Map** -- offline by default, over a bundled world map. Online map tiles are opt-in, asked once per server per session, and audited.
 
 <Aside type="note" title="Findings are everywhere you look">
-The same findings appear as listing columns, in Triage and under the **Findings** node in the tree -- which only appears once there is something in it.
+The same findings appear as listing columns, in Triage and under the **Findings** node in the tree -- which only appears once there is something in it. Every Triage tab with rows has its group there, in Triage's order: deleted files by state, NTFS sections, the map, thumbnail caches, similar pictures.
 </Aside>

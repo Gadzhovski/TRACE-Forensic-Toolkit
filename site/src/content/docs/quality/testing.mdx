@@ -10,7 +10,7 @@ A forensic tool has to be right, not just work. TRACE is tested the way its resu
 
 <Stats
 	items={[
-		{ value: '~600', label: 'automated tests' },
+		{ value: '~900', label: 'automated tests' },
 		{ value: '4', label: 'platforms in CI' },
 		{ value: '3', label: 'Python versions' },
 		{ value: '16', label: 'images with a full manifest' },
@@ -26,6 +26,8 @@ Continuous integration (GitHub Actions) runs the **real installers** -- `install
 
 A branch push gets a quick run on one machine; every change that reaches `master` runs on every platform, and the weekly run catches a dependency release that breaks an untouched part. CI tests what a change touched: it works out which test files reach the changed code and which public images those tests need -- and anything it cannot place runs everything.
 
+CI uses a small, deliberate set of public images and samples (about 500 MB as GitHub stores it), cached by GitHub between runs -- downloaded from the publishers once, not on every run. The full set, NIST's included, runs on the maintainers' own Windows, macOS and Linux machines (`python tools/run_tests.py full`).
+
 CI also checks that **nothing was compiled** during the install, and a separate job refuses any disk image or case database committed to the repository.
 
 ## Public evidence, published answers
@@ -34,7 +36,7 @@ The tests download their images from the publishers, checked against recorded SH
 
 - **DFTT** (Digital Forensics Tool Testing) images -- FAT, NTFS, ext2/3, ISO 9660, keyword search and carving, each with its published answer key.
 - **DFRWS 2006 and 2007** forensic challenges -- the standard file-carving benchmarks.
-- **NIST CFReDS** deleted-file recovery images.
+- **NIST CFReDS** -- Deleted File Recovery (91 images, scored against NIST's own 290-page answer key), File Carving levels 0 to 5, Searching Container Files, the Russian Tea Room (non-Latin text) and the 2017 Windows registry set.
 - **NPS** (Naval Postgraduate School) disk images, including an E01 whose stored hashes are verified.
 - **Btrfs** volumes from fox-it's dissect.btrfs -- subvolumes, snapshots, compression, sparse files, RAID1 -- checked against the values its own tests publish.
 - **Artifact samples** from plaso, dfvfs, EVTX-ATTACK-SAMPLES and others: virtual disks, BitLocker, FileVault and LUKS volumes, shadow copies, APFS, LVM, XFS, AD1 and L01 images, mailboxes -- pinned by commit and SHA-256.
@@ -47,7 +49,7 @@ That is what proved a 2026 upgrade of The Sleuth Kit changed nothing -- and caug
 
 ## Carving, scored against the answer keys
 
-`tools/carve_score.py` runs the real carvers over the DFTT and DFRWS images and a corpus of real published files, and compares what they find with the answer keys their authors published:
+`tools/score/carve_score.py` runs the real carvers over the DFTT and DFRWS images and a corpus of real published files, and compares what they find with the answer keys their authors published:
 
 | Test image | Located | Byte-exact |
 |:--|:--:|:--:|
@@ -58,6 +60,12 @@ That is what proved a 2026 upgrade of The Sleuth Kit changed nothing -- and caug
 | Real-file corpus | 63 / 63 | 63 / 63 |
 
 The run **fails if a score drops** below its recorded baseline, and reassembly has its own baseline -- a rebuilt file that regresses to a contiguous carve still *locates*, so locating alone would not notice. Carves no answer key accounts for are listed: that number is the false-positive rate, and it is watched. The corpus plants 27 signature **decoys** -- a format's magic followed by junk -- and none may be carved.
+
+## Deleted files, scored against NIST's answer key
+
+`tools/score/dfr_score.py` reads every NIST Deleted File Recovery image the way TRACE does and compares it with NIST's published key: is each deleted file listed, is its state right, are its times NIST's, and is what TRACE recovers the file's own bytes. NIST's test files describe themselves -- every 512-byte block names its file and its number -- so recovered content is judged block by block, not by sector order.
+
+The run fails if a single deleted file is called **recoverable** when NIST's key says it was overwritten. On ext, FAT, exFAT and NTFS that number is **0** -- the work behind it is on the [triage page](/features/triage/#deleted-files).
 
 ## Checked against reference implementations
 
@@ -71,7 +79,9 @@ Where another trusted tool reads the same thing, TRACE's output is compared with
 | AFF4 reader | pyaff4's disk hashes on the AFF4 reference images |
 | AD1 hashing | FTK Imager's own log |
 | zstd decoder | facebook/zstd's golden files, valid and must-fail |
-| keyword search | DFTT #2's published answer key |
+| keyword search | DFTT #2's published answer key; NIST's Russian Tea Room (UTF-16 Cyrillic) and Searching Container Files |
+| deleted registry keys and values | NIST's cfreds-2017-winreg hives as they were before the deletion |
+| file systems, partition tables, E01 hashes | The Sleuth Kit's own test images, file by file against fiwalk's DFXML |
 | Sigma | SigmaHQ's 2,547 Windows rules over EVTX-ATTACK-SAMPLES |
 
 ## The packages test themselves
@@ -80,8 +90,9 @@ Every Windows zip and macOS DMG is **unpacked or mounted** -- into a path with s
 
 <Aside type="note" title="Run the tests yourself">
 ```bash
-python tools/fetch_test_images.py
-python -m pytest -n auto --dist loadfile
-python tools/carve_score.py
+python -m tools.testdata.fetch       # the CI set, checked against its SHA-256s
+python tools/run_tests.py quick      # no test data needed, about a minute
+python tools/run_tests.py ci         # exactly what CI runs
+python tools/run_tests.py full       # everything present, plus both scores
 ```
 </Aside>

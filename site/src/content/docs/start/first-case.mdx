@@ -21,11 +21,11 @@ A **case** is one investigation, across as many devices as it involves. It is a 
 
 1. **Details.** On the welcome screen choose **New Case**. Give the case a name, number, examiner and description, and pick where its folder goes.
 
-2. **Evidence.** Add disk images, logical images, folders or a live disk. Each item is opened on a background thread as you add it, and TRACE shows what it found: the format and size, the partition layout (*MBR · NTFS ×2*), encrypted volumes, file systems it can see, and any hashes the image stores. Later segments (`.E02`, `.002`, `.ad2`) are picked up with the first.
+2. **Evidence.** Add disk images, logical images, folders or a live disk. Each item is opened on a background thread as you add it, and TRACE shows what it found: the format and size, the partition layout (*MBR · NTFS ×2*), encrypted volumes, file systems it can see, and any hashes the image stores. Later segments (`.E02`, `.002`, `.ad2`) are picked up with the first, and a folder holding an image's segments is added as that image.
 
    Custody fields -- exhibit number, description, acquired by, acquired on -- are filled in from the E01 or L01 header where it has them, marked *from image header*, for you to confirm.
 
-3. **Modules.** Choose what to run: a profile -- **Quick**, **Standard**, **Full** -- or **Custom**. Each module shows its cost, and anything that cannot run on this evidence says why. With several images, each is listed with what it holds (`GPT · FAT16, Btrfs · Linux`): one selection can apply to all of them -- each image runs only the modules that can find something in it, so the NTFS module is not run on a Linux disk -- or each image gets its own.
+3. **Modules.** Choose what to run: a profile -- **None** (just browse; modules can run later), **Quick**, **Standard**, **Full** -- or **Custom**. Each module shows its cost, and anything that cannot run on this evidence says why. With several images, each is listed with what it holds (`GPT · FAT16, Btrfs · Linux`): one selection can apply to all of them -- each image runs only the modules that can find something in it, so the NTFS module is not run on a Linux disk -- or each image gets its own.
 
 4. **Review**, then **Create**. Nothing is written to disk before this step; if creation fails, the folder it started is removed.
 

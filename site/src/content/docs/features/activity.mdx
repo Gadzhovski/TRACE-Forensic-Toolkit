@@ -30,16 +30,16 @@ Not every time is *when it happened*. Where it is not, the record says so in its
 | **Programs** | Prefetch (Windows XP to 11, compressed included), Amcache, Shimcache, UserAssist, BAM, RunMRU, PowerShell history and script-block logging (event 4104), bash / zsh / fish history |
 | **Files and folders** | ShellBags, LNK shortcuts, Jump Lists, RecentDocs, TypedPaths, Office recent files, macOS recent items and shared file lists, FSEvents, `recently-used.xbel` |
 | **USB devices** | USBSTOR, DeviceClasses, MountPoints2, setupapi logs |
-| **Logons** | Windows event logs (logons, sessions; service and machine accounts left out), Linux journal, syslog, wtmp/utmpx; SSH hosts connected to (`known_hosts`) and keys allowed to log in (`authorized_keys`) |
+| **Logons** | Windows event logs (logons, sessions; service and machine accounts left out), Linux journal, syslog and auth logs (rotated and compressed copies too), wtmp/utmpx, macOS unified log (logons, sudo, screen locks, USB storage); SSH hosts connected to (`known_hosts`) and keys allowed to log in (`authorized_keys`) |
 | **Browsers** | Chrome, Edge, Brave, Vivaldi and other Chromium browsers, Firefox, Safari, Internet Explorer (WebCache and `index.dat`) -- history and downloads |
 | **Searches** | WordWheelQuery (what was typed into Explorer's search box) and search-engine searches from browser history |
-| **Network** | NetworkList profiles, SRUM connectivity, Wi-Fi networks on iOS and Android |
+| **Network** | NetworkList profiles, SRUM connectivity, Wi-Fi networks on iOS and Android, NetworkManager connections on Linux (saved passwords never copied) |
 | **Usage** | SRUM application, network and energy use; macOS KnowledgeC |
 | **Communication** | Skype, iMessage and SMS, WhatsApp (iOS and Android), Android and iOS call logs and contacts |
 | **Cloud** | OneDrive, Google Drive |
 | **Antivirus** | Microsoft Defender detection history, MPLog, and quarantined files (decrypted in memory) |
 | **Recycle Bin** | `$I` / `$R` (including deleted `$I` records of an emptied bin) and XP's INFO2 |
-| **System** | time zone, installed programs, Windows version, macOS install history, phone accounts and builds; Linux release, host name, time zone, user accounts (and who may use sudo), and software installed and removed (dnf, apt) |
+| **System** | time zone, installed programs, Windows version, macOS install history, phone accounts and builds; Linux release, host name, time zone, user accounts (and who may use sudo), software installed and removed (dnf, apt, dpkg, yum), and Docker and Podman containers |
 
 Windows Timeline (ActivitiesCache.db), SRUM and WebCache are read from their own databases -- ESE through libesedb, SQLite through TRACE's reader, which applies a write-ahead log's committed frames first.
 
