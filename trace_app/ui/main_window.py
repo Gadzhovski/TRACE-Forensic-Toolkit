@@ -6273,8 +6273,32 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
         folder = QFileDialog.getExistingDirectory(self, "Select Evidence "
                                                         "Folder")
-        if folder:
-            self.open_evidence_image(folder)
+        if not folder:
+            return
+        from trace_app.core.logical_sources import folder_images, kind_of
+        if kind_of(folder) == 'folder':
+            images, other = folder_images(folder)
+            if images and other:
+                # An image among other files: which is the evidence is the
+                # examiner's call, not a guess.
+                from PySide6.QtWidgets import QMessageBox
+                from trace_app.ui.dialogs import message
+                names = ', '.join(os.path.basename(i) for i in images[:3])
+                other = not message.question(
+                    self, "Open the disk image?",
+                    f"This folder holds the disk image {names} and other "
+                    f"files.",
+                    "Yes opens the image, so the disk inside it can be "
+                    "browsed (its later segments are read with it). No "
+                    "opens the folder as a collection of files.",
+                    default=QMessageBox.StandardButton.Yes)
+            if images and not other:
+                # A folder of an image's segments (x.E01, x.E02 ...): the
+                # disk is the evidence, read through its first segment.
+                for image in images:
+                    self.open_evidence_image(image)
+                return
+        self.open_evidence_image(folder)
 
     def add_live_disk(self):
         """File > Add Live Disk: choose a disk; in a case it goes through

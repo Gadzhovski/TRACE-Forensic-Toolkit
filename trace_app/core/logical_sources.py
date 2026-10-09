@@ -19,6 +19,7 @@ The times a source records are the ones shown, with what they are:
 
 import collections
 import os
+import re
 import stat
 import tarfile
 import threading
@@ -59,6 +60,82 @@ def kind_of(path):
                          '.tar.xz', '.txz')):
         return 'tar'
     return None
+
+
+#: Second and later segments of a segmented image: they are read with the
+#: first, so selecting every segment adds the image once.
+_LATER_SEGMENT = re.compile(
+    r'\.(?:e|ex|s|l|lx)(?:0[2-9]|[1-9][0-9])$|\.(?:00[2-9]|0[1-9][0-9]|'
+    r'[1-9][0-9]{2})$|\.ad(?:[2-9]|[1-9][0-9]+)$', re.IGNORECASE)
+
+#: Any segment of an image TRACE opens as one piece of evidence: EWF
+#: (E01/Ex01/S01/L01/Lx01 and on), AD1 and its parts, split raw (.000,
+#: .001 ...), and single-file disk images.
+_IMAGE_FILE = re.compile(
+    r'\.(?:e|ex|s|l|lx)[0-9]{2}$|\.ad[0-9]+$|\.[0-9]{3}$|'
+    r'\.(?:dd|raw|img|iso|dmg|hdd|hds|sparseimage|vmdk|vhd|vhdx|qcow2?|'
+    r'aff4?)$', re.IGNORECASE)
+
+#: What imagers write beside an image: acquisition logs, hash lists,
+#: reports -- and what operating systems leave in any folder.
+_SIDE_FILE = re.compile(
+    r'\.(?:txt|log|csv|xml|info|md5|sha1|sha256|hash|json|html?|pdf|rtf)$'
+    r'|^(?:desktop\.ini|thumbs\.db)$|^\.', re.IGNORECASE)
+
+
+def is_later_segment(path):
+    """Whether `path` is a second or later segment of a segmented image."""
+    # A split raw image numbered from .000 has .001 as its second part.
+    if path.lower().endswith('.001') and \
+            os.path.exists(path[:-4] + '.000'):
+        return True
+    return bool(_LATER_SEGMENT.search(path))
+
+
+def folder_images(path):
+    """(images, holds_other): the first segment of every disk or logical
+    image directly in the folder `path`, and whether the folder holds
+    anything else -- sub-folders, or files that are neither image segments
+    nor what an imager leaves beside its image.
+
+    A folder holding only images (1.E01, 1.E02, 1.E03 and the imager's
+    log) is how an image is handed over: it is the image that is the
+    evidence, not the folder of its segment files. Beside it count: logs
+    and hash lists (`_SIDE_FILE`), and any file named after one of the
+    images -- GNOME_Fedora.docx beside GNOME_Fedora.e01 is its acquisition
+    report, whatever its format."""
+    try:
+        entries = sorted(os.scandir(path), key=lambda e: e.name.lower())
+    except OSError:
+        return [], True
+    images, files, other = [], [], False
+    for entry in entries:
+        if entry.name.startswith('.'):
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            # A sparsebundle or a Parallels bundle is an image itself.
+            if kind_of(entry.path) is None and \
+                    entry.name.lower().endswith(('.sparsebundle', '.hdd')):
+                images.append(entry.path)
+            else:
+                other = True
+            continue
+        if _IMAGE_FILE.search(entry.name):
+            if not is_later_segment(entry.path):
+                images.append(entry.path)
+        elif not _SIDE_FILE.search(entry.name):
+            files.append(entry.name)
+    stems = {_stem(os.path.basename(image)) for image in images}
+    for name in files:
+        if _stem(name) not in stems:
+            other = True
+    return images, other
+
+
+def _stem(name):
+    """'GNOME_Fedora.e01' / 'GNOME_Fedora.docx' / 'x.E01.txt' -> the name
+    before its first dot, lower case."""
+    return name.split('.', 1)[0].lower()
 
 
 def open_logical(path):

@@ -257,15 +257,21 @@ GROUPS = (
 
 #: Profiles: what each ticks. Modules that cannot run are left unticked
 #: whatever the profile says.
-QUICK, STANDARD, FULL, CUSTOM = 'quick', 'standard', 'full', 'custom'
+NONE, QUICK, STANDARD, FULL, CUSTOM = ('none', 'quick', 'standard', 'full',
+                                       'custom')
 _QUICK = {MODULE_MAGIC, MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
           MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES, MODULE_PERSISTENCE,
           MODULE_THUMBNAILS, MODULE_DELETED, MODULE_SIGMA}
 _STANDARD = _QUICK | {MODULE_HASH, MODULE_EXECUTABLES, MODULE_INDEX,
                       MODULE_HASHSETS, MODULE_YARA, MODULE_KEYWORDS}
 _FULL = _STANDARD | {MODULE_ENTROPY, MODULE_CARVE}
-PROFILES = {QUICK: _QUICK, STANDARD: _STANDARD, FULL: _FULL}
+#: None first: browsing without any analysis is a first-class answer.
+PROFILES = {NONE: frozenset(), QUICK: _QUICK, STANDARD: _STANDARD,
+            FULL: _FULL}
 PROFILE_LABELS = {
+    NONE: ("None", "No analysis: the evidence opens for browsing only. "
+           "Modules can be run any time from Analysis \u25b8 Run Analysis "
+           "Modules."),
     QUICK: ("Quick", "Fast modules only: nothing reads every file in full."),
     STANDARD: ("Standard", "Everything but entropy and carving: hashes, "
                "the search index and the rules this case uses."),
@@ -393,7 +399,7 @@ class ModuleSelector(QWidget):
         top.addWidget(label)
         self.profile_combo = QComboBox()
         self.profile_combo.setObjectName("moduleProfileCombo")
-        for key in (QUICK, STANDARD, FULL, CUSTOM):
+        for key in (NONE, QUICK, STANDARD, FULL, CUSTOM):
             self.profile_combo.addItem(PROFILE_LABELS[key][0], key)
         self.profile_combo.currentIndexChanged.connect(self._profile_chosen)
         top.addWidget(self.profile_combo)

@@ -771,8 +771,8 @@ class CaseWizard(SetupWizard):
             return
 
         remember_case(folder, values['name'])
-        if choice:
-            remember_profile(choice.get('profile'))
+        if items:
+            remember_profile(self.modules_page.selector.profile())
         self.case = case
         self.setup = {'verify': verify, 'choice': choice}
         self.accept()
@@ -818,8 +818,8 @@ class AddEvidenceWizard(SetupWizard):
     def finish(self):
         items = self.evidence_page.intake.usable()
         choice = self.modules_page.choice()
-        if choice:
-            remember_profile(choice.get('profile'))
+        if items:
+            remember_profile(self.modules_page.selector.profile())
         self.setup = {'items': items,
                       'verify': self.evidence_page.intake.verify_after(),
                       'choice': choice}
