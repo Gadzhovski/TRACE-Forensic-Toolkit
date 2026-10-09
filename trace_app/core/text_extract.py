@@ -51,9 +51,19 @@ def extract_text(content, name='', limit=None):
     extension = ('.' + name.rsplit('.', 1)[-1].lower()) if '.' in name else ''
 
     try:
-        if extension == '.pdf' or content[:5] == b'%PDF-':
+        from trace_app.core import pcap
+        if pcap.is_capture(content[:4]):
+            # A network capture: its hosts, looked-up names, URLs and TLS
+            # server names -- what a keyword search or an indicator wants.
+            text = pcap.text(pcap.summarise(content))
+        elif extension == '.msg' or (
+                content[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1' and
+                _is_msg(content)):
+            text = _from_msg(content)
+        elif extension == '.pdf' or content[:5] == b'%PDF-':
             text = _from_pdf(content)
-        elif extension in ('.docx', '.xlsx', '.pptx'):
+        elif extension in ('.docx', '.xlsx', '.pptx', '.docm', '.xlsm',
+                           '.pptm', '.dotm', '.xltm', '.potm', '.ppsm'):
             text = _from_ooxml(content, extension)
         elif extension in ('.doc', '.xls', '.ppt') or content[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
             text = _from_ole(content)
@@ -72,9 +82,38 @@ def extract_text(content, name='', limit=None):
         except Exception:
             text = ''
 
+    # Macro source is text a search should find (URLDownloadToFile, a URL).
+    if content[:4] == b'PK\x03\x04' or \
+            content[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+        try:
+            from trace_app.core import vba
+            project = vba.extract(content)
+            if project is not None and project.modules:
+                text = f"{text}\n{project.source}"
+        except Exception as exc:
+            logger.debug("No macro text from %s: %s", name or '?', exc)
+
     if limit and len(text) > limit:
         text = text[:limit]
     return text
+
+
+def _is_msg(content):
+    from trace_app.core.msgfile import is_msg
+    return is_msg(content)
+
+
+def _from_msg(content):
+    """An Outlook message: its header fields and body as text."""
+    from trace_app.core import msgfile
+    message = msgfile.Message.open(bytes(content))
+    kind, body, _source = message.body()
+    if kind == 'html':
+        import re
+        body = re.sub(r'<[^>]+>', ' ', body)
+    facts = '\n'.join(f"{k}: {v}" for k, v in message.facts() if v)
+    names = '\n'.join(a['name'] for a in message.attachments())
+    return f"{facts}\n{names}\n{body}"
 
 
 def extract_strings(content, min_length=MIN_STRING_LENGTH):

@@ -155,7 +155,7 @@ def _run(report, images, sandbox):
             if sys.version_info < (3, 12):
                 expected_missing.add('sigma')
             if sys.version_info < (3, 11):
-                expected_missing.add('ios_encrypted')
+                expected_missing |= {'ios_encrypted', 'office_encrypted'}
         missing = [c.key for c in capabilities.CAPABILITIES
                    if not c.available and c.key not in expected_missing]
         assert not missing, f"unavailable: {', '.join(missing)}"

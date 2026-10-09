@@ -115,7 +115,7 @@ CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
 TREE_ARCHIVE_SUFFIXES = ('.zip', '.7z', '.rar', '.tar', '.gz', '.tgz',
                          '.bz2', '.tbz', '.tbz2', '.xz', '.txz', '.jar',
                          '.apk', '.pst', '.ost', '.mbox', '.cpio', '.lzma',
-                         '.zlib', '.cpgz')
+                         '.zlib', '.cpgz', '.msg')
 #: Archives the tree keeps read, so stepping through one is not a re-read.
 TREE_ARCHIVES_KEPT = 3
 #: ...and those that are archives inside but documents to an examiner: a
@@ -2652,9 +2652,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # A Thumbs.db is an OLE file like a Word document; its streams, not
         # its first bytes, say what it is -- so its name earns it a read.
+        # An Outlook .msg is OLE as well: its streams say what it is.
         if header is not None and not archives.detect_archive(header) and \
                 not thumbnails.is_cache_name(name) and \
-                not rdpcache.is_rdp_cache_name(name):
+                not rdpcache.is_rdp_cache_name(name) and \
+                not name.lower().endswith('.msg'):
             return None
 
         self.set_status(f"Opening {name}…")

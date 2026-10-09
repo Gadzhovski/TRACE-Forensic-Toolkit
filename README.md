@@ -40,7 +40,9 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
   sectors. Every check is kept, and the audit trail is append-only and
   hash-chained. Exports are hashed, read back and listed in a manifest.
 - **Triage** — file types from content, entropy, hidden data, photo GPS,
-  document authors, executables, duplicates and hash sets.
+  document authors, Office macros (VBA source, auto-run and download /
+  execute calls flagged), executables with imphash and Rich-header
+  hashes, duplicates and hash sets.
 - **User activity** — programs run, files opened, USB devices, logons, the
   Recycle Bin, browser history, chats and phone backups, on one timeline.
 - **Search** — full-text search inside documents, mail and archives, plus
@@ -49,11 +51,16 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
   keyword lists and persistence (autoruns) graded by risk.
 - **File carving** — 70 file types from unallocated space or slack, checked
   for completeness, with fragmented ZIP and PDF files rebuilt.
-- **Viewers** — pictures, video, PDF, Office, mail, SQLite, registry hives,
-  a hex editor with a data inspector, and HTML shown offline.
+- **Viewers** — pictures, video, PDF, Office (password-protected ones
+  opened with their password), mail including Outlook .msg, network
+  captures (hosts, DNS, HTTP, TLS server names), SQLite (files stored in
+  cells opened as files), registry hives, a hex editor with a data
+  inspector, and HTML shown offline.
 - **Under the hood** — NTFS $MFT, $UsnJrnl and $LogFile, shadow copies,
-  BitLocker / FileVault / LUKS unlocking, APFS, LVM, XFS and Btrfs
-  volumes.
+  BitLocker / FileVault / LUKS unlocking, Core Storage, APFS, LVM, XFS and
+  Btrfs volumes; Parallels, VMware, Hyper-V, QEMU and Mac disk images;
+  hardware and software RAID, Windows dynamic disks, lost partitions;
+  CPIO, LZMA and zlib streams, damaged gzip recovered as far as it reads.
 
 ## Screenshots
 

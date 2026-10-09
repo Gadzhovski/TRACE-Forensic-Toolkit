@@ -214,6 +214,16 @@ CAPABILITIES = (
     Capability('ios_encrypted', 'Volumes and encryption', "Encrypted iPhone "
                "backups, opened with their password", 'cryptography',
                _module_version('cryptography', '__version__')),
+    Capability('office_encrypted', 'File analysis', "Password-protected "
+               "Office documents, opened with their password",
+               'msoffcrypto-tool', _module_version('msoffcrypto',
+                                                   '__version__')),
+    Capability('pcap', 'File analysis', "Network captures (pcap, pcapng): "
+               "hosts, DNS, HTTP, TLS server names", 'dpkt',
+               _module_version('dpkt', '__version__')),
+    Capability('pe_hashes', 'File analysis', "Program import hashes "
+               "(imphash) and Rich-header hashes", 'pefile',
+               _module_version('pefile', '__version__')),
     Capability('pdf', 'File analysis', "PDF and e-book reading, the case "
                "report's PDF", 'PyMuPDF', _module_version('pymupdf',
                                                          'VersionBind')),

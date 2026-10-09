@@ -93,6 +93,11 @@ def detect_archive(data):
             thumbnails.is_thumbs_db(data):
         return 'thumbsdb'
 
+    # An Outlook message: its page and attachments (core/msgfile.py).
+    from trace_app.core import msgfile
+    if isinstance(data, (bytes, bytearray)) and msgfile.is_msg(data):
+        return 'msg'
+
     # An RDP bitmap cache: its tiles, as pictures (core/rdpcache.py).
     from trace_app.core import rdpcache
     if rdpcache.is_bin(data[:8]):
@@ -166,6 +171,12 @@ def list_members(data, kind=None, password=None):
         return _list_single_stream(data, kind)
     if kind == 'cpio':
         return _list_cpio(data)
+    if kind == 'msg':
+        from trace_app.core import msgfile
+        try:
+            return msgfile.list_members(bytes(data))
+        except msgfile.MsgError as exc:
+            raise ArchiveError(f"Damaged Outlook message: {exc}") from exc
     if kind == '7z':
         return _list_7z(data, password)
     if kind == 'rar':
@@ -283,6 +294,12 @@ def read_member(data, member_name=None, kind=None, password=None,
         try:
             return cpio.read(data, member_name, limit)
         except cpio.CpioError as exc:
+            raise ArchiveError(str(exc)) from exc
+    if kind == 'msg':
+        from trace_app.core import msgfile
+        try:
+            return msgfile.read_member(bytes(data), member_name, limit)
+        except msgfile.MsgError as exc:
             raise ArchiveError(str(exc)) from exc
     if kind == '7z':
         return _read_7z_member(data, member_name, password, limit)
