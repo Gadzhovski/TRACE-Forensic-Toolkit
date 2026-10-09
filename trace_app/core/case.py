@@ -1934,10 +1934,16 @@ class Case:
         (see `recycle_origins`)."""
         return recycle_origins(self._db, evidence_id)
 
-    def deleted_counts(self, evidence_id=None):
-        where, params = '', []
+    def deleted_counts(self, evidence_id=None, files_only=False):
+        """{state: count}; `files_only` leaves deleted folders out, as
+        the Deleted files tab does by default."""
+        clauses, params = [], []
         if evidence_id is not None:
-            where, params = " WHERE evidence_id = ?", [evidence_id]
+            clauses.append("evidence_id = ?")
+            params.append(evidence_id)
+        if files_only:
+            clauses.append("is_dir = 0")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
         return {row[0]: row[1] for row in self._db.execute(
             "SELECT state, COUNT(*) FROM deleted_files" + where
             + " GROUP BY state", params)}

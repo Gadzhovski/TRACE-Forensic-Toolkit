@@ -2488,3 +2488,63 @@ def test_the_hex_tab_reads_a_listed_file_from_its_image(qapp, window, truth,
     assert viewer.source.image_offset(0) == begin
     window.case.remove_bookmark(mark['id'])
     window.refresh_bookmarks()
+
+
+def test_every_triage_tab_with_rows_has_its_group_in_the_tree(
+        qapp, tmp_path, stubbed_dialogs):
+    """Deleted files, NTFS sections and similar pictures used to live only
+    in Triage. Each sub-tab with rows has a group under Findings, counted
+    as its tab counts, in the tab's order, and a click opens that tab."""
+    from PySide6.QtCore import Qt
+    from trace_app.core import deleted, ntfs
+    from trace_app.core.analysis import MODULES, analyse_evidence
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.main_window import MainWindow
+    folder = str(tmp_path / 'Tree groups')
+    case = Case.create(folder, 'Tree groups')
+    for name in ('7-ntfs-undel.dd', FIRST, SECOND):
+        path = image_path(name)
+        evidence = case.add_evidence(path)
+        handler = ImageHandler(path)
+        analyse_evidence(handler, case, evidence, MODULES)
+        deleted.analyse_evidence(handler, case, evidence)
+        ntfs.analyse_evidence(handler, case, evidence)
+        handler.close_resources()
+    case.close()
+    win = MainWindow(case=Case.open(folder))
+    try:
+        pump(qapp, 120, lambda: len(win.evidence_files) == 3)
+        win.refresh_analysis_views()
+        tabs = win.triage_panel.tabs
+        pump(qapp, 30, lambda: any(tabs.tabText(i).startswith(
+            'Similar pictures (') and not tabs.tabText(i).endswith('(0)')
+            for i in range(tabs.count())))
+        pump(qapp, 0.5)
+        tree = win.tree_viewer
+        root = next(tree.topLevelItem(i)
+                    for i in range(tree.topLevelItemCount())
+                    if (tree.topLevelItem(i).data(0, Qt.UserRole) or {})
+                    .get('is_analysis_root'))
+        groups = {root.child(i).text(0).rsplit(' (', 1)[0]: root.child(i)
+                  for i in range(root.childCount())}
+        titles = {tabs.tabText(i).rsplit(' (', 1)[0]: tabs.tabText(i)
+                  for i in range(tabs.count())}
+        for label in ('Deleted files', 'Similar pictures', 'Duplicates'):
+            assert groups[label].text(0) == titles[label], label
+        deleted_files = groups['Deleted files']
+        assert deleted_files.childCount() >= 1          # by state
+        assert '$LogFile records' in groups              # an NTFS section
+        # Triage's order: Duplicates before NTFS before Deleted files.
+        order = [root.child(i).text(0).rsplit(' (', 1)[0]
+                 for i in range(root.childCount())]
+        assert order.index('Duplicates') < order.index('$LogFile records') \
+            < order.index('Deleted files') < order.index('Similar pictures')
+        for label, tab in (('Deleted files', 'Deleted files'),
+                           ('$LogFile records', 'NTFS'),
+                           ('Similar pictures', 'Similar pictures')):
+            win.on_item_clicked(groups[label], 0)
+            pump(qapp, 0.2)
+            assert tabs.tabText(tabs.currentIndex()).startswith(tab), label
+    finally:
+        win.cleanup_resources()

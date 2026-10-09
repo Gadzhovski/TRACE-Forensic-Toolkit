@@ -1510,6 +1510,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.similar_panel.file_menu_requested.connect(
             self.open_finding_menu)
         self.triage_panel.add_similar_tab(self.similar_panel)
+        #: Groups of similar pictures in the whole case, as the tab last
+        #: counted them (grouping runs on its thread; the tree reuses it).
+        self._similar_groups = 0
+        self.similar_panel.count_changed.connect(self._similar_counted)
 
         # Everything set to start by itself, graded.
         from trace_app.ui.viewers.persistence_panel import PersistencePanel
@@ -4633,6 +4637,29 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # --- findings in the tree ---------------------------------------
 
+    @Slot(int)
+    def _similar_counted(self, count):
+        """Similar pictures counted its groups: shown in the tree when it
+        counted the whole case's groups (not one image, not the matches of
+        a reference picture)."""
+        panel = self.similar_panel
+        if getattr(panel, '_mode', 'groups') == 'reference' or \
+                self.triage_panel.evidence_id is not None:
+            return
+        if count != self._similar_groups:
+            self._similar_groups = count
+            self.refresh_analysis_tree()
+
+    #: Findings groups in the order of Triage's sub-tabs, so the tree and
+    #: the tab read alike.
+    _FINDINGS_ORDER = (
+        'mismatch', 'entropy', 'duplicates', 'hidden', 'photos', 'authors',
+        'yara', 'executables', 'sigma', 'carved', 'indicators',
+        'ntfs:timestomp', 'ntfs:streams', 'ntfs:slack', 'ntfs:logfile',
+        'ntfs:journal', 'persistence', 'deleted', 'map', 'thumbnails:all',
+        'thumbnails', 'keywords', 'similar', 'hash:known-bad',
+        'hash:notable')
+
     def refresh_analysis_tree(self):
         """Rebuild the Findings node at the top of the tree.
 
@@ -4657,7 +4684,35 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         indicators = self._case_indicator_summary()
         ntfs = self.case.ntfs_counts(evidence_id)
         hashed = self.case.hash_match_counts(evidence_id)
+        # Every Triage sub-tab with something in it has a group here too:
+        # these are counted, not listed file by file (Triage has the rows).
+        # Files, as the Deleted files tab counts them by default.
+        deleted_states = self.case.deleted_counts(evidence_id,
+                                                  files_only=True)
+        thumbnails = self.case.thumbnail_counts(evidence_id)
+        try:
+            from trace_app.core import geo
+            located = len(geo.located(self.case, evidence_id))
+        except Exception as exc:
+            logger.debug("Located items not counted: %s", exc)
+            located = 0
+        similar = getattr(self, '_similar_groups', 0)
+        counted = [
+            ('ntfs:slack', 'Index slack entries', icons.DELETED_FILES,
+             ntfs.get('slack', 0)),
+            ('ntfs:logfile', '$LogFile records', icons.CHANGE_JOURNAL,
+             ntfs.get('logfile', 0)),
+            ('ntfs:journal', 'Change journal records', icons.CHANGE_JOURNAL,
+             ntfs.get('journal', 0)),
+            ('map', 'Located on the map', icons.FINDING_LOCATION, located),
+            ('thumbnails:all', 'Thumbnail cache pictures', icons.THUMBNAILS,
+             thumbnails.get('pictures', 0)),
+            ('similar', 'Similar pictures', icons.FINDING_DUPLICATES,
+             similar),
+        ]
         if not summary['analysed'] and not summary['carved'] \
+                and not sum(deleted_states.values()) \
+                and not any(count for *_rest, count in counted) \
                 and not indicators and not ntfs['timestomp'] \
                 and not ntfs['streams'] \
                 and not hashed.get(hashsets.KNOWN_BAD) \
@@ -4766,7 +4821,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         keyword_terms = term_summary(self.case.findings(
             evidence_id, 'keywords', limit=500000))
         if not any(count for _, _, _, count, _ in groups) and not indicators \
-                and not keyword_terms:
+                and not keyword_terms and not sum(deleted_states.values()) \
+                and not any(count for *_rest, count in counted):
             return          # analysed, and nothing stood out: say nothing
 
         root = QTreeWidgetItem(self.tree_viewer)
@@ -4896,6 +4952,50 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                               'group': 'indicators',
                                               'indicator_kind': kind})
 
+        # Deleted files by what can be got back -- the state is the finding;
+        # the files are in Triage's Deleted files tab.
+        if sum(deleted_states.values()):
+            from trace_app.core.deleted import STATES
+            group = QTreeWidgetItem(root)
+            group.setText(0, f"Deleted files "
+                             f"({sum(deleted_states.values()):,})")
+            group.setIcon(0, icons.icon(icons.DELETED_FILES))
+            group.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                           'group': 'deleted'})
+            for state in sorted(deleted_states, key=lambda s: (
+                    STATES.index(s) if s in STATES else len(STATES), s)):
+                node = QTreeWidgetItem(group)
+                node.setText(0, f"{state[:1].upper()}{state[1:]} "
+                                f"({deleted_states[state]:,})")
+                node.setIcon(0, icons.icon(icons.DELETED_FILES))
+                node.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                              'group': 'deleted'})
+
+        # Sections with rows but nothing to list file by file here: a count
+        # that opens the tab.
+        for key, label, glyph, count in counted:
+            if not count:
+                continue
+            group = QTreeWidgetItem(root)
+            group.setText(0, f"{label} ({count:,})")
+            group.setIcon(0, icons.icon(glyph))
+            group.setToolTip(0, "Opens Triage on these rows")
+            group.setData(0, Qt.UserRole, {
+                'is_analysis_group': True,
+                'group': key.split(':')[0] if key.startswith('thumbnails')
+                else key})
+            group.setData(1, Qt.UserRole, key)
+
+        # Triage's order, so the tree and the tab read alike.
+        def rank(child):
+            data = child.data(0, Qt.UserRole) or {}
+            key = child.data(1, Qt.UserRole) or data.get('group')
+            order = self._FINDINGS_ORDER
+            return order.index(key) if key in order else len(order)
+
+        children = root.takeChildren()
+        for child in sorted(children, key=rank):
+            root.addChild(child)
         root.setExpanded(True)
 
     def _case_indicator_summary(self):
