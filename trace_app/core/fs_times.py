@@ -12,9 +12,10 @@ distinct time with its MACB letters, as the NTFS module does.
 * Deleted entries count while their metadata is still theirs (TSK lists
   the name, and the inode is unallocated); a name whose inode a live file
   has taken describes that file, not the deleted one, and is left out.
-* FAT and exFAT store local wall-clock time with no zone: their rows are
-  source 'FS-local' and the timeline shows them as local, never as UTC.
-  Everything else is 'FS', UTC.
+* FAT stores local wall-clock time with no zone: its rows are source
+  'FS-local' and the timeline shows them as local, never as UTC. exFAT
+  does too, unless an entry records its UTC offset -- then it is UTC
+  (core/exfat). Everything else is 'FS', UTC.
 * What a file system does not record is not invented: ext2/3 have no
   birth time, FAT keeps a date for access.
 """
@@ -55,13 +56,17 @@ def time_text(seconds, nanoseconds=0):
     return text
 
 
-def macb_rows(meta):
-    """[(time text, 'MACB' letters)], one per distinct time."""
+def macb_rows(meta, seconds=None):
+    """[(time text, 'MACB' letters)], one per distinct time. `seconds`:
+    {attribute: seconds} to use instead of the entry's own (an exFAT
+    entry's times in UTC, core/exfat)."""
     letters = {}
     for attribute, position, letter in (('mtime', 0, 'M'), ('atime', 1, 'A'),
                                         ('ctime', 2, 'C'),
                                         ('crtime', 3, 'B')):
-        text = time_text(getattr(meta, attribute, 0) or 0,
+        value = (seconds or {}).get(attribute,
+                                    getattr(meta, attribute, 0))
+        text = time_text(value or 0,
                          getattr(meta, attribute + '_nano', 0) or 0)
         if text is None:
             continue
@@ -131,15 +136,20 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
     case.clear_fs_times(evidence_id)
     entries = events = 0
     try:
+        from trace_app.core import exfat
         for index, (key, fs, local) in enumerate(found):
-            source = SOURCE_LOCAL if local else SOURCE
             batch = []
             for path, meta, deleted, name in _walk(
                     fs, fs.open_dir(path='/'), '', 0, set(), should_stop):
                 entries += 1
                 ref = make_artifact_ref(key, meta.addr,
                                         getattr(name, 'meta_seq', None))
-                for text, letters in macb_rows(meta):
+                # Per entry: an exFAT entry that records its UTC offset is
+                # in UTC on a file system whose times otherwise are not.
+                values, zoned = exfat.entry_times(
+                    image_handler, key, meta, not local)
+                source = SOURCE if zoned else SOURCE_LOCAL
+                for text, letters in macb_rows(meta, values):
                     batch.append((ref, path, text, letters, source,
                                   int(deleted)))
                 if len(batch) >= BATCH:

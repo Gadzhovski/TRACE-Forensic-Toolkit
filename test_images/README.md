@@ -132,6 +132,44 @@ What these established, all measured rather than assumed:
   block pointers. The listing now says which deleted files can actually be
   opened and which are a name and nothing more.
 
+## NIST CFReDS (local, in `nist/`)
+
+Downloaded by hand from https://cfreds-archive.nist.gov/ (each file's
+SHA-256 is in the `.json` beside it); not yet in the fetch catalog -- how
+these reach CI is planned separately. `tests/test_nist_cfreds.py` skips
+what is absent.
+
+| Folder | Set | What it checks | Ground truth |
+|---|---|---|---|
+| `nist/dfr/` | Deleted File Recovery, 91 images (ext, FAT, exFAT, NTFS, HFS+; DFR-01..17) | deleted names, states, content, MAC times | `setup-july-10-2012.pdf`, parsed by `tools/nist_dfr_key.py`; `tools/dfr_score.py` |
+| `nist/carving/` | File Carving L0-L5 x Graphic/Archive/Audio/Video/Documents, 30 images + `TestFiles/` originals | carving | pieces identified by bytes against the originals (`tools/nist_carving_truth.py`); `tools/carve_score.py` |
+| `nist/containers/` | Searching Container Files (`files.dd`, `nested.dd`) | text inside 17 container types, nested | `content_info-2.txt` |
+| `nist/russian/` | Russian Tea Room (`CFReDS001.E01`) | UTF-16BE Cyrillic search, in files and free space | `russian-utf-16.zip` (the planted files) |
+| `nist/winreg/` | cfreds-2017-winreg (10 archives; extract to `nist/winreg/x/`) | deleted keys/values, corrupted and manipulated hives | the same hives before deletion; NIST's `.txt` per corrupted hive |
+
+What they found and fixed (details in CLAUDE.md):
+
+- exFAT times are UTC (each entry records its offset; TSK ignores it) and
+  deleted exFAT files are read from their own cluster chain (braided
+  files recovered byte-exact)
+- deleted files whose space a later, also-deleted file took were called
+  recoverable (FAT, NTFS); FAT files in pieces now say only their start
+  is known; NTFS files only `$LogFile` still names are listed (50 on
+  DFR-08/10/13); ext3/ext4 files emptied on deletion are recovered from
+  the journal's copy of their inode (279 on DFR-10, byte-exact)
+- file-system structures counted as free space (carving, deleted states,
+  free-space search); ext backup superblocks taken for lost partitions
+- free space was never searched (4 of the Russian menu's 8 sections are
+  in no file); UTF-16 in non-Latin alphabets was never extracted
+- CAB, LHA/LZH, ALZip, uuencode, Unix .Z were unreadable (16 of 17
+  container types now searchable; StuffIt X is proprietary)
+- BMP over 5,000,000 bytes not carved, GIFs cut at the first `00 3B`, MP3
+  carves running past a cut last frame, a nested ZIP's end record taken
+  for the outer one's
+- deleted registry keys and values were not recovered (81/81 keys,
+  163/168 values with their data, none attributed to a wrong key);
+  python-registry misreads inline REG_DWORD_BIG_ENDIAN
+
 ## Btrfs
 
 The Sleuth Kit in the pytsk3 wheels does not read Btrfs; TRACE does, in

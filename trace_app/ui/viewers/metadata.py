@@ -135,10 +135,12 @@ class MetadataViewer(QWidget):
             carved_source = data.get('carved_timestamp_source') or ''
             created_time = modified_time = accessed_time = changed_time = None
         else:
-            created_time = self._format_timestamp(getattr(metadata, 'crtime', None))
-            modified_time = self._format_timestamp(getattr(metadata, 'mtime', None))
-            accessed_time = self._format_timestamp(getattr(metadata, 'atime', None))
-            changed_time = self._format_timestamp(getattr(metadata, 'ctime', None))
+            # UTC where the file system says so; FAT's (and exFAT's
+            # without an offset) local wall-clock digits marked as such.
+            shown = self.image_handler.entry_times_text(
+                data.get('start_offset'), metadata)
+            created_time, modified_time = shown['created'], shown['modified']
+            accessed_time, changed_time = shown['accessed'], shown['changed']
 
         md5_hash = hashlib.md5(file_content).hexdigest() if file_content else "N/A"
         sha256_hash = hashlib.sha256(file_content).hexdigest() if file_content else "N/A"
@@ -322,15 +324,23 @@ class MetadataViewer(QWidget):
 
         lines.append("")
         lines.append("Timestamps:")
+        from trace_app.core import exfat
+        from trace_app.core.image_handler import _TIMEZONE_NAIVE
+        values, zoned = exfat.entry_times(
+            self.image_handler, offset, meta,
+            self.image_handler.get_fs_type(offset) not in _TIMEZONE_NAIVE)
         for label, attr in (("Created ", 'crtime'), ("File Modified", 'mtime'),
                             ("MFT Modified", 'ctime'), ("Accessed", 'atime')):
-            ts = getattr(meta, attr, None)
+            ts = values.get(attr)
             # NTFS records these to 100-nanosecond precision and TSK hands the
             # fraction back separately. Truncating to whole seconds throws away
             # the detail that orders events within the same second, which is
             # exactly what a timeline is built from.
             nanoseconds = getattr(meta, f'{attr}_nano', None)
-            lines.append(f"  {label}\t{self._format_timestamp(ts, nanoseconds)}")
+            text = self._format_timestamp(ts, nanoseconds)
+            if not zoned and text.endswith(" UTC"):
+                text = text[:-4] + " (local, no zone)"
+            lines.append(f"  {label}\t{text}")
 
         # Attribute list -- the resident/non-resident breakdown istat prints.
         try:

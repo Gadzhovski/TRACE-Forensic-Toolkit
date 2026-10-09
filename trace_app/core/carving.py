@@ -123,10 +123,6 @@ JPG_FOOTER = b'\xFF\xD9'
 PNG_HEADER = b'\x89PNG\r\n\x1a\n'
 #: IEND carries no data, so its CRC is a constant and forms part of the footer.
 PNG_FOOTER = b'IEND\xAE\x42\x60\x82'
-GIF_HEADER = b'GIF8'
-#: Block terminator followed by the GIF trailer.
-GIF_FOOTER = b'\x00\x3B'
-BMP_HEADER = b'BM'
 WAV_HEADER = b'RIFF'
 PDF_HEADER = b'%PDF-'
 PDF_FOOTER = b'%%EOF'
@@ -466,7 +462,7 @@ class Carver:
         return sum(marker in head for marker in cls._HTML_STRUCTURE) >= 2
 
     def _carve_by_footer(self, chunk, base_offset, file_type,
-                         header, footer):
+                         header, footer, skip_carved=False):
         """Carve every `header` .. `footer` span that actually parses.
 
         The first footer after a header is routinely the wrong one. A JPEG's
@@ -486,6 +482,10 @@ class Carver:
             if start_index == -1:
                 break
 
+            if skip_carved and \
+                    (base_offset + start_index, None) in self._seen:
+                cursor = start_index + len(header)
+                continue
             if not self._starts_a_file(base_offset + start_index):
                 # Mid-sector: embedded in something else, not a file of its
                 # own. See _starts_a_file.
@@ -539,8 +539,16 @@ class Carver:
                               JPG_HEADER, JPG_FOOTER)
 
     def carve_gif_files(self, chunk, base_offset):
-        self._carve_by_footer(chunk, base_offset, 'gif',
-                              GIF_HEADER, GIF_FOOTER)
+        # Walked block by block (carving_formats.measure_gif): the first
+        # 00 3B after the header is often inside the image data.
+        self._carve_sized(chunk, base_offset, (b'GIF87a', b'GIF89a'),
+                          formats.measure_gif, True, 0,
+                          CARVE_MAX_SIZE.get('gif'))
+        # A GIF in pieces cannot be walked to its trailer. The footer
+        # search still locates it, as a partial carve verification says
+        # is partial -- only where the walk carved nothing.
+        self._carve_by_footer(chunk, base_offset, 'gif', b'GIF8',
+                              b'\x00\x3B', skip_carved=True)
 
     def carve_png_files(self, chunk, base_offset):
         self._carve_by_footer(chunk, base_offset, 'png',
@@ -773,56 +781,25 @@ class Carver:
             return None
         if cap and end - start_index > cap:
             return None
+        # The end record says where its archive began: the central
+        # directory (its size and offset) ends where the record starts.
+        # When that is not this header, the record is another archive's --
+        # one nested in this one's gap (NIST's L4: an .xlsx in pieces
+        # around a .docx) -- and joining them made one file of both,
+        # which zipfile opens (it allows data before an archive) and the
+        # nested .docx was never carved. ZIP64 records its offsets
+        # elsewhere: not checked here.
+        cd_size, cd_offset = struct.unpack('<II', chunk[eocd + 12:eocd + 20])
+        if cd_offset != 0xFFFFFFFF and \
+                eocd - cd_size - cd_offset != start_index:
+            return None
         return end
 
     def carve_bmp_files(self, chunk, base_offset):
-        bmp_start_signature = BMP_HEADER
-        header_size = 14  # The static header size for BMP files
-
-        current_offset = 0
-        while current_offset < len(chunk) - header_size:
-            # Look for the BMP signature
-            start_index = chunk.find(bmp_start_signature, current_offset)
-            if start_index == -1:
-                break  # No more BMP files found
-
-            # Verify there's enough chunk left to read the BMP size
-            if start_index + header_size > len(chunk) - 4:
-                break  # Not enough data for size
-
-            # Read file size directly from header
-            bmp_file_size = int.from_bytes(chunk[start_index + 2:start_index + 6], byteorder='little')
-
-            # Sanity check for BMP size (adjust max and min size as per your need)
-            if bmp_file_size < 100 or bmp_file_size > 5000000:
-                current_offset = start_index + 2
-                continue  # Not a valid BMP size, skip to next possible start
-
-            # Read and check dimensions for further validation
-            bmp_width = int.from_bytes(chunk[start_index + 18:start_index + 22], byteorder='little')
-            bmp_height = int.from_bytes(chunk[start_index + 22:start_index + 26], byteorder='little')
-
-            # Reasonable dimensions check (adjust max width/height as per your need)
-            if bmp_width <= 0 or bmp_width > 10000 or bmp_height <= 0 or bmp_height > 10000:
-                current_offset = start_index + 2
-                continue  # Unreasonable dimensions, likely not a BMP
-
-            # Extract the BMP file if it's entirely within the chunk
-            if start_index + bmp_file_size <= len(chunk):
-                bmp_content = chunk[start_index:start_index + bmp_file_size]
-                # Header plausibility is not proof: 'BM' plus a believable size
-                # and dimensions matched 174 times in one 62 MB test image.
-                if is_valid_file(bmp_content, 'bmp'):
-                    self.save_file(bmp_content, 'bmp',
-                                   base_offset + start_index)
-                    current_offset = start_index + bmp_file_size
-                else:
-                    current_offset = start_index + 2
-            else:
-                break  # The BMP file exceeds the chunk boundary, stop processing
-
-        # Return if more data is needed or if processing is complete
-        return None
+        # Sized by its structure (carving_formats.measure_bmp) and read
+        # from the image in full: it used to refuse anything over
+        # 5,000,000 bytes or past the chunk, and every top-down bitmap.
+        self._carve_sized(chunk, base_offset, (b'BM',), formats.measure_bmp)
 
     def carve_ole_files(self, chunk, base_offset):
         """Recover legacy Office documents (.doc, .xls, .ppt).

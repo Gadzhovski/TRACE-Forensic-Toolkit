@@ -307,6 +307,131 @@ def _rw2_raw_end(tags):
     return None
 
 
+class _Cursor:
+    """Byte-at-a-time reads through `src` in 1 MB windows -- for walking a
+    format made of many small blocks (GIF's sub-blocks are 1-255 bytes)."""
+
+    def __init__(self, src, at):
+        self.src, self.at = src, at
+        self.window, self.window_at = b'', at
+
+    def byte(self, at):
+        rel = at - self.window_at
+        if not 0 <= rel < len(self.window):
+            self.window_at, self.window = at, self.src.get(at, 1 << 20)
+            rel = 0
+            if not self.window:
+                return None
+        return self.window[rel]
+
+    def get(self, at, length):
+        rel = at - self.window_at
+        if 0 <= rel and rel + length <= len(self.window):
+            return self.window[rel:rel + length]
+        return self.src.get(at, length)
+
+
+def measure_gif(src, start, cap=None):
+    """A GIF walked block by block to its trailer: the logical screen and
+    its colour table, then extensions and images, each a chain of
+    sub-blocks, then 0x3B. Searching for 00 3B instead stops wherever image
+    data holds those bytes -- and Pillow decodes the truncated picture, so
+    the cut passed validation (NIST's L0_Graphic GIF: 36,579 of 132,948)."""
+    cursor = _Cursor(src, start)
+    head = cursor.get(start, 13)
+    if len(head) < 13 or head[:6] not in (b'GIF87a', b'GIF89a'):
+        return None
+    if not _u16le(head, 6) or not _u16le(head, 8):
+        return None
+    pos = start + 13
+    if head[10] & 0x80:
+        pos += 3 * (2 << (head[10] & 7))
+    images = 0
+
+    def sub_blocks(at):
+        while True:
+            size = cursor.byte(at)
+            if size is None:
+                return None
+            at += 1 + size
+            if size == 0:
+                return at
+            if cap and at - start > cap:
+                return None
+
+    while True:
+        kind = cursor.byte(pos)
+        if kind == 0x3B:
+            return (pos + 1 - start, 'gif') if images else None
+        if kind == 0x21:                              # extension
+            pos = sub_blocks(pos + 2)
+        elif kind == 0x2C:                            # image
+            descriptor = cursor.get(pos, 10)
+            if len(descriptor) < 10 or not _u16le(descriptor, 5) or \
+                    not _u16le(descriptor, 7):
+                return None
+            pos += 10
+            if descriptor[9] & 0x80:
+                pos += 3 * (2 << (descriptor[9] & 7))
+            minimum = cursor.byte(pos)
+            if minimum is None or not 2 <= minimum <= 12:
+                return None
+            pos = sub_blocks(pos + 1)
+            images += 1
+        else:
+            return None
+        if pos is None or (cap and pos - start > cap):
+            return None
+
+
+#: DIB header sizes: OS/2 1.x (12), BITMAPINFOHEADER (40), its V2/V3
+#: extensions (52, 56), OS/2 2.x (64), V4 (108), V5 (124).
+_BMP_DIB_SIZES = (12, 40, 52, 56, 64, 108, 124)
+
+
+def measure_bmp(src, start):
+    """A BMP's extent from its own structure: pixel rows (padded to four
+    bytes) after the pixel-data offset -- or, compressed, the image size
+    the header records -- and a V5 header's embedded ICC profile, which
+    follows the pixels. The file-size field is the cross-check, not the
+    answer (writers pad it, or leave it 0). Top-down bitmaps have a
+    negative height. It used to refuse anything over 5,000,000 bytes."""
+    h = src.get(start, 14 + 124)
+    if len(h) < 26 or h[:2] != b'BM':
+        return None
+    declared, data_at, dib = _u32le(h, 2), _u32le(h, 10), _u32le(h, 14)
+    if dib not in _BMP_DIB_SIZES or len(h) < 14 + min(dib, 40):
+        return None
+    if dib == 12:
+        width, height = _u16le(h, 18), _u16le(h, 20)
+        planes, bits = _u16le(h, 22), _u16le(h, 24)
+        compression = image_size = 0
+    else:
+        width, height = struct.unpack_from('<ii', h, 18)
+        planes, bits = _u16le(h, 26), _u16le(h, 28)
+        compression, image_size = _u32le(h, 30), _u32le(h, 34)
+    if planes != 1 or bits not in (1, 2, 4, 8, 16, 24, 32) or \
+            not 0 < width <= 65535 or not 0 < abs(height) <= 65535 or \
+            data_at < 14 + dib:
+        return None
+    if compression in (0, 3, 6):                     # RGB, (ALPHA)BITFIELDS
+        extent = data_at + (width * bits + 31) // 32 * 4 * abs(height)
+    elif compression in (1, 2, 4, 5) and image_size:  # RLE8/4, JPEG, PNG
+        extent = data_at + image_size
+    else:
+        return None
+    if dib == 124 and len(h) >= 14 + 124 and h[14 + 56:14 + 60] in (
+            b'DEBM', b'MBED'):
+        # An embedded profile: at an offset from the DIB header's start.
+        profile_at, profile_size = _u32le(h, 14 + 112), _u32le(h, 14 + 116)
+        if profile_at and profile_size:
+            extent = max(extent, 14 + profile_at + profile_size)
+    # Some writers count two bytes of padding the rows do not need.
+    if extent <= declared <= extent + 4:
+        extent = declared
+    return extent, 'bmp'
+
+
 #: Fujifilm RAF: a fixed header, then (offset, length) pairs for the
 #: embedded JPEG, the CFA header and the CFA (raw) data.
 RAF_MAGIC = b'FUJIFILMCCD-RAW '
@@ -574,6 +699,7 @@ def measure_mp3(src, start):
     expect = first[1:]
     window = b''
     window_at = pos
+    last = pos
     while True:
         if pos + 4 > window_at + len(window):
             window_at = pos
@@ -584,13 +710,41 @@ def measure_mp3(src, start):
         frame = mpeg_frame(window[rel:rel + 4])
         if frame is None or frame[1:] != expect:
             break
+        last = pos
         pos += frame[0]
         frames += 1
     if frames < (MP3_MIN_FRAMES if tagged else MP3_MIN_FRAMES_UNTAGGED):
         return None
     if src.get(pos, 3) == b'TAG':
         pos += 128
+    else:
+        # A last frame cut short by its encoder: its header declares more
+        # bytes than precede the ID3v1 tag, so the walk ran through the tag
+        # into whatever follows (NIST's audio1.mp3: 467 bytes of fill).
+        body = src.get(last + 4, pos - last - 4)
+        at = body.find(b'TAG')
+        while at != -1:
+            if id3v1(src.get(last + 4 + at, 128)):
+                return last + 4 + at + 128 - start, 'mp3'
+            at = body.find(b'TAG', at + 1)
     return pos - start, 'mp3'
+
+
+def id3v1(tag):
+    """Is this 128 bytes an ID3v1 tag? 'TAG', then title, artist, album
+    (30 each), year (4) and comment (30): text, NUL-padded -- what tells a
+    real tag from 'TAG' inside compressed audio."""
+    if len(tag) != 128 or tag[:3] != b'TAG':
+        return False
+    comment = tag[97:127]
+    if comment[28] == 0:
+        comment = comment[:28]              # ID3v1.1: byte 29 is the track
+    for field in (tag[3:33], tag[33:63], tag[63:93], tag[93:97], comment):
+        text = field.rstrip(b'\x00 ')
+        if b'\x00' in text or any(b < 0x20 and b not in (9, 10, 13)
+                                  for b in text):
+            return False
+    return True
 
 
 _OGG_TABLE = []

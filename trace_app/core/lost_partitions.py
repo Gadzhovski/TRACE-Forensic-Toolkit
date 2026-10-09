@@ -44,6 +44,13 @@ def signature(head):
             head[0x52:0x57] == b'FAT32'):
         return 'FAT'
     if head[1080:1082] == b'\x53\xef':
+        # A backup superblock (one per sparse group) records its group
+        # number; a file system's own has 0. Opened as a partition, a
+        # backup reads every block number from the wrong place -- DFTT
+        # #12, its primary superblock zeroed, showed five such "lost
+        # partitions" made of the backups.
+        if head[1024 + 0x5A:1024 + 0x5C] != b'\x00\x00':
+            return None
         return 'Ext'
     if head[1024:1026] in (b'H+', b'HX'):
         return 'HFS+'

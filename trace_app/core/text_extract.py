@@ -37,6 +37,55 @@ _PRINTABLE_ASCII = re.compile(rb'[\x20-\x7e\t\r\n]{%d,}' % MIN_STRING_LENGTH)
 _PRINTABLE_UTF16 = re.compile(
     rb'(?:[\x20-\x7e]\x00){%d,}' % MIN_STRING_LENGTH)
 
+#: UTF-16 text in a non-Latin alphabet -- Greek, Cyrillic, Armenian,
+#: Hebrew, Arabic (U+0370-06FF) -- mixed with ASCII spaces, digits and
+#: punctuation, in either byte order. The Latin-only patterns above saw
+#: none of it: NIST's Russian Tea Room menu (UTF-16BE) was invisible
+#: wherever it was not a whole .txt file. CJK is left out: its code
+#: points cover a third of all byte pairs, and blind matching would read
+#: every compressed file as Chinese.
+_SCRIPT_UTF16 = {
+    'utf-16-le': re.compile(
+        rb'(?:[\x20-\x7e]\x00|[\x00-\xff][\x03-\x06]){%d,}'
+        % MIN_STRING_LENGTH),
+    'utf-16-be': re.compile(
+        rb'(?:\x00[\x20-\x7e]|[\x03-\x06][\x00-\xff]){%d,}'
+        % MIN_STRING_LENGTH),
+}
+
+
+def script_runs(data, min_length=MIN_STRING_LENGTH):
+    """[(offset, text)] of UTF-16 runs (either byte order) holding letters
+    of a non-Latin alphabet. A run counts when most of its characters are
+    letters or spaces and at least `min_length` are letters outside ASCII
+    -- random bytes seldom manage that; text does. (A Latin-only UTF-16LE
+    run is the strings pass's.)"""
+    found = []
+    for encoding, pattern in _SCRIPT_UTF16.items():
+        for match in pattern.finditer(data):
+            raw = match.group()
+            start = match.start()
+            if len(raw) % 2:
+                raw = raw[:-1]
+            text = raw.decode(encoding, 'replace')
+            foreign = sum(1 for c in text if c.isalpha() and ord(c) > 0x36F)
+            letters = sum(1 for c in text if c.isalpha() or c.isspace())
+            if foreign >= min_length and letters * 2 >= len(text) and \
+                    '\ufffd' not in text:
+                found.append((start, text, foreign))
+    # Text in one byte order also reads in the other, a byte off, as
+    # nearly the same letters (one junk character first, the last lost):
+    # both readings are kept -- which is true cannot be told from the
+    # letters -- and a search finds the word in the right one.
+    found.sort()
+    seen = set()
+    kept = []
+    for start, text, _foreign in found:
+        if text not in seen:
+            seen.add(text)
+            kept.append((start, text))
+    return kept
+
 
 def extract_text(content, name='', limit=None):
     """Readable text from `content`, chosen by what the file actually is.
@@ -131,6 +180,7 @@ def extract_strings(content, min_length=MIN_STRING_LENGTH):
     for match in _PRINTABLE_UTF16.findall(content):
         pieces.append(match.decode('utf-16-le', errors='replace'))
 
+    pieces += [text for _start, text in script_runs(content, min_length)]
     return '\n'.join(pieces)
 
 
@@ -189,6 +239,10 @@ def _from_ole(content):
 
 def _from_plain(content):
     """Decode text, guessing the encoding when it is not obvious."""
+    # A byte-order mark says. Counting NULs (below) does not: Cyrillic in
+    # UTF-16BE is 04xx, with a NUL only for ASCII among it.
+    if content[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        return content.decode('utf-16', errors='replace')
     for encoding in ('utf-8-sig', 'utf-8'):
         try:
             return content.decode(encoding)
@@ -199,8 +253,12 @@ def _from_plain(content):
     # proportion of interleaved nulls is the giveaway.
     sample = content[:4096]
     if sample.count(b'\x00') > len(sample) // 4:
+        # Without a mark the NULs' side says the byte order (Python's
+        # 'utf-16' assumes little-endian).
+        big = sample[0::2].count(0) > sample[1::2].count(0)
         try:
-            return content.decode('utf-16', errors='replace')
+            return content.decode('utf-16-be' if big else 'utf-16-le',
+                                  errors='replace')
         except UnicodeDecodeError:
             pass
 

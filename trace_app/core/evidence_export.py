@@ -292,19 +292,17 @@ def _facts(handler, item, entry):
     facts['artifact_ref'] = item.get('artifact_ref') or make_artifact_ref(
         item['start_offset'], item['inode_number'], sequence)
     try:
-        from trace_app.core.image_handler import _TIMEZONE_NAIVE
-        zoned = handler.get_fs_type(item['start_offset']) not in \
-            _TIMEZONE_NAIVE
+        shown = handler.entry_times_text(item['start_offset'], meta)
     except Exception:
-        zoned = True
-    for key, field in (('created', 'crtime'), ('modified', 'mtime'),
-                       ('accessed', 'atime'), ('changed', 'ctime')):
+        shown = {key: safe_datetime(getattr(meta, field, None))
+                 for key, field in (('created', 'crtime'),
+                                    ('modified', 'mtime'),
+                                    ('accessed', 'atime'),
+                                    ('changed', 'ctime'))}
+    for key, text in shown.items():
         if item.get(key) and item[key] != 'N/A':
             continue
-        try:
-            facts[key] = safe_datetime(getattr(meta, field), zoned)
-        except Exception:
-            pass
+        facts[key] = text
     return facts
 
 

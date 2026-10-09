@@ -7,10 +7,14 @@ expressions should find it. A list made of that table is run over the
 image's search index; every string stored inside a file -- allocated or
 deleted, and the file name in a directory entry -- is found where the table
 says, and so is the one wholly inside a file's slack (3slack3: indexing
-reads each live file's slack as an item of its own). Strings that cross
-from one file or into slack, or lie in unallocated space, are in no single
-item, so a search of the index does not find them; the table marks them as
-such and so does this test.
+reads each live file's slack as an item of its own), and so is the one
+in unallocated space (3cross3: free space is indexed in pieces, named by
+sector -- DFTT puts it at sector 283, in the piece from 282). Strings that
+cross from one file into another or into slack are in no single item, so
+a search of the index does not find them; the table marks them as such and
+so does this test. 'SECOND' is also a name in the FAT16 root folder
+(sector 239): file-system structures are not free space, so that copy is
+the file's name, not an "unallocated" hit.
 """
 
 import os
@@ -25,18 +29,20 @@ DFTT_TERMS = [
     ('SECOND', {'/file2.dat', '/second'}),     # and a file's name
     ('1cross1', set()),                        # crosses two files
     ('2cross2', {'/file3.dat'}),
-    ('3cross3', set()),                        # unallocated
+    ('3cross3', {'[unallocated]/sectors 282-2329'}),   # free space
     ('1slack1', set()),                        # file into slack
     ('2slack2', set()),
     ('3slack3', {'/file4.dat [slack]'}),       # wholly in file4's slack
     ('1fragment1', {'/file4.dat'}),
     ('2fragment sentence2', {'/file6.dat'}),
-    ('deleted', {'/_ILE5.DAT'}),               # a deleted file
+    # A deleted file -- whose cluster is free space too: the same bytes,
+    # DFTT's sector 276, are an unallocated piece as well.
+    ('deleted', {'/_ILE5.DAT', '[unallocated]/sectors 276-276'}),
     (r'a?b\c*d$e#f[g^', {'/file7.dat'}),
     ('FirST', {'/file1.dat'}),                 # case-insensitive
     (r'/f[[:alpha:]]rst/', {'/file1.dat'}),
     (r'/f[a-z]r[0-9]?s[[:space:]]*t/', {'/file1.dat'}),
-    (r'/d[a-z]l.?t.?d/', {'/_ILE5.DAT'}),
+    (r'/d[a-z]l.?t.?d/', {'/_ILE5.DAT', '[unallocated]/sectors 276-276'}),
     (r'/[r-t][[:space:]]?[j-m][[:space:]]?[a-c]{2,2}[[:space:]]?[j-m]/',
      {'/file4.dat [slack]'}),                  # 3slack3; the others cross
     (r'/[1572943][[:space:]]?fr.{2,3}ent[[:space:]]?/',
@@ -110,7 +116,7 @@ def test_dftt_keyword_search_answer_key(indexed_case, tmp_path):
     library.update(entry['id'], terms=[keywords.make_term('deleted')])
     keywords.run_case(case, library)
     assert {f['path'] for f in case.findings(evidence_id, 'keywords')} == \
-        {'/_ILE5.DAT'}
+        {'/_ILE5.DAT', '[unallocated]/sectors 276-276'}
     trail = ' '.join(row['detail'] or '' for row in case.activity())
     assert 'keyword search finished' in ' '.join(
         row['action'] for row in case.activity())

@@ -50,6 +50,25 @@ BASELINE = {
     # byte-exact, and none of its signature decoys. 63 since the camera raws
     # (CR2, CR3, NEF x2, ARW, DNG, RAF, RW2, ORF, PEF) and two PSBs.
     'carve-corpus.dd': 63,
+    # NIST CFReDS file carving (tools/nist_carving_truth.py: every planted
+    # piece identified by its bytes against NIST's originals). L0/L1 are
+    # whole files -- "L1" pieces lie end to end -- all byte-exact once the
+    # BMP (5,000,000-byte cap), GIF (first 00 3B) and MP3 (cut last frame)
+    # carvers were fixed. L2 (out of order) and L3 (a piece missing) are
+    # located at most: no structure proves an out-of-order join. L4/L5
+    # (nested, braided): ZIPs and PDFs rebuilt around what lies inside
+    # them once a nested archive's end record stopped being taken as the
+    # outer one's.
+    'L0_Graphic.dd': 5, 'L1_Graphic.dd': 5, 'L2_Graphic.dd': 3,
+    'L3_Graphic.dd': 1, 'L4_Graphic.dd': 6, 'L5_Graphic.dd': 3,
+    'L0_Archive.dd': 6, 'L1_Archive.dd': 6, 'L2_Archive.dd': 0,
+    'L3_Archive.dd': 0, 'L4_Archive.dd': 4, 'L5_Archive.dd': 1,
+    'L0_Video.dd': 6, 'L1_Video.dd': 6, 'L2_Video.dd': 5,
+    'L3_Video.dd': 3, 'L4_Video.dd': 7, 'L5_Video.dd': 7,
+    'L0_Documents.dd': 7, 'L1_Documents.dd': 7, 'L2_Documents.dd': 0,
+    'L3_Documents.dd': 1, 'L4_Documents.dd': 8, 'L5_Documents.dd': 7,
+    'L0_Audio.dd': 2, 'L1_Audio.dd': 2, 'L2_Audio.dd': 2,
+    'L3_Audio.dd': 2, 'L4_Audio.dd': 2, 'L5_Audio.dd': 2,
 }
 
 #: Files rebuilt from fragments, byte-exact against the key. Gated like
@@ -61,6 +80,10 @@ REBUILT_BASELINE = {
     '12-carve-ext2.dd': 2,
     'dfrws-2006-challenge.raw': 2,      # 4b.zip, 4c.zip
     'dfrws-2007-challenge.img': 4,      # 2.pdf, 3.pdf, 13.pdf, 14.pdf
+    # NIST: an .xlsx and a .pptx rebuilt around the files nested in their
+    # gaps, the braided .docx/.xlsx/.pdf pairs, one archive in each.
+    'L4_Archive.dd': 1, 'L5_Archive.dd': 1,
+    'L4_Documents.dd': 3, 'L5_Documents.dd': 6,
 }
 
 #: How close a recovered offset must be to the documented one to count as the
@@ -139,6 +162,14 @@ def score(image_name, truth, found):
             detail = f"{len(blob):,} bytes"
             if item.get('md5'):
                 digest = hashlib.md5(blob).hexdigest()
+                if item.get('header_size') == len(blob) and \
+                        hashlib.md5(blob[:item['size']]).hexdigest() == \
+                        item['md5']:
+                    # The original is shorter than its own header says
+                    # (NIST's audio2.wav, by 8 bytes): the carve is the
+                    # original, then the bytes the header claims too.
+                    digest = item['md5']
+                    detail += " (to the length its header declares)"
                 if digest == item['md5']:
                     exact += 1
                     exact_possible += 1
@@ -219,7 +250,9 @@ def main():
 
     regressed = False
     for name in names:
-        path = os.path.join(IMAGE_DIR, name)
+        # An entry may name its image's place under test_images/ (NIST's
+        # carving set lives in nist/carving/).
+        path = os.path.join(IMAGE_DIR, truth[name].get('path', name))
         if not os.path.exists(path):
             print(f"\n=== {name}\n    not present in test_images/ -- skipped")
             continue

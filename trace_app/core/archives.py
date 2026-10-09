@@ -16,6 +16,7 @@ import bz2
 import io
 import logging
 import lzma
+import struct
 import tarfile
 import zipfile
 import zlib
@@ -59,6 +60,10 @@ class EncryptedArchive(ArchiveError):
     Raised rather than returning empty content: an examiner told "this file is
     empty" would draw the wrong conclusion about the evidence.
     """
+
+
+#: Read by core/legacy_archives.
+_LEGACY = ('cab', 'lzh', 'alz', 'uue', 'compress')
 
 
 def detect_archive(data):
@@ -118,6 +123,12 @@ def detect_archive(data):
     if isinstance(data, (bytes, bytearray)) and cpio.format_of(data):
         return 'cpio'
 
+    # Cabinet, LHA, ALZip, uuencode, Unix compress (core/legacy_archives).
+    from trace_app.core import legacy_archives
+    legacy = legacy_archives.kind_of(data)
+    if legacy:
+        return legacy
+
     # Headerless compressed streams: LZMA "alone" (.lzma) and raw zlib.
     # Their few header bytes could start anything, so a trial
     # decompression must succeed as well.
@@ -171,6 +182,13 @@ def list_members(data, kind=None, password=None):
         return _list_single_stream(data, kind)
     if kind == 'cpio':
         return _list_cpio(data)
+    if kind in _LEGACY:
+        from trace_app.core import legacy_archives
+        try:
+            return legacy_archives.members(data, kind)
+        except (legacy_archives.LegacyError, struct.error, ValueError,
+                IndexError) as exc:
+            raise ArchiveError(f"Damaged {kind} archive: {exc}") from exc
     if kind == 'msg':
         from trace_app.core import msgfile
         try:
@@ -294,6 +312,13 @@ def read_member(data, member_name=None, kind=None, password=None,
         try:
             return cpio.read(data, member_name, limit)
         except cpio.CpioError as exc:
+            raise ArchiveError(str(exc)) from exc
+    if kind in _LEGACY:
+        from trace_app.core import legacy_archives
+        try:
+            return legacy_archives.read(data, kind, member_name, limit)
+        except (legacy_archives.LegacyError, struct.error, ValueError,
+                IndexError, OSError, EOFError, zlib.error) as exc:
             raise ArchiveError(str(exc)) from exc
     if kind == 'msg':
         from trace_app.core import msgfile

@@ -77,11 +77,14 @@ def slack_ranges(image_handler, should_stop=None):
 
 
 def text_of(data):
-    """The readable text in slack bytes: ASCII and UTF-16LE runs, one per
-    line, in the order they lie."""
+    """The readable text in slack (or unallocated) bytes: ASCII and
+    UTF-16LE runs, and UTF-16 in a non-Latin alphabet in either byte order
+    (text_extract.script_runs), one per line, in the order they lie."""
+    from trace_app.core.text_extract import script_runs
     found = [(m.start(), m.group().decode('ascii', 'replace').strip())
              for m in _ASCII.finditer(data)]
     found += [(m.start(), m.group().decode('utf-16-le', 'replace').strip())
               for m in _UTF16.finditer(data)]
+    found += [(start, text.strip()) for start, text in script_runs(data)]
     found.sort()
     return '\n'.join(text for _start, text in found if len(text) >= MIN_TEXT)

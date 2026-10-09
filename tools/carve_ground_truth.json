@@ -2116,5 +2116,2985 @@
     "note": "contiguous"
    }
   ]
+ },
+ "L0_Graphic.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L0_Graphic -- contiguous files between fills",
+  "path": "nist/carving/L0_Graphic.dd",
+  "files": [
+   {
+    "name": "000_0021.png",
+    "type": "png",
+    "offset": "0x4e2000",
+    "size": 12966639,
+    "md5": "b1bdd6f22c1a622b6acf68ba95d6ad64",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x1621c00",
+    "size": 806664,
+    "md5": "1e846d0506d21dd8a08a0cd784ce4f19",
+    "recoverable": false,
+    "note": "TRACE has no carver for .pcx"
+   },
+   {
+    "name": "09260002.jpg",
+    "type": "jpg",
+    "offset": "0x1bc8c00",
+    "size": 60716,
+    "md5": "bb1e236cf935815e5bb714760b23f549",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "100_0304crop.bmp",
+    "type": "bmp",
+    "offset": "0x20b9a00",
+    "size": 5111906,
+    "md5": "a4f1f6095d8117aa00737f4b7f79c094",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "100_0018.tif",
+    "type": "tiff",
+    "offset": "0x2a7bc00",
+    "size": 14969328,
+    "md5": "70ea373e3b686f6ef295fd9a49fe1a13",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "100_0183.gif",
+    "type": "gif",
+    "offset": "0x3da4600",
+    "size": 132948,
+    "md5": "0b910d6c21828e0b8be06322168fbd60",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L1_Graphic.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L1_Graphic -- files in fragments, in order",
+  "path": "nist/carving/L1_Graphic.dd",
+  "files": [
+   {
+    "name": "09260002.jpg",
+    "type": "jpg",
+    "offset": "0x4e2000",
+    "size": 60716,
+    "md5": "bb1e236cf935815e5bb714760b23f549",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "100_0018.tif",
+    "type": "tiff",
+    "offset": "0x9d2e00",
+    "size": 14969328,
+    "md5": "70ea373e3b686f6ef295fd9a49fe1a13",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "100_0304crop.bmp",
+    "type": "bmp",
+    "offset": "0x1cfb800",
+    "size": 5111906,
+    "md5": "a4f1f6095d8117aa00737f4b7f79c094",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x26bda00",
+    "size": 806664,
+    "md5": "1e846d0506d21dd8a08a0cd784ce4f19",
+    "recoverable": false,
+    "note": "TRACE has no carver for .pcx"
+   },
+   {
+    "name": "100_0183.gif",
+    "type": "gif",
+    "offset": "0x2c64a00",
+    "size": 132948,
+    "md5": "0b910d6c21828e0b8be06322168fbd60",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "000_0021.png",
+    "type": "png",
+    "offset": "0x3167200",
+    "size": 12966639,
+    "md5": "b1bdd6f22c1a622b6acf68ba95d6ad64",
+    "recoverable": true,
+    "note": "the layout names it 000_021.png"
+   }
+  ]
+ },
+ "L2_Graphic.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L2_Graphic -- files in fragments, out of order",
+  "path": "nist/carving/L2_Graphic.dd",
+  "files": [
+   {
+    "name": "100_0018.tif",
+    "type": "tiff",
+    "offset": "0x4e2000",
+    "size": 14969328,
+    "fragments": [
+     [
+      "0x4e2000",
+      4989440
+     ],
+     [
+      "0xe66800",
+      4989440
+     ],
+     [
+      "0x9a4200",
+      4990448
+     ]
+    ],
+    "md5": "70ea373e3b686f6ef295fd9a49fe1a13",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "09260002.jpg",
+    "type": "jpg",
+    "offset": "0x180aa00",
+    "size": 60716,
+    "fragments": [
+     [
+      "0x180aa00",
+      19968
+     ],
+     [
+      "0x1814a00",
+      19968
+     ],
+     [
+      "0x180f800",
+      20780
+     ]
+    ],
+    "md5": "bb1e236cf935815e5bb714760b23f549",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "100_0304crop.bmp",
+    "type": "bmp",
+    "offset": "0x1f6ba00",
+    "size": 5111906,
+    "fragments": [
+     [
+      "0x1f6ba00",
+      2555904
+     ],
+     [
+      "0x1cfb800",
+      2556002
+     ]
+    ],
+    "md5": "a4f1f6095d8117aa00737f4b7f79c094",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x26bda00",
+    "size": 806664,
+    "fragments": [
+     [
+      "0x26bda00",
+      268800
+     ],
+     [
+      "0x2741000",
+      268800
+     ],
+     [
+      "0x26ff400",
+      269064
+     ]
+    ],
+    "md5": "1e846d0506d21dd8a08a0cd784ce4f19",
+    "recoverable": false,
+    "note": "3 fragments, out of order; TRACE has no carver for .pcx"
+   },
+   {
+    "name": "100_0183.gif",
+    "type": "gif",
+    "offset": "0x2c6fa00",
+    "size": 132948,
+    "fragments": [
+     [
+      "0x2c6fa00",
+      88064
+     ],
+     [
+      "0x2c64a00",
+      44884
+     ]
+    ],
+    "md5": "0b910d6c21828e0b8be06322168fbd60",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "000_0021.png",
+    "type": "png",
+    "offset": "0x3796200",
+    "size": 12966639,
+    "fragments": [
+     [
+      "0x3796200",
+      6482944
+     ],
+     [
+      "0x3167200",
+      6483695
+     ]
+    ],
+    "md5": "b1bdd6f22c1a622b6acf68ba95d6ad64",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   }
+  ]
+ },
+ "L3_Graphic.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L3_Graphic -- files with a fragment missing",
+  "path": "nist/carving/L3_Graphic.dd",
+  "files": [
+   {
+    "name": "100_0304crop.bmp",
+    "type": "bmp",
+    "offset": null,
+    "size": 5111906,
+    "recoverable": false,
+    "note": "2,555,904 of its 5,111,906 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "100_0183.gif",
+    "type": "gif",
+    "offset": null,
+    "size": 132948,
+    "recoverable": false,
+    "note": "44,032 of its 132,948 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "000_0021.png",
+    "type": "png",
+    "offset": null,
+    "size": 12966639,
+    "recoverable": false,
+    "note": "8,643,584 of its 12,966,639 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "09260002.jpg",
+    "type": "jpg",
+    "offset": "0x4e2000",
+    "size": 60716,
+    "recoverable": true,
+    "note": "30,508 of its 60,716 bytes are not in the image"
+   },
+   {
+    "name": "100_0018.tif",
+    "type": "tiff",
+    "offset": "0x9cb600",
+    "size": 14969328,
+    "recoverable": true,
+    "note": "4,990,448 of its 14,969,328 bytes are not in the image"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x1f83c00",
+    "size": 806664,
+    "fragments": [
+     [
+      "0x1f83c00",
+      268800
+     ],
+     [
+      "0x1fc5600",
+      269064
+     ]
+    ],
+    "recoverable": false,
+    "note": "268,800 of its 806,664 bytes are not in the image; 2 fragments; TRACE has no carver for .pcx"
+   }
+  ]
+ },
+ "L4_Graphic.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L4_Graphic -- files nested inside other files",
+  "path": "nist/carving/L4_Graphic.dd",
+  "files": [
+   {
+    "name": "09260002.jpg",
+    "type": "jpg",
+    "offset": "0x4e2000",
+    "size": 60716,
+    "fragments": [
+     [
+      "0x4e2000",
+      30208
+     ],
+     [
+      "0x4f8600",
+      30508
+     ]
+    ],
+    "md5": "bb1e236cf935815e5bb714760b23f549",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "02010026.jpg",
+    "type": "jpg",
+    "offset": "0x4e9600",
+    "size": 61038,
+    "md5": "20f34a3f571d394ab9342ac21588e96e",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "100_0304crop.bmp",
+    "type": "bmp",
+    "offset": "0x9e1e00",
+    "size": 5111906,
+    "fragments": [
+     [
+      "0x9e1e00",
+      1703936
+     ],
+     [
+      "0x19c8800",
+      3407970
+     ]
+    ],
+    "md5": "a4f1f6095d8117aa00737f4b7f79c094",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "100_0018.tif",
+    "type": "tiff",
+    "offset": "0xb81e00",
+    "size": 14969328,
+    "md5": "70ea373e3b686f6ef295fd9a49fe1a13",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x21eaa00",
+    "size": 806664,
+    "fragments": [
+     [
+      "0x21eaa00",
+      402944
+     ],
+     [
+      "0x2ecb400",
+      403720
+     ]
+    ],
+    "md5": "1e846d0506d21dd8a08a0cd784ce4f19",
+    "recoverable": false,
+    "note": "2 fragments; TRACE has no carver for .pcx"
+   },
+   {
+    "name": "100_0183.gif",
+    "type": "gif",
+    "offset": "0x224d000",
+    "size": 132948,
+    "fragments": [
+     [
+      "0x224d000",
+      88064
+     ],
+     [
+      "0x2ec0400",
+      44884
+     ]
+    ],
+    "md5": "0b910d6c21828e0b8be06322168fbd60",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "000_0021.png",
+    "type": "png",
+    "offset": "0x2262800",
+    "size": 12966639,
+    "md5": "b1bdd6f22c1a622b6acf68ba95d6ad64",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L5_Graphic.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L5_Graphic -- fragments of two files braided together",
+  "path": "nist/carving/L5_Graphic.dd",
+  "files": [
+   {
+    "name": "09260002.jpg",
+    "type": "jpg",
+    "offset": "0x4e2000",
+    "size": 60716,
+    "fragments": [
+     [
+      "0x4e2000",
+      30208
+     ],
+     [
+      "0x759600",
+      30508
+     ]
+    ],
+    "md5": "bb1e236cf935815e5bb714760b23f549",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "100_0304crop.bmp",
+    "type": "bmp",
+    "offset": "0x4e9600",
+    "size": 5111906,
+    "fragments": [
+     [
+      "0x4e9600",
+      2555904
+     ],
+     [
+      "0x760e00",
+      2556002
+     ]
+    ],
+    "md5": "a4f1f6095d8117aa00737f4b7f79c094",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "100_0018.tif",
+    "type": "tiff",
+    "offset": "0xeb3000",
+    "size": 14969328,
+    "fragments": [
+     [
+      "0xeb3000",
+      4989440
+     ],
+     [
+      "0x13b6c00",
+      4989440
+     ],
+     [
+      "0x18ba800",
+      4990448
+     ]
+    ],
+    "md5": "70ea373e3b686f6ef295fd9a49fe1a13",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x1375200",
+    "size": 806664,
+    "fragments": [
+     [
+      "0x1375200",
+      268800
+     ],
+     [
+      "0x1878e00",
+      268800
+     ],
+     [
+      "0x1d7ce00",
+      269064
+     ]
+    ],
+    "md5": "1e846d0506d21dd8a08a0cd784ce4f19",
+    "recoverable": false,
+    "note": "3 fragments; TRACE has no carver for .pcx"
+   },
+   {
+    "name": "100_0183.gif",
+    "type": "gif",
+    "offset": "0x22a0a00",
+    "size": 132948,
+    "fragments": [
+     [
+      "0x22a0a00",
+      66048
+     ],
+     [
+      "0x2941e00",
+      66900
+     ]
+    ],
+    "md5": "0b910d6c21828e0b8be06322168fbd60",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "000_0021.png",
+    "type": "png",
+    "offset": "0x22b0c00",
+    "size": 12966639,
+    "fragments": [
+     [
+      "0x22b0c00",
+      6482944
+     ],
+     [
+      "0x2952400",
+      6483695
+     ]
+    ],
+    "md5": "b1bdd6f22c1a622b6acf68ba95d6ad64",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "02010025.pcx",
+    "type": "pcx",
+    "offset": "0x28df800",
+    "size": 806664,
+    "fragments": [
+     [
+      "0x28df800",
+      402944
+     ],
+     [
+      "0x2f81400",
+      403720
+     ]
+    ],
+    "md5": "1e846d0506d21dd8a08a0cd784ce4f19",
+    "recoverable": false,
+    "note": "2 fragments; TRACE has no carver for .pcx"
+   }
+  ]
+ },
+ "L0_Archive.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L0_Archive -- contiguous files between fills",
+  "path": "nist/carving/L0_Archive.dd",
+  "files": [
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0x4e2000",
+    "size": 1130244,
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0xad8000",
+    "size": 565104,
+    "md5": "7e50af1887d7b39c3a900d99924ae521",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc3.gz",
+    "type": "gz",
+    "offset": "0x1044000",
+    "size": 50605,
+    "md5": "2b2ac3fd281e2f1ff94257f47780ad9a",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc4.tar",
+    "type": "tar",
+    "offset": "0x1532600",
+    "size": 1212928,
+    "md5": "c52408fbba699fff0f6ea62ba86ab33d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": "0x1b3c800",
+    "size": 941059,
+    "md5": "3fb5f789ab0d9693a9e11333fac463ef",
+    "recoverable": false,
+    "note": "TRACE has no carver for .wim"
+   },
+   {
+    "name": "arc6.rar",
+    "type": "rar",
+    "offset": "0x2104600",
+    "size": 868785,
+    "md5": "15ccca7548228668d1fe8eead2ff10fc",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": "0x26ba800",
+    "size": 643764,
+    "md5": "4c514453204a0eca1d8e46765ecaa4ce",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L1_Archive.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L1_Archive -- files in fragments, in order",
+  "path": "nist/carving/L1_Archive.dd",
+  "files": [
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0x4e2000",
+    "size": 1130244,
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0xad8000",
+    "size": 565104,
+    "md5": "7e50af1887d7b39c3a900d99924ae521",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc3.gz",
+    "type": "gz",
+    "offset": "0x1044000",
+    "size": 50605,
+    "md5": "2b2ac3fd281e2f1ff94257f47780ad9a",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc4.tar",
+    "type": "tar",
+    "offset": "0x1532600",
+    "size": 1212928,
+    "md5": "c52408fbba699fff0f6ea62ba86ab33d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": "0x1b3c800",
+    "size": 941059,
+    "md5": "3fb5f789ab0d9693a9e11333fac463ef",
+    "recoverable": false,
+    "note": "TRACE has no carver for .wim"
+   },
+   {
+    "name": "arc6.rar",
+    "type": "rar",
+    "offset": "0x2104600",
+    "size": 868785,
+    "md5": "15ccca7548228668d1fe8eead2ff10fc",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": "0x26ba800",
+    "size": 643764,
+    "md5": "4c514453204a0eca1d8e46765ecaa4ce",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L2_Archive.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L2_Archive -- files in fragments, out of order",
+  "path": "nist/carving/L2_Archive.dd",
+  "files": [
+   {
+    "name": "arc6.rar",
+    "type": "rar",
+    "offset": "0x54c200",
+    "size": 868785,
+    "fragments": [
+     [
+      "0x54c200",
+      434176
+     ],
+     [
+      "0x4e2000",
+      434609
+     ]
+    ],
+    "md5": "15ccca7548228668d1fe8eead2ff10fc",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": "0xa98200",
+    "size": 643764,
+    "fragments": [
+     [
+      "0xa98200",
+      214528
+     ],
+     [
+      "0xb01000",
+      214528
+     ],
+     [
+      "0xacc800",
+      214708
+     ]
+    ],
+    "md5": "4c514453204a0eca1d8e46765ecaa4ce",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0x1073400",
+    "size": 1130244,
+    "fragments": [
+     [
+      "0x1073400",
+      376320
+     ],
+     [
+      "0x1017600",
+      376320
+     ],
+     [
+      "0x10cf200",
+      377604
+     ]
+    ],
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0x1669800",
+    "size": 565104,
+    "fragments": [
+     [
+      "0x1669800",
+      187904
+     ],
+     [
+      "0x160d600",
+      377200
+     ]
+    ],
+    "md5": "7e50af1887d7b39c3a900d99924ae521",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "arc4.tar",
+    "type": "tar",
+    "offset": "0x1bdc400",
+    "size": 1212928,
+    "fragments": [
+     [
+      "0x1bdc400",
+      807936
+     ],
+     [
+      "0x1b79600",
+      404992
+     ]
+    ],
+    "md5": "c52408fbba699fff0f6ea62ba86ab33d",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": "0x221ce00",
+    "size": 941059,
+    "fragments": [
+     [
+      "0x221ce00",
+      313344
+     ],
+     [
+      "0x21d0600",
+      313344
+     ],
+     [
+      "0x2183800",
+      314371
+     ]
+    ],
+    "md5": "3fb5f789ab0d9693a9e11333fac463ef",
+    "recoverable": false,
+    "note": "3 fragments, out of order; TRACE has no carver for .wim"
+   },
+   {
+    "name": "arc3.gz",
+    "type": "gz",
+    "offset": "0x2753c00",
+    "size": 50605,
+    "fragments": [
+     [
+      "0x2753c00",
+      16384
+     ],
+     [
+      "0x274b600",
+      34221
+     ]
+    ],
+    "md5": "2b2ac3fd281e2f1ff94257f47780ad9a",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   }
+  ]
+ },
+ "L3_Archive.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L3_Archive -- files with a fragment missing",
+  "path": "nist/carving/L3_Archive.dd",
+  "files": [
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": null,
+    "size": 643764,
+    "recoverable": false,
+    "note": "321,536 of its 643,764 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": null,
+    "size": 1130244,
+    "recoverable": false,
+    "note": "376,320 of its 1,130,244 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "arc4.tar",
+    "type": "tar",
+    "offset": null,
+    "size": 1212928,
+    "recoverable": false,
+    "note": "807,936 of its 1,212,928 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": null,
+    "size": 941059,
+    "recoverable": false,
+    "note": "313,344 of its 941,059 bytes are not in the image; its first fragment is missing; TRACE has no carver for .wim"
+   },
+   {
+    "name": "arc6.rar",
+    "type": "rar",
+    "offset": "0x4e2000",
+    "size": 868785,
+    "recoverable": true,
+    "note": "434,609 of its 868,785 bytes are not in the image"
+   },
+   {
+    "name": "arc3.gz",
+    "type": "gz",
+    "offset": "0xf5ec00",
+    "size": 50605,
+    "recoverable": true,
+    "note": "17,837 of its 50,605 bytes are not in the image"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0x1448c00",
+    "size": 565104,
+    "fragments": [
+     [
+      "0x1448c00",
+      187904
+     ],
+     [
+      "0x1476a00",
+      189296
+     ]
+    ],
+    "recoverable": true,
+    "note": "187,904 of its 565,104 bytes are not in the image; 2 fragments"
+   }
+  ]
+ },
+ "L4_Archive.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L4_Archive -- files nested inside other files",
+  "path": "nist/carving/L4_Archive.dd",
+  "files": [
+   {
+    "name": "arc4.tar",
+    "type": "tar",
+    "offset": "0x4e2000",
+    "size": 1212928,
+    "fragments": [
+     [
+      "0x4e2000",
+      606208
+     ],
+     [
+      "0x68a000",
+      606720
+     ]
+    ],
+    "md5": "c52408fbba699fff0f6ea62ba86ab33d",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0x576000",
+    "size": 1130244,
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc3.gz",
+    "type": "gz",
+    "offset": "0xc00200",
+    "size": 50605,
+    "fragments": [
+     [
+      "0xc00200",
+      16384
+     ],
+     [
+      "0xcd8400",
+      34221
+     ]
+    ],
+    "md5": "2b2ac3fd281e2f1ff94257f47780ad9a",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc6.rar",
+    "type": "rar",
+    "offset": "0xc04200",
+    "size": 868785,
+    "md5": "15ccca7548228668d1fe8eead2ff10fc",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0x11c2a00",
+    "size": 1130244,
+    "fragments": [
+     [
+      "0x11c2a00",
+      752640
+     ],
+     [
+      "0x1304600",
+      377604
+     ]
+    ],
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0x127a600",
+    "size": 565104,
+    "md5": "7e50af1887d7b39c3a900d99924ae521",
+    "recoverable": true,
+    "note": "the layout names it arc1.7z / arc3.gz"
+   },
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": "0x1842a00",
+    "size": 643764,
+    "fragments": [
+     [
+      "0x1842a00",
+      321536
+     ],
+     [
+      "0x1a01000",
+      322228
+     ]
+    ],
+    "md5": "4c514453204a0eca1d8e46765ecaa4ce",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0x1891200",
+    "size": 565104,
+    "fragments": [
+     [
+      "0x1891200",
+      375808
+     ],
+     [
+      "0x19d2c00",
+      189296
+     ]
+    ],
+    "md5": "7e50af1887d7b39c3a900d99924ae521",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": "0x18ece00",
+    "size": 941059,
+    "md5": "3fb5f789ab0d9693a9e11333fac463ef",
+    "recoverable": false,
+    "note": "TRACE has no carver for .wim"
+   }
+  ]
+ },
+ "L5_Archive.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L5_Archive -- fragments of two files braided together",
+  "path": "nist/carving/L5_Archive.dd",
+  "files": [
+   {
+    "name": "arc3.gz",
+    "type": "gz",
+    "offset": "0x4e2000",
+    "size": 50605,
+    "fragments": [
+     [
+      "0x4e2000",
+      25088
+     ],
+     [
+      "0x55b000",
+      25517
+     ]
+    ],
+    "md5": "2b2ac3fd281e2f1ff94257f47780ad9a",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": "0x4e8200",
+    "size": 941059,
+    "fragments": [
+     [
+      "0x4e8200",
+      470528
+     ],
+     [
+      "0x561400",
+      470531
+     ]
+    ],
+    "md5": "3fb5f789ab0d9693a9e11333fac463ef",
+    "recoverable": false,
+    "note": "2 fragments; TRACE has no carver for .wim"
+   },
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": "0xab6400",
+    "size": 643764,
+    "fragments": [
+     [
+      "0xab6400",
+      321536
+     ],
+     [
+      "0xc22a00",
+      322228
+     ]
+    ],
+    "md5": "4c514453204a0eca1d8e46765ecaa4ce",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0xb04c00",
+    "size": 1130244,
+    "fragments": [
+     [
+      "0xb04c00",
+      564736
+     ],
+     [
+      "0xc71600",
+      565508
+     ]
+    ],
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc4.tar",
+    "type": "tar",
+    "offset": "0xb8ea00",
+    "size": 1212928,
+    "fragments": [
+     [
+      "0xb8ea00",
+      606208
+     ],
+     [
+      "0xcfb800",
+      606720
+     ]
+    ],
+    "md5": "c52408fbba699fff0f6ea62ba86ab33d",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "arc2.bz2",
+    "type": "bz2",
+    "offset": "0x1271a00",
+    "size": 565104,
+    "fragments": [
+     [
+      "0x1271a00",
+      187904
+     ],
+     [
+      "0x12d3e00",
+      187904
+     ],
+     [
+      "0x1336200",
+      189296
+     ]
+    ],
+    "md5": "7e50af1887d7b39c3a900d99924ae521",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "arc7.zip",
+    "type": "zip",
+    "offset": "0x129f800",
+    "size": 643764,
+    "fragments": [
+     [
+      "0x129f800",
+      214528
+     ],
+     [
+      "0x1301c00",
+      214528
+     ],
+     [
+      "0x1364600",
+      214708
+     ]
+    ],
+    "md5": "4c514453204a0eca1d8e46765ecaa4ce",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "arc1.7z",
+    "type": "7z",
+    "offset": "0x187ae00",
+    "size": 1130244,
+    "fragments": [
+     [
+      "0x187ae00",
+      376320
+     ],
+     [
+      "0x1969e00",
+      376320
+     ],
+     [
+      "0x1a58e00",
+      377604
+     ]
+    ],
+    "md5": "d1051cae37c82c24a019d03902c2d0c2",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "arc5.wim",
+    "type": "wim",
+    "offset": "0x18d6c00",
+    "size": 941059,
+    "fragments": [
+     [
+      "0x18d6c00",
+      313344
+     ],
+     [
+      "0x19c5c00",
+      313344
+     ],
+     [
+      "0x1ab5200",
+      314371
+     ]
+    ],
+    "md5": "3fb5f789ab0d9693a9e11333fac463ef",
+    "recoverable": false,
+    "note": "3 fragments; TRACE has no carver for .wim"
+   },
+   {
+    "name": "arc6.rar",
+    "type": "rar",
+    "offset": "0x1923400",
+    "size": 868785,
+    "fragments": [
+     [
+      "0x1923400",
+      289280
+     ],
+     [
+      "0x1a12400",
+      289280
+     ],
+     [
+      "0x1b02000",
+      290225
+     ]
+    ],
+    "md5": "15ccca7548228668d1fe8eead2ff10fc",
+    "recoverable": true,
+    "note": "3 fragments"
+   }
+  ]
+ },
+ "L0_Video.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L0_Video -- contiguous files between fills",
+  "path": "nist/carving/L0_Video.dd",
+  "files": [
+   {
+    "name": "vid1.mp4",
+    "type": "mp4",
+    "offset": "0x4e2000",
+    "size": 1136007,
+    "md5": "d3bf39fa2f30b5acf644523d1a92ac82",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid2.avi",
+    "type": "avi",
+    "offset": "0xad9600",
+    "size": 1470360,
+    "md5": "20ca4356a2f152bae77c30f98f7e381f",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": "0x1122600",
+    "size": 497414,
+    "md5": "074ce15293e30b338d5a0c5fe8cf5d88",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x167de00",
+    "size": 3713213,
+    "md5": "c57611b8e3052bd853d79e2de932aa3d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid5.mpg",
+    "type": "mpg",
+    "offset": "0x1eea800",
+    "size": 22579200,
+    "md5": "57586384eb1f286ef9c2325b521dca4c",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid6.wmv",
+    "type": "wmv",
+    "offset": "0x3955000",
+    "size": 2461696,
+    "md5": "abb8ca304b17d645aee1c46786361fe0",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L1_Video.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L1_Video -- files in fragments, in order",
+  "path": "nist/carving/L1_Video.dd",
+  "files": [
+   {
+    "name": "vid1.mp4",
+    "type": "mp4",
+    "offset": "0x4e2000",
+    "size": 1136007,
+    "md5": "d3bf39fa2f30b5acf644523d1a92ac82",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid2.avi",
+    "type": "avi",
+    "offset": "0xad9600",
+    "size": 1470360,
+    "md5": "20ca4356a2f152bae77c30f98f7e381f",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": "0x1122600",
+    "size": 497414,
+    "md5": "074ce15293e30b338d5a0c5fe8cf5d88",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x167de00",
+    "size": 3713213,
+    "md5": "c57611b8e3052bd853d79e2de932aa3d",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid5.mpg",
+    "type": "mpg",
+    "offset": "0x1eea800",
+    "size": 22579200,
+    "md5": "57586384eb1f286ef9c2325b521dca4c",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid6.wmv",
+    "type": "wmv",
+    "offset": "0x3955000",
+    "size": 2461696,
+    "md5": "abb8ca304b17d645aee1c46786361fe0",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L2_Video.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L2_Video -- files in fragments, out of order",
+  "path": "nist/carving/L2_Video.dd",
+  "files": [
+   {
+    "name": "vid2.avi",
+    "type": "avi",
+    "offset": "0x595a00",
+    "size": 1470360,
+    "fragments": [
+     [
+      "0x595a00",
+      734720
+     ],
+     [
+      "0x4e2000",
+      735640
+     ]
+    ],
+    "md5": "20ca4356a2f152bae77c30f98f7e381f",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "vid6.wmv",
+    "type": "wmv",
+    "offset": "0xb2b000",
+    "size": 2461696,
+    "fragments": [
+     [
+      "0xb2b000",
+      820224
+     ],
+     [
+      "0xcbbc00",
+      820224
+     ],
+     [
+      "0xbf3400",
+      821248
+     ]
+    ],
+    "md5": "abb8ca304b17d645aee1c46786361fe0",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "vid1.mp4",
+    "type": "mp4",
+    "offset": "0x12c2600",
+    "size": 1136007,
+    "fragments": [
+     [
+      "0x12c2600",
+      378368
+     ],
+     [
+      "0x1266000",
+      378368
+     ],
+     [
+      "0x131ec00",
+      379271
+     ]
+    ],
+    "md5": "d3bf39fa2f30b5acf644523d1a92ac82",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": "0x18ae800",
+    "size": 497414,
+    "fragments": [
+     [
+      "0x18ae800",
+      165376
+     ],
+     [
+      "0x185d600",
+      332038
+     ]
+    ],
+    "md5": "074ce15293e30b338d5a0c5fe8cf5d88",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "vid5.mpg",
+    "type": "mpg",
+    "offset": "0x24e6600",
+    "size": 22579200,
+    "fragments": [
+     [
+      "0x24e6600",
+      15052800
+     ],
+     [
+      "0x1db8e00",
+      7526400
+     ]
+    ],
+    "md5": "57586384eb1f286ef9c2325b521dca4c",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x3a7fe00",
+    "size": 3713213,
+    "fragments": [
+     [
+      "0x3a7fe00",
+      1237504
+     ],
+     [
+      "0x3951c00",
+      1237504
+     ],
+     [
+      "0x3823600",
+      1238205
+     ]
+    ],
+    "md5": "c57611b8e3052bd853d79e2de932aa3d",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   }
+  ]
+ },
+ "L3_Video.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L3_Video -- files with a fragment missing",
+  "path": "nist/carving/L3_Video.dd",
+  "files": [
+   {
+    "name": "vid2.avi",
+    "type": "avi",
+    "offset": null,
+    "size": 1470360,
+    "recoverable": false,
+    "note": "734,720 of its 1,470,360 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "vid6.wmv",
+    "type": "wmv",
+    "offset": null,
+    "size": 2461696,
+    "recoverable": false,
+    "note": "820,224 of its 2,461,696 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": null,
+    "size": 497414,
+    "recoverable": false,
+    "note": "330,752 of its 497,414 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x4e2000",
+    "size": 3713213,
+    "recoverable": true,
+    "note": "1,856,701 of its 3,713,213 bytes are not in the image"
+   },
+   {
+    "name": "vid1.mp4",
+    "type": "mp4",
+    "offset": "0x111ee00",
+    "size": 1136007,
+    "recoverable": true,
+    "note": "379,271 of its 1,136,007 bytes are not in the image"
+   },
+   {
+    "name": "vid5.mpg",
+    "type": "mpg",
+    "offset": "0x16b9a00",
+    "size": 22579200,
+    "fragments": [
+     [
+      "0x16b9a00",
+      7526400
+     ],
+     [
+      "0x1de7200",
+      7526400
+     ]
+    ],
+    "recoverable": true,
+    "note": "7,526,400 of its 22,579,200 bytes are not in the image; 2 fragments"
+   }
+  ]
+ },
+ "L4_Video.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L4_Video -- files nested inside other files",
+  "path": "nist/carving/L4_Video.dd",
+  "files": [
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": "0x4e2000",
+    "size": 497414,
+    "fragments": [
+     [
+      "0x4e2000",
+      248320
+     ],
+     [
+      "0x1aa7200",
+      249094
+     ]
+    ],
+    "md5": "074ce15293e30b338d5a0c5fe8cf5d88",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid5.mpg",
+    "type": "mpg",
+    "offset": "0x51ea00",
+    "size": 22579200,
+    "md5": "57586384eb1f286ef9c2325b521dca4c",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid6.wmv",
+    "type": "wmv",
+    "offset": "0x1fc6000",
+    "size": 2461696,
+    "fragments": [
+     [
+      "0x1fc6000",
+      820224
+     ],
+     [
+      "0x21a3a00",
+      1641472
+     ]
+    ],
+    "md5": "abb8ca304b17d645aee1c46786361fe0",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid1.mp4",
+    "type": "mp4",
+    "offset": "0x208e400",
+    "size": 1136007,
+    "md5": "d3bf39fa2f30b5acf644523d1a92ac82",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "vid2.avi",
+    "type": "avi",
+    "offset": "0x2816600",
+    "size": 1470360,
+    "fragments": [
+     [
+      "0x2816600",
+      734720
+     ],
+     [
+      "0x2ccde00",
+      735640
+     ]
+    ],
+    "md5": "20ca4356a2f152bae77c30f98f7e381f",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x28c9c00",
+    "size": 3713213,
+    "fragments": [
+     [
+      "0x28c9c00",
+      1237504
+     ],
+     [
+      "0x2a71600",
+      2475709
+     ]
+    ],
+    "md5": "c57611b8e3052bd853d79e2de932aa3d",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": "0x29f7e00",
+    "size": 497414,
+    "md5": "074ce15293e30b338d5a0c5fe8cf5d88",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L5_Video.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L5_Video -- fragments of two files braided together",
+  "path": "nist/carving/L5_Video.dd",
+  "files": [
+   {
+    "name": "vid1.mp4",
+    "type": "mp4",
+    "offset": "0x4e2000",
+    "size": 1136007,
+    "fragments": [
+     [
+      "0x4e2000",
+      567808
+     ],
+     [
+      "0x731e00",
+      568199
+     ]
+    ],
+    "md5": "d3bf39fa2f30b5acf644523d1a92ac82",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x56ca00",
+    "size": 3713213,
+    "fragments": [
+     [
+      "0x56ca00",
+      1856512
+     ],
+     [
+      "0x7bca00",
+      1856701
+     ]
+    ],
+    "md5": "c57611b8e3052bd853d79e2de932aa3d",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid3.mov",
+    "type": "mov",
+    "offset": "0xe64000",
+    "size": 497414,
+    "fragments": [
+     [
+      "0xe64000",
+      248320
+     ],
+     [
+      "0x1a91600",
+      249094
+     ]
+    ],
+    "md5": "074ce15293e30b338d5a0c5fe8cf5d88",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid5.mpg",
+    "type": "mpg",
+    "offset": "0xea0a00",
+    "size": 22579200,
+    "fragments": [
+     [
+      "0xea0a00",
+      11289600
+     ],
+     [
+      "0x1ace400",
+      11289600
+     ]
+    ],
+    "md5": "57586384eb1f286ef9c2325b521dca4c",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid6.wmv",
+    "type": "wmv",
+    "offset": "0x1964e00",
+    "size": 2461696,
+    "fragments": [
+     [
+      "0x1964e00",
+      1230848
+     ],
+     [
+      "0x2592800",
+      1230848
+     ]
+    ],
+    "md5": "abb8ca304b17d645aee1c46786361fe0",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "vid2.avi",
+    "type": "avi",
+    "offset": "0x2ba1000",
+    "size": 1470360,
+    "fragments": [
+     [
+      "0x2ba1000",
+      489984
+     ],
+     [
+      "0x2d46c00",
+      489984
+     ],
+     [
+      "0x2eec800",
+      490392
+     ]
+    ],
+    "md5": "20ca4356a2f152bae77c30f98f7e381f",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "vid4.flv",
+    "type": "flv",
+    "offset": "0x2c18a00",
+    "size": 3713213,
+    "fragments": [
+     [
+      "0x2c18a00",
+      1237504
+     ],
+     [
+      "0x2dbe600",
+      1237504
+     ],
+     [
+      "0x2f64400",
+      1238205
+     ]
+    ],
+    "md5": "c57611b8e3052bd853d79e2de932aa3d",
+    "recoverable": true,
+    "note": "3 fragments"
+   }
+  ]
+ },
+ "L0_Documents.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L0_Documents -- contiguous files between fills",
+  "path": "nist/carving/L0_Documents.dd",
+  "files": [
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0x4e2000",
+    "size": 3176275,
+    "md5": "624eb29686b0b13974a804d66a6779d8",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0xccb800",
+    "size": 2525414,
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D3.xlsx",
+    "type": "xlsx",
+    "offset": "0x1416200",
+    "size": 23513,
+    "md5": "21f5ae676b06893a1ad7e7fc9da8a141",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D4.xlsx",
+    "type": "xlsx",
+    "offset": "0x18fde00",
+    "size": 13824,
+    "md5": "d5a11e93b5bd2a6e7735fee921c0a6ea",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x1de3400",
+    "size": 4424,
+    "md5": "038bc8f9138cc281ee9def3edadec4bd",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D6.docx",
+    "type": "docx",
+    "offset": "0x22c6600",
+    "size": 4004,
+    "md5": "00a289fca326a78e40420f33dfe77eac",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": "0x27a9600",
+    "size": 902645,
+    "md5": "3bb602b8f96c56a10bbc97a5e210678d",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L1_Documents.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L1_Documents -- files in fragments, in order",
+  "path": "nist/carving/L1_Documents.dd",
+  "files": [
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0x4e2000",
+    "size": 3176275,
+    "md5": "624eb29686b0b13974a804d66a6779d8",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0xccb800",
+    "size": 2525414,
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D3.xlsx",
+    "type": "xlsx",
+    "offset": "0x1416200",
+    "size": 23513,
+    "md5": "21f5ae676b06893a1ad7e7fc9da8a141",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D4.xlsx",
+    "type": "xlsx",
+    "offset": "0x18fde00",
+    "size": 13824,
+    "md5": "d5a11e93b5bd2a6e7735fee921c0a6ea",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x1de3400",
+    "size": 4424,
+    "md5": "038bc8f9138cc281ee9def3edadec4bd",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D6.docx",
+    "type": "docx",
+    "offset": "0x22c6600",
+    "size": 4004,
+    "md5": "00a289fca326a78e40420f33dfe77eac",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": "0x27a9600",
+    "size": 902645,
+    "md5": "3bb602b8f96c56a10bbc97a5e210678d",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L2_Documents.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L2_Documents -- files in fragments, out of order",
+  "path": "nist/carving/L2_Documents.dd",
+  "files": [
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0x5e4c00",
+    "size": 3176275,
+    "fragments": [
+     [
+      "0x5e4c00",
+      2116608
+     ],
+     [
+      "0x4e2000",
+      1059667
+     ]
+    ],
+    "md5": "624eb29686b0b13974a804d66a6779d8",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0xe66a00",
+    "size": 2525414,
+    "fragments": [
+     [
+      "0xe66a00",
+      841728
+     ],
+     [
+      "0xccb800",
+      1683686
+     ]
+    ],
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "D3.xlsx",
+    "type": "xlsx",
+    "offset": "0x1419200",
+    "size": 23513,
+    "fragments": [
+     [
+      "0x1419200",
+      11264
+     ],
+     [
+      "0x1416200",
+      12249
+     ]
+    ],
+    "md5": "21f5ae676b06893a1ad7e7fc9da8a141",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "D4.xlsx",
+    "type": "xlsx",
+    "offset": "0x18ff000",
+    "size": 13824,
+    "fragments": [
+     [
+      "0x18ff000",
+      4608
+     ],
+     [
+      "0x18fde00",
+      4608
+     ],
+     [
+      "0x1900200",
+      4608
+     ]
+    ],
+    "md5": "d5a11e93b5bd2a6e7735fee921c0a6ea",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x1de3400",
+    "size": 4424,
+    "fragments": [
+     [
+      "0x1de3400",
+      1024
+     ],
+     [
+      "0x1de4200",
+      1024
+     ],
+     [
+      "0x1de3800",
+      2376
+     ]
+    ],
+    "md5": "038bc8f9138cc281ee9def3edadec4bd",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   },
+   {
+    "name": "D6.docx",
+    "type": "docx",
+    "offset": "0x22c7200",
+    "size": 4004,
+    "fragments": [
+     [
+      "0x22c7200",
+      1024
+     ],
+     [
+      "0x22c6600",
+      2980
+     ]
+    ],
+    "md5": "00a289fca326a78e40420f33dfe77eac",
+    "recoverable": true,
+    "note": "2 fragments, out of order"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": "0x283c600",
+    "size": 902645,
+    "fragments": [
+     [
+      "0x283c600",
+      300544
+     ],
+     [
+      "0x27f3000",
+      300544
+     ],
+     [
+      "0x27a9600",
+      301557
+     ]
+    ],
+    "md5": "3bb602b8f96c56a10bbc97a5e210678d",
+    "recoverable": true,
+    "note": "3 fragments, out of order"
+   }
+  ]
+ },
+ "L3_Documents.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L3_Documents -- files with a fragment missing",
+  "path": "nist/carving/L3_Documents.dd",
+  "files": [
+   {
+    "name": "D3.xlsx",
+    "type": "xlsx",
+    "offset": null,
+    "size": 23513,
+    "recoverable": false,
+    "note": "7,680 of its 23,513 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "D4.xlsx",
+    "type": "xlsx",
+    "offset": null,
+    "size": 13824,
+    "recoverable": false,
+    "note": "6,656 of its 13,824 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "D6.docx",
+    "type": "docx",
+    "offset": null,
+    "size": 4004,
+    "recoverable": false,
+    "note": "1,024 of its 4,004 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": null,
+    "size": 902645,
+    "recoverable": false,
+    "note": "601,088 of its 902,645 bytes are not in the image; its first fragment is missing"
+   },
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0x4e2000",
+    "size": 3176275,
+    "recoverable": true,
+    "note": "1,059,667 of its 3,176,275 bytes are not in the image"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0xbc8c00",
+    "size": 2525414,
+    "fragments": [
+     [
+      "0xbc8c00",
+      841728
+     ],
+     [
+      "0xc96400",
+      841958
+     ]
+    ],
+    "recoverable": true,
+    "note": "841,728 of its 2,525,414 bytes are not in the image; 2 fragments"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x1c0f800",
+    "size": 4424,
+    "recoverable": true,
+    "note": "2,376 of its 4,424 bytes are not in the image"
+   }
+  ]
+ },
+ "L4_Documents.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L4_Documents -- files nested inside other files",
+  "path": "nist/carving/L4_Documents.dd",
+  "files": [
+   {
+    "name": "D4.xlsx",
+    "type": "xlsx",
+    "offset": "0x4e2000",
+    "size": 13824,
+    "fragments": [
+     [
+      "0x4e2000",
+      6656
+     ],
+     [
+      "0x7eb200",
+      7168
+     ]
+    ],
+    "md5": "d5a11e93b5bd2a6e7735fee921c0a6ea",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0x4e3a00",
+    "size": 3176275,
+    "md5": "624eb29686b0b13974a804d66a6779d8",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D3.xlsx",
+    "type": "xlsx",
+    "offset": "0xccee00",
+    "size": 23513,
+    "fragments": [
+     [
+      "0xccee00",
+      7680
+     ],
+     [
+      "0xcd1c00",
+      15833
+     ]
+    ],
+    "md5": "21f5ae676b06893a1ad7e7fc9da8a141",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D6.docx",
+    "type": "docx",
+    "offset": "0xcd0c00",
+    "size": 4004,
+    "md5": "00a289fca326a78e40420f33dfe77eac",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0x11b7a00",
+    "size": 3176275,
+    "fragments": [
+     [
+      "0x11b7a00",
+      2116608
+     ],
+     [
+      "0x1625000",
+      1059667
+     ]
+    ],
+    "md5": "624eb29686b0b13974a804d66a6779d8",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0x13bc600",
+    "size": 2525414,
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "contiguous"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": "0x1c09c00",
+    "size": 902645,
+    "fragments": [
+     [
+      "0x1c09c00",
+      451072
+     ],
+     [
+      "0x1ee1a00",
+      451573
+     ]
+    ],
+    "md5": "3bb602b8f96c56a10bbc97a5e210678d",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0x1c77e00",
+    "size": 2525414,
+    "fragments": [
+     [
+      "0x1c77e00",
+      1683456
+     ],
+     [
+      "0x1e14000",
+      841958
+     ]
+    ],
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x1e12e00",
+    "size": 4424,
+    "md5": "038bc8f9138cc281ee9def3edadec4bd",
+    "recoverable": true,
+    "note": "contiguous"
+   }
+  ]
+ },
+ "L5_Documents.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L5_Documents -- fragments of two files braided together",
+  "path": "nist/carving/L5_Documents.dd",
+  "files": [
+   {
+    "name": "D3.xlsx",
+    "type": "xlsx",
+    "offset": "0x4e2000",
+    "size": 23513,
+    "fragments": [
+     [
+      "0x4e2000",
+      11264
+     ],
+     [
+      "0x4e5400",
+      12249
+     ]
+    ],
+    "md5": "21f5ae676b06893a1ad7e7fc9da8a141",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x4e4c00",
+    "size": 4424,
+    "fragments": [
+     [
+      "0x4e4c00",
+      2048
+     ],
+     [
+      "0x4e8400",
+      2376
+     ]
+    ],
+    "md5": "038bc8f9138cc281ee9def3edadec4bd",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": "0x9cae00",
+    "size": 902645,
+    "fragments": [
+     [
+      "0x9cae00",
+      451072
+     ],
+     [
+      "0xbbe400",
+      451573
+     ]
+    ],
+    "md5": "3bb602b8f96c56a10bbc97a5e210678d",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D1.pdf",
+    "type": "pdf",
+    "offset": "0xa39000",
+    "size": 3176275,
+    "fragments": [
+     [
+      "0xa39000",
+      1587712
+     ],
+     [
+      "0xc2c800",
+      1588563
+     ]
+    ],
+    "md5": "624eb29686b0b13974a804d66a6779d8",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D4.xlsx",
+    "type": "xlsx",
+    "offset": "0xbbca00",
+    "size": 13824,
+    "fragments": [
+     [
+      "0xbbca00",
+      6656
+     ],
+     [
+      "0xdb0600",
+      7168
+     ]
+    ],
+    "md5": "d5a11e93b5bd2a6e7735fee921c0a6ea",
+    "recoverable": true,
+    "note": "2 fragments"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0x1294200",
+    "size": 2525414,
+    "fragments": [
+     [
+      "0x1294200",
+      841728
+     ],
+     [
+      "0x13ab000",
+      841728
+     ],
+     [
+      "0x14c1e00",
+      841958
+     ]
+    ],
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "D7.pptx",
+    "type": "pptx",
+    "offset": "0x1361a00",
+    "size": 902645,
+    "fragments": [
+     [
+      "0x1361a00",
+      300544
+     ],
+     [
+      "0x1478800",
+      300544
+     ],
+     [
+      "0x158f800",
+      301557
+     ]
+    ],
+    "md5": "3bb602b8f96c56a10bbc97a5e210678d",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "D2.pdf",
+    "type": "pdf",
+    "offset": "0x1abb200",
+    "size": 2525414,
+    "fragments": [
+     [
+      "0x1abb200",
+      841728
+     ],
+     [
+      "0x1b89200",
+      841728
+     ],
+     [
+      "0x1c57200",
+      841958
+     ]
+    ],
+    "md5": "d8b3bd66e9c38ce0af69658df3de8c78",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "D5.docx",
+    "type": "docx",
+    "offset": "0x1b88a00",
+    "size": 4424,
+    "fragments": [
+     [
+      "0x1b88a00",
+      1024
+     ],
+     [
+      "0x1c56a00",
+      1024
+     ],
+     [
+      "0x1d24c00",
+      2376
+     ]
+    ],
+    "md5": "038bc8f9138cc281ee9def3edadec4bd",
+    "recoverable": true,
+    "note": "3 fragments"
+   },
+   {
+    "name": "D6.docx",
+    "type": "docx",
+    "offset": "0x1b88e00",
+    "size": 4004,
+    "fragments": [
+     [
+      "0x1b88e00",
+      1024
+     ],
+     [
+      "0x1c56e00",
+      1024
+     ],
+     [
+      "0x1d25600",
+      1956
+     ]
+    ],
+    "md5": "00a289fca326a78e40420f33dfe77eac",
+    "recoverable": true,
+    "note": "3 fragments"
+   }
+  ]
+ },
+ "L0_Audio.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L0_Audio -- contiguous files between fills",
+  "path": "nist/carving/L0_Audio.dd",
+  "files": [
+   {
+    "name": "audio1.mp3",
+    "type": "mp3",
+    "offset": "0x4e2000",
+    "size": 1052707,
+    "md5": "4906f2b94eb7a95591396dca7fb9ef67",
+    "recoverable": true,
+    "note": "the layout names it Audio1.mp3"
+   },
+   {
+    "name": "audio2.wav",
+    "type": "wav",
+    "offset": "0xac5200",
+    "size": 4612652,
+    "md5": "5124c9db0a4c3269e8562b8ed2e85f66",
+    "header_size": 4612660,
+    "recoverable": true,
+    "note": "its RIFF header declares 4,612,660 bytes; the original is 4,612,652; the layout names it Audio2.wav"
+   },
+   {
+    "name": "audio3.au",
+    "type": "au",
+    "offset": "0x140d600",
+    "size": 9243672,
+    "md5": "ad0c2d9fd8ef051e6b3bfecfee780a44",
+    "recoverable": false,
+    "note": "TRACE has no carver for .au; the layout names it Audio3.au"
+   },
+   {
+    "name": "audio4.wma",
+    "type": "wma",
+    "offset": "0x21c0400",
+    "size": 1074987,
+    "md5": "1e1eaa07418813407a3e12e685008570",
+    "recoverable": false,
+    "note": "TRACE has no carver for .wma; the layout names it Audio4.wma"
+   }
+  ]
+ },
+ "L1_Audio.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L1_Audio -- files in fragments, in order",
+  "path": "nist/carving/L1_Audio.dd",
+  "files": [
+   {
+    "name": "audio1.mp3",
+    "type": "mp3",
+    "offset": "0x4e2000",
+    "size": 1052707,
+    "md5": "4906f2b94eb7a95591396dca7fb9ef67",
+    "recoverable": true,
+    "note": "the layout names it Audio1.mp3"
+   },
+   {
+    "name": "audio2.wav",
+    "type": "wav",
+    "offset": "0xac5200",
+    "size": 4612652,
+    "md5": "5124c9db0a4c3269e8562b8ed2e85f66",
+    "header_size": 4612660,
+    "recoverable": true,
+    "note": "its RIFF header declares 4,612,660 bytes; the original is 4,612,652; the layout names it Audio2.wav"
+   },
+   {
+    "name": "audio3.au",
+    "type": "au",
+    "offset": "0x140d600",
+    "size": 9243672,
+    "md5": "ad0c2d9fd8ef051e6b3bfecfee780a44",
+    "recoverable": false,
+    "note": "TRACE has no carver for .au; the layout names it Audio3.au"
+   },
+   {
+    "name": "audio4.wma",
+    "type": "wma",
+    "offset": "0x21c0400",
+    "size": 1074987,
+    "md5": "1e1eaa07418813407a3e12e685008570",
+    "recoverable": false,
+    "note": "TRACE has no carver for .wma; the layout names it Audio4.wma"
+   }
+  ]
+ },
+ "L2_Audio.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L2_Audio -- files in fragments, out of order",
+  "path": "nist/carving/L2_Audio.dd",
+  "files": [
+   {
+    "name": "audio1.mp3",
+    "type": "mp3",
+    "offset": "0x562a00",
+    "size": 1052707,
+    "fragments": [
+     [
+      "0x562a00",
+      526336
+     ],
+     [
+      "0x4e2000",
+      526371
+     ]
+    ],
+    "md5": "4906f2b94eb7a95591396dca7fb9ef67",
+    "recoverable": true,
+    "note": "2 fragments, out of order; the layout names it Audio1.mp3"
+   },
+   {
+    "name": "audio2.wav",
+    "type": "wav",
+    "offset": "0xac5200",
+    "size": 4612652,
+    "fragments": [
+     [
+      "0xac5200",
+      1537536
+     ],
+     [
+      "0xdb4000",
+      1537536
+     ],
+     [
+      "0xc3c800",
+      1537580
+     ]
+    ],
+    "md5": "5124c9db0a4c3269e8562b8ed2e85f66",
+    "header_size": 4612660,
+    "recoverable": true,
+    "note": "its RIFF header declares 4,612,660 bytes; the original is 4,612,652; 3 fragments, out of order; the layout names it Audio2.wav"
+   },
+   {
+    "name": "audio3.au",
+    "type": "au",
+    "offset": "0x16fda00",
+    "size": 9243672,
+    "fragments": [
+     [
+      "0x16fda00",
+      3081216
+     ],
+     [
+      "0x140d600",
+      3081216
+     ],
+     [
+      "0x19ede00",
+      3081240
+     ]
+    ],
+    "md5": "ad0c2d9fd8ef051e6b3bfecfee780a44",
+    "recoverable": false,
+    "note": "3 fragments, out of order; TRACE has no carver for .au; the layout names it Audio3.au"
+   },
+   {
+    "name": "audio4.wma",
+    "type": "wma",
+    "offset": "0x2218000",
+    "size": 1074987,
+    "fragments": [
+     [
+      "0x2218000",
+      715776
+     ],
+     [
+      "0x21c0400",
+      359211
+     ]
+    ],
+    "md5": "1e1eaa07418813407a3e12e685008570",
+    "recoverable": false,
+    "note": "2 fragments, out of order; TRACE has no carver for .wma; the layout names it Audio4.wma"
+   }
+  ]
+ },
+ "L3_Audio.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L3_Audio -- files with a fragment missing",
+  "path": "nist/carving/L3_Audio.dd",
+  "files": [
+   {
+    "name": "audio3.au",
+    "type": "au",
+    "offset": null,
+    "size": 9243672,
+    "recoverable": false,
+    "note": "3,081,216 of its 9,243,672 bytes are not in the image; its first fragment is missing; TRACE has no carver for .au; the layout names it Audio3.au"
+   },
+   {
+    "name": "audio1.mp3",
+    "type": "mp3",
+    "offset": "0x4e2000",
+    "size": 1052707,
+    "fragments": [
+     [
+      "0x4e2000",
+      350720
+     ],
+     [
+      "0x537a00",
+      351267
+     ]
+    ],
+    "recoverable": true,
+    "note": "350,720 of its 1,052,707 bytes are not in the image; 2 fragments; the layout names it Audio1.mp3"
+   },
+   {
+    "name": "audio2.wav",
+    "type": "wav",
+    "offset": "0xa6f800",
+    "size": 4612652,
+    "recoverable": true,
+    "note": "2,306,604 of its 4,612,652 bytes are not in the image; the layout names it Audio2.wav"
+   },
+   {
+    "name": "audio4.wma",
+    "type": "wma",
+    "offset": "0x1c47200",
+    "size": 1074987,
+    "recoverable": false,
+    "note": "359,211 of its 1,074,987 bytes are not in the image; TRACE has no carver for .wma; the layout names it Audio4.wma"
+   }
+  ]
+ },
+ "L4_Audio.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L4_Audio -- files nested inside other files",
+  "path": "nist/carving/L4_Audio.dd",
+  "files": [
+   {
+    "name": "audio1.mp3",
+    "type": "mp3",
+    "offset": "0x4e2000",
+    "size": 1052707,
+    "fragments": [
+     [
+      "0x4e2000",
+      526336
+     ],
+     [
+      "0x9c8c00",
+      526336
+     ]
+    ],
+    "recoverable": true,
+    "note": "35 of its 1,052,707 bytes are not in the image; 2 fragments; the layout names it Audio1.mp3 / Audio2.wav"
+   },
+   {
+    "name": "audio2.wav",
+    "type": "wav",
+    "offset": "0x562800",
+    "size": 4612652,
+    "md5": "5124c9db0a4c3269e8562b8ed2e85f66",
+    "header_size": 4612660,
+    "recoverable": true,
+    "note": "its RIFF header declares 4,612,660 bytes; the original is 4,612,652; the layout names it Audio1.mp3 / Audio2.wav"
+   },
+   {
+    "name": "audio3.au",
+    "type": "au",
+    "offset": "0xf2b400",
+    "size": 9243672,
+    "fragments": [
+     [
+      "0xf2b400",
+      6162432
+     ],
+     [
+      "0x1612400",
+      3081240
+     ]
+    ],
+    "md5": "ad0c2d9fd8ef051e6b3bfecfee780a44",
+    "recoverable": false,
+    "note": "2 fragments; TRACE has no carver for .au; the layout names it Audio3.au / Audio4.wma"
+   },
+   {
+    "name": "audio4.wma",
+    "type": "wma",
+    "offset": "0x150bc00",
+    "size": 1074987,
+    "md5": "1e1eaa07418813407a3e12e685008570",
+    "recoverable": false,
+    "note": "TRACE has no carver for .wma; the layout names it Audio3.au / Audio4.wma"
+   }
+  ]
+ },
+ "L5_Audio.dd": {
+  "source": "https://cfreds-archive.nist.gov/FileCarving/index.html",
+  "title": "NIST CFReDS file carving L5_Audio -- fragments of two files braided together",
+  "path": "nist/carving/L5_Audio.dd",
+  "files": [
+   {
+    "name": "audio1.mp3",
+    "type": "mp3",
+    "offset": "0x4e2000",
+    "size": 1052707,
+    "fragments": [
+     [
+      "0x4e2000",
+      526336
+     ],
+     [
+      "0x795800",
+      526371
+     ]
+    ],
+    "md5": "4906f2b94eb7a95591396dca7fb9ef67",
+    "recoverable": true,
+    "note": "2 fragments; the layout names it Audio1.mp3 / Audio2.wav"
+   },
+   {
+    "name": "audio2.wav",
+    "type": "wav",
+    "offset": "0x562800",
+    "size": 4612652,
+    "fragments": [
+     [
+      "0x562800",
+      2306048
+     ],
+     [
+      "0x816200",
+      2306604
+     ]
+    ],
+    "md5": "5124c9db0a4c3269e8562b8ed2e85f66",
+    "header_size": 4612660,
+    "recoverable": true,
+    "note": "its RIFF header declares 4,612,660 bytes; the original is 4,612,652; 2 fragments; the layout names it Audio1.mp3 / Audio2.wav"
+   },
+   {
+    "name": "audio3.au",
+    "type": "au",
+    "offset": "0xf2b600",
+    "size": 9243672,
+    "fragments": [
+     [
+      "0xf2b600",
+      3081216
+     ],
+     [
+      "0x1273000",
+      3081216
+     ],
+     [
+      "0x15baa00",
+      3081240
+     ]
+    ],
+    "md5": "ad0c2d9fd8ef051e6b3bfecfee780a44",
+    "recoverable": false,
+    "note": "3 fragments; TRACE has no carver for .au; the layout names it Audio3.au / Audio4.wma"
+   },
+   {
+    "name": "audio4.wma",
+    "type": "wma",
+    "offset": "0x121ba00",
+    "size": 1074987,
+    "fragments": [
+     [
+      "0x121ba00",
+      357888
+     ],
+     [
+      "0x1563400",
+      357888
+     ],
+     [
+      "0x18ab000",
+      359211
+     ]
+    ],
+    "md5": "1e1eaa07418813407a3e12e685008570",
+    "recoverable": false,
+    "note": "3 fragments; TRACE has no carver for .wma; the layout names it Audio3.au / Audio4.wma"
+   }
+  ]
  }
 }

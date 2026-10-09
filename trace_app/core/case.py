@@ -1899,7 +1899,13 @@ class Case:
               r.get('changed'),
               json.dumps({'runs': [list(run) for run in
                                    (r.get('runs') or [])[:64]],
-                          'inode': r.get('inode')}))
+                          'inode': r.get('inode'),
+                          # FAT's times (and exFAT's without an offset) are
+                          # local wall-clock digits, though the columns say
+                          # _utc: the panel labels them.
+                          'times_local': bool(r.get('times_local')),
+                          # The deleted file that took its space later.
+                          'claimed_by': r.get('claimed_by')}))
              for r in rows])
         self._db.commit()
 

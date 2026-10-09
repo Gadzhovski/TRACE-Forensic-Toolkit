@@ -474,6 +474,12 @@ class ImageHandler:
             except Exception as e:
                 logger.error(f"Error accessing root directory: {e}")
 
+            # The file system's own structures: no walk reaches them, and
+            # they are not free space (core/fs_metadata).
+            from trace_app.core import fs_metadata
+            allocation_map.extend(fs_metadata.ranges(
+                self, fs_info, partition_offset, record_runs))
+
             allocation_map = self._merge_ranges(allocation_map)
             logger.info("Allocation map: %d regions covering %.1f MB",
                         len(allocation_map),
@@ -2217,6 +2223,24 @@ class ImageHandler:
         except Exception:
             return None
 
+    def entry_times_text(self, start_offset, meta):
+        """{'accessed', 'modified', 'created', 'changed'} as the listing
+        shows them: UTC where the file system records it (NTFS, ext, HFS+,
+        and an exFAT entry with its UTC offset), "(local, no zone)" where
+        it does not (FAT; exFAT without one). See safe_datetime."""
+        if meta is None:
+            return dict.fromkeys(('accessed', 'modified', 'created',
+                                  'changed'), "N/A")
+        from trace_app.core import exfat
+        zoned = self.get_fs_type(start_offset) not in _TIMEZONE_NAIVE
+        values, zoned = exfat.entry_times(self, start_offset, meta,
+                                                zoned)
+        return {key: safe_datetime(values.get(field), zoned)
+                for key, field in (('accessed', 'atime'),
+                                   ('modified', 'mtime'),
+                                   ('created', 'crtime'),
+                                   ('changed', 'ctime'))}
+
     def get_directory_contents(self, start_offset, inode_number=None):
         """Get directory contents with caching for performance."""
         cache_key = f"{start_offset}_{inode_number}"
@@ -2230,9 +2254,6 @@ class ImageHandler:
             try:
                 directory = fs.open_dir(inode=inode_number) if inode_number else fs.open_dir(path="/")
                 entries = []
-                # FAT and exFAT store wall-clock time with no timezone; every
-                # other filesystem here stores UTC. See safe_datetime.
-                zoned = self.get_fs_type(start_offset) not in _TIMEZONE_NAIVE
 
                 for entry in directory:
                     if entry.info.name.name in [b".", b".."]:
@@ -2263,10 +2284,7 @@ class ImageHandler:
                         "is_directory": is_directory,
                         "inode_number": inode,
                         "size": meta.size if meta and meta.size is not None else 0,
-                        "accessed": safe_datetime(meta.atime, zoned) if hasattr(meta, 'atime') else "N/A",
-                        "modified": safe_datetime(meta.mtime, zoned) if hasattr(meta, 'mtime') else "N/A",
-                        "created": safe_datetime(meta.crtime, zoned) if hasattr(meta, 'crtime') else "N/A",
-                        "changed": safe_datetime(meta.ctime, zoned) if hasattr(meta, 'ctime') else "N/A",
+                        **self.entry_times_text(start_offset, meta),
                         # Whether the filesystem still considers this entry
                         # live. TSK reports it and the listing was discarding
                         # it, so a deleted file in a directory looked exactly
@@ -2772,10 +2790,7 @@ class ImageHandler:
                 "name": dir_name,
                 "path": full_path,
                 "size": 0,  # Directories don't have a size in this context
-                "accessed": safe_datetime(entry.info.meta.atime if entry.info.meta else None),
-                "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
-                "created": safe_datetime(entry.info.meta.crtime if hasattr(entry.info.meta, 'crtime') else None),
-                "changed": safe_datetime(entry.info.meta.ctime if entry.info.meta else None),
+                **self.entry_times_text(start_offset, entry.info.meta),
                 "inode_item": str(inode_number),
                 "inode_number": inode_number,
                 "start_offset": start_offset,
@@ -2827,10 +2842,7 @@ class ImageHandler:
                 "name": file_name,
                 "path": full_path,  # Now includes volume information
                 "size": entry.info.meta.size if entry.info.meta else 0,
-                "accessed": safe_datetime(entry.info.meta.atime if entry.info.meta else None),
-                "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
-                "created": safe_datetime(entry.info.meta.crtime if hasattr(entry.info.meta, 'crtime') else None),
-                "changed": safe_datetime(entry.info.meta.ctime if entry.info.meta else None),
+                **self.entry_times_text(start_offset, entry.info.meta),
                 "inode_item": str(inode_number),  # For display compatibility
                 "inode_number": inode_number,  # For file content retrieval
                 "start_offset": start_offset,  # Partition offset needed for retrieval
@@ -2898,8 +2910,22 @@ class ImageHandler:
         try:
             file_obj = fs.open_meta(inode=inode_number)
             if file_obj.info.meta.size == 0:
+                # A deleted ext3/4 file: emptied, but its journal may still
+                # hold the inode as it was (core/ext_journal).
+                from trace_app.core import ext_journal
+                logged = ext_journal.read_deleted(self, offset,
+                                                  file_obj.info.meta)
+                if logged is not None:
+                    return logged, file_obj.info.meta
                 logger.info("File has no content or is a special metafile!")
                 return None, None
+
+            # A deleted exFAT file in pieces: its own cluster chain, not
+            # TSK's one-piece reading of it (core/exfat).
+            from trace_app.core import exfat
+            chained = exfat.read_deleted(self, offset, file_obj.info.meta)
+            if chained is not None:
+                return chained, file_obj.info.meta
 
             # For large files, read in chunks
             file_size = file_obj.info.meta.size
