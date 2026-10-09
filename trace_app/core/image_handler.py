@@ -59,12 +59,20 @@ class _Closed:
     def close(self):
         pass
 
+class IncompleteEvidence(OSError):
+    """A read past the data an incomplete image holds; the message says
+    where the data ends and what is missing (core/ewf_check.py)."""
+
+
 class EWFImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
         self._ewf_handle = ewf_handle
         # One handle, read from the window's thread and from workers: a
         # seek and a read from two threads interleave into wrong bytes.
         self._lock = threading.Lock()
+        #: (what is missing, where the data ends) for a set that is not
+        #: whole -- ImageHandler.load_image fills it.
+        self.incomplete = None
         super(EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
 
     def close(self):
@@ -72,11 +80,28 @@ class EWFImgInfo(pytsk3.Img_Info):
 
     def read(self, offset, size):
         with self._lock:
-            self._ewf_handle.seek(offset)
-            return self._ewf_handle.read(size)
+            try:
+                self._ewf_handle.seek(offset)
+                return self._ewf_handle.read(size)
+            except OSError:
+                if self.incomplete is None:
+                    raise
+        raise IncompleteEvidence(incomplete_message(self.incomplete,
+                                                    offset))
 
     def get_size(self):
         return self._ewf_handle.get_media_size()
+
+
+def incomplete_message(incomplete, offset=None):
+    """An incomplete image's state in words: what is missing, where its
+    data ends, and (for a failed read) where the read was."""
+    missing, end = incomplete
+    where = (f"Byte {offset:,} is not in this image. " if offset is not None
+             else "")
+    return (f"{where}The E01 is incomplete: {missing}. It holds data up to "
+            f"{FileSystemUtils.get_readable_size(end)}; nothing past that "
+            f"can be read.")
 
 
 class UnsupportedEvidence(ValueError):
@@ -817,6 +842,11 @@ class ImageHandler:
                     if not (stored_md5 or stored_sha1):
                         hash_sha256 = hashlib.sha256()
 
+                    # An incomplete set cannot be hashed whole: say why at once
+                    # rather than after reading up to the gap.
+                    if self.incomplete():
+                        raise IncompleteEvidence(self.incomplete())
+
                     # Decompressing the image is the expensive part -- on a
                     # compressed E01 it is ~94% of the work, hashing only ~6%
                     # -- and libewf offers no threading of its own. Several
@@ -1072,6 +1102,7 @@ class ImageHandler:
                 ewf_handle = pyewf.handle()
                 ewf_handle.open(filenames)
                 self.img_info = EWFImgInfo(ewf_handle)
+                self._check_segments(filenames)
             elif image_type == "raw":
                 self.img_info = pytsk3.Img_Info(self.image_path)
             elif image_type == "live":
@@ -1136,6 +1167,34 @@ class ImageHandler:
             self.fs_info = None
             self.is_wiped_image = True
             return False
+
+    def _check_segments(self, filenames):
+        """A segment set missing a file, or with one cut short, opens and
+        then fails at the first read past the gap. Say so up front (the
+        tree's tooltip, evidence intake) and make those reads say why."""
+        from trace_app.core import ewf_check
+        try:
+            missing = ewf_check.problem(filenames)
+        except Exception as exc:
+            logger.debug("Segment check failed: %s", exc)
+            return
+        if not missing:
+            return
+        size = self.img_info.get_size()
+        end = ewf_check.data_end(self.img_info.read, size)
+        self.img_info.incomplete = (missing, end)
+        self.container_note = (
+            f"Incomplete E01: {missing}; data up to "
+            f"{FileSystemUtils.get_readable_size(end)} of "
+            f"{FileSystemUtils.get_readable_size(size)}")
+        logger.warning("%s: %s", self.image_path,
+                       incomplete_message((missing, end)))
+
+    def incomplete(self):
+        """incomplete_message() for an image whose segment set is not
+        whole, else None."""
+        state = getattr(self.img_info, 'incomplete', None)
+        return incomplete_message(state) if state else None
 
     def has_filesystem(self, start_offset):
         fs_info = self.get_fs_info(start_offset)
@@ -2819,6 +2878,8 @@ class ImageHandler:
         return True
 
     def get_file_content(self, inode_number, offset):
+        #: Why the last read failed, in words, for the window to show.
+        self.last_read_error = None
         fs = self.get_fs_info(offset)
         if not fs:
             return None, None
@@ -2848,6 +2909,9 @@ class ImageHandler:
             return content, metadata
 
         except Exception as e:
+            # TSK reports a failed image read in its own words; an
+            # incomplete image's reason is the one worth showing.
+            self.last_read_error = self.incomplete() or str(e)
             logger.error(f"Error reading file: {e}")
             return None, None
 
