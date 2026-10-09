@@ -150,6 +150,7 @@ def main():
         os.path.dirname(os.path.abspath(__file__)))))
     folder = sys.argv[1] if len(sys.argv) > 1 else \
         os.path.join(root, 'test_images', 'built')
+    os.makedirs(folder, exist_ok=True)
     if os.geteuid() != 0:
         sys.exit("Run as root: the volume is loop-mounted")
     print(build(folder))

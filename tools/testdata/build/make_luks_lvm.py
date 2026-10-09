@@ -164,6 +164,7 @@ def main():
         os.path.dirname(os.path.abspath(__file__)))))
     folder = sys.argv[1] if len(sys.argv) > 1 else \
         os.path.join(root, 'test_images', 'built')
+    os.makedirs(folder, exist_ok=True)
     if os.geteuid() != 0:
         sys.exit("Run as root: the disk is a loop device")
     disks = [build_one(folder, version) for version in (1, 2)]
