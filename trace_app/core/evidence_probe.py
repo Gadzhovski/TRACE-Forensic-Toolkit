@@ -86,9 +86,13 @@ def probe(path):
         result['error'] = 'The file or folder does not exist.'
         return result
 
-    from trace_app.core.image_handler import ImageHandler
+    from trace_app.core.image_handler import ImageHandler, \
+        UnsupportedEvidence
     try:
         handler = ImageHandler(path)
+    except UnsupportedEvidence as exc:       # known, and explained
+        result['error'] = str(exc)
+        return result
     except ValueError:                # an extension TRACE does not read
         extension = os.path.splitext(path)[1] or 'no extension'
         result['error'] = (f"Not an evidence format TRACE reads "

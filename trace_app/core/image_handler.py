@@ -79,6 +79,21 @@ class EWFImgInfo(pytsk3.Img_Info):
         return self._ewf_handle.get_media_size()
 
 
+class UnsupportedEvidence(ValueError):
+    """A format TRACE recognises but cannot read; the message says what
+    it is and what to do instead."""
+
+
+def _starts_with(path, magic):
+    try:
+        if os.path.isfile(path):
+            with open(path, 'rb') as handle:
+                return handle.read(len(magic)) == magic
+    except OSError:
+        pass
+    return False
+
+
 # ImageHandler class with optimizations
 #: Filesystems that store a local wall-clock time with no timezone recorded.
 #: Reporting one of these as UTC claims knowledge the evidence does not carry.
@@ -449,7 +464,9 @@ class ImageHandler:
         note says why a whole partition counts as used: carving it as
         "unallocated" would report live files as deleted ones."""
         kind = self.volume_kind(start_sector)
-        if start_sector in self._bitlocker or kind in ('lvm', 'ldm'):
+        if kind == 'ldm':
+            return self._ldm_allocation(start_sector), None
+        if start_sector in self._bitlocker or kind == 'lvm':
             # Encrypted bytes, or extents mapped elsewhere: the decrypted
             # volume and the logical volumes are carved in their own
             # ranges (carve_volumes), so the raw bytes are skipped.
@@ -630,7 +647,10 @@ class ImageHandler:
         return info
 
     def get_image_type(self):
-        """Determine the type of the image based on its extension."""
+        """Determine the type of the image based on its extension. A
+        file with no extension (or .bin) is read as raw -- dd writes
+        whatever name it is given; a format TRACE recognises but cannot
+        read raises UnsupportedEvidence saying what it is."""
         from trace_app.core import assembly, live_disk, logical_sources
         if live_disk.is_device_path(self.image_path):
             return "live"
@@ -643,7 +663,13 @@ class ImageHandler:
 
         ewf = [".e01", ".s01", ".ex01"]
         raw = [".raw", ".img", ".dd", ".iso",
-               ".001", ".sparse"]
+               ".001", ".sparse", ".bin", ""]
+        if extension == '.ctr' or _starts_with(self.image_path, b'XWFS'):
+            raise UnsupportedEvidence(
+                "This is an X-Ways evidence file container (.ctr), a "
+                "proprietary X-Ways format TRACE cannot read. Export its "
+                "contents from X-Ways Forensics (as files, or as an E01 / "
+                "raw image) to examine them here.")
 
         if extension == '.aff4':
             return "aff4"
@@ -1538,8 +1564,12 @@ class ImageHandler:
             return self._lost
         from trace_app.core import lost_partitions, partition_names
         partitions = self.get_partitions()
-        if not partitions and self.get_fs_info(0) is not None:
-            return self._lost                     # a volume image
+        if not partitions and (self.get_fs_info(0) is not None or
+                               self.volume_kind(0) is not None or
+                               self.fs_layers(0)):
+            # A volume image, or a container (LVM, LUKS, a RAID member...)
+            # whose own file systems are not lost partitions.
+            return self._lost
         known = []
         for _addr, desc, start, length in partitions:
             text = desc.decode('utf-8', 'replace') if isinstance(
@@ -1601,7 +1631,13 @@ class ImageHandler:
         `start_sector`: [{'key', 'index', 'name', 'kind', 'size', 'disks',
         'readable', 'why'}] -- 'readable' when every extent it needs is on
         this disk (simple volumes, a mirror's plex); the others need the
-        group's other disks (File > Assemble)."""
+        group's other disks (File > Assemble).
+
+        A volume of one extent here is a run of sectors on this disk: its
+        key is its real start sector, read in place like a partition --
+        so a simple volume at the partition's start keeps the references
+        it had before dynamic disks were read (p63:...). Only a volume put
+        together from several extents gets a containers.ldm_key."""
         from trace_app.core import hwraid, ldm
         database = self.ldm_database()
         if database is None or start_sector not in self._ldm_starts():
@@ -1612,6 +1648,14 @@ class ImageHandler:
         for index, volume in enumerate(database.volume_list()):
             key = containers.ldm_key(start_sector, index)
             readable, why = False, ''
+            run = self._single_extent(volume, database)
+            if run is not None:
+                out.append({'key': run, 'index': index,
+                            'name': volume['name'], 'kind': volume['kind'],
+                            'size': volume['size'],
+                            'disks': len(volume['disks']), 'readable': True,
+                            'group': database.group_name, 'why': ''})
+                continue
             if key not in self._volumes:
                 try:
                     reader = ldm.volume_reader(volume, here)
@@ -1625,6 +1669,42 @@ class ImageHandler:
                         'readable': readable,
                         'group': database.group_name, 'why': why})
         return out
+
+    def _ldm_allocation(self, start_sector):
+        """Carving's map of a dynamic disk's data partition: each volume
+        read in place by its file system's own allocation; the extents of
+        volumes put together from several (striped, RAID5, spanned --
+        their bytes here mean nothing alone) as used; the rest -- between
+        and after volumes, where deleted ones were -- free."""
+        database = self.ldm_database()
+        ranges = []
+        base = database.data_start * self.sector_size
+        for volume in self.dynamic_volumes(start_sector):
+            if volume['readable'] and volume['key'] < \
+                    containers.SHADOW_KEY_BASE:
+                ranges += self.build_allocation_map(volume['key'])
+        for volume in database.volume_list():
+            if self._single_extent(volume, database) is not None:
+                continue
+            for component in volume['components']:
+                ranges += [(base + e['start'], base + e['start'] + e['size'])
+                           for e in component['extents']
+                           if e['disk_guid'] == database.disk_guid]
+        # The database itself, at the disk's end.
+        size = self.get_size()
+        ranges.append((size - 2048 * self.sector_size, size))
+        return self._merge_ranges(ranges)
+
+    def _single_extent(self, volume, database):
+        """The start sector of a volume that is one extent on this disk
+        (in any of its plexes), else None."""
+        for component in volume['components']:
+            extents = component['extents']
+            if len(extents) == 1 and component['kind'] not in (1, 3) and \
+                    extents[0]['disk_guid'] == database.disk_guid:
+                return (database.data_start * self.sector_size +
+                        extents[0]['start']) // self.sector_size
+        return None
 
     def volume_kind(self, start_sector):
         """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', 'ldm' or None for a
