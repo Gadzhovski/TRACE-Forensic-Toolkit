@@ -5,7 +5,6 @@ that the rest of the application talks to: partition enumeration, filesystem
 traversal, file content reads, and the allocation map used by file carving.
 """
 
-import hashlib
 import queue
 import threading
 import logging
@@ -746,7 +745,8 @@ class ImageHandler:
                 while remaining > 0 and not stop.is_set():
                     chunk = handle.read(min(CHUNK_SIZE, remaining))
                     if not chunk:
-                        break
+                        raise IOError(f"the image ended at byte "
+                                      f"{end - remaining:,}")
                     remaining -= len(chunk)
                     queues[index].put(chunk)
             except Exception as e:
@@ -800,154 +800,122 @@ class ImageHandler:
         return size
 
     def calculate_hashes(self, progress_callback=None):
-        """Hash the image for verification, reporting progress as it goes.
+        """Hash the evidence for verification: every byte, or an error.
 
-        SHA-256 is computed only when the image carries no stored hashes to
-        verify against. An E01 records MD5 and SHA-1 at acquisition, and those
-        are what the result is checked against; a third digest that nothing
-        compares to costs about 9% of the hashing time -- roughly 17 seconds on
-        a 16 GB image -- for a number no one looks at. A raw image stores
-        nothing, so there SHA-256 is the only durable identifier and is worth
-        having.
+        Returns {'computed_md5', 'computed_sha1', 'computed_sha256', 'size',
+        'path', 'stored_md5', 'stored_sha1'} and, when they apply,
+        'damaged' (an E01's sector ranges whose chunks fail their own
+        checksums), 'container_problems' (its damaged structure),
+        'container_check' (AFF4) and 'live'. A failure gives 'error' and
+        no digests at all (core/evidence_hash.py): a hash of the part
+        that could be read is not a hash of the evidence, and recorded as
+        a baseline it would make the damaged copy the reference.
+
+        What is hashed is what the evidence holds: a raw file's bytes, an
+        E01's media (checked chunk by chunk, core/ewf_chunks.py), a
+        virtual disk's or an assembled array's disk, logical evidence as
+        `_logical_hashes` describes. MD5, SHA-1 and SHA-256 are always
+        computed, so any hash recorded elsewhere can be checked.
         """
-        hash_md5 = hashlib.md5()
-        hash_sha1 = hashlib.sha1()
-        hash_sha256 = None
-        size = 0
-        total_size = 0
-        stored_md5, stored_sha1 = None, None
-
+        from trace_app.core import evidence_hash
+        result = {'computed_md5': None, 'computed_sha1': None,
+                  'computed_sha256': None, 'size': 0,
+                  'path': self.image_path, 'stored_md5': None,
+                  'stored_sha1': None}
         image_type = self.get_image_type()
-        if image_type == "logical":
-            return self._logical_hashes(progress_callback)
-
         try:
-            # First get total size for progress reporting
-            if image_type == "ewf":
-                filenames = pyewf.glob(self.image_path)
-                ewf_handle = pyewf.handle()
+            if image_type == "logical":
+                digests = self._logical_hashes(result, progress_callback)
+            elif image_type == "ewf":
+                digests = self._ewf_hashes(result, progress_callback)
+            elif image_type == "raw" and not \
+                    self.image_path.lower().endswith('.001'):
+                # The file's own bytes are the evidence.
+                digests = evidence_hash.hash_file(self.image_path,
+                                                  progress_callback)
+            else:
+                # The disk, not its container files: a split raw image's
+                # segments, a split VMDK's extents, a VHDX whose layout
+                # changes as it is compacted, a differencing disk with its
+                # parents, an AFF4's streams, an assembled array, a live
+                # disk -- what the guest saw is what is evidence.
+                if self.img_info is None:
+                    raise evidence_hash.HashingError(
+                        self.load_error or "The image could not be opened")
+                digests = evidence_hash.hash_reader(
+                    self.img_info.read, self.img_info.get_size(),
+                    progress_callback, what='disk')
+            result.update({f'computed_{name}': digests[name]
+                           for name in evidence_hash.ALGORITHMS})
+            result['size'] = digests['size']
+        except HashingCancelled:
+            raise
+        except Exception as exc:
+            logger.error("Could not hash %s: %s", self.image_path, exc)
+            result.update({'computed_md5': None, 'computed_sha1': None,
+                           'computed_sha256': None, 'error': str(exc)})
+        if image_type == "aff4":
+            # The container's own check of what it stores: it stands
+            # whether or not the disk could be hashed.
+            result['container_check'] = self._aff4_check()
+        if image_type == "live":
+            # What was read, when: a disk in use changes as it is read.
+            result['live'] = True
+        return result
+
+    def _ewf_hashes(self, result, progress_callback=None):
+        """An E01 set's media, every chunk checked against its own
+        checksum (core/ewf_chunks.py) -- libewf reads a damaged chunk as
+        zeros without a word. The hashes it stores are read for the
+        verdict. Ex01 (EWF2) goes through libewf, unchecked per chunk."""
+        from trace_app.core import evidence_hash, ewf_chunks
+        if self.incomplete():
+            raise IncompleteEvidence(self.incomplete())
+        filenames = pyewf.glob(self.image_path)
+        handle = pyewf.handle()
+        handle.open(filenames)
+        try:
+            total = handle.get_media_size()
+            for algorithm, key in (('MD5', 'stored_md5'),
+                                   ('SHA1', 'stored_sha1')):
                 try:
-                    ewf_handle.open(filenames)
-                    total_size = ewf_handle.get_media_size()
+                    result[key] = handle.get_hash_value(algorithm) or None
+                except Exception as exc:
+                    logger.debug("No stored %s: %s", algorithm, exc)
+        finally:
+            handle.close()
+        try:
+            chunk_map = ewf_chunks.ChunkMap(filenames)
+        except ewf_chunks.NotEwf1:
+            hashers = evidence_hash.new_hashers()
+            size = self._hash_ewf_parallel(filenames, total,
+                                           list(hashers.values()),
+                                           progress_callback)
+            if size != total:
+                raise evidence_hash.HashingError(
+                    f"The image gave {size:,} bytes; its media is "
+                    f"{total:,}")
+            return evidence_hash.digests(hashers, size)
+        if chunk_map.media_size != total:
+            raise evidence_hash.HashingError(
+                f"The image's tables describe {chunk_map.media_size:,} "
+                f"bytes; libewf reads {total:,}")
+        damaged = []
 
-                    try:
-                        # Attempt to retrieve the stored hash values
-                        stored_md5 = ewf_handle.get_hash_value("MD5")
-                        stored_sha1 = ewf_handle.get_hash_value("SHA1")
-                    except Exception as e:
-                        logger.warning(f"Unable to retrieve stored hash values: {e}")
+        def chunks():
+            for offset, data, ok in ewf_chunks.read_media(chunk_map):
+                if not ok:
+                    damaged.append(offset)
+                yield data
 
-                    # Nothing to check a SHA-256 against when the image
-                    # already carries its own hashes.
-                    if not (stored_md5 or stored_sha1):
-                        hash_sha256 = hashlib.sha256()
-
-                    # An incomplete set cannot be hashed whole: say why at once
-                    # rather than after reading up to the gap.
-                    if self.incomplete():
-                        raise IncompleteEvidence(self.incomplete())
-
-                    # Decompressing the image is the expensive part -- on a
-                    # compressed E01 it is ~94% of the work, hashing only ~6%
-                    # -- and libewf offers no threading of its own. Several
-                    # handles reading disjoint ranges do decompress in
-                    # parallel, though, so the read is split across workers
-                    # while one hasher consumes their output in order.
-                    hashers = [hash_md5, hash_sha1]
-                    if hash_sha256 is not None:
-                        hashers.append(hash_sha256)
-                    size = self._hash_ewf_parallel(
-                        filenames, total_size, hashers, progress_callback)
-                finally:
-                    ewf_handle.close()
-
-            elif image_type in ("virtual", "aff4", "live", "assembled") or (
-                    image_type == "raw" and
-                    self.image_path.lower().endswith('.001')):
-                # A split raw image (x.001, x.002...) is read by TSK as one
-                # disk; hashing only the first segment's file gave a hash
-                # of part of it.
-                # The disk, not its container files: a split VMDK is many
-                # files, a VHDX's layout changes as it is compacted, and a
-                # differencing disk is meaningless without its parents. What
-                # the guest saw is what is evidence.
-                total_size = self.img_info.get_size()
-                hash_sha256 = hashlib.sha256()
-                position = 0
-                while position < total_size:
-                    chunk = self.img_info.read(
-                        position, min(CHUNK_SIZE, total_size - position))
-                    if not chunk:
-                        break
-                    for hasher in (hash_md5, hash_sha1, hash_sha256):
-                        hasher.update(chunk)
-                    position += len(chunk)
-                    size = position
-                    if progress_callback and total_size > 0:
-                        try:
-                            progress_callback(size, total_size)
-                        except Exception as e:
-                            logger.error(f"Progress callback error: {e}")
-
-            elif image_type == "raw":
-                try:
-                    total_size = os.path.getsize(self.image_path)
-                    hash_sha256 = hashlib.sha256()
-                    with open(self.image_path, "rb") as f:
-                        while True:
-                            chunk = f.read(CHUNK_SIZE)
-                            if not chunk:
-                                break
-
-                            hash_md5.update(chunk)
-                            hash_sha1.update(chunk)
-                            hash_sha256.update(chunk)
-                            size += len(chunk)
-
-                            # Report progress safely
-                            if progress_callback and total_size > 0:
-                                try:
-                                    progress_callback(size, total_size)
-                                except Exception as e:
-                                    logger.error(f"Progress callback error: {e}")
-                except Exception as e:
-                    logger.error(f"Error reading raw image: {e}")
-
-            # Compile the computed and stored hashes in a dictionary
-            hashes = {
-                'computed_md5': hash_md5.hexdigest(),
-                'computed_sha1': hash_sha1.hexdigest(),
-                'computed_sha256': hash_sha256.hexdigest() if hash_sha256 else None,
-                'size': size,
-                'path': self.image_path,
-                'stored_md5': stored_md5,
-                'stored_sha1': stored_sha1
-            }
-            if image_type == "aff4":
-                hashes['container_check'] = self._aff4_check()
-            if image_type == "live":
-                # What was read, when: a disk in use changes as it is read.
-                hashes['live'] = True
-
-            return hashes
-        except Exception as e:
-            logger.error(f"Error calculating hashes: {e}")
-            failed = {
-                'computed_md5': 'Error',
-                'computed_sha1': 'Error',
-                'computed_sha256': 'Error',
-                'size': 0,
-                'path': self.image_path,
-                'stored_md5': None,
-                'stored_sha1': None,
-                'error': str(e)
-            }
-            if image_type == "aff4":
-                # A damaged container (a segment failing the ZIP's CRC-32)
-                # cannot be hashed whole; its own check still says what is
-                # wrong.
-                failed['container_check'] = self._aff4_check()
-            return failed
+        digests = evidence_hash.hash_stream(chunks(), total,
+                                            progress_callback)
+        if damaged:
+            result['damaged'] = ewf_chunks.damaged_ranges(
+                damaged, chunk_map.chunk_size, self.sector_size or 512)
+        if chunk_map.problems:
+            result['container_problems'] = list(chunk_map.problems)
+        return digests
 
     def _aff4_check(self):
         """(ok, detail) from re-hashing an AFF4 image's streams against
@@ -979,113 +947,98 @@ class ImageHandler:
         """Logical evidence: files, no disk -- nothing to carve."""
         return self.logical_fs is not None
 
-    def _logical_hashes(self, progress_callback=None):
-        """Verification hashes of logical evidence.
+    def _logical_hashes(self, result, progress_callback=None):
+        """Verification hashes of logical evidence, into `result`
+        (stored hashes) and returned as digests.
 
         * AD1: the image-wide MD5 and SHA-1 as FTK Imager computes them
           (core/ad1.py), checked against the ones in its log (x.ad1.txt)
-          when the log is beside it.
+          when the log is beside it; no SHA-256 (FTK defines none).
         * L01: the media hash libewf computes, checked against the one
           the file records.
+        * iOS backup: every file as stored.
         * ZIP / TAR: the archive file itself.
-        * A folder: MD5 / SHA-1 / SHA-256 over every file, in sorted path
-          order, as path + NUL + content -- so a file added, removed,
-          renamed or changed changes it.
+        * A folder: over every file, in sorted path order, as path + NUL +
+          content -- so a file added, removed, renamed or changed changes
+          it. A file that cannot be read in full fails the hash.
         """
-        from trace_app.core import logical_sources
+        from trace_app.core import evidence_hash, logical_sources
         kind = logical_sources.kind_of(self.image_path)
-        result = {'computed_md5': None, 'computed_sha1': None,
-                  'computed_sha256': None, 'size': 0,
-                  'path': self.image_path, 'stored_md5': None,
-                  'stored_sha1': None}
-        try:
-            if kind == 'ad1':
-                from trace_app.core import ad1
-                computed = ad1.verify(
-                    self.image_path,
-                    progress=(lambda done, total: progress_callback(done,
-                                                                    total))
-                    if progress_callback else None)
-                result.update(computed or {})
-                result.update(ad1.logged_hashes(self.image_path))
-                result['size'] = sum(os.path.getsize(p) for p in
-                                     ad1.segment_paths(self.image_path))
-                return result
-            if kind == 'ios_backup':
-                # As stored -- encrypted or not, unlocked or not.
-                from trace_app.core import ios_backup
-                hashers = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
-                result['size'] = ios_backup.hash_folder(
-                    self.image_path, hashers, progress_callback)
-                result['computed_md5'], result['computed_sha1'], \
-                    result['computed_sha256'] = (h.hexdigest()
-                                                 for h in hashers)
-                return result
-            if kind == 'l01':
-                filenames = pyewf.glob(self.image_path)
-                handle = pyewf.handle()
-                handle.open(filenames)
-                try:
-                    total = handle.get_media_size()
-                    for algorithm, key in (('MD5', 'stored_md5'),
-                                           ('SHA1', 'stored_sha1')):
-                        try:
-                            result[key] = handle.get_hash_value(algorithm)
-                        except Exception:
-                            pass
-                finally:
-                    handle.close()
-                hashers = [hashlib.md5(), hashlib.sha1()]
-                result['size'] = self._hash_ewf_parallel(
-                    filenames, total, hashers, progress_callback)
-                result['computed_md5'] = hashers[0].hexdigest()
-                result['computed_sha1'] = hashers[1].hexdigest()
-                return result
-            hashers = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
-            if kind == 'folder':
-                files = [(self.logical_fs.path_of(n.inode), n)
-                         for n in self.logical_fs.nodes.values()
-                         if not n.is_dir]
-                files.sort(key=lambda pair: pair[0])
-                total = sum(n.size for _p, n in files) or 1
-                done = 0
-                for path, node in files:
-                    for hasher in hashers:
-                        hasher.update(path.encode('utf-8',
-                                                  'surrogateescape') + b'\0')
-                    position = 0
-                    while position < node.size:
-                        chunk = node.reader(position, min(CHUNK_SIZE,
-                                                          node.size - position))
-                        if not chunk:
-                            break
-                        for hasher in hashers:
-                            hasher.update(chunk)
-                        position += len(chunk)
-                        done += len(chunk)
-                        if progress_callback:
-                            progress_callback(done, total)
-                result['size'] = done
-            else:
-                total = os.path.getsize(self.image_path) or 1
-                with open(self.image_path, 'rb') as handle:
-                    while True:
-                        chunk = handle.read(CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        for hasher in hashers:
-                            hasher.update(chunk)
-                        result['size'] += len(chunk)
-                        if progress_callback:
-                            progress_callback(result['size'], total)
-            result['computed_md5'], result['computed_sha1'], \
-                result['computed_sha256'] = (h.hexdigest() for h in hashers)
-            return result
-        except Exception as exc:
-            logger.error("Could not hash %s: %s", self.image_path, exc)
-            result.update({'computed_md5': 'Error', 'computed_sha1': 'Error',
-                           'computed_sha256': 'Error', 'error': str(exc)})
-            return result
+        if kind == 'ad1':
+            from trace_app.core import ad1
+            computed = ad1.verify(self.image_path,
+                                  progress=progress_callback) or {}
+            if not computed.get('computed_md5'):
+                raise evidence_hash.HashingError(
+                    "The AD1 image could not be read in full")
+            result.update(ad1.logged_hashes(self.image_path))
+            return {'md5': computed.get('computed_md5'),
+                    'sha1': computed.get('computed_sha1'),
+                    'sha256': computed.get('computed_sha256'),
+                    'size': sum(os.path.getsize(p) for p in
+                                ad1.segment_paths(self.image_path))}
+        if kind == 'ios_backup':
+            # As stored -- encrypted or not, unlocked or not.
+            from trace_app.core import ios_backup
+            hashers = evidence_hash.new_hashers()
+            size = ios_backup.hash_folder(self.image_path,
+                                          list(hashers.values()),
+                                          progress_callback)
+            return evidence_hash.digests(hashers, size)
+        if kind == 'l01':
+            filenames = pyewf.glob(self.image_path)
+            handle = pyewf.handle()
+            handle.open(filenames)
+            try:
+                total = handle.get_media_size()
+                for algorithm, key in (('MD5', 'stored_md5'),
+                                       ('SHA1', 'stored_sha1')):
+                    try:
+                        result[key] = handle.get_hash_value(algorithm) or None
+                    except Exception:
+                        pass
+            finally:
+                handle.close()
+            hashers = evidence_hash.new_hashers()
+            size = self._hash_ewf_parallel(filenames, total,
+                                           list(hashers.values()),
+                                           progress_callback)
+            if size != total:
+                raise evidence_hash.HashingError(
+                    f"The L01 gave {size:,} bytes; its media is {total:,}")
+            return evidence_hash.digests(hashers, size)
+        if kind == 'folder':
+            files = sorted(((self.logical_fs.path_of(n.inode), n)
+                            for n in self.logical_fs.nodes.values()
+                            if not n.is_dir), key=lambda pair: pair[0])
+            total = sum(n.size for _p, n in files)
+            hashers = evidence_hash.new_hashers()
+            done = 0
+            for path, node in files:
+                for hasher in hashers.values():
+                    hasher.update(path.encode('utf-8', 'surrogateescape')
+                                  + b'\0')
+                position = 0
+                while position < node.size:
+                    want = min(CHUNK_SIZE, node.size - position)
+                    try:
+                        chunk = node.reader(position, want)
+                    except Exception as exc:
+                        raise evidence_hash.HashingError(
+                            f"{path} could not be read at byte "
+                            f"{position:,}: {exc}") from exc
+                    if not chunk:
+                        raise evidence_hash.HashingError(
+                            f"{path} ended at byte {position:,}; it was "
+                            f"{node.size:,} bytes when the folder was read")
+                    for hasher in hashers.values():
+                        hasher.update(chunk)
+                    position += len(chunk)
+                    done += len(chunk)
+                    if progress_callback:
+                        progress_callback(done, total)
+            return evidence_hash.digests(hashers, done)
+        return evidence_hash.hash_file(self.image_path, progress_callback)
 
     def load_image(self):
         """Load the image and read its volume/filesystem information.
