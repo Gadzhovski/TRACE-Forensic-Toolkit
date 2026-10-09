@@ -1,6 +1,6 @@
 """Downloads for the test-data scripts, patient with third-party hosts.
 
-fetch_test_images.py, carve_corpus.py and fetch_artifact_samples.py fetch
+tools/testdata/fetch.py and build/carve_corpus.py fetch
 from some forty sites nobody here runs. A host that is slow or briefly down
 must not fail a test run -- and in CI every job of a run asks at once, the
 first time a cache is empty. So each URL is tried several times with a

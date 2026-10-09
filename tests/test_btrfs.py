@@ -2,7 +2,7 @@
 (core/qcow2.py).
 
 The volumes are fox-it/dissect.btrfs's test images
-(tools/fetch_test_images.py), and the values asserted are the ones its own
+(tools/testdata/fetch.py), and the values asserted are the ones its own
 tests publish: the same tree in the top-level subvolume, a subvolume and a
 snapshot of it, nested subvolumes, zlib / LZO / zstd files (extents and
 inline), sparse files and a snapshot's partly rewritten copies, and one
@@ -544,7 +544,7 @@ def _deleted_key():
 
 def test_deleted_files_come_back_byte_for_byte(tmp_path):
     """A volume the Linux kernel itself wrote and deleted files on
-    (tools/make_btrfs_deleted.py): plain, inline, zstd-compressed and
+    (tools/testdata/build/make_btrfs_deleted.py): plain, inline, zstd-compressed and
     no-checksum files, a deleted folder and a deleted subvolume all come
     back with the bytes the answer key records -- read the way the window
     reads them, by reference through a fresh handler."""

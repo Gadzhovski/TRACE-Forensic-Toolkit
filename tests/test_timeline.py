@@ -17,8 +17,9 @@ import sqlite3
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 
 
 @pytest.fixture(scope='module')
@@ -27,7 +28,7 @@ def built(tmp_path_factory):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail("usnjrnl.qcow2 missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     from trace_app.core import ntfs
     from trace_app.core.activity import record
     from trace_app.core.case import Case

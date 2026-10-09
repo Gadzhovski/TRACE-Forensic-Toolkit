@@ -7,10 +7,11 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 from tests.conftest import pump
 from trace_app.ui.viewers import text as text_view
 
-PAGEANT = os.path.join(ROOT, 'test_images', 'carve_samples', 'pageant.exe')
+PAGEANT = os.path.join(testdata.CORPUS_SAMPLES, 'pageant.exe')
 
 
 # --- what the bytes are -------------------------------------------------------------

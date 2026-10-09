@@ -1,5 +1,5 @@
 """Encrypted Linux disks as installers lay them out: GPT -> LUKS -> LVM ->
-ext4 (tools/make_luks_lvm.py, made by cryptsetup and lvm2 themselves).
+ext4 (tools/testdata/build/make_luks_lvm.py, made by cryptsetup and lvm2 themselves).
 
 LUKS1 is unlocked by libluksde; LUKS2 -- cryptsetup's default, which
 libluksde cannot read -- by core/luks2.py, here with argon2id and 4 KiB

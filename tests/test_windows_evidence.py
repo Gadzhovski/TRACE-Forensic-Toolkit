@@ -2,7 +2,7 @@
 the registry's Run dialog, typed paths, Explorer searches, MountPoints2,
 BAM, time zone, networks and installed programs.
 
-plaso's published test data (tools/fetch_artifact_samples.py), and where
+plaso's published test data (tools/testdata/samples.py), and where
 plaso's own tests record a value for the same file, the value here is that
 one. BAM has no sample hive; its value bytes are plaso's test bytes.
 """
@@ -13,15 +13,16 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 UTC = datetime.timezone.utc
 
 
 def sample(name):
     path = os.path.join(SAMPLES, name)
     if not os.path.exists(path):
-        message = f"{name} missing -- run tools/fetch_artifact_samples.py"
+        message = f"{name} missing -- run python -m tools.testdata.fetch --group samples"
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)

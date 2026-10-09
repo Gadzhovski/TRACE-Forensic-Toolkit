@@ -14,6 +14,7 @@ import shutil
 import sqlite3
 
 import pytest
+from tools import testdata
 
 SECTOR = 512
 
@@ -179,12 +180,12 @@ def test_carved_files_are_analysed(tmp_path):
     from trace_app.core.case import Case
     from trace_app.core.image_handler import ImageHandler
     from tests.conftest import ROOT
-    exe = os.path.join(ROOT, 'test_images', 'artifact_samples',
+    exe = os.path.join(testdata.SAMPLES,
                        'pageant-w32.exe')
     if not os.path.exists(exe):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail("pageant-w32.exe missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     with open(exe, 'rb') as handle:
         program = handle.read()
     image = bytearray(4 * 1024 * 1024)

@@ -21,7 +21,7 @@ as LUKS1, and every one of them is in `cryptography` (already required):
 `unlock(window, password=None, key=None)` returns a volume shaped like a
 libyal one (read_buffer_at_offset, get_size, close), so ImageHandler and
 LibyalImgInfo treat it as they treat pyluksde's. Values are checked
-against cryptsetup's own volumes (tools/make_luks_lvm.py).
+against cryptsetup's own volumes (tools/testdata/build/make_luks_lvm.py).
 """
 
 import base64

@@ -19,8 +19,9 @@ import sqlite3
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 MESSAGE = re.compile(r'message number (\d+) about the plan')
 
 
@@ -106,7 +107,7 @@ def test_real_databases_give_no_noise(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     with open(path, 'rb') as handle:
         rows = sqlite_recover.recover(handle.read())
     assert len(rows) <= 3                  # these were never deleted from
@@ -120,7 +121,7 @@ def test_a_deleted_skype_message_is_activity_again(tmp_path):
     from trace_app.core.activity import chat
     source = os.path.join(SAMPLES, 'skype_main.db')
     if not os.path.exists(source):
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     path = str(tmp_path / 'main.db')
     shutil.copy(source, path)
     db = sqlite3.connect(path)

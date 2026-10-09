@@ -16,8 +16,9 @@ import random
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-XWAYS = os.path.join(ROOT, 'test_images', 'X-WaysTrainingImages')
+XWAYS = os.path.join(testdata.PRIVATE, 'X-WaysTrainingImages')
 CHUNK = 4096
 SECTOR = 512
 

@@ -5,8 +5,8 @@ nothing about the files it silently lost, or the fragments it invented. This
 runs the real carvers over a test image the way carve_files does, then compares
 what came back against ground truth transcribed from the test author's own key.
 
-    python tools/carve_score.py                     # every known image
-    python tools/carve_score.py 11-carve-fat.dd     # just one
+    python tools/score/carve_score.py                     # every known image
+    python tools/score/carve_score.py 11-carve-fat.dd     # just one
 
 Exit status is non-zero if any image scores below its recorded baseline, so
 this can gate a change that would lose a file.
@@ -18,7 +18,8 @@ import logging
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))))
 
 # Rejected candidates are logged per-attempt and are the normal case; they are
 # noise here, not findings.
@@ -26,11 +27,12 @@ logging.disable(logging.ERROR)
 
 from trace_app.core.carving import Carver
 from trace_app.infra.constants import CARVE_OVERLAP, CHUNK_SIZE
+from tools import testdata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 IMAGE_DIR = os.path.join(ROOT, 'test_images')
-TRUTH = os.path.join(HERE, 'carve_ground_truth.json')
+TRUTH = os.path.join(ROOT, 'tests', 'expected', 'carve_ground_truth.json')
 
 #: What the carvers scored when this harness was written, before any of the
 #: accuracy work. A run may exceed these; it must never fall below one.
@@ -46,11 +48,11 @@ BASELINE = {
     # RFC 5322 messages -- raised this from 63. Reassembly of the PDFs in
     # two fragments, in order, raised it to 78.
     'dfrws-2007-challenge.img': 78,
-    # Real published files of 40+ formats (tools/carve_corpus.py): every one,
+    # Real published files of 40+ formats (tools/testdata/build/carve_corpus.py): every one,
     # byte-exact, and none of its signature decoys. 63 since the camera raws
     # (CR2, CR3, NEF x2, ARW, DNG, RAF, RW2, ORF, PEF) and two PSBs.
     'carve-corpus.dd': 63,
-    # NIST CFReDS file carving (tools/nist_carving_truth.py: every planted
+    # NIST CFReDS file carving (tools/score/nist_carving_truth.py: every planted
     # piece identified by its bytes against NIST's originals). L0/L1 are
     # whole files -- "L1" pieces lie end to end -- all byte-exact once the
     # BMP (5,000,000-byte cap), GIF (first 00 3B) and MP3 (cut last frame)
@@ -251,9 +253,10 @@ def main():
     regressed = False
     for name in names:
         # An entry may name its image's place under test_images/ (NIST's
-        # carving set lives in nist/carving/).
-        path = os.path.join(IMAGE_DIR, truth[name].get('path', name))
-        if not os.path.exists(path):
+        # carving set lives in nist/carving/); others are found by name.
+        path = os.path.join(IMAGE_DIR, truth[name]['path']) \
+            if 'path' in truth[name] else testdata.locate(name)
+        if not path or not os.path.exists(path):
             print(f"\n=== {name}\n    not present in test_images/ -- skipped")
             continue
         hits, total, base = score(name, truth[name], carve_image(path))

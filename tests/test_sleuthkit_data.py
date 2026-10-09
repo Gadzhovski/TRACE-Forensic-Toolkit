@@ -1,5 +1,5 @@
 """The Sleuth Kit's own test images (sleuthkit/sleuthkit_test_data,
-fetched and SHA-256 pinned by tools/fetch_artifact_samples.py).
+fetched and SHA-256 pinned by tools/testdata/samples.py).
 
 Expected values come from outside TRACE: the DFXML fiwalk wrote for four
 of them (every file's path, size, allocation and MD5), the MD5 each E01
@@ -22,8 +22,9 @@ import zipfile
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 E01S = ['tsk-apfs-apfs_pool.E01', 'tsk-btrfs-btrfs_testimage_50MB.E01',
         'tsk-btrfs-btrfs_zstd.E01', 'tsk-exfat-exfat1.E01',
         'tsk-from_brian-6-fat-undel.E01',
@@ -37,7 +38,7 @@ E01S = ['tsk-apfs-apfs_pool.E01', 'tsk-btrfs-btrfs_testimage_50MB.E01',
 def sample(name):
     path = os.path.join(SAMPLES, name)
     if not os.path.exists(path):
-        message = f"{name} is missing -- run tools/fetch_artifact_samples.py"
+        message = f"{name} is missing -- run python -m tools.testdata.fetch --group samples"
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)

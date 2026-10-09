@@ -1,11 +1,12 @@
-"""Add NIST CFReDS's file carving images to tools/carve_ground_truth.json.
+"""Add NIST CFReDS's file carving images to
+tests/expected/carve_ground_truth.json.
 
 https://cfreds-archive.nist.gov/FileCarving/index.html publishes 30 images
 (L0-L5 x Graphic/Documents/Archive/Audio/Video), each made of fragments of
 the original files (TestFiles/) between 5,120,000-byte fills, and their
 layout (ImageLayouts.htm: label, size, start and end sector per piece).
 
-    python tools/nist_carving_truth.py test_images/nist/carving
+    python tools/score/nist_carving_truth.py test_images/nist/carving
 
 The layout's extents are used, its labels are not: they have errors (an
 "arc3.gz" of arc2.bz2's size, "D2.pdf (2)" that is D1's second half,
@@ -33,7 +34,8 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TRUTH = os.path.join(HERE, 'carve_ground_truth.json')
+TRUTH = os.path.join(os.path.dirname(os.path.dirname(HERE)), 'tests',
+                     'expected', 'carve_ground_truth.json')
 SOURCE = 'https://cfreds-archive.nist.gov/FileCarving/index.html'
 SECTOR = 512
 
@@ -49,7 +51,7 @@ LEVELS = {
 
 def carver_type(extension):
     """The type TRACE's carver reports for an extension, or None."""
-    sys.path.insert(0, os.path.dirname(HERE))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
     from trace_app.core.carving import EXTENSION_CARVER
     extension = {'tif': 'tiff'}.get(extension, extension)
     return extension if extension in EXTENSION_CARVER else None

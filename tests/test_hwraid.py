@@ -4,7 +4,7 @@ Assemble dialog's descriptor for it (core/assembly.py).
 * Synthetic arrays, striped here by a writer independent of the reader --
   every level and parity rotation, with HP's parity delay, whole and with
   a disk missing -- read back byte for byte. No images: every system.
-* Against mdadm: the kernel-built arrays (tools/make_md_raid.py, Linux
+* Against mdadm: the kernel-built arrays (tools/testdata/build/make_md_raid.py, Linux
   CI) read through hwraid with their own parameters equal their files.
 * The X-Ways training sets (HP Smart Array RAID5 with a disk missing and
   parity delay, Adaptec RAID5, a RAID0) are private: run locally when
@@ -18,12 +18,13 @@ import random
 
 import pytest
 
-from tests.conftest import ROOT
+import tests.conftest  # noqa: F401  (sets up isolation)
 from tests.disk_builders import fat_volume_with_pngs as _fat_volume_with_pngs
 from tests.disk_builders import stripe
 
-TEST_IMAGES = os.path.join(ROOT, 'test_images')
-XWAYS = os.path.join(TEST_IMAGES, 'X-WaysTrainingImages')
+from tools import testdata
+
+XWAYS = os.path.join(testdata.PRIVATE, 'X-WaysTrainingImages')
 CHUNK = 4096
 
 

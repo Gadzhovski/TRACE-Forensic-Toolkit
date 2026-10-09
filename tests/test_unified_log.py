@@ -1,6 +1,6 @@
 """Apple's unified log (core/activity/unified_log.py).
 
-plaso's unified_logging1.dmg (tools/fetch_artifact_samples.py) holds a
+plaso's unified_logging1.dmg (tools/testdata/samples.py) holds a
 Mac's /private/var/db log tree on APFS. plaso's tests give, for each
 tracev3 file, how many entries `log show` would list and every field of
 one entry; TRACE reads the same files through its own APFS and DMG
@@ -15,8 +15,9 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLE = os.path.join(ROOT, 'test_images', 'artifact_samples',
+SAMPLE = os.path.join(testdata.SAMPLES,
                       'unified_logging1.dmg')
 DIAGNOSTICS = ('private', 'var', 'db', 'Diagnostics')
 
@@ -28,7 +29,7 @@ def log_tree():
     if not os.path.exists(SAMPLE):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail("unified_logging1.dmg missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     handler = ImageHandler(SAMPLE)
     assert handler.loaded
     (key,) = [k for k in handler.volume_offsets() if k >= 2 ** 50]

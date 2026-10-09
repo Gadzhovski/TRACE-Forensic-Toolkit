@@ -1,6 +1,6 @@
 """FileVault 2, APFS (plain and encrypted), LUKS and LVM volumes.
 
-dfvfs's published test images (tools/fetch_artifact_samples.py), with the
+dfvfs's published test images (tools/testdata/samples.py), with the
 passwords dfvfs's own tests use. Each holds the same small tree --
 passwords.txt, a_directory/{a_file, another_file}, a_link -- so every
 volume is checked the same way: it is recognised, unlocks only with the
@@ -14,8 +14,9 @@ import tempfile
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 PASSWORDS_HEAD = b'place,user,password\nbank,joesmith,superr'
 
 
@@ -24,7 +25,7 @@ def sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     return path
 
 

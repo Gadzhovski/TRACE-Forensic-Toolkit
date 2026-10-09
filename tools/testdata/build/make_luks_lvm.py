@@ -9,7 +9,7 @@ volumes (root, home) holding known files, and in home a PNG deleted after
 writing -- its bytes left in the LV's free space, for carving inside the
 decrypted volume. An answer key (JSON) is written beside them.
 
-    sudo python3 tools/make_luks_lvm.py [folder]          # Linux, root
+    sudo python3 tools/testdata/build/make_luks_lvm.py [folder]          # Linux, root
 
 Needs cryptsetup, lvm2 and mkfs.ext4. On Windows or macOS, in a
 privileged container:
@@ -17,7 +17,7 @@ privileged container:
     docker run --rm --privileged -v "$PWD:/src" -w /src debian:bookworm \\
         sh -c "apt-get update -qq && apt-get install -y -qq cryptsetup-bin \\
                lvm2 e2fsprogs fdisk python3 >/dev/null && \\
-               python3 tools/make_luks_lvm.py"
+               python3 tools/testdata/build/make_luks_lvm.py"
 
 Disks: luks1-lvm.raw (PBKDF2, 512-byte sectors: libluksde) and
 luks2-lvm.raw (argon2id, 4 KiB sectors, as installers now write them:
@@ -160,9 +160,10 @@ def build_one(folder, version):
 
 
 def main():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
     folder = sys.argv[1] if len(sys.argv) > 1 else \
-        os.path.join(root, 'test_images')
+        os.path.join(root, 'test_images', 'built')
     if os.geteuid() != 0:
         sys.exit("Run as root: the disk is a loop device")
     disks = [build_one(folder, version) for version in (1, 2)]

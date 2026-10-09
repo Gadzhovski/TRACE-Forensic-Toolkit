@@ -2,10 +2,10 @@
 publishes about each -- never against TRACE's own output:
 
 * Deleted File Recovery (DFR-01..17 on ext, FAT, exFAT, NTFS, HFS+):
-  tools/nist_dfr_ground_truth.json, parsed from NIST's answer key by
-  tools/nist_dfr_key.py; content checked against the sectors the key lists
+  tests/expected/nist_dfr_ground_truth.json, parsed from NIST's answer key by
+  tools/score/nist_dfr_key.py; content checked against the sectors the key lists
   and the test files' own block markers ("DFR / Block 00008 ... file X").
-  tools/dfr_score.py runs the whole set; these tests hold the cases that
+  tools/score/dfr_score.py runs the whole set; these tests hold the cases that
   found something.
 * Searching Container Files: the sentence NIST hid in each container type
   (its content_info-2.txt).
@@ -28,9 +28,10 @@ import zipfile
 import pytest
 
 from tests.conftest import ROOT, image_path
+from tools import testdata
 
-NIST = os.path.join(ROOT, 'test_images', 'nist')
-KEY = os.path.join(ROOT, 'tools', 'nist_dfr_ground_truth.json')
+NIST = testdata.NIST
+KEY = os.path.join(ROOT, 'tests', 'expected', 'nist_dfr_ground_truth.json')
 
 
 def nist(*parts):
@@ -60,8 +61,8 @@ def _deleted(handler):
 
 def _by_key_name(records, fat=True):
     """{the key's name: record} -- FAT loses a deleted short name's first
-    character ('_APELLA.TXT'), matched as tools/dfr_score.py does."""
-    from tools.dfr_score import same_name
+    character ('_APELLA.TXT'), matched as tools/score/dfr_score.py does."""
+    from tools.score.dfr_score import same_name
 
     class Lookup(dict):
         def __missing__(self, name):
@@ -96,7 +97,7 @@ def test_a_fragmented_deleted_exfat_file_is_read_from_its_own_chain():
     the FAT chain on deletion; TSK reads each as one piece (half itself,
     half the other). Both are recovered byte for byte -- every block of
     each names its file, in order."""
-    from tools.dfr_score import own_content
+    from tools.score.dfr_score import own_content
     handler = _handler(nist('dfr', 'dfr-05-braid-xfat.dd'))
     try:
         records = {r['name']: r for r in _deleted(handler)}
@@ -113,7 +114,7 @@ def test_a_fragmented_deleted_exfat_file_is_read_from_its_own_chain():
 def test_files_of_a_deleted_exfat_folder_are_read_from_their_chains():
     """DFR-12: a folder deleted with its files; their entries keep the
     in-use bit (exFAT frees the folder's clusters, not its entries)."""
-    from tools.dfr_score import own_content
+    from tools.score.dfr_score import own_content
     handler = _handler(nist('dfr', 'dfr-12-xfat.dd'))
     try:
         records = [r for r in _deleted(handler)
@@ -179,7 +180,7 @@ def test_fat_times_are_the_digits_the_volume_holds():
     with one fixed offset; its access times (a date: local midnight) show
     the offset as their UTC time of day. TRACE shows the digits on disk,
     marked as local."""
-    from tools.dfr_score import _fat_driver_offset, _shifted
+    from tools.score.dfr_score import _fat_driver_offset, _shifted
     image = _key('fat-01')
     offset = _fat_driver_offset(image)
     assert offset == -240
@@ -212,7 +213,7 @@ def test_of_two_deleted_ntfs_files_the_one_freed_later_owns_the_clusters():
     """DFR-13: D067 was created before D099 but appended to after D099 was
     deleted, so its clusters are its own -- $LogFile frees D067's entry
     later. Its bytes, block by block, are D067's."""
-    from tools.dfr_score import own_content
+    from tools.score.dfr_score import own_content
     handler = _handler(nist('dfr', 'dfr-13-ntfs.dd'))
     try:
         records = {r['name']: r for r in _deleted(handler)}
@@ -228,7 +229,7 @@ def test_of_two_deleted_ntfs_files_the_one_freed_later_owns_the_clusters():
 
 
 def test_recycle_bin_deletions_keep_the_original_name_and_content():
-    from tools.dfr_score import score
+    from tools.score.dfr_score import score
     result = score('ntfs-01-recycle', _key('ntfs-01-recycle'))
     assert result.get('listed') == 1 and not result.get('false ok')
     assert result.get('content ok') == 1
@@ -244,7 +245,7 @@ def test_recycle_bin_deletions_keep_the_original_name_and_content():
 def test_no_deleted_file_is_called_recoverable_when_it_is_not(name):
     """Whatever TRACE calls recoverable is the file's bytes, or the key
     says so; every time agrees with the key."""
-    from tools.dfr_score import image_path as dfr_image, score
+    from tools.score.dfr_score import image_path as dfr_image, score
     if dfr_image(name) is None:
         pytest.skip(f"{name} is not downloaded")
     result = score(name, _key(name))
@@ -538,7 +539,7 @@ def test_ext_files_emptied_on_deletion_come_back_from_the_journal():
     journal's copy from before holds them. Every file recovered is its own
     bytes, block by block, by NIST's markers -- 279 of them."""
     import re
-    from tools.dfr_score import own_content
+    from tools.score.dfr_score import own_content
     found = _journal_recoveries('dfr-10-ext.dd')
     assert len(found) >= 279
     for inode, data, reused in found:

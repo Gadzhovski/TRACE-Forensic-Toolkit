@@ -1,7 +1,7 @@
 """Disks built in Python for the storage tests: RAID members striped by
 a writer independent of TRACE's reader, and a FAT16 volume of PNGs that
 only a right reconstruction reads as PNGs. Names no test image, so a
-test importing it needs none (tools/ci_select.py reads imports)."""
+test importing it needs none (tools/testdata/ci_select.py reads imports)."""
 
 import random
 

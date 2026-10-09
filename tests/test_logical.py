@@ -20,9 +20,10 @@ import zipfile
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
-CARVE = os.path.join(ROOT, 'test_images', 'carve_samples')
+SAMPLES = testdata.SAMPLES
+CARVE = testdata.CORPUS_SAMPLES
 
 
 def sample(name, folder=SAMPLES):
@@ -30,8 +31,8 @@ def sample(name, folder=SAMPLES):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py and "
-                    "tools/carve_corpus.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples and "
+                    "tools/testdata/build/carve_corpus.py")
     return path
 
 

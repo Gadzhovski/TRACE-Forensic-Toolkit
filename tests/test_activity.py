@@ -2,7 +2,7 @@
 
 Real artifacts -- Prefetch from XP to Windows 11, hives, Jump Lists, event
 logs, browser databases -- fetched and checksum-pinned by
-tools/fetch_artifact_samples.py. Where plaso's own tests record a value for
+tools/testdata/samples.py. Where plaso's own tests record a value for
 the same file, the expected value here is that one: two implementations
 reading the same bytes the same way. The rest are generated here.
 """
@@ -14,15 +14,16 @@ import sqlite3
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 
 
 def sample(name):
     path = os.path.join(SAMPLES, name)
     if not os.path.exists(path):
-        message = (f"{name} is not in test_images/artifact_samples -- run "
-                   f"'python tools/fetch_artifact_samples.py'")
+        message = (f"{name} is not in test_images/samples -- run "
+                   f"'python -m tools.testdata.fetch --group samples'")
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)
@@ -400,10 +401,9 @@ def test_the_analysis_dialog_offers_activity(qapp):
 def test_a_real_windows_xp_image_end_to_end():
     """The public NPS domexusers image (4.4 GB): not fetched in CI, so this
     skips without it even there. Read where an examiner would expect."""
-    from tests.conftest import IMAGE_DIR
     from trace_app.core.activity import collect
     from trace_app.core.image_handler import ImageHandler
-    path = os.path.join(IMAGE_DIR, 'nps-2009-domexusers.E01')
+    path = testdata.locate('nps-2009-domexusers.E01') or ''
     if not os.path.exists(path):
         pytest.skip("nps-2009-domexusers.E01 is not in test_images/")
     handler = ImageHandler(path)

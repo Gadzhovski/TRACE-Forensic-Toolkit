@@ -1,6 +1,6 @@
 """Outlook .msg, Office macros, encrypted Office documents, network
 captures and PE import hashes, on published samples (fetched and SHA-256
-pinned by tools/fetch_artifact_samples.py).
+pinned by tools/testdata/samples.py).
 
 Expected values come from outside TRACE: Apache POI's own assertions for
 its .msg files and its .vba reference source for its macro documents;
@@ -16,16 +16,17 @@ import struct
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
-CARVE = os.path.join(ROOT, 'test_images', 'carve_samples')
+SAMPLES = testdata.SAMPLES
+CARVE = testdata.CORPUS_SAMPLES
 OFFICE_PASSWORD = 'Password1234_'          # msoffcrypto-tool's tests
 
 
 def sample(name, folder=SAMPLES):
     path = os.path.join(folder, name)
     if not os.path.exists(path):
-        message = f"{name} is missing -- run tools/fetch_artifact_samples.py"
+        message = f"{name} is missing -- run python -m tools.testdata.fetch --group samples"
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)

@@ -12,7 +12,7 @@ index, search, reopen, and open the main window on it -- and records a
 manifest of what TRACE reads from each image (core/manifest.py).
 
 The build script compares those manifests with the ones the test suite
-checked by hand (tests/manifests/), so a packaged build is shown to read
+checked by hand (tests/expected/manifests/), so a packaged build is shown to read
 evidence exactly as the source does. It is also a validation step an examiner
 can run on an installed copy against a known image.
 

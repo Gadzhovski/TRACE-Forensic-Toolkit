@@ -1,5 +1,5 @@
 """Formats from dfvfs's test corpus (log2timeline/dfvfs test_data, fetched
-and SHA-256 pinned by tools/fetch_artifact_samples.py).
+and SHA-256 pinned by tools/testdata/samples.py).
 
 Expected values come from outside TRACE: dfvfs's own test assertions
 (sizes, member names), the reference files the corpus carries (ext2.raw is
@@ -15,8 +15,9 @@ import shutil
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 PASSWORDS = (b"place,user,password\nbank,joesmith,superrich\n"
              b"alarm system,-,1234\ntreasure chest,-,1111\n"
              b"uber secret laire,admin,admin\n")
@@ -26,7 +27,7 @@ HDS = 'hfsplus.hdd.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds'
 def sample(name):
     path = os.path.join(SAMPLES, name)
     if not os.path.exists(path):
-        message = f"{name} is missing -- run tools/fetch_artifact_samples.py"
+        message = f"{name} is missing -- run python -m tools.testdata.fetch --group samples"
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)

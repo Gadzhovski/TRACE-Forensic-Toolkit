@@ -16,8 +16,9 @@ import zipfile
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 MIMIKATZ_ENTRY = 'defender-entry-{800362A7-0000-0000-FB11-12639186E0D6}'
 MIMIKATZ_CONTENT = 'defender-resource-A6C8322B8A19AEED96EFBD045206966DA4C9619D'
 
@@ -27,7 +28,7 @@ def sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     return path
 
 

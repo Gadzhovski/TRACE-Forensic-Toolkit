@@ -1,7 +1,7 @@
 """Recovering deleted files from the raw bytes of a disk image.
 
 The engine behind file carving, with no Qt in it: the analysis job, the
-quick-triage carve and tools/carve_score.py all drive this one module, so the
+quick-triage carve and tools/score/carve_score.py all drive this one module, so the
 carvers that are scored against the DFTT/DFRWS answer keys are exactly the
 ones an examiner runs.
 

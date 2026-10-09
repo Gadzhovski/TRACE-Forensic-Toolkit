@@ -6,14 +6,14 @@ version on loop devices, puts an ext4 file system with deterministic files
 on each, stops the array and keeps every member's image, with an answer
 key (level, members, each file's SHA-256) beside them.
 
-    sudo python3 tools/make_md_raid.py [folder]          # Linux, root
+    sudo python3 tools/testdata/build/make_md_raid.py [folder]          # Linux, root
 
 Needs mdadm, mkfs.ext4 and sfdisk. CI builds them on Ubuntu (tests.yml);
 on Windows or macOS, in a privileged container:
 
     docker run --rm --privileged -v "$PWD:/src" -w /src debian:bookworm \\
         sh -c "apt-get update -qq && apt-get install -y -qq mdadm \\
-               e2fsprogs fdisk python3 >/dev/null && python3 tools/make_md_raid.py"
+               e2fsprogs fdisk python3 >/dev/null && python3 tools/testdata/build/make_md_raid.py"
 
 Arrays (members are md-<name>-<n>.raw):
 
@@ -130,9 +130,10 @@ def build_one(folder, name, level, count, options):
 
 
 def main():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
     folder = sys.argv[1] if len(sys.argv) > 1 else \
-        os.path.join(root, 'test_images')
+        os.path.join(root, 'test_images', 'built')
     if os.geteuid() != 0:
         sys.exit("Run as root: the members are loop devices")
     key = [build_one(folder, *spec) for spec in ARRAYS]

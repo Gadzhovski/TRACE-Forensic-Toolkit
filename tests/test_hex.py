@@ -11,9 +11,10 @@ import pytest
 
 from trace_app.core import hex_source
 from tests.conftest import ROOT
+from tools import testdata
 from tests.conftest import pump
 
-JPEG_IMAGE = os.path.join(ROOT, 'test_images', '8-jpeg-search.dd')
+JPEG_IMAGE = testdata.locate('8-jpeg-search.dd') or ''
 
 DATA = (b'\x00' * 21 + b'Hello EXIF' + b'\x00' * 40 +
         'Secret'.encode('utf-16-le') + b'\x00' * 30 + b'exif\xff\xd8')

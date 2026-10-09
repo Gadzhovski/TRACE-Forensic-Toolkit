@@ -4,6 +4,7 @@ dd writes whatever name it is given, so a file with no extension (or
 explained, not reported as an unknown extension."""
 
 import pytest
+from tools import testdata
 
 
 def test_a_file_with_no_extension_is_raw(tmp_path):
@@ -107,7 +108,7 @@ def test_xways_truncated_e01_says_why_reads_fail():
     from tests.conftest import ROOT
     from trace_app.core.image_handler import (ImageHandler,
                                               IncompleteEvidence)
-    path = os.path.join(ROOT, 'test_images', 'X-WaysTrainingImages',
+    path = os.path.join(testdata.PRIVATE, 'X-WaysTrainingImages',
                         '12 TB NTFS.e01')
     if not os.path.exists(path):
         pytest.skip("private X-Ways training images (local only)")

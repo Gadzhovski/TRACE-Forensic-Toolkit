@@ -1,6 +1,6 @@
 """Write manifests of test images (see trace_app/core/manifest.py).
 
-    python -m tests.manifest test_images/7-ntfs-undel.dd -o tests/manifests
+    python -m tests.manifest test_images/ci/7-ntfs-undel.dd -o tests/expected/manifests
 """
 
 import argparse

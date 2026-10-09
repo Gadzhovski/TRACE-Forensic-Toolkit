@@ -13,8 +13,9 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 UTC = datetime.timezone.utc
 
 
@@ -23,7 +24,7 @@ def sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     with open(path, 'rb') as handle:
         return handle.read()
 
@@ -309,8 +310,7 @@ def test_a_real_ubuntu_image_end_to_end():
     the files GTK remembers, from one run."""
     from trace_app.core import activity
     from trace_app.core.image_handler import ImageHandler
-    from tests.conftest import IMAGE_DIR
-    path = os.path.join(IMAGE_DIR, 'ubnist1.casper-rw.gen3.E01')
+    path = testdata.locate('ubnist1.casper-rw.gen3.E01') or ''
     if not os.path.exists(path):
         pytest.skip("ubnist1.casper-rw.gen3.E01 is not in test_images/")
     handler = ImageHandler(path)

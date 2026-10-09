@@ -9,7 +9,7 @@ import zipfile
 
 import pytest
 
-from tests.conftest import image_path  # noqa: F401  (sets up isolation)
+from tests.conftest import data_path, image_path  # noqa: F401  (sets up isolation)
 
 
 # --- helpers ------------------------------------------------------------------
@@ -545,8 +545,7 @@ def test_heic_photos_give_up_their_exif():
     any other -- previewed, and its EXIF read by the photo module."""
     pytest.importorskip('pi_heif')
     from trace_app.core.content_checks import photo_metadata
-    path = os.path.join(os.path.dirname(image_path('carve-corpus.dd')),
-                        'carve_samples', 'L_exif_xmp_iptc.heic')
+    path = data_path('corpus', 'L_exif_xmp_iptc.heic')
     with open(path, 'rb') as handle:
         facts = photo_metadata(handle.read())
     assert facts['make'] == 'SONY' and facts['model'] == 'ILCE-7SM3'

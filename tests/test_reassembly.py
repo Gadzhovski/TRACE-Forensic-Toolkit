@@ -4,7 +4,7 @@
 Every input is generated here: a real ZIP and a real PDF, cut at sector
 boundaries inside the members or streams whose checksums must then prove
 each split, with foreign bytes laid in the gaps. The DFRWS images, where the same
-thing happens to real files, are scored by tools/carve_score.py.
+thing happens to real files, are scored by tools/score/carve_score.py.
 """
 
 import io
@@ -15,6 +15,7 @@ import sqlite3
 import zipfile
 
 import pytest
+from tools import testdata
 
 SECTOR = 512
 
@@ -318,7 +319,7 @@ def _rebuilt_against_key(path, name, reassemble, rebuilt):
     from tests.conftest import ROOT
     from trace_app.core import carving_formats as formats
 
-    with open(os.path.join(ROOT, 'tools', 'carve_ground_truth.json'),
+    with open(os.path.join(ROOT, 'tests', 'expected', 'carve_ground_truth.json'),
               encoding='utf-8') as handle:
         key = json.load(handle)[name]['files']
     with open(path, 'rb') as handle:
@@ -348,12 +349,11 @@ def test_a_pdf_split_by_an_ext2_indirect_block_is_rebuilt():
 
 def test_dfrws_2006_fragmented_zips_are_rebuilt():
     """The two ZIPs DFRWS 2006 stores in two fragments, byte-exact. The
-    DFRWS images are scored locally by tools/carve_score.py and are not
+    DFRWS images are scored locally by tools/score/carve_score.py and are not
     fetched in CI, so this one skips without them even there."""
-    from tests.conftest import IMAGE_DIR
     from trace_app.core.reassembly import reassemble_zip
     name = 'dfrws-2006-challenge.raw'
-    path = os.path.join(IMAGE_DIR, name)
+    path = testdata.locate(name) or ''
     if not os.path.exists(path):
         pytest.skip(f"{name} is not in test_images/ (not used by CI)")
     _rebuilt_against_key(path, name, reassemble_zip, {'4b.zip', '4c.zip'})

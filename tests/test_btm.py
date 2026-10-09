@@ -2,8 +2,8 @@
 among the autostarts (core/persistence_unix.py).
 
 The files are BTMParser's BackgroundItems-v13.btm and macos-loginitems'
-v4 and pre-Ventura backgrounditems.btm (tools/fetch_artifact_samples.py
-in test_images/artifact_samples); the values asserted are the ones their
+v4 and pre-Ventura backgrounditems.btm (tools/testdata/samples.py
+in test_images/samples); the values asserted are the ones their
 own tests publish -- 1Password Launcher's record, Syncthing's path and
 creation, PoisonApple's login item -- plus what TRACE reads beyond them:
 a helper's whole path inside its app, and what registered an item.
@@ -17,8 +17,9 @@ import shutil
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 UTC = datetime.timezone.utc
 
 
@@ -27,7 +28,7 @@ def sample_path(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     return path
 
 

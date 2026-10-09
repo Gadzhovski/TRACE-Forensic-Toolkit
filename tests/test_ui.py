@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from tests.conftest import image_path, pump
+from tools import testdata
 
 pytestmark = [pytest.mark.ui, pytest.mark.images]
 
@@ -1165,10 +1166,10 @@ def test_activity_is_a_job_a_tab_and_a_tree_node(qapp, window, truth):
 
 def _artifact_sample(name):
     from tests.conftest import ROOT
-    path = os.path.join(ROOT, 'test_images', 'artifact_samples', name)
+    path = os.path.join(testdata.SAMPLES, name)
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
-            pytest.fail(f"{name} missing: run tools/fetch_artifact_samples.py")
+            pytest.fail(f"{name} missing: run python -m tools.testdata.fetch --group samples")
         pytest.skip(f"{name} missing")
     return path
 
@@ -1260,10 +1261,10 @@ def test_a_mailbox_browses_like_an_archive(qapp, window):
     from PySide6.QtCore import Qt
     from tests.conftest import ROOT
     from trace_app.core.containers import ByteWindow
-    path = os.path.join(ROOT, 'test_images', 'carve_samples',
+    path = os.path.join(testdata.CORPUS_SAMPLES,
                         'example-2013.ost')
     if not os.path.exists(path):
-        pytest.skip("example-2013.ost missing: run tools/carve_corpus.py")
+        pytest.skip("example-2013.ost missing: run tools/testdata/build/carve_corpus.py")
     with open(path, 'rb') as handle:
         data = handle.read()
     stream = ByteWindow(lambda o, n: data[o:o + n], 0, len(data))
@@ -2001,9 +2002,9 @@ def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
     from trace_app.core import content_checks
     from trace_app.core.case import make_artifact_ref
     from tests.conftest import ROOT
-    path = os.path.join(ROOT, 'test_images', 'carve_samples', 'pageant.exe')
+    path = os.path.join(testdata.CORPUS_SAMPLES, 'pageant.exe')
     if not os.path.exists(path):
-        pytest.skip("run tools/carve_corpus.py")
+        pytest.skip("run tools/testdata/build/carve_corpus.py")
     with open(path, 'rb') as handle:
         data = handle.read()
     evidence = window.case.evidence()[0]['id']
@@ -2042,10 +2043,10 @@ def test_an_ad1_opens_as_a_tree_of_files(qapp, stubbed_dialogs):
     -- there are files, not a disk."""
     from tests.conftest import ROOT
     from trace_app.ui.main_window import MainWindow
-    path = os.path.join(ROOT, 'test_images', 'artifact_samples',
+    path = os.path.join(testdata.SAMPLES,
                         'text-and-pictures.ad1')
     if not os.path.exists(path):
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     window = MainWindow()
     try:
         assert window.open_evidence_image(path)
@@ -2178,7 +2179,7 @@ def test_media_says_what_it_is_and_switches_after_playing(qapp):
 ])
 def test_video_shows_its_first_frame_steps_and_saves(qapp, tmp_path, name,
                                                      size, fps):
-    """Real video (CC0 clips, tools/fetch_test_images.py): the first frame
+    """Real video (CC0 clips, tools/testdata/fetch.py): the first frame
     is shown with nothing playing, the line gives size and rate, a frame
     step moves one frame and stays paused, and Save Frame writes that frame
     as a PNG named after the file and the moment."""

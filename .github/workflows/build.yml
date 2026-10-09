@@ -92,17 +92,20 @@ jobs:
         shell: pwsh
         run: ./install_windows.ps1 -Yes
 
-      - name: Cache the self-test images
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      # The same cache as the tests' CI data set (tests.yml), restored
+      # only: it holds every self-test image.
+      - name: Restore the self-test images
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
-          path: test_images
-          key: build-images-${{ hashFiles('tools/fetch_test_images.py', 'build_app.py') }}
+          path: test_images/ci
+          key: test-data-ci-${{ hashFiles('tools/testdata/catalog.py') }}
+          enableCrossOsArchive: true
 
       - name: Fetch and verify the self-test images
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" tools/fetch_test_images.py ntfs1-gen2.E01 8-jpeg-search.dd \
+          "$PY" -m tools.testdata.fetch ntfs1-gen2.E01 8-jpeg-search.dd \
             dfr-01-xfat.dd ext3-img-kw-1.dd image.gen1.dmg iso-endian.iso
 
       - name: Build, package and self-test

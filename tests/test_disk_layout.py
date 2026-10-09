@@ -5,11 +5,11 @@ import os
 
 import pytest
 
-from tests.conftest import ROOT
+import tests.conftest  # noqa: F401  (sets up isolation)
+from tools import testdata
 
-IMAGES = os.path.join(ROOT, 'test_images')
-EXTENDED = os.path.join(IMAGES, 'ext-part-test-2.dd')
-PLAIN = os.path.join(IMAGES, '8-jpeg-search.dd')
+EXTENDED = testdata.locate('ext-part-test-2.dd') or 'ext-part-test-2.dd'
+PLAIN = testdata.locate('8-jpeg-search.dd') or '8-jpeg-search.dd'
 
 
 @pytest.mark.skipif(not os.path.exists(EXTENDED),

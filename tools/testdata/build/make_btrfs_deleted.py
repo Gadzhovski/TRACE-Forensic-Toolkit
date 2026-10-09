@@ -7,14 +7,14 @@ deterministic files on a loop-mounted Btrfs, deletes them in a fixed
 order, and records the answer key -- each deleted file's path, size and
 SHA-256 -- beside the image.
 
-    sudo python3 tools/make_btrfs_deleted.py [folder]     # Linux, root
+    sudo python3 tools/testdata/build/make_btrfs_deleted.py [folder]     # Linux, root
 
 Needs mkfs.btrfs (btrfs-progs), chattr and a kernel with Btrfs. CI builds
 it on Ubuntu (tests.yml); on Windows or macOS, in a privileged container:
 
     docker run --rm --privileged -v "$PWD:/src" -w /src debian:bookworm \\
         sh -c "apt-get update -qq && apt-get install -y -qq btrfs-progs \\
-               e2fsprogs python3 >/dev/null && python3 tools/make_btrfs_deleted.py"
+               e2fsprogs python3 >/dev/null && python3 tools/testdata/build/make_btrfs_deleted.py"
 
 What is in it:
 
@@ -146,9 +146,10 @@ def build(folder):
 
 
 def main():
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))))
     folder = sys.argv[1] if len(sys.argv) > 1 else \
-        os.path.join(root, 'test_images')
+        os.path.join(root, 'test_images', 'built')
     if os.geteuid() != 0:
         sys.exit("Run as root: the volume is loop-mounted")
     print(build(folder))

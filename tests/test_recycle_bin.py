@@ -16,8 +16,9 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-IMAGE = os.path.join(ROOT, 'test_images', 'dfr-01-recycle-ntfs.dd')
+IMAGE = testdata.locate('dfr-01-recycle-ntfs.dd') or ''
 SID = 'S-1-5-21-1906619128-910460487-204217675-1003'
 BIN = f'/$RECYCLE.BIN/{SID}'
 
@@ -27,7 +28,7 @@ def case(tmp_path_factory):
     if not os.path.exists(IMAGE):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail("dfr-01-recycle-ntfs.dd missing")
-        pytest.skip("run tools/fetch_test_images.py")
+        pytest.skip("run tools/testdata/fetch.py")
     from trace_app.core import activity, deleted
     from trace_app.core.case import Case
     from trace_app.core.image_handler import ImageHandler

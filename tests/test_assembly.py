@@ -6,7 +6,7 @@ device, checked against the contents its own tests publish -- whole, with
 a device missing where the profile allows it, and refused where it does
 not.
 
-md: arrays mdadm itself made (tools/make_md_raid.py: every RAID level,
+md: arrays mdadm itself made (tools/testdata/build/make_md_raid.py: every RAID level,
 superblocks 0.90 / 1.0 / 1.2, two RAID5 layouts, a member inside a GPT
 partition) with each file's SHA-256 as the kernel wrote it. They need root
 and a loop device to build, so CI builds them on Linux and these tests

@@ -1543,7 +1543,7 @@
   ]
  },
  "carve-corpus.dd": {
-  "source": "tools/carve_corpus.py (built locally from pinned public samples)",
+  "source": "tools/testdata/build/carve_corpus.py (built locally from pinned public samples)",
   "title": "Real published files of every format TRACE carves that the DFTT/DFRWS images do not hold, among random filler and signature decoys",
   "note": "Deterministic: fixed seed, SHA-256-pinned inputs. Sources are listed in carve_corpus.py.",
   "sha256": "ab98692c38c4f1b8e347e0cb9e8abf26d8c96dbce1e00eb9db0f05e569a94551",

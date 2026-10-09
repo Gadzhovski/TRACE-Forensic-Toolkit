@@ -5,9 +5,9 @@ with the images at https://cfreds-archive.nist.gov/dfr-test-images.html.
 It is parsed here rather than transcribed by hand, so the ground truth is
 the publisher's document and nothing else:
 
-    python tools/nist_dfr_key.py test_images/nist/dfr/setup-july-10-2012.pdf
+    python tools/score/nist_dfr_key.py test_images/nist/dfr/setup-july-10-2012.pdf
 
-writes tools/nist_dfr_ground_truth.json. Per image ('ext-07', 'fat-04',
+writes tests/expected/nist_dfr_ground_truth.json. Per image ('ext-07', 'fat-04',
 ...): the partitions' start sectors; every deleted file (name, size); the
 MAC times `stat` printed just before deletion (UTC and local); the key's count of
 each file's sectors and of those still intact at the end; when each was
@@ -34,7 +34,8 @@ except ImportError:                                   # pragma: no cover
     ZoneInfo = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-OUTPUT = os.path.join(HERE, 'nist_dfr_ground_truth.json')
+OUTPUT = os.path.join(os.path.dirname(os.path.dirname(HERE)), 'tests',
+                      'expected', 'nist_dfr_ground_truth.json')
 #: SHA-256 of setup-july-10-2012.pdf as published.
 PDF_SHA256 = None
 

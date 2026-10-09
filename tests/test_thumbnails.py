@@ -14,8 +14,9 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 
 
 def sample(name):
@@ -23,7 +24,7 @@ def sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     with open(path, 'rb') as handle:
         return handle.read()
 
@@ -227,8 +228,7 @@ def test_a_real_xp_image_end_to_end(tmp_path):
     from trace_app.core import thumbnails
     from trace_app.core.case import Case
     from trace_app.core.image_handler import ImageHandler
-    from tests.conftest import IMAGE_DIR
-    path = os.path.join(IMAGE_DIR, 'nps-2009-domexusers.E01')
+    path = testdata.locate('nps-2009-domexusers.E01') or ''
     if not os.path.exists(path):
         pytest.skip("nps-2009-domexusers.E01 is not in test_images/")
     handler = ImageHandler(path)

@@ -37,9 +37,9 @@ SHA-256 before it is kept:
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
-test_images/artifact_samples/ (gitignored, like every test image).
+test_images/samples/ (gitignored, like every test image).
 
-    python tools/fetch_artifact_samples.py
+    python -m tools.testdata.fetch --group samples
 """
 
 import hashlib
@@ -47,8 +47,9 @@ import os
 import sys
 import urllib.parse
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FOLDER = os.path.join(ROOT, 'test_images', 'artifact_samples')
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+FOLDER = os.path.join(ROOT, 'test_images', 'samples')
 
 _PLASO = ('https://raw.githubusercontent.com/log2timeline/plaso/'
           'ac6460d7350c9160bdf69161726ee0e8d4545874/test_data/')
@@ -947,11 +948,8 @@ SAMPLES = {
 
 def _download(url):
     """Fetch with retries and mirrors (tools/download.py)."""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    try:
-        from download import download
-    finally:
-        sys.path.pop(0)
+    sys.path.insert(0, ROOT)
+    from tools.testdata.download import download
     return download(url)
 
 

@@ -1,17 +1,17 @@
 """Score TRACE's deleted-file listing against NIST's DFR answer key.
 
-    python tools/dfr_score.py                 # every image present
-    python tools/dfr_score.py ext-07 fat-02   # some
-    python tools/dfr_score.py -v ext-07       # and every disagreement
-    python tools/dfr_score.py -j 6            # six images at a time
+    python tools/score/dfr_score.py                 # every image present
+    python tools/score/dfr_score.py ext-07 fat-02   # some
+    python tools/score/dfr_score.py -v ext-07       # and every disagreement
+    python tools/score/dfr_score.py -j 6            # six images at a time
 
 ext2/ext3 images take a minute or more each: NIST filled their volumes
 with one file of ~130,000 runs, and The Sleuth Kit's run list is
 quadratic to build (opening that file's metadata takes ~50 s).
 
 The images (dfr-NN[-variant]-<fs>.dd) are read from test_images/nist/dfr
-or test_images; the key is tools/nist_dfr_ground_truth.json, parsed from
-NIST's own document by tools/nist_dfr_key.py. Per image:
+or test_images; the key is tests/expected/nist_dfr_ground_truth.json,
+parsed from NIST's own document by tools/score/nist_dfr_key.py. Per image:
 
   listed     deleted files in the key that TRACE lists by name
   state      of the key's files with an intact count, those whose TRACE
@@ -61,11 +61,11 @@ import sys
 from collections import Counter, defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, ROOT)
-KEY = os.path.join(HERE, 'nist_dfr_ground_truth.json')
+KEY = os.path.join(ROOT, 'tests', 'expected', 'nist_dfr_ground_truth.json')
 FOLDERS = [os.path.join(ROOT, 'test_images', 'nist', 'dfr'),
-           os.path.join(ROOT, 'test_images')]
+           os.path.join(ROOT, 'test_images', 'ci')]
 SECTOR = 512
 
 

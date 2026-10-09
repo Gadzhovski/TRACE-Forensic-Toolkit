@@ -15,8 +15,9 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 
 #: Hives recovered by yarp, SHA-256 (as tests/test_regf_log.py).
 YARP = {
@@ -33,7 +34,7 @@ def _sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     with open(path, 'rb') as handle:
         data = handle.read()
     return lzma.decompress(data) if name.endswith('.xz') else data

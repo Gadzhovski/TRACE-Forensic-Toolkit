@@ -13,33 +13,38 @@ This reads the files a change touched and works out:
   imports count wherever they are. `trace_app.ui.main_window` and
   `trace_app.app` import nearly everything, so nothing is reached *through*
   them: the window's tests run when the window itself or a theme changes;
-* the public images to download -- only those the chosen test files name;
+* which data groups to restore -- the CI image set (test_images/ci),
+  the artifact samples, the carving corpus, the Linux-built images -- only
+  those the chosen test files read. Each group is one cache, keyed by its
+  catalog, so it is downloaded once and restored after that;
 * whether the carving score runs -- when a carver, or its scoring, changed.
 
 Anything it cannot place (an installer, requirements, the shared test setup,
-image access, an unknown path) runs everything, as does a push to the
-default branch, the weekly run and a manual run -- those also catch what
-the narrower rules above let through. Where it runs is `matrix`: a branch
+image access, an unknown path) runs everything, as do the weekly run and a
+manual run -- those also catch what the narrower rules above let through.
+A push to the default branch runs what that push changed. Only the CI
+data set is ever used here; the local, NIST and private data are for the
+maintainers' machines (tools/run_tests.py full). Where it runs is `matrix`: a branch
 push on Ubuntu with one Python, master and pull requests on every system,
 the weekly and manual runs on every system and Python. CI keeps
 TRACE_REQUIRE_IMAGES=1, so a test that needs an image this script did not
 fetch fails loudly rather than passing by skipping.
 
-    python tools/ci_select.py                    # what this branch would run
-    python tools/ci_select.py --base HEAD~3      # ... for the last 3 commits
-    python tools/ci_select.py --github           # in Actions: outputs + summary
+    python tools/testdata/ci_select.py               # what this branch would run
+    python tools/testdata/ci_select.py --base HEAD~3 # ... for the last 3 commits
+    python tools/testdata/ci_select.py --github      # in Actions: outputs + summary
 """
 
 import argparse
 import ast
-import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
 
 #: Where the tests run, by how close a change is to master (`matrix`):
 #: a branch push is a quick look on one machine; master and pull requests
@@ -65,7 +70,10 @@ FULL = (
     re.compile(r'^main\.py$'),
     re.compile(r'^\.github/workflows/tests\.yml$'),
     re.compile(r'^tests/conftest\.py$'),
-    re.compile(r'^tools/(ci_select|download|fetch_test_images|fetch_artifact_samples|carve_corpus|make_btrfs_deleted|make_md_raid|make_luks_lvm)\.py$'),
+    re.compile(r'^tools/fetch_test_images\.py$'),
+    # How the data is fetched, built and laid out (not NIST's own catalog,
+    # which CI never reads).
+    re.compile(r'^tools/testdata/(?!nist\.py$)'),
     re.compile(r'^trace_app/(__init__|app)\.py$'),
     re.compile(r'^trace_app/[^/]+/__init__\.py$'),
     re.compile(r'^trace_app/core/(image_handler|background|walk)\.py$'),
@@ -84,6 +92,10 @@ IGNORED = (
     re.compile(r'^docs/'),
     re.compile(r'^Icons_archive/'),
     re.compile(r'^test_images/README'),
+    # Data CI never has, and the local runner.
+    re.compile(r'^tools/testdata/nist\.py$'),
+    re.compile(r'^tools/run_tests\.py$'),
+    re.compile(r'^tools/score/(nist_dfr_key|nist_carving_truth)\.py$'),
     re.compile(r'^(build_app\.py|TRACE\.spec)$'),
     re.compile(r'^\.github/workflows/(build|release)\.yml$'),
     re.compile(r'^trace_app/selftest\.py$'),
@@ -101,7 +113,11 @@ HUBS = {'trace_app.ui.main_window', 'trace_app.app'}
 #: A change reaching any of these runs the carving score.
 CARVING_MODULES = re.compile(
     r'^trace_app\.core\.(carving\w*|carve_\w+|reassembly|deleted|slack)$')
-CARVING_FILES = re.compile(r'^tools/(carve_score\.py|carve_ground_truth\.json)$')
+CARVING_FILES = re.compile(
+    r'^(tools/score/carve_score\.py|tests/expected/carve_ground_truth\.json)$')
+#: Answer keys read by one test file only.
+KEY_FILES = {'tests/expected/nist_dfr_ground_truth.json':
+             'tests.test_nist_cfreds'}
 #: What the carving score reads.
 CARVE_SCORE_IMAGES = ['11-carve-fat.dd', '12-carve-ext2.dd']
 
@@ -211,15 +227,10 @@ def dependents(graph, changed):
 # -- images --------------------------------------------------------------
 
 def catalog():
-    """The image names tools/fetch_test_images.py can fetch."""
-    path = os.path.join(ROOT, 'tools', 'fetch_test_images.py')
-    with open(path, encoding='utf-8') as handle:
-        tree = ast.parse(handle.read())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-                getattr(t, 'id', '') == 'CATALOG' for t in node.targets):
-            return [key.value for key in node.value.keys]
-    return []
+    """The CI image set (tools/testdata/catalog.py)."""
+    sys.path.insert(0, ROOT)
+    from tools.testdata.catalog import CI
+    return list(CI)
 
 
 #: Names of the images Linux CI builds (tests.yml's "Build the Linux
@@ -250,11 +261,15 @@ def needs(test_files, graph):
                 text += handle.read()
     images = [name for name in catalog() if name in text]
     if 'test_image_handling' in text or 'manifests' in text:
-        images += [name[:-len('.json')] for name in sorted(os.listdir(
-            os.path.join(ROOT, 'tests', 'manifests'))) if name.endswith('.json')
-            and name[:-len('.json')] in catalog()]
-    return (sorted(set(images)), 'artifact_samples' in text,
-            'carve-corpus' in text or 'carve_samples' in text,
+        folder = os.path.join(ROOT, 'tests', 'expected', 'manifests')
+        images += [name[:-len('.manifest.json')]
+                   for name in sorted(os.listdir(folder))
+                   if name[:-len('.manifest.json')] in catalog()]
+    samples = ('SAMPLES', "data_path('samples'")
+    corpus = ('carve-corpus', 'CORPUS_SAMPLES', "data_path('corpus'",
+              'carve_corpus')
+    return (sorted(set(images)), any(word in text for word in samples),
+            any(word in text for word in corpus),
             any(name in text for name in LINUX_BUILT))
 
 
@@ -288,7 +303,11 @@ def plan(files, full_reason=None):
                     full_reason = f'{path} was removed'
                     break
                 changed_modules.add(module)
-            elif path.startswith('tests/manifests/') or path == 'tests/manifest.py':
+            elif path in KEY_FILES:
+                selected.add(KEY_FILES[path])
+                reasons.append(f'{path}: {KEY_FILES[path].split(".")[-1]}')
+            elif path.startswith('tests/expected/manifests/') or \
+                    path == 'tests/manifest.py':
                 selected.add('tests.test_image_handling')
                 reasons.append(f'{path}: image handling')
             elif any(p.search(path) for p in INTERFACE):
@@ -307,6 +326,11 @@ def plan(files, full_reason=None):
     reached = dependents(graph, changed_modules)
     for module in sorted(changed_modules):
         hits = sorted(tests & dependents(graph, {module}))
+        if not hits and module.startswith('trace_app.'):
+            # Reached only through imports inside functions, which are not
+            # followed: which tests run it cannot be told -- all of them.
+            return plan(files, f'no test imports {module} directly; '
+                               f'it may be reached from anywhere')
         reasons.append(f'{module}: ' + (', '.join(
             h.split('.')[-1] for h in hits) or 'no test reaches it'))
     selected |= tests & reached
@@ -371,13 +395,27 @@ def _github_base():
     if event == 'pull_request':
         return payload['pull_request']['base']['sha'], None
     if os.environ.get('GITHUB_REF') == f'refs/heads/{default}':
-        return None, f'a push to {default} tests everything'
+        # What this push brought: everything since the commit it moved the
+        # branch from. A new branch, or a forced push that rewrote it, has
+        # no such commit here: everything.
+        before = payload.get('before') or ''
+        if before.strip('0') and _known(before):
+            return before, None
+        return None, f'a push to {default} with no previous commit to compare'
     # A branch: everything it changed since leaving the default branch --
     # not since the previous push, which a newer push may have cancelled.
     try:
         return _git('merge-base', f'origin/{default}', 'HEAD'), None
     except subprocess.CalledProcessError:
         return None, f'no common history with {default}'
+
+
+def _known(commit):
+    try:
+        _git('cat-file', '-e', f'{commit}^{{commit}}')
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 
 def main(argv=None):
@@ -409,11 +447,9 @@ def main(argv=None):
         'full': 'true' if result['full'] else 'false',
         # Empty on a full run: pytest's own testpaths, every file.
         'tests': ' '.join(result['tests']),
-        # Empty on a full run: the fetcher's whole catalog.
-        'images': '' if result['full'] else ' '.join(result['images']),
+        # The CI image set is restored whole (one cache, tools/testdata
+        # fetch --group ci) whenever a chosen test reads any of it.
         'fetch_images': 'true' if result['images'] else 'false',
-        'images_key': hashlib.sha256(' '.join(result['images']).encode())
-                             .hexdigest()[:12],
         'artifacts': 'true' if result['artifacts'] else 'false',
         'corpus': 'true' if result['corpus'] else 'false',
         'linux_images': 'true' if result['linux_images'] else 'false',
