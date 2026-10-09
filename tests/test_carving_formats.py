@@ -3,7 +3,7 @@
 Most inputs are generated here with the standard library and Pillow; one is
 the example the MS-SHLLINK specification itself publishes. Real published
 files of every format are the job of the carving corpus
-(tools/carve_corpus.py), checked at the end against its answer key.
+(tools/testdata/build/carve_corpus.py), checked at the end against its answer key.
 """
 
 import base64
@@ -21,6 +21,7 @@ import zipfile
 import pytest
 
 from tests.conftest import ROOT, image_path
+from tools import testdata
 
 SECTOR = 512
 
@@ -232,12 +233,7 @@ def test_embedded_dates_are_read_with_their_source(tmp_path):
 def test_random_data_and_bare_signatures_are_not_carved():
     """A signature is not a file: each format's magic, followed by junk,
     must produce nothing -- and neither must random data."""
-    sys_path_tools = os.path.join(ROOT, 'tools')
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        'carve_corpus', os.path.join(sys_path_tools, 'carve_corpus.py'))
-    corpus = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(corpus)
+    from tools.testdata.build import carve_corpus as corpus
 
     rng = random.Random(99)
     image = bytearray(rng.randbytes(8 * 1024 * 1024))
@@ -280,11 +276,11 @@ def test_a_carved_zip_is_named_for_what_it_is():
 
 @pytest.mark.images
 def test_the_real_file_corpus_matches_its_answer_key():
-    """Real published files of every format (tools/carve_corpus.py): each
+    """Real published files of every format (tools/testdata/build/carve_corpus.py): each
     recovered byte-exact where the key says, and nothing else."""
     import hashlib
     path = image_path('carve-corpus.dd')
-    with open(os.path.join(ROOT, 'tools', 'carve_ground_truth.json'),
+    with open(os.path.join(ROOT, 'tests', 'expected', 'carve_ground_truth.json'),
               encoding='utf-8') as handle:
         key = json.load(handle)['carve-corpus.dd']
     with open(path, 'rb') as handle:
@@ -303,10 +299,10 @@ def test_the_real_file_corpus_matches_its_answer_key():
 
 # --- camera raw and PSB --------------------------------------------------------------
 
-CARVE_SAMPLES = os.path.join(ROOT, 'test_images', 'carve_samples')
+CARVE_SAMPLES = testdata.CORPUS_SAMPLES
 
 #: (sample, extension, bytes the format's structure records). The samples are
-#: raw.pixls.us's (CC0) and psd-tools' (MIT), fetched by tools/carve_corpus.py.
+#: raw.pixls.us's (CC0) and psd-tools' (MIT), fetched by tools/testdata/build/carve_corpus.py.
 #: ARW and DNG end with bytes nothing in them records (zero padding after the
 #: last block; 52 trailing bytes after the last tile): carved to what is
 #: recorded, like a registry hive or an EVTX log.
@@ -331,7 +327,7 @@ def _raw_sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/carve_corpus.py")
+        pytest.skip("run tools/testdata/build/carve_corpus.py")
     with open(path, 'rb') as handle:
         return handle.read()
 

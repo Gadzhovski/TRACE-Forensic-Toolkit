@@ -7,6 +7,14 @@ in sector 0. Adding the slots up counts space twice. `regions(handler)`
 lays them out as the disk is: every sector belongs to one region -- a
 volume over a table over unallocated space, containers left out because
 what they contain is shown -- in disk order, with what each volume holds.
+
+It is the one account of the disk the window gives: the tree's partition,
+table and free-space nodes, the Image Information map and its volume table
+all name a region with `label(region)` -- the name the tree has always used
+(ImageHandler.partition_label: 'GPT Header', 'Linux Filesystem @ 4096'),
+free space by where it really starts ('Unallocated Space @ 34', not
+TSK's slot from sector 0, which overlaps the partition table), and a file
+system no table entry points at as 'Lost partition @ n'.
 """
 
 import logging
@@ -14,8 +22,10 @@ import logging
 logger = logging.getLogger('TRACE.DiskLayout')
 
 VOLUME, TABLE, UNALLOCATED = 'volume', 'table', 'unallocated'
+#: A file system no partition table entry points at (lost_partitions).
+LOST = 'lost'
 #: Which claimant owns a sector two slots cover.
-_PRIORITY = {VOLUME: 3, TABLE: 2, UNALLOCATED: 1}
+_PRIORITY = {VOLUME: 4, TABLE: 3, LOST: 2, UNALLOCATED: 1}
 #: Extended partitions -- containers of logical ones.
 _CONTAINER_TYPES = ('(0x05)', '(0x0f)', '(0x85)', '(0x0F)')
 
@@ -55,7 +65,10 @@ def _describe(handler, start):
 
 def regions(handler):
     """[{'kind', 'start', 'sectors', 'bytes', 'name', 'slot', 'description',
-    'encryption'}] covering the image from sector 0 to its end, in order."""
+    'encryption', 'label', 'volume_start'}] covering the image from sector 0
+    to its end, in order. 'name' is a volume's file system; 'label' what it
+    is called (`label()` adds the file system); 'volume_start' the sector
+    its slot starts at (where its file system is opened)."""
     sector = int(getattr(handler, 'sector_size', 512) or 512)
     total = int(handler.get_size() or 0)
     total_sectors = -(-total // sector) if total else 0
@@ -74,13 +87,28 @@ def regions(handler):
             continue
         claims.append((int(start), int(start) + int(length), kind, slot,
                        description))
+    try:
+        lost = handler.lost_partitions() if claims else []
+    except Exception as exc:
+        logger.debug("No lost partitions: %s", exc)
+        lost = []
+    for partition in lost:
+        if partition.get('overlaps') is not None:
+            continue          # inside an older lost one: that one is drawn
+        begin = int(partition['start'])
+        length = -(-int(partition['size']) // sector)
+        claims.append((begin, begin + length, LOST, None, 'Lost partition'))
 
     if not claims:
         # One file system across the image, or nothing recognisable.
         name, encryption = _describe(handler, 0)
         kind = VOLUME if name or encryption else UNALLOCATED
-        return [_region(kind, 0, total_sectors, sector, name, None,
-                        'Whole image', encryption)] if total_sectors else []
+        found = _region(kind, 0, total_sectors, sector, name, None,
+                        'Whole image', encryption)
+        found['label'] = 'Volume' if kind == VOLUME else \
+            'Unallocated Space @ 0'
+        found['volume_start'], found['lost'] = 0, False
+        return [found] if total_sectors else []
 
     # Every boundary; each interval goes to its most specific claimant.
     points = sorted({0, total_sectors} |
@@ -105,12 +133,29 @@ def regions(handler):
         owner = piece['owner']
         name, encryption = (None, None)
         description = owner[4] if owner else 'Unallocated'
-        if kind == VOLUME:
+        if kind in (VOLUME, LOST):
             name, encryption = _describe(handler, owner[0])
-        found.append(_region(kind, piece['begin'],
-                             piece['end'] - piece['begin'], sector, name,
-                             slot, description, encryption))
+        region = _region(VOLUME if kind == LOST else kind, piece['begin'],
+                         piece['end'] - piece['begin'], sector, name,
+                         slot, description, encryption)
+        region['lost'] = kind == LOST
+        region['volume_start'] = owner[0] if owner else piece['begin']
+        region['label'] = _name(handler, kind, piece['begin'], owner)
+        found.append(region)
     return found
+
+
+def _name(handler, kind, begin, owner):
+    """What the tree calls the slot a region belongs to."""
+    if kind == UNALLOCATED:
+        return f"Unallocated Space @ {begin}"
+    if kind == LOST:
+        return f"Lost partition @ {owner[0]}"
+    try:
+        return handler.partition_label(owner[0], owner[4].encode('utf-8'))
+    except Exception as exc:
+        logger.debug("No name for the slot at %s: %s", owner[0], exc)
+        return owner[4]
 
 
 def _region(kind, start, sectors, sector_size, name, slot, description,
@@ -120,15 +165,28 @@ def _region(kind, start, sectors, sector_size, name, slot, description,
             'description': description, 'encryption': encryption}
 
 
+#: How an encrypted volume's scheme is named.
+ENCRYPTION_NAMES = {'bitlocker': 'BitLocker', 'fvde': 'FileVault',
+                    'luks': 'LUKS'}
+
+
+def contents(region):
+    """What a volume region holds: its file system, its encryption, or
+    'no file system' -- None for a table or free space."""
+    if region['kind'] != VOLUME:
+        return None
+    if region.get('encryption'):
+        return ENCRYPTION_NAMES.get(region['encryption'], 'Encrypted')
+    return region.get('name') or 'no file system'
+
+
 def label(region):
-    """How a region is named to an examiner."""
-    if region['kind'] == TABLE:
-        return "Partition table"
-    if region['kind'] == UNALLOCATED:
-        return "Unallocated"
-    if region['encryption']:
-        names = {'bitlocker': 'BitLocker', 'fvde': 'FileVault',
-                 'luks': 'LUKS'}
-        return f"{names.get(region['encryption'], 'Encrypted')} volume"
-    return f"{region['name']} volume" if region['name'] else \
-        "Unrecognised volume"
+    """How a region is named to an examiner -- as the tree names it, with
+    what a volume holds: 'Linux Filesystem @ 4096 (Ext4)', 'GPT Header',
+    'Unallocated Space @ 34'."""
+    name = region.get('label')
+    if name is None:              # a region made by hand (tests, old data)
+        name = {TABLE: "Partition table",
+                UNALLOCATED: "Unallocated"}.get(region['kind'], "Volume")
+    what = contents(region)
+    return f"{name} ({what})" if what else name

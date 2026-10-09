@@ -19,6 +19,11 @@ Linux:
 macOS: launch agents and daemons outside /System -- /Library and each
 user's ~/Library -- with Program / ProgramArguments, RunAtLoad and
 KeepAlive. Apple's own (in /System) are part of the sealed system volume.
+And Background Task Management (activity/btm.py): every login item,
+agent and daemon macOS 13+ registered, per user, whether it is enabled
+and allowed, its developer and team; before 13, each user's
+backgrounditems.btm -- including what registered an item (System Events:
+added by AppleScript, as persistence tools do).
 
 Grading looks at what an entry starts: a program in /tmp, /var/tmp or
 /dev/shm, a hidden file, a download piped into a shell, a reverse shell
@@ -349,6 +354,67 @@ def _macos(volume, homes, tick):
                 runs_at_load='yes' if at_load else None,
                 keeps_alive='yes' if alive else None,
                 basis="the plist's last change"))
+    found += _background_items(volume, homes, tick)
+    return found
+
+
+def _background_items(volume, homes, tick):
+    """Background Task Management's records (activity/btm.py)."""
+    from trace_app.core.activity import _split, btm
+    files = []
+    for root in (('private', 'var', 'db'), ('var', 'db')):
+        folder = volume.find(*root, 'com.apple.backgroundtaskmanagement')
+        if folder is not None:
+            files += [(entry, '') for entry in volume.children(folder)
+                      if entry.name.lower().startswith('backgrounditems')
+                      and entry.name.lower().endswith('.btm')]
+            break
+    for user, home in homes:
+        entry = volume.find(*_split(home.path), 'Library',
+                            'Application Support',
+                            'com.apple.backgroundtaskmanagementagent',
+                            'backgrounditems.btm')
+        if entry is not None and not entry.is_dir:
+            files.append((entry, user))
+    if not files:
+        return []
+    names = {}
+    for root in (('private', 'var', 'db'), ('var', 'db')):
+        users = volume.find(*root, 'dslocal', 'nodes', 'Default', 'users')
+        if users is not None:
+            names = btm.account_uuids(
+                volume.read(e) for e in volume.children(users)
+                if e.name.endswith('.plist') and not e.is_dir)
+            break
+    found = []
+    for entry, owner in files:
+        tick(entry.path)
+        try:
+            items = btm.items(volume.read(entry))
+        except btm.BtmError as exc:
+            logger.debug("%s not read: %s", entry.path, exc)
+            continue
+        for item in items:
+            if not (item['name'] or item['url'] or item['executable']):
+                continue        # a developer's entry: a grouping, no program
+            command = ' '.join(filter(None, (
+                item['executable'] or item['url'], item['arguments'])))
+            found.append(_entry(
+                'Background item', item['name'] or item['identifier'],
+                command, item['modified'],
+                user=owner or btm.user_label(item['user_uuid'], names),
+                source=entry.path, source_ref=volume.ref(entry),
+                enabled=item['enabled'],
+                kind=item['type_details'],
+                state=item['disposition_details'] or None,
+                developer=item['developer'], team=item['team'],
+                bundle=item['bundle'], parent=item['container'],
+                identifier=item['identifier'] if not item['legacy']
+                else None,
+                app=item['url'] if item['executable'] else None,
+                added_by=item['added_by'],
+                basis=None if item['modified'] else
+                "no time recorded for this item"))
     return found
 
 
@@ -433,11 +499,16 @@ def grade(entry):
     if location == 'cron' and entry['source'].split('/')[-2:-1] in (
             ['cron'], ['crontabs']):
         reasons.append("a user's own crontab")
-    if location in ('Launch agent', 'Launch daemon') and target and \
+    if location in ('Launch agent', 'Launch daemon',
+                    'Background item') and target and \
             not target.startswith(('/System/', '/usr/', '/Applications/',
                                    '/Library/', '/bin/', '/sbin/')):
         reasons.append("starts a program outside the system and "
                        "Applications folders")
+    if location == 'Background item' and \
+            'System Events' in (entry['detail'].get('added_by') or ''):
+        reasons.append("registered through System Events -- by an "
+                       "AppleScript, as persistence tools do")
     if location == 'SSH authorized key' and entry['user'] == 'root':
         reasons.append("lets this key log in as root")
     if location == 'rc.local':

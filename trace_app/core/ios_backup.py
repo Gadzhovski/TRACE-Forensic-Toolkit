@@ -557,13 +557,14 @@ def hash_folder(path, hashers, progress=None, chunk=1024 * 1024):
         for name in entries:
             full = os.path.join(folder, name)
             relative = '/' + os.path.relpath(full, path).replace(os.sep, '/')
-            files.append((relative, full))
+            files.append((relative, full, os.path.getsize(full)))
     files.sort()
-    total = sum(os.path.getsize(f) for _r, f in files) or 1
+    total = sum(size for _r, _f, size in files) or 1
     done = 0
-    for relative, full in files:
+    for relative, full, size in files:
         for hasher in hashers:
             hasher.update(relative.encode('utf-8', 'surrogateescape') + b'\0')
+        read = 0
         with open(full, 'rb') as handle:
             while True:
                 block = handle.read(chunk)
@@ -571,7 +572,13 @@ def hash_folder(path, hashers, progress=None, chunk=1024 * 1024):
                     break
                 for hasher in hashers:
                     hasher.update(block)
+                read += len(block)
                 done += len(block)
                 if progress:
                     progress(done, total)
+        # A file that changed while the backup was hashed: the hash
+        # would describe neither the backup before nor after.
+        if read != size:
+            raise OSError(f"{relative} changed while it was hashed "
+                          f"({size:,} -> {read:,} bytes)")
     return done

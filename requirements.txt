@@ -32,6 +32,7 @@ libewf-python>=20260924
 libvmdk-python>=20260714    # VMware VMDK virtual disks
 libvhdi-python>=20260901    # Hyper-V / Virtual PC VHD and VHDX
 libqcow-python>=20260703    # QEMU QCOW / QCOW2
+libphdi-python>=20260902    # Parallels Desktop disks (.hdd bundles)
 libmodi-python>=20260902    # Mac disk images: DMG (compressed too), sparse
                             # images and sparse bundles
 libbde-python>=20260916     # BitLocker volumes, unlocked with a key given
@@ -74,6 +75,14 @@ PyYAML>=6.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python
 cryptography>=46.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11'
                          # AES for encrypted iPhone backups (password given
                          # by the examiner); Windows on ARM wheels from 3.11
+msoffcrypto-tool>=5.4.2 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11'
+                         # password-protected Office documents, decrypted in
+                         # memory with the examiner's password (MIT, pure
+                         # Python; needs cryptography, hence its marker)
+dpkt>=1.9.8              # network captures: pcap / pcapng (BSD, pure Python)
+pefile>=2023.2.7,!=2024.8.26
+                         # imphash and Rich-header hashes (MIT, pure Python;
+                         # 2024.8.26 is the release PyInstaller refuses)
 requests>=2.31.0         # VirusTotal API
 # Zstandard in C (PEP 784's backport of 3.14's compression.zstd; PSF). Btrfs
 # volumes are zstd-compressed throughout on Fedora, and TRACE's own decoder

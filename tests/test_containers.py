@@ -1,8 +1,8 @@
 """Virtual disks, BitLocker, Volume Shadow Copies and Outlook mailboxes.
 
 The images are dfvfs's published test data, the mailboxes java-libpst's
-(all fetched and SHA-256 pinned by tools/fetch_artifact_samples.py and
-tools/carve_corpus.py). What each holds is fixed, so the assertions are about
+(all fetched and SHA-256 pinned by tools/testdata/samples.py and
+tools/testdata/build/carve_corpus.py). What each holds is fixed, so the assertions are about
 content -- a file's bytes, a snapshot's files -- not merely "it opened".
 """
 
@@ -14,9 +14,10 @@ import shutil
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
-CARVE_SAMPLES = os.path.join(ROOT, 'test_images', 'carve_samples')
+SAMPLES = testdata.SAMPLES
+CARVE_SAMPLES = testdata.CORPUS_SAMPLES
 
 PASSWORDS_NTFS = 126           # passwords.txt on the dfvfs NTFS volumes
 BDE_PASSWORD = 'bde-TEST'      # dfvfs's own tests use this
@@ -25,7 +26,7 @@ BDE_PASSWORD = 'bde-TEST'      # dfvfs's own tests use this
 def sample(name, folder=SAMPLES):
     path = os.path.join(folder, name)
     if not os.path.exists(path):
-        message = f"{name} is missing -- run tools/fetch_artifact_samples.py"
+        message = f"{name} is missing -- run python -m tools.testdata.fetch --group samples"
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)

@@ -12,7 +12,7 @@ index, search, reopen, and open the main window on it -- and records a
 manifest of what TRACE reads from each image (core/manifest.py).
 
 The build script compares those manifests with the ones the test suite
-checked by hand (tests/manifests/), so a packaged build is shown to read
+checked by hand (tests/expected/manifests/), so a packaged build is shown to read
 evidence exactly as the source does. It is also a validation step an examiner
 can run on an installed copy against a known image.
 
@@ -155,7 +155,7 @@ def _run(report, images, sandbox):
             if sys.version_info < (3, 12):
                 expected_missing.add('sigma')
             if sys.version_info < (3, 11):
-                expected_missing.add('ios_encrypted')
+                expected_missing |= {'ios_encrypted', 'office_encrypted'}
         missing = [c.key for c in capabilities.CAPABILITIES
                    if not c.available and c.key not in expected_missing]
         assert not missing, f"unavailable: {', '.join(missing)}"
@@ -359,6 +359,11 @@ def _case_workflow(check, report, images, sandbox, app):
             index.close()
             outcomes = case.verify_evidence()
             assert len(outcomes) == len(images), outcomes
+            # Hashed in full and judged: never changed or unreadable.
+            assert all(status in ('verified', 'baseline')
+                       for _row, status, _detail in outcomes), outcomes
+            audit = case.verify_audit()
+            assert audit['ok'], audit['problems']
         finally:
             case.close()
         return (f"analysed {counts} files; {found} found by name search; "

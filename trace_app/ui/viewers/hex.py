@@ -27,7 +27,7 @@ import bisect
 import logging
 
 from PySide6.QtCore import (QEvent, QObject, QRect, QSize, Qt, QThread,
-                            QTimer, Signal)
+                            QTimer, Signal, Slot)
 from PySide6.QtGui import (QAction, QActionGroup, QColor, QFont,
                            QFontMetrics, QKeySequence, QPalette,
                            QResizeEvent, QShortcut)
@@ -120,13 +120,19 @@ def printable(data):
 
 
 class _SearchWorker(QObject):
-    finished = Signal(list, int)
+    """Searches on a QThread it is moved to. `finished` carries the
+    matches, the needle's length and the search's generation, and must be
+    connected to bound methods of GUI objects only: a lambda or partial
+    connected to it runs in *this* object's thread, the worker's (the
+    results table was once filled from here and crashed)."""
+    finished = Signal(list, int, int)
 
-    def __init__(self, source, query_bytes, fold):
+    def __init__(self, source, query_bytes, fold, generation=0):
         super().__init__()
         self.source = source
         self.query_bytes = query_bytes
         self.fold = fold
+        self.generation = generation
         self.stopped = False
 
     def run(self):
@@ -138,7 +144,8 @@ class _SearchWorker(QObject):
             logger.warning("Hex search failed: %s", exc)
             matches = []
         if not self.stopped:
-            self.finished.emit(matches, len(self.query_bytes))
+            self.finished.emit(matches, len(self.query_bytes),
+                               self.generation)
 
 
 #: The theme's selection colour, for the ASCII characters of selected
@@ -1139,6 +1146,14 @@ class HexViewer(QWidget):
         """'  ·  Image offset 0x…  ·  sector N', or why there is none."""
         source = self.source
         image = source.image_offset(offset)
+        from trace_app.core.image_handler import ImageHandler
+        if image is not None and image >= ImageHandler.CARVE_SPACE:
+            # Carved inside a decrypted, logical or RAID volume: its own
+            # address range (ImageHandler.carve_volumes), not the image's.
+            within = (image - ImageHandler.CARVE_SPACE) % \
+                ImageHandler.CARVE_SPAN
+            return (f"  ·  Volume offset {self._number(within)} (inside a "
+                    f"decrypted, LVM or RAID volume, not on the image)")
         if image is not None:
             sector = image // max(1, getattr(source, 'sector_size', 512))
             return (f"  ·  Image offset {self._number(image)}  ·  "
@@ -1241,21 +1256,24 @@ class HexViewer(QWidget):
                 self, "Export Selection", f"{name}.{begin:x}-{end - 1:x}.bin")
             if not path:
                 return None
+        from trace_app.core import evidence_export
+        name = self.data.get('path') or self.data.get('name') or 'data'
+        source = f"{name} bytes {begin:,}-{end - 1:,}"
         try:
-            with open(path, 'wb') as handle:
-                position = begin
-                while position < end:
-                    piece = self.source.read(position,
-                                             min(4 << 20, end - position))
-                    if not piece:
-                        break
-                    handle.write(piece)
-                    position += len(piece)
-        except OSError as exc:
+            # Read in full and checked, or not written: a short read used
+            # to leave a truncated file named as the whole selection.
+            digests = evidence_export.save_reader(
+                path, lambda offset, length:
+                self.source.read(begin + offset, length), end - begin,
+                'byte range exported', source)
+        except Exception as exc:
             message.warning(self, "Export failed", str(exc))
             return None
-        message.information(self, "Selection exported",
-                            f"{end - begin:,} bytes written to\n{path}")
+        message.information(
+            self, "Selection exported",
+            f"{end - begin:,} bytes written to\n{path}\n\n"
+            f"SHA-256 {digests['sha256']}\n"
+            f"Written copy: {digests['written_copy_check']}")
         return path
 
     def _bookmark_refusal(self, selected):
@@ -1348,27 +1366,33 @@ class HexViewer(QWidget):
             return
         self._set_result_count(None, searching=True)
         thread = QThread(self)
+        self._search_generation += 1
         worker = _SearchWorker(reader, query_bytes,
-                               fold=kind in (SEARCH_TEXT, SEARCH_UTF16))
+                               fold=kind in (SEARCH_TEXT, SEARCH_UTF16),
+                               generation=self._search_generation)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        self._search_generation += 1
-        worker.finished.connect(
-            lambda found, length, g=self._search_generation:
-            self._search_finished(g, found, length))
+        # Bound methods of this (GUI) widget, never lambdas: Qt queues
+        # them to the GUI thread, where widgets may be touched.
+        worker.finished.connect(self._search_finished)
         worker.finished.connect(thread.quit)
+        # Before the deleteLaters, so it is posted first and sender() is
+        # still the thread when it runs.
+        thread.finished.connect(self._search_done)
         thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda t=thread: self._search_done(t))
         self._search_thread, self._search_worker = thread, worker
         thread.start()
 
-    def _search_finished(self, generation, matches, length):
+    @Slot(list, int, int)
+    def _search_finished(self, matches, length, generation):
         if generation == self._search_generation:
             self.handle_search_results(matches, length)
 
-    def _search_done(self, thread):
-        if self._search_thread is thread:
+    @Slot()
+    def _search_done(self):
+        if self._search_thread is not None and \
+                self._search_thread is self.sender():
             self._search_thread = self._search_worker = None
 
     def _stop_search(self):

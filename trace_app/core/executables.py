@@ -615,7 +615,41 @@ def _pe(data):
         facts['checksum'] = {'stored': f'{stored:#010x}',
                              'computed': f'{computed:#010x}',
                              'matches': computed == stored}
+    facts.update(pe_hashes(data))
     return facts
+
+
+def pe_hashes(data):
+    """{'imphash', 'rich_hash'} as threat-intelligence feeds publish them
+    (VirusTotal, MalwareBazaar): pefile computes both -- the imphash as
+    Mandiant defined it, with pefile's own table naming ordinal-only
+    imports of ws2_32 / oleaut32, so a value here equals one looked up.
+    {} when the file has neither (or pefile cannot read it)."""
+    try:
+        import pefile
+    except ImportError:
+        return {}
+    out = {}
+    try:
+        pe = pefile.PE(data=bytes(data), fast_load=True)
+        try:
+            pe.parse_data_directories(directories=[
+                pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
+            imphash = pe.get_imphash()
+            if imphash:
+                out['imphash'] = imphash
+            # fast_load skips the Rich header; pefile's own
+            # get_rich_header_hash is this MD5 of its decoded bytes.
+            rich = pe.parse_rich_header()
+            if rich and rich.get('clear_data'):
+                import hashlib
+                out['rich_hash'] = hashlib.md5(
+                    rich['clear_data']).hexdigest()
+        finally:
+            pe.close()
+    except Exception as exc:
+        logger.debug("pefile could not read the file: %s", exc)
+    return out
 
 
 def _what_starts(head):

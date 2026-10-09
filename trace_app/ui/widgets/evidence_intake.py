@@ -14,7 +14,6 @@ one, and marked so. They are what the report states about the evidence.
 
 import logging
 import os
-import re
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog,
@@ -25,6 +24,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog,
 
 from trace_app.core import evidence_probe
 from trace_app.core.case import EVIDENCE_DETAILS
+from trace_app.core.logical_sources import is_later_segment  # noqa: F401 (tests import it here)
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
@@ -37,7 +37,8 @@ logger = logging.getLogger('TRACE.EvidenceIntake')
 DISK_IMAGE_PATTERNS = ("*.e01", "*.E01", "*.ex01", "*.Ex01", "*.s01", "*.S01",
                        "*.aff4", "*.AFF4",
                        "*.raw", "*.RAW", "*.img", "*.IMG", "*.dd", "*.DD",
-                       "*.iso", "*.ISO", "*.001", "*.dmg", "*.DMG",
+                       "*.iso", "*.ISO", "*.000", "*.001", "*.dmg",
+                       "*.DMG", "*.hdd", "*.HDD", "*.hds",
                        "*.sparse", "*.sparseimage", "*.vmdk", "*.VMDK",
                        "*.vhd", "*.VHD", "*.vhdx", "*.VHDX", "*.qcow2",
                        "*.QCOW2", "*.qcow")
@@ -51,12 +52,6 @@ EVIDENCE_FILE_FILTER = ";;".join((
     "Logical Evidence: AD1, L01, ZIP, TAR ({})".format(
         " ".join(LOGICAL_PATTERNS)),
     "All Files (*)"))
-
-#: Second and later segments of a segmented image: they are read with the
-#: first, so selecting every segment adds the image once.
-_LATER_SEGMENT = re.compile(
-    r'\.(?:e|ex|s|l|lx)(?:0[2-9]|[1-9][0-9])$|\.(?:00[2-9]|0[1-9][0-9]|'
-    r'[1-9][0-9]{2})$|\.ad(?:[2-9]|[1-9][0-9]+)$', re.IGNORECASE)
 
 CHECKING = 'checking'
 _STATUS_ICONS = {evidence_probe.OK: icons.SUCCESS,
@@ -75,10 +70,6 @@ _ORPHANS = set()
 
 def _key(path):
     return os.path.normcase(os.path.normpath(os.path.abspath(path)))
-
-
-def is_later_segment(path):
-    return bool(_LATER_SEGMENT.search(path))
 
 
 class ProbeWorker(QThread):
@@ -304,11 +295,35 @@ class EvidenceIntake(QWidget):
     def add_paths(self, paths):
         """Add items and start checking each. Duplicates and later segments
         of an image are skipped, and the message says so."""
-        skipped, segments = [], []
+        skipped, segments, notes = [], [], []
         from trace_app.core.live_disk import is_device_path
+        from trace_app.core.logical_sources import folder_images, kind_of
+        expanded = []
         for path in paths:
             if not is_device_path(path):
                 path = os.path.normpath(path)
+            if kind_of(path) == 'folder':
+                images, other = folder_images(path)
+                name = os.path.basename(path.rstrip('/\\')) or path
+                if images and not other:
+                    # A folder of an image's segments: the image is the
+                    # evidence (its later segments are read with it).
+                    expanded += images
+                    notes.append(f"{name} holds "
+                                 + (f"the image {os.path.basename(images[0])}"
+                                    if len(images) == 1 else
+                                    f"{len(images)} images")
+                                 + ": added as disk evidence")
+                    continue
+                if images:
+                    notes.append(f"{name} also holds "
+                                 f"{os.path.basename(images[0])}"
+                                 f"{' and more images' if len(images) > 1 else ''}"
+                                 f": the folder is added as a collection of "
+                                 f"files -- add the image itself to read the "
+                                 f"disk inside it")
+            expanded.append(path)
+        for path in expanded:
             key = _key(path)
             if key in self._existing:
                 skipped.append(f"{os.path.basename(path)} is already in the "
@@ -325,7 +340,6 @@ class EvidenceIntake(QWidget):
                     'result': None, 'details': {}, 'from_header': set()}
             self._add_row(item)
             self._start_probe(item)
-        notes = []
         if segments:
             notes.append(f"{len(segments)} later segment"
                          f"{'s' if len(segments) != 1 else ''} skipped "

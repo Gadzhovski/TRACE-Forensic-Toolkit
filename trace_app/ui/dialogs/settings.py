@@ -43,6 +43,7 @@ PAGES = (
       ("Limits", 'case', ('max_analysis_mb', 'max_inspect_mb',
                           'high_entropy')),
       ("Archives", 'case', ('archive_depth', 'archive_member_mb')),
+      ("Search index", 'case', ('index_unallocated',)),
       ("Indicators", 'case', ('indicators',)))),
     ("Carving & Exports", icons.FINDING_CARVED,
      "How files are carved, and where copies and exports are written.",

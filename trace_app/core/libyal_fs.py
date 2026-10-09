@@ -57,7 +57,9 @@ class _Name:
         self.meta_seq = 0
         # A file recovered from what the file system left behind (Btrfs's
         # older leaves) reads as deleted, as TSK marks one.
-        self.flags = pytsk3.TSK_FS_NAME_FLAG_UNALLOC             if getattr(entry, 'deleted', False)             else pytsk3.TSK_FS_NAME_FLAG_ALLOC
+        self.flags = pytsk3.TSK_FS_NAME_FLAG_UNALLOC \
+            if getattr(entry, 'deleted', False) \
+            else pytsk3.TSK_FS_NAME_FLAG_ALLOC
         self.par_addr = getattr(entry, 'parent_identifier', 0) or 0
         self.meta_addr = identifier
         self.type = kind
@@ -69,7 +71,9 @@ class _Meta:
         self.addr = identifier
         self.type = _kind(mode)
         self.size = int(entry.size or 0)
-        self.flags = pytsk3.TSK_FS_META_FLAG_UNALLOC             if getattr(entry, 'deleted', False)             else pytsk3.TSK_FS_META_FLAG_ALLOC
+        self.flags = pytsk3.TSK_FS_META_FLAG_UNALLOC \
+            if getattr(entry, 'deleted', False) \
+            else pytsk3.TSK_FS_META_FLAG_ALLOC
         self.mode = mode
         self.uid = getattr(entry, 'owner_identifier', 0) or 0
         self.gid = getattr(entry, 'group_identifier', 0) or 0

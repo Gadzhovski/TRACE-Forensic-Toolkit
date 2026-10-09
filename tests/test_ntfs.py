@@ -2,7 +2,7 @@
 the change journal.
 
 plaso's test data, fetched and SHA-256 pinned by
-tools/fetch_artifact_samples.py: a raw Windows XP $MFT, a $UsnJrnl:$J excerpt,
+tools/testdata/samples.py: a raw Windows XP $MFT, a $UsnJrnl:$J excerpt,
 and a QCOW2 disk with an NTFS volume and its journal. The expected values are
 plaso's own test expectations for the same files -- and its 31,642 MFT events
 are exactly the $STANDARD_INFORMATION and $FILE_NAME attributes counted here
@@ -17,15 +17,16 @@ import struct
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 
 
 def sample(name):
     path = os.path.join(SAMPLES, name)
     if not os.path.exists(path):
-        message = (f"{name} is not in test_images/artifact_samples -- run "
-                   f"'python tools/fetch_artifact_samples.py'")
+        message = (f"{name} is not in test_images/samples -- run "
+                   f"'python -m tools.testdata.fetch --group samples'")
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(message)
         pytest.skip(message)

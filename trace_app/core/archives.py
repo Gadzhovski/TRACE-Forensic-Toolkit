@@ -13,12 +13,13 @@ No Qt imports belong here.
 """
 
 import bz2
-import gzip
 import io
 import logging
 import lzma
+import struct
 import tarfile
 import zipfile
+import zlib
 
 logger = logging.getLogger('TRACE.Archives')
 
@@ -61,6 +62,10 @@ class EncryptedArchive(ArchiveError):
     """
 
 
+#: Read by core/legacy_archives.
+_LEGACY = ('cab', 'lzh', 'alz', 'uue', 'compress')
+
+
 def detect_archive(data):
     """What kind of archive `data` is, or None.
 
@@ -93,6 +98,11 @@ def detect_archive(data):
             thumbnails.is_thumbs_db(data):
         return 'thumbsdb'
 
+    # An Outlook message: its page and attachments (core/msgfile.py).
+    from trace_app.core import msgfile
+    if isinstance(data, (bytes, bytearray)) and msgfile.is_msg(data):
+        return 'msg'
+
     # An RDP bitmap cache: its tiles, as pictures (core/rdpcache.py).
     from trace_app.core import rdpcache
     if rdpcache.is_bin(data[:8]):
@@ -107,6 +117,26 @@ def detect_archive(data):
     # TAR keeps its magic 257 bytes in, and has no signature at offset 0.
     if len(data) > 262 and data[257:262] == b'ustar':
         return 'tar'
+
+    # CPIO (initramfs, RPM payloads): its magic, then a consistent header.
+    from trace_app.core import cpio
+    if isinstance(data, (bytes, bytearray)) and cpio.format_of(data):
+        return 'cpio'
+
+    # Cabinet, LHA, ALZip, uuencode, Unix compress (core/legacy_archives).
+    from trace_app.core import legacy_archives
+    legacy = legacy_archives.kind_of(data)
+    if legacy:
+        return legacy
+
+    # Headerless compressed streams: LZMA "alone" (.lzma) and raw zlib.
+    # Their few header bytes could start anything, so a trial
+    # decompression must succeed as well.
+    if isinstance(data, (bytes, bytearray)):
+        if _is_lzma_alone(data):
+            return 'lzma'
+        if _is_zlib(data):
+            return 'zlib'
 
     # Defender's quarantined content (Quarantine\ResourceData\..): RC4 of
     # BackupRead's streams, browsed as the file and its streams.
@@ -139,15 +169,32 @@ def list_members(data, kind=None, password=None):
         return _list_zip(data)
     if kind == 'tar':
         return _list_tar(data)
-    if kind in ('gzip', 'bzip2', 'xz'):
+    if kind in SINGLE_STREAMS:
         # .tar.gz and friends are a tar inside a single-stream compressor, and
-        # are far more common than a bare compressed file. tarfile reads all
-        # three transparently, so try it first and fall back to treating the
-        # stream as one file.
+        # are far more common than a bare compressed file. tarfile reads
+        # gzip, bzip2, xz and LZMA-alone transparently, so try it first and
+        # fall back to treating the stream as one file.
+        if kind != 'zlib':
+            try:
+                return _list_tar(data)
+            except ArchiveError:
+                pass
+        return _list_single_stream(data, kind)
+    if kind == 'cpio':
+        return _list_cpio(data)
+    if kind in _LEGACY:
+        from trace_app.core import legacy_archives
         try:
-            return _list_tar(data)
-        except ArchiveError:
-            return _list_single_stream(data, kind)
+            return legacy_archives.members(data, kind)
+        except (legacy_archives.LegacyError, struct.error, ValueError,
+                IndexError) as exc:
+            raise ArchiveError(f"Damaged {kind} archive: {exc}") from exc
+    if kind == 'msg':
+        from trace_app.core import msgfile
+        try:
+            return msgfile.list_members(bytes(data))
+        except msgfile.MsgError as exc:
+            raise ArchiveError(f"Damaged Outlook message: {exc}") from exc
     if kind == '7z':
         return _list_7z(data, password)
     if kind == 'rar':
@@ -252,14 +299,33 @@ def read_member(data, member_name=None, kind=None, password=None,
         return _read_zip_member(data, member_name, password, limit)
     if kind == 'tar':
         return _read_tar_member(data, member_name, limit)
-    if kind in ('gzip', 'bzip2', 'xz'):
+    if kind in SINGLE_STREAMS:
         # See list_members: a compressed tarball is read as a tar.
-        if member_name:
+        if member_name and kind != 'zlib':
             try:
                 return _read_tar_member(data, member_name, limit)
             except ArchiveError:
                 pass
         return _read_single_stream(data, kind, limit)
+    if kind == 'cpio':
+        from trace_app.core import cpio
+        try:
+            return cpio.read(data, member_name, limit)
+        except cpio.CpioError as exc:
+            raise ArchiveError(str(exc)) from exc
+    if kind in _LEGACY:
+        from trace_app.core import legacy_archives
+        try:
+            return legacy_archives.read(data, kind, member_name, limit)
+        except (legacy_archives.LegacyError, struct.error, ValueError,
+                IndexError, OSError, EOFError, zlib.error) as exc:
+            raise ArchiveError(str(exc)) from exc
+    if kind == 'msg':
+        from trace_app.core import msgfile
+        try:
+            return msgfile.read_member(bytes(data), member_name, limit)
+        except msgfile.MsgError as exc:
+            raise ArchiveError(str(exc)) from exc
     if kind == '7z':
         return _read_7z_member(data, member_name, password, limit)
     if kind == 'rar':
@@ -366,52 +432,159 @@ def _read_tar_member(data, name, limit):
 
 # --- single-stream compressors -------------------------------------------
 
-def _list_single_stream(data, kind):
-    """gzip, bzip2 and xz hold one stream, not a directory.
+#: Compressors holding one stream rather than a directory of members.
+SINGLE_STREAMS = ('gzip', 'bzip2', 'xz', 'lzma', 'zlib')
 
-    The inner name is only recorded by gzip, and only sometimes; where it is
-    absent the archive's own name minus its suffix is the best guess a listing
-    can offer.
+
+def _list_single_stream(data, kind):
+    """gzip, bzip2, xz, LZMA-alone and zlib hold one stream, not a
+    directory.
+
+    The inner name is only recorded by gzip, and only sometimes. The
+    stream is decompressed (up to the member limit) for its true size and
+    to find damage: a stream cut short -- a log rotated mid-write, a
+    carved or partly overwritten file -- is listed with what can be
+    recovered, marked 'damaged', rather than refused.
     """
     name = _gzip_inner_name(data) if kind == 'gzip' else ''
+    content, problem = _inflate(data, kind, MAX_MEMBER_BYTES)
     return [{
         'name': name or f'(decompressed {kind} stream)',
-        'size': _single_stream_size(data, kind),
+        'size': len(content),
         'compressed_size': len(data),
         'is_dir': False,
         'modified': '',
         'encrypted': False,
         'crc': '',
+        'damaged': problem,
     }]
 
 
 def _read_single_stream(data, kind, limit):
-    # GzipFile takes the stream as `fileobj`; BZ2File and LZMAFile take it
-    # positionally. Passing the wrong one is a TypeError, not a bad archive.
-    try:
-        if kind == 'gzip':
-            handle = gzip.GzipFile(fileobj=io.BytesIO(data))
-        elif kind == 'bzip2':
-            handle = bz2.BZ2File(io.BytesIO(data))
-        else:
-            handle = lzma.LZMAFile(io.BytesIO(data))
-        with handle:
-            content = handle.read(limit)
-    except (OSError, EOFError, lzma.LZMAError) as exc:
-        raise ArchiveError(f"Damaged {kind} stream: {exc}") from exc
+    """The stream's bytes; of a damaged stream, what decompresses before
+    the damage (the listing says what is missing)."""
+    content, problem = _inflate(data, kind, limit)
+    if problem and not content:
+        raise ArchiveError(f"Damaged {kind} stream: {problem}")
     _guard_bomb(len(data), len(content), kind)
     return content
 
 
-def _single_stream_size(data, kind):
-    """Uncompressed size, where it can be had without decompressing.
+def _inflate(data, kind, limit):
+    """(bytes, problem): the stream decompressed up to `limit` bytes --
+    every gzip member, every xz/bzip2 stream in turn -- and '' or what is
+    wrong with it. Decompression stops at damage, keeping what came
+    before: zlib checks each gzip member's CRC-32 and size as it ends."""
+    if limit is None:
+        limit = MAX_MEMBER_BYTES
+    out = bytearray()
+    remaining = bytes(data)
+    members = 0
+    while remaining and len(out) < limit:
+        if kind == 'gzip':
+            engine = zlib.decompressobj(31)
+        elif kind == 'zlib':
+            engine = zlib.decompressobj()
+        elif kind == 'bzip2':
+            engine = bz2.BZ2Decompressor()
+        elif kind == 'xz':
+            engine = lzma.LZMADecompressor(lzma.FORMAT_XZ)
+        else:
+            engine = lzma.LZMADecompressor(lzma.FORMAT_ALONE)
+        try:
+            if kind in ('gzip', 'zlib'):
+                piece = engine.decompress(remaining, limit - len(out))
+                while engine.unconsumed_tail and len(out) + len(piece) < \
+                        limit:
+                    piece += engine.decompress(engine.unconsumed_tail,
+                                               limit - len(out) - len(piece))
+                out += piece
+                finished, rest = engine.eof, engine.unused_data
+            else:
+                out += engine.decompress(remaining, limit - len(out))
+                while not engine.eof and not engine.needs_input and \
+                        len(out) < limit:
+                    out += engine.decompress(b'', limit - len(out))
+                finished, rest = engine.eof, engine.unused_data
+        except (zlib.error, OSError, EOFError, lzma.LZMAError) as exc:
+            return bytes(out), (f"damaged after {len(out):,} bytes "
+                                f"({exc}); what came before is shown")
+        members += 1
+        if len(out) >= limit:
+            return bytes(out[:limit]), ''
+        if not finished:
+            return bytes(out), (f"the stream ends without its end marker "
+                                f"(cut short): {len(out):,} bytes "
+                                f"recovered")
+        remaining = rest
+        # Another member follows only for the formats that allow it, and
+        # only if it starts like one; padding (zeros) ends the stream.
+        if kind in ('zlib', 'lzma') or not remaining.strip(b'\0'):
+            break
+        if kind == 'gzip' and not remaining.startswith(b'\x1f\x8b'):
+            return bytes(out), (f"{len(remaining):,} bytes follow the last "
+                                f"gzip member and are not one")
+    return bytes(out), ''
 
-    gzip stores it in the last four bytes, modulo 4 GB. The others do not, so
-    they report their compressed size and the listing says as much.
-    """
-    if kind == 'gzip' and len(data) > 8:
-        return int.from_bytes(data[-4:], 'little')
-    return len(data)
+
+def _is_lzma_alone(data):
+    """An LZMA-alone header: properties < 225, a sane dictionary size,
+    a size field that is unknown or plausible -- and a trial decode."""
+    if len(data) < 18 or data[0] >= 225:
+        return False
+    dictionary = int.from_bytes(data[1:5], 'little')
+    size = int.from_bytes(data[5:13], 'little')
+    # The encoders write 2**n or 2**n + 2**(n-1); anything else is not
+    # an LZMA header, whatever a permissive decoder makes of it.
+    if not 4096 <= dictionary <= 1 << 30 or not any(
+            dictionary in (1 << n, (1 << n) + (1 << (n - 1)))
+            for n in range(12, 31)):
+        return False
+    if size != (1 << 64) - 1 and size > 1 << 40:
+        return False
+    try:
+        engine = lzma.LZMADecompressor(lzma.FORMAT_ALONE)
+        out = engine.decompress(data[:262144], 4096)
+        return len(out) >= 4096 or (engine.eof and bool(out) and (
+            size == (1 << 64) - 1 or size == len(out)))
+    except lzma.LZMAError:
+        return False
+
+
+def _is_zlib(data):
+    """A zlib header (deflate, a valid window, check bits, no preset
+    dictionary) whose first bytes inflate."""
+    if len(data) < 8:
+        return False
+    cmf, flg = data[0], data[1]
+    if cmf & 0x0F != 8 or cmf >> 4 > 7 or (cmf << 8 | flg) % 31 or \
+            flg & 0x20:
+        return False
+    try:
+        engine = zlib.decompressobj()
+        out = engine.decompress(data[:262144])
+    except zlib.error:
+        return False
+    if len(out) < 8:
+        return False
+    # A zlib stream followed by more data (not padding) is the first chunk
+    # of a container -- a DMG's data fork begins this way -- not a zlib
+    # file.
+    if engine.eof and engine.unused_data.strip(b'\0'):
+        return False
+    return True
+
+
+def _list_cpio(data):
+    from trace_app.core import cpio
+    try:
+        found = cpio.members(data)
+    except cpio.CpioError as exc:
+        raise ArchiveError(f"Damaged CPIO archive: {exc}") from exc
+    return [{'name': m['name'], 'size': m['size'],
+             'compressed_size': m['size'], 'is_dir': m['is_dir'],
+             'modified': m['modified'], 'encrypted': False, 'crc': '',
+             'damaged': m['damaged']} for m in found]
 
 
 def _gzip_inner_name(data):

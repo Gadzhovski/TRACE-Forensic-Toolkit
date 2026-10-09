@@ -29,10 +29,12 @@ logger = logging.getLogger('TRACE.DeletedPanel')
 
 SHOWN_LIMIT = 50000
 _COLUMNS = ('Name', 'Evidence', 'State', 'Size', 'Overwritten', 'Pieces',
-            'Modified (UTC)', 'Entry changed (UTC)', 'Path')
+            'Modified', 'Entry changed', 'Path')
 _TONE = {deleted.RECOVERABLE: 'clean', deleted.RESIDENT: 'clean',
          deleted.PARTLY: 'suspicious', deleted.OVERWRITTEN: 'malicious',
-         deleted.REUSED: 'unknown', deleted.NO_DATA: 'unknown'}
+         deleted.REUSED: 'unknown', deleted.NO_DATA: 'unknown',
+         deleted.START_ONLY: 'suspicious',
+         deleted.POSSIBLY: 'suspicious'}
 _MEANING = {
     deleted.RECOVERABLE: "The entry is unused and none of its clusters is "
                          "held by a live file: its content is as it was.",
@@ -45,6 +47,15 @@ _MEANING = {
     deleted.NO_DATA: "Its entry no longer records where its data was (ext3 "
                      "and ext4 clear it on deletion); carving may still "
                      "find it.",
+    deleted.POSSIBLY: "A deleted file written later may lie over its "
+                      "clusters: if it was written after this one was "
+                      "deleted, this one's data is gone. FAT keeps no "
+                      "deletion time to say which.",
+    deleted.START_ONLY: "FAT kept where it began, not where the rest of it "
+                        "lay, and another deleted file's data follows its "
+                        "start: it was in pieces. Only its first cluster is "
+                        "known to be its own; what reads after it may be "
+                        "another file's.",
 }
 
 
@@ -170,6 +181,9 @@ class DeletedFilesPanel(QWidget):
         for position, row in enumerate(rows):
             size = int(row.get('size') or 0)
             lost = int(row.get('overwritten') or 0)
+            # FAT's times are local wall-clock digits: never shown as UTC.
+            zone = " (local, no zone)" if (row.get('detail') or {}).get(
+                'times_local') else ' UTC'
             cells = [
                 QTableWidgetItem(row.get('name') or ''),
                 QTableWidgetItem(self._names.get(row['evidence_id'], '')),
@@ -179,8 +193,10 @@ class DeletedFilesPanel(QWidget):
                 _Number(FileSystemUtils.get_readable_size(lost)
                         if lost else ''),
                 _Number(str(row.get('runs') or '')),
-                QTableWidgetItem(row.get('modified_utc') or ''),
-                QTableWidgetItem(row.get('changed_utc') or ''),
+                QTableWidgetItem(row['modified_utc'] + zone
+                                 if row.get('modified_utc') else ''),
+                QTableWidgetItem(row['changed_utc'] + zone
+                                 if row.get('changed_utc') else ''),
                 QTableWidgetItem(row.get('path') or '')]
             cells[3].setData(Qt.UserRole + 1, size)
             cells[4].setData(Qt.UserRole + 1, lost)

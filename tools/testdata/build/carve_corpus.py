@@ -7,17 +7,17 @@ builds an image the same way the DFRWS authors did: real files, taken from the
 test suites and sample collections of projects that publish them, each pinned
 by SHA-256, placed on sector boundaries among random filler.
 
-    python tools/carve_corpus.py            fetch samples, build the image,
+    python tools/testdata/build/carve_corpus.py            fetch samples, build the image,
                                             write its answer key
-    python tools/carve_score.py carve-corpus.dd
+    python tools/score/carve_score.py carve-corpus.dd
 
 The image is deterministic -- a fixed seed and pinned inputs -- so its answer
-key in tools/carve_ground_truth.json is stable and committed. Between the
+key in tests/expected/carve_ground_truth.json is stable and committed. Between the
 files are decoys: each format's signature followed by junk, which a carver
 that trusts signatures will "recover". None should be carved; the scorer
 reports anything that is as an unaccounted carve.
 
-Nothing downloaded is committed: the samples land in test_images/carve_samples
+Nothing downloaded is committed: the samples land in test_images/corpus/samples
 (gitignored, like every test image) and are verified before use.
 """
 
@@ -33,10 +33,10 @@ import tarfile
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
-SAMPLES = os.path.join(ROOT, 'test_images', 'carve_samples')
-IMAGE = os.path.join(ROOT, 'test_images', 'carve-corpus.dd')
-TRUTH = os.path.join(HERE, 'carve_ground_truth.json')
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+SAMPLES = os.path.join(ROOT, 'test_images', 'corpus', 'samples')
+IMAGE = os.path.join(ROOT, 'test_images', 'corpus', 'carve-corpus.dd')
+TRUTH = os.path.join(ROOT, 'tests', 'expected', 'carve_ground_truth.json')
 SECTOR = 512
 SEED = 20261002
 
@@ -181,11 +181,8 @@ def _download(url):
     """Fetch with retries and mirrors (tools/download.py): sample hosts are
     third parties, and a brief outage should not fail a test run."""
     # Imported here: tests load this file by path, without tools/ on sys.path.
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    try:
-        from download import download
-    finally:
-        sys.path.pop(0)
+    sys.path.insert(0, ROOT)
+    from tools.testdata.download import download
     return download(url)
 
 
@@ -305,7 +302,7 @@ def build(files):
     with open(TRUTH, encoding='utf-8') as handle:
         truth = json.load(handle)
     truth[os.path.basename(IMAGE)] = {
-        'source': 'tools/carve_corpus.py (built locally from pinned public '
+        'source': 'tools/testdata/build/carve_corpus.py (built locally from pinned public '
                   'samples)',
         'title': 'Real published files of every format TRACE carves that the '
                  'DFTT/DFRWS images do not hold, among random filler and '

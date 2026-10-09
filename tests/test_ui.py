@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from tests.conftest import image_path, pump
+from tools import testdata
 
 pytestmark = [pytest.mark.ui, pytest.mark.images]
 
@@ -594,6 +595,22 @@ def test_qt_messages_reach_the_log(qapp, caplog):
         qInstallMessageHandler(None)
 
 
+def test_font_fallback_noise_is_kept_out_of_the_warnings():
+    """Evidence text with a glyph the font lacks makes Qt try every
+    Windows bitmap font, each logging CreateFontFaceFromHDC() failed;
+    that is DEBUG. Other font warnings are not."""
+    import logging
+    from trace_app.app import qt_level
+    noise = ("DirectWrite: CreateFontFaceFromHDC() failed (Indicates an "
+             "error in an input file such as a font file.) for "
+             "QFontDef(Family=\"8514oem\", ...)")
+    assert qt_level(logging.WARNING, 'qt.qpa.fonts', noise) == logging.DEBUG
+    assert qt_level(logging.WARNING, 'qt.qpa.fonts',
+                    'Unable to open default EUDC font') == logging.WARNING
+    assert qt_level(logging.WARNING, 'qt.gui.imageio',
+                    'Bogus marker length') == logging.DEBUG
+
+
 def test_a_disguised_file_is_shown_as_what_it_is(qapp, viewer):
     from PIL import Image
     buffer = io.BytesIO()
@@ -1149,10 +1166,10 @@ def test_activity_is_a_job_a_tab_and_a_tree_node(qapp, window, truth):
 
 def _artifact_sample(name):
     from tests.conftest import ROOT
-    path = os.path.join(ROOT, 'test_images', 'artifact_samples', name)
+    path = os.path.join(testdata.SAMPLES, name)
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
-            pytest.fail(f"{name} missing: run tools/fetch_artifact_samples.py")
+            pytest.fail(f"{name} missing: run python -m tools.testdata.fetch --group samples")
         pytest.skip(f"{name} missing")
     return path
 
@@ -1244,10 +1261,10 @@ def test_a_mailbox_browses_like_an_archive(qapp, window):
     from PySide6.QtCore import Qt
     from tests.conftest import ROOT
     from trace_app.core.containers import ByteWindow
-    path = os.path.join(ROOT, 'test_images', 'carve_samples',
+    path = os.path.join(testdata.CORPUS_SAMPLES,
                         'example-2013.ost')
     if not os.path.exists(path):
-        pytest.skip("example-2013.ost missing: run tools/carve_corpus.py")
+        pytest.skip("example-2013.ost missing: run tools/testdata/build/carve_corpus.py")
     with open(path, 'rb') as handle:
         data = handle.read()
     stream = ByteWindow(lambda o, n: data[o:o + n], 0, len(data))
@@ -1985,9 +2002,9 @@ def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
     from trace_app.core import content_checks
     from trace_app.core.case import make_artifact_ref
     from tests.conftest import ROOT
-    path = os.path.join(ROOT, 'test_images', 'carve_samples', 'pageant.exe')
+    path = os.path.join(testdata.CORPUS_SAMPLES, 'pageant.exe')
     if not os.path.exists(path):
-        pytest.skip("run tools/carve_corpus.py")
+        pytest.skip("run tools/testdata/build/carve_corpus.py")
     with open(path, 'rb') as handle:
         data = handle.read()
     evidence = window.case.evidence()[0]['id']
@@ -2026,10 +2043,10 @@ def test_an_ad1_opens_as_a_tree_of_files(qapp, stubbed_dialogs):
     -- there are files, not a disk."""
     from tests.conftest import ROOT
     from trace_app.ui.main_window import MainWindow
-    path = os.path.join(ROOT, 'test_images', 'artifact_samples',
+    path = os.path.join(testdata.SAMPLES,
                         'text-and-pictures.ad1')
     if not os.path.exists(path):
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     window = MainWindow()
     try:
         assert window.open_evidence_image(path)
@@ -2162,7 +2179,7 @@ def test_media_says_what_it_is_and_switches_after_playing(qapp):
 ])
 def test_video_shows_its_first_frame_steps_and_saves(qapp, tmp_path, name,
                                                      size, fps):
-    """Real video (CC0 clips, tools/fetch_test_images.py): the first frame
+    """Real video (CC0 clips, tools/testdata/fetch.py): the first frame
     is shown with nothing playing, the line gives size and rate, a frame
     step moves one frame and stays paused, and Save Frame writes that frame
     as a PNG named after the file and the moment."""
@@ -2471,3 +2488,63 @@ def test_the_hex_tab_reads_a_listed_file_from_its_image(qapp, window, truth,
     assert viewer.source.image_offset(0) == begin
     window.case.remove_bookmark(mark['id'])
     window.refresh_bookmarks()
+
+
+def test_every_triage_tab_with_rows_has_its_group_in_the_tree(
+        qapp, tmp_path, stubbed_dialogs):
+    """Deleted files, NTFS sections and similar pictures used to live only
+    in Triage. Each sub-tab with rows has a group under Findings, counted
+    as its tab counts, in the tab's order, and a click opens that tab."""
+    from PySide6.QtCore import Qt
+    from trace_app.core import deleted, ntfs
+    from trace_app.core.analysis import MODULES, analyse_evidence
+    from trace_app.core.case import Case
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.main_window import MainWindow
+    folder = str(tmp_path / 'Tree groups')
+    case = Case.create(folder, 'Tree groups')
+    for name in ('7-ntfs-undel.dd', FIRST, SECOND):
+        path = image_path(name)
+        evidence = case.add_evidence(path)
+        handler = ImageHandler(path)
+        analyse_evidence(handler, case, evidence, MODULES)
+        deleted.analyse_evidence(handler, case, evidence)
+        ntfs.analyse_evidence(handler, case, evidence)
+        handler.close_resources()
+    case.close()
+    win = MainWindow(case=Case.open(folder))
+    try:
+        pump(qapp, 120, lambda: len(win.evidence_files) == 3)
+        win.refresh_analysis_views()
+        tabs = win.triage_panel.tabs
+        pump(qapp, 30, lambda: any(tabs.tabText(i).startswith(
+            'Similar pictures (') and not tabs.tabText(i).endswith('(0)')
+            for i in range(tabs.count())))
+        pump(qapp, 0.5)
+        tree = win.tree_viewer
+        root = next(tree.topLevelItem(i)
+                    for i in range(tree.topLevelItemCount())
+                    if (tree.topLevelItem(i).data(0, Qt.UserRole) or {})
+                    .get('is_analysis_root'))
+        groups = {root.child(i).text(0).rsplit(' (', 1)[0]: root.child(i)
+                  for i in range(root.childCount())}
+        titles = {tabs.tabText(i).rsplit(' (', 1)[0]: tabs.tabText(i)
+                  for i in range(tabs.count())}
+        for label in ('Deleted files', 'Similar pictures', 'Duplicates'):
+            assert groups[label].text(0) == titles[label], label
+        deleted_files = groups['Deleted files']
+        assert deleted_files.childCount() >= 1          # by state
+        assert '$LogFile records' in groups              # an NTFS section
+        # Triage's order: Duplicates before NTFS before Deleted files.
+        order = [root.child(i).text(0).rsplit(' (', 1)[0]
+                 for i in range(root.childCount())]
+        assert order.index('Duplicates') < order.index('$LogFile records') \
+            < order.index('Deleted files') < order.index('Similar pictures')
+        for label, tab in (('Deleted files', 'Deleted files'),
+                           ('$LogFile records', 'NTFS'),
+                           ('Similar pictures', 'Similar pictures')):
+            win.on_item_clicked(groups[label], 0)
+            pump(qapp, 0.2)
+            assert tabs.tabText(tabs.currentIndex()).startswith(tab), label
+    finally:
+        win.cleanup_resources()

@@ -20,6 +20,9 @@ def case(tmp_path):
     case.first = case.add_evidence(str(images / 'laptop.dd'),
                                    details={'exhibit_number': 'RG-01'})
     case.second = case.add_evidence(str(images / 'phone.dd'))
+    # Acquired as MD5 abab...: the first hash matches it, so verified.
+    case.set_acquisition_hashes(case.first, 'custody form',
+                                md5='ab' * 16)
     case.record_hashes(case.first, {'computed_md5': 'ab' * 16,
                                     'computed_sha256': 'cd' * 32})
     yield case
@@ -30,6 +33,10 @@ def test_the_case_card_and_evidence_table(qapp, case):
     from PySide6.QtCore import Qt
     from trace_app.ui.viewers.case_panel import CasePanel, format_utc
     panel = CasePanel()
+    # What each image holds comes from the window (core/evidence_profile);
+    # an image not open has none yet.
+    panel.profile_for = lambda row: 'MBR · NTFS · Windows' \
+        if row['path'].endswith('laptop.dd') else None
     panel.set_case(case)
     try:
         assert panel.title.text() == 'Operation Nightingale'
@@ -43,8 +50,12 @@ def test_the_case_card_and_evidence_table(qapp, case):
         assert status['laptop.dd'].text() == 'Verified'
         assert status['laptop.dd'].foreground().color().name() != \
             status['phone.dd'].foreground().color().name()
+        contains = {table.item(r, 0).text(): table.item(r, 5).text()
+                    for r in range(2)}
+        assert contains == {'laptop.dd': 'MBR · NTFS · Windows',
+                            'phone.dd': '—'}
         # Hashes shortened, whole in the tooltip.
-        md5 = next(table.item(r, 5) for r in range(2)
+        md5 = next(table.item(r, 6) for r in range(2)
                    if table.item(r, 0).text() == 'laptop.dd')
         assert md5.text() == 'abababab…abababab' and \
             md5.toolTip() == 'ab' * 16

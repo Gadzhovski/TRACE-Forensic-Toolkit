@@ -10,7 +10,7 @@ Open disk images read-only, organise them into cases, triage what stands out,<br
 search inside the evidence and recover deleted files — on Windows, macOS and Linux.
 
 <p>
-  <img src="https://img.shields.io/badge/version-2.1.0-4c8eda?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-2.2.0-4c8eda?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
@@ -33,10 +33,16 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 
 - **Cases** — one investigation, any number of images, with custody details,
   an audit trail, bookmarks, notes and a PDF/HTML report.
-- **Integrity** — evidence is never mounted or written to; hashes are verified
-  against those stored in the image, and every check is kept.
+- **Integrity** — evidence is never mounted or written to. Every image is
+  hashed in full (MD5, SHA-1, SHA-256; a read that fails gives no hash) and
+  checked against the hashes it stores, its acquisition log and the case's
+  record, which is never replaced; an E01's chunk checksums locate damaged
+  sectors. Every check is kept, and the audit trail is append-only and
+  hash-chained. Exports are hashed, read back and listed in a manifest.
 - **Triage** — file types from content, entropy, hidden data, photo GPS,
-  document authors, executables, duplicates and hash sets.
+  document authors, Office macros (VBA source, auto-run and download /
+  execute calls flagged), executables with imphash and Rich-header
+  hashes, duplicates and hash sets.
 - **User activity** — programs run, files opened, USB devices, logons, the
   Recycle Bin, browser history, chats and phone backups, on one timeline.
 - **Search** — full-text search inside documents, mail and archives, plus
@@ -45,11 +51,16 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
   keyword lists and persistence (autoruns) graded by risk.
 - **File carving** — 70 file types from unallocated space or slack, checked
   for completeness, with fragmented ZIP and PDF files rebuilt.
-- **Viewers** — pictures, video, PDF, Office, mail, SQLite, registry hives,
-  a hex editor with a data inspector, and HTML shown offline.
+- **Viewers** — pictures, video, PDF, Office (password-protected ones
+  opened with their password), mail including Outlook .msg, network
+  captures (hosts, DNS, HTTP, TLS server names), SQLite (files stored in
+  cells opened as files), registry hives, a hex editor with a data
+  inspector, and HTML shown offline.
 - **Under the hood** — NTFS $MFT, $UsnJrnl and $LogFile, shadow copies,
-  BitLocker / FileVault / LUKS unlocking, APFS, LVM, XFS and Btrfs
-  volumes.
+  BitLocker / FileVault / LUKS unlocking, Core Storage, APFS, LVM, XFS and
+  Btrfs volumes; Parallels, VMware, Hyper-V, QEMU and Mac disk images;
+  hardware and software RAID, Windows dynamic disks, lost partitions;
+  CPIO, LZMA and zlib streams, damaged gzip recovered as far as it reads.
 
 ## Screenshots
 
@@ -78,12 +89,12 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 
 | | |
 |:--|:--|
-| **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2 |
+| **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2, Parallels |
 | **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups |
 | **Live disks** | an attached disk, read-only, without imaging it first |
 | **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, Btrfs, UFS, ISO 9660 |
 | **Encrypted volumes** | BitLocker, FileVault 2, LUKS, encrypted APFS and iOS backups |
-| **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
+| **Inside files** | archives (ZIP, 7z, RAR, TAR, CAB, LHA…), PST / OST / MSG, EML / mbox, registry hives, event logs, SQLite, pcap |
 
 ## Installation
 

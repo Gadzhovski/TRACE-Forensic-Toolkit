@@ -5,7 +5,6 @@ that the rest of the application talks to: partition enumeration, filesystem
 traversal, file content reads, and the allocation map used by file carving.
 """
 
-import hashlib
 import queue
 import threading
 import logging
@@ -59,12 +58,20 @@ class _Closed:
     def close(self):
         pass
 
+class IncompleteEvidence(OSError):
+    """A read past the data an incomplete image holds; the message says
+    where the data ends and what is missing (core/ewf_check.py)."""
+
+
 class EWFImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
         self._ewf_handle = ewf_handle
         # One handle, read from the window's thread and from workers: a
         # seek and a read from two threads interleave into wrong bytes.
         self._lock = threading.Lock()
+        #: (what is missing, where the data ends) for a set that is not
+        #: whole -- ImageHandler.load_image fills it.
+        self.incomplete = None
         super(EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
 
     def close(self):
@@ -72,11 +79,52 @@ class EWFImgInfo(pytsk3.Img_Info):
 
     def read(self, offset, size):
         with self._lock:
-            self._ewf_handle.seek(offset)
-            return self._ewf_handle.read(size)
+            try:
+                self._ewf_handle.seek(offset)
+                return self._ewf_handle.read(size)
+            except OSError:
+                if self.incomplete is None:
+                    raise
+        raise IncompleteEvidence(incomplete_message(self.incomplete,
+                                                    offset))
 
     def get_size(self):
         return self._ewf_handle.get_media_size()
+
+
+def incomplete_message(incomplete, offset=None):
+    """An incomplete image's state in words: what is missing, where its
+    data ends, and (for a failed read) where the read was."""
+    missing, end = incomplete
+    where = (f"Byte {offset:,} is not in this image. " if offset is not None
+             else "")
+    return (f"{where}The E01 is incomplete: {missing}. It holds data up to "
+            f"{FileSystemUtils.get_readable_size(end)}; nothing past that "
+            f"can be read.")
+
+
+#: First segments of a split raw image: dd/split number from .000 or
+#: .001 (dfvfs's ext2.splitraw.000). The Sleuth Kit finds the rest.
+SPLIT_RAW_FIRST = ('.000', '.001')
+
+
+def is_split_raw(path):
+    return path.lower().endswith(SPLIT_RAW_FIRST)
+
+
+class UnsupportedEvidence(ValueError):
+    """A format TRACE recognises but cannot read; the message says what
+    it is and what to do instead."""
+
+
+def _starts_with(path, magic):
+    try:
+        if os.path.isfile(path):
+            with open(path, 'rb') as handle:
+                return handle.read(len(magic)) == magic
+    except OSError:
+        pass
+    return False
 
 
 # ImageHandler class with optimizations
@@ -149,6 +197,11 @@ class ImageHandler:
         self._shadows = {}          # start sector -> (pyvshadow volume, stores)
         self._bitlocker_checked = {}
         self._kinds = {}            # start sector -> containers.volume_kind
+        self._layers = {}           # start sector -> fs_layers()
+        #: start sector -> mdraid.Array (or None: not a member, or one
+        #: whose array needs disks this image does not hold); see md_array.
+        self._md = {}
+        self._md_member = {}        # start sector -> mdraid.Member
         self._lvm = {}              # start sector -> (handle, group, [lv])
         self._apfs = {}             # start sector -> (container, [volume])
         #: Logical evidence (core/logical.py): an AD1 or L01 image, a
@@ -208,6 +261,7 @@ class ImageHandler:
         # Clear caches
         self.fs_info_cache.clear()
         self._directory_cache.clear()
+        self._layers.clear()
 
     def get_size(self):
         """Returns the size of the disk image."""
@@ -217,13 +271,105 @@ class ImageHandler:
             raise AttributeError("Image not loaded or unsupported format.")
 
     def read(self, offset, size):
-        """Reads data from the image starting at `offset` for `size` bytes."""
+        """Reads data from the image starting at `offset` for `size` bytes.
+        Offsets from CARVE_SPACE up are inside a volume (carve_volumes)."""
+        if offset >= self.CARVE_SPACE:
+            return self._read_volume_space(offset, size)
         if self.img_info and hasattr(self.img_info, 'read'):
             return self.img_info.read(offset, size)
         else:
             raise NotImplementedError("The image format does not support direct reading.")
 
-    def build_allocation_map(self, start_offset):
+    # --- carving inside volumes ---------------------------------------------
+
+    #: Carving reaches what the image's own bytes do not show plainly: an
+    #: unlocked encrypted volume (decrypted), an LVM logical volume (its
+    #: extents in order), a RAID array kept in one image. Each has a fixed
+    #: range of addresses above any image -- CARVE_SPACE + slot *
+    #: CARVE_SPAN, the slot from the partition's place among the image's
+    #: partitions and the volume's index in it -- so a carve's offset reads
+    #: back through read(), and its span ref stays valid after a reopen
+    #: (an encrypted volume's once it is unlocked again).
+    CARVE_SPACE = 1 << 61
+    CARVE_SPAN = 1 << 44              # 16 TiB per volume
+    _SLOTS_PER_PARTITION = 128        # the volume itself, then 64 LVs
+
+    def carve_volumes(self):
+        """[{'base', 'size', 'key', 'label'}] -- the volumes carving reads
+        in their own address range, in address order."""
+        if self.logical_fs is not None or self.img_info is None:
+            return []
+        partitions = self.get_partitions()
+        starts = sorted({p[2] for p in partitions}) if partitions else [0]
+        out = []
+        for position, start in enumerate(starts):
+            entries = []
+            try:
+                if start in self._bitlocker:
+                    if self.inner_kind(start) == 'lvm':
+                        entries = self._lv_entries(start)
+                    else:
+                        name = containers.ENCRYPTION_NAMES.get(
+                            self._unlocked_kind.get(start), 'encrypted')
+                        entries = [(0, start, f"decrypted {name} volume at "
+                                              f"sector {start}")]
+                elif self.volume_kind(start) == 'lvm':
+                    entries = self._lv_entries(start)
+                elif self.volume_kind(start) == 'ldm':
+                    entries = [(1 + v['index'], v['key'],
+                                f"dynamic volume {v['name']}")
+                               for v in self.dynamic_volumes(start)
+                               if v['readable']]
+                else:
+                    array = self.md_array(start)
+                    if array is not None and array.level != 1:
+                        entries = [(0, start, f"RAID{array.level} array at "
+                                              f"sector {start}")]
+            except Exception as exc:
+                logger.warning("Volumes at sector %s not carved: %s", start,
+                               exc)
+                continue
+            for index, key, label in entries:
+                image = self._volumes.get(key)
+                if image is None:
+                    continue
+                size = image.get_size()
+                if size > self.CARVE_SPAN:
+                    logger.warning("%s is larger than %d bytes: not carved",
+                                   label, self.CARVE_SPAN)
+                    continue
+                slot = position * self._SLOTS_PER_PARTITION + index
+                out.append({'base': self.CARVE_SPACE + slot * self.CARVE_SPAN,
+                            'size': size, 'key': key, 'label': label})
+        self._carve_space = {v['base']: v for v in out}
+        return out
+
+    def _lv_entries(self, start):
+        return [(1 + v['index'], v['key'],
+                 f"LVM volume {v['group']}/{v['name']}")
+                for v in self.logical_volumes(start)]
+
+    def _read_volume_space(self, offset, size):
+        base = self.CARVE_SPACE + ((offset - self.CARVE_SPACE)
+                                   // self.CARVE_SPAN * self.CARVE_SPAN)
+        volume = getattr(self, '_carve_space', {}).get(base)
+        if volume is None:
+            self.carve_volumes()
+            volume = self._carve_space.get(base)
+        if volume is None:
+            # Locked again, or no longer there: nothing to read.
+            return b''
+        within = offset - base
+        if within >= volume['size']:
+            return b''
+        return self._volumes[volume['key']].read(
+            within, min(size, volume['size'] - within))
+
+    def volume_allocation(self, volume):
+        """A carve volume's allocated ranges, in its own address range."""
+        return self.build_allocation_map(volume['key'], base=volume['base'])
+
+    def build_allocation_map(self, start_offset, base=None):
         """Byte ranges occupied by allocated files, for carving to skip.
 
         The ranges come from each file's data runs -- the blocks the
@@ -248,7 +394,10 @@ class ImageHandler:
                              start_offset)
                 return allocation_map
 
-            partition_offset = start_offset * self.sector_size
+            # Where the file system's offset 0 is: the partition, or (for
+            # a volume carved in its own range) `base`.
+            partition_offset = (start_offset * self.sector_size
+                                if base is None else base)
             from trace_app.core.libyal_fs import is_libyal
             if is_libyal(fs_info):
                 # XFS (extents of live files) and Btrfs (its extent tree):
@@ -325,6 +474,12 @@ class ImageHandler:
             except Exception as e:
                 logger.error(f"Error accessing root directory: {e}")
 
+            # The file system's own structures: no walk reaches them, and
+            # they are not free space (core/fs_metadata).
+            from trace_app.core import fs_metadata
+            allocation_map.extend(fs_metadata.ranges(
+                self, fs_info, partition_offset, record_runs))
+
             allocation_map = self._merge_ranges(allocation_map)
             logger.info("Allocation map: %d regions covering %.1f MB",
                         len(allocation_map),
@@ -339,13 +494,35 @@ class ImageHandler:
     #: data is not where the partition's bytes are (LVM maps extents,
     #: LUKS and FileVault encrypt them).
     _UNMAPPED_KINDS = {'lvm': 'an LVM volume group', 'luks': 'a LUKS volume',
-                       'fvde': 'a FileVault volume'}
+                       'fvde': 'a FileVault volume',
+                       'mdraid': 'a Linux RAID member whose other disks '
+                                 'are not in this image'}
 
     def partition_allocation(self, start_sector):
         """(allocated byte ranges, note) for carving one partition. The
         note says why a whole partition counts as used: carving it as
         "unallocated" would report live files as deleted ones."""
         kind = self.volume_kind(start_sector)
+        if kind == 'ldm':
+            return self._ldm_allocation(start_sector), None
+        if start_sector in self._bitlocker or kind == 'lvm':
+            # Encrypted bytes, or extents mapped elsewhere: the decrypted
+            # volume and the logical volumes are carved in their own
+            # ranges (carve_volumes), so the raw bytes are skipped.
+            base, length = self.partition_bytes(start_sector)
+            return [(base, base + length)], None
+        array = self.md_array(start_sector)
+        if array is not None:
+            base, length = self.partition_bytes(start_sector)
+            member = self.md_member(start_sector)
+            if array.level != 1 or kind is not None:
+                # The array is carved in its own range (carve_volumes).
+                return [(base, base + length)], None
+            # A mirror member's data is the array's, data_offset in.
+            shift = member.data_offset
+            return [(base, base + shift)] + [
+                (b + shift, e + shift)
+                for b, e in self.build_allocation_map(start_sector)], None
         if kind == 'apfs':
             base, length = self.partition_bytes(start_sector)
             volumes = self.apfs_volumes(start_sector)
@@ -365,12 +542,24 @@ class ImageHandler:
                 ranges += [(base + b, base + e)
                            for b, e in fs.allocated_ranges()]
             return self._merge_ranges(ranges), None
+        if kind in ('luks', 'fvde'):
+            base, length = self.partition_bytes(start_sector)
+            return [(base, base + length)], (
+                f"sector {start_sector} holds {self._UNMAPPED_KINDS[kind]}, "
+                f"locked: unlock it to carve what is inside")
         if kind in self._UNMAPPED_KINDS:
             base, length = self.partition_bytes(start_sector)
             return [(base, base + length)], (
                 f"sector {start_sector} holds {self._UNMAPPED_KINDS[kind]}: "
                 f"its free space cannot be told from used space, so it is "
                 f"skipped -- carve the whole image to read it")
+        layers = self.fs_layers(start_sector)
+        if layers:
+            # Live in either file system is live: both are skipped.
+            base = start_sector * self.sector_size
+            return self._merge_ranges(
+                [r for layer in layers for r in
+                 self.build_allocation_map(layer['key'], base=base)]), None
         if self.has_filesystem(start_sector):
             return self.build_allocation_map(start_sector), None
         return [], None
@@ -497,10 +686,15 @@ class ImageHandler:
         return info
 
     def get_image_type(self):
-        """Determine the type of the image based on its extension."""
-        from trace_app.core import live_disk, logical_sources
+        """Determine the type of the image based on its extension. A
+        file with no extension (or .bin) is read as raw -- dd writes
+        whatever name it is given; a format TRACE recognises but cannot
+        read raises UnsupportedEvidence saying what it is."""
+        from trace_app.core import assembly, live_disk, logical_sources
         if live_disk.is_device_path(self.image_path):
             return "live"
+        if assembly.is_assembly(self.image_path):
+            return "assembled"
         if logical_sources.kind_of(self.image_path):
             return "logical"
         _, extension = os.path.splitext(self.image_path.rstrip('/\\'))
@@ -508,7 +702,13 @@ class ImageHandler:
 
         ewf = [".e01", ".s01", ".ex01"]
         raw = [".raw", ".img", ".dd", ".iso",
-               ".001", ".sparse"]
+               ".000", ".001", ".sparse", ".bin", ""]
+        if extension == '.ctr' or _starts_with(self.image_path, b'XWFS'):
+            raise UnsupportedEvidence(
+                "This is an X-Ways evidence file container (.ctr), a "
+                "proprietary X-Ways format TRACE cannot read. Export its "
+                "contents from X-Ways Forensics (as files, or as an E01 / "
+                "raw image) to examine them here.")
 
         if extension == '.aff4':
             return "aff4"
@@ -516,7 +716,8 @@ class ImageHandler:
             return "ewf"
         elif extension in raw:
             return "raw"
-        elif extension in containers.VIRTUAL_DISK_EXTENSIONS:
+        elif extension in containers.VIRTUAL_DISK_EXTENSIONS or \
+                containers.is_parallels(self.image_path):
             return "virtual"
         else:
             raise ValueError(f"Unsupported image type: {extension}")
@@ -560,7 +761,8 @@ class ImageHandler:
                 while remaining > 0 and not stop.is_set():
                     chunk = handle.read(min(CHUNK_SIZE, remaining))
                     if not chunk:
-                        break
+                        raise IOError(f"the image ended at byte "
+                                      f"{end - remaining:,}")
                     remaining -= len(chunk)
                     queues[index].put(chunk)
             except Exception as e:
@@ -614,149 +816,133 @@ class ImageHandler:
         return size
 
     def calculate_hashes(self, progress_callback=None):
-        """Hash the image for verification, reporting progress as it goes.
+        """Hash the evidence for verification: every byte, or an error.
 
-        SHA-256 is computed only when the image carries no stored hashes to
-        verify against. An E01 records MD5 and SHA-1 at acquisition, and those
-        are what the result is checked against; a third digest that nothing
-        compares to costs about 9% of the hashing time -- roughly 17 seconds on
-        a 16 GB image -- for a number no one looks at. A raw image stores
-        nothing, so there SHA-256 is the only durable identifier and is worth
-        having.
+        Returns {'computed_md5', 'computed_sha1', 'computed_sha256', 'size',
+        'path', 'stored_md5', 'stored_sha1'} and, when they apply,
+        'damaged' (an E01's sector ranges whose chunks fail their own
+        checksums), 'container_problems' (its damaged structure),
+        'container_check' (AFF4) and 'live'. A failure gives 'error' and
+        no digests at all (core/evidence_hash.py): a hash of the part
+        that could be read is not a hash of the evidence, and recorded as
+        a baseline it would make the damaged copy the reference.
+
+        What is hashed is what the evidence holds: a raw file's bytes, an
+        E01's media (checked chunk by chunk, core/ewf_chunks.py), a
+        virtual disk's or an assembled array's disk, logical evidence as
+        `_logical_hashes` describes. MD5, SHA-1 and SHA-256 are always
+        computed, so any hash recorded elsewhere can be checked.
         """
-        hash_md5 = hashlib.md5()
-        hash_sha1 = hashlib.sha1()
-        hash_sha256 = None
-        size = 0
-        total_size = 0
-        stored_md5, stored_sha1 = None, None
-
+        from trace_app.core import evidence_hash
+        result = {'computed_md5': None, 'computed_sha1': None,
+                  'computed_sha256': None, 'size': 0,
+                  'path': self.image_path, 'stored_md5': None,
+                  'stored_sha1': None}
         image_type = self.get_image_type()
-        if image_type == "logical":
-            return self._logical_hashes(progress_callback)
-
         try:
-            # First get total size for progress reporting
-            if image_type == "ewf":
-                filenames = pyewf.glob(self.image_path)
-                ewf_handle = pyewf.handle()
+            if image_type == "logical":
+                digests = self._logical_hashes(result, progress_callback)
+            elif image_type == "ewf":
+                digests = self._ewf_hashes(result, progress_callback)
+            elif image_type == "raw" and not \
+                    is_split_raw(self.image_path):
+                # The file's own bytes are the evidence.
+                digests = evidence_hash.hash_file(self.image_path,
+                                                  progress_callback)
+            else:
+                # The disk, not its container files: a split raw image's
+                # segments, a split VMDK's extents, a VHDX whose layout
+                # changes as it is compacted, a differencing disk with its
+                # parents, an AFF4's streams, an assembled array, a live
+                # disk -- what the guest saw is what is evidence.
+                if self.img_info is None:
+                    raise evidence_hash.HashingError(
+                        self.load_error or "The image could not be opened")
+                digests = evidence_hash.hash_reader(
+                    self.img_info.read, self.img_info.get_size(),
+                    progress_callback, what='disk')
+            result.update({f'computed_{name}': digests[name]
+                           for name in evidence_hash.ALGORITHMS})
+            result['size'] = digests['size']
+        except HashingCancelled:
+            raise
+        except Exception as exc:
+            logger.error("Could not hash %s: %s", self.image_path, exc)
+            result.update({'computed_md5': None, 'computed_sha1': None,
+                           'computed_sha256': None, 'error': str(exc)})
+        if image_type == "aff4":
+            # The container's own check of what it stores: it stands
+            # whether or not the disk could be hashed.
+            result['container_check'] = self._aff4_check()
+        if image_type == "live":
+            # What was read, when: a disk in use changes as it is read.
+            result['live'] = True
+        return result
+
+    def _ewf_hashes(self, result, progress_callback=None):
+        """An E01 set's media, every chunk checked against its own
+        checksum (core/ewf_chunks.py) -- libewf reads a damaged chunk as
+        zeros without a word. The hashes it stores are read for the
+        verdict. Ex01 (EWF2) goes through libewf, unchecked per chunk."""
+        from trace_app.core import evidence_hash, ewf_chunks
+        if self.incomplete():
+            raise IncompleteEvidence(self.incomplete())
+        filenames = pyewf.glob(self.image_path)
+        handle = pyewf.handle()
+        handle.open(filenames)
+        try:
+            total = handle.get_media_size()
+            for algorithm, key in (('MD5', 'stored_md5'),
+                                   ('SHA1', 'stored_sha1')):
                 try:
-                    ewf_handle.open(filenames)
-                    total_size = ewf_handle.get_media_size()
-
-                    try:
-                        # Attempt to retrieve the stored hash values
-                        stored_md5 = ewf_handle.get_hash_value("MD5")
-                        stored_sha1 = ewf_handle.get_hash_value("SHA1")
-                    except Exception as e:
-                        logger.warning(f"Unable to retrieve stored hash values: {e}")
-
-                    # Nothing to check a SHA-256 against when the image
-                    # already carries its own hashes.
-                    if not (stored_md5 or stored_sha1):
-                        hash_sha256 = hashlib.sha256()
-
-                    # Decompressing the image is the expensive part -- on a
-                    # compressed E01 it is ~94% of the work, hashing only ~6%
-                    # -- and libewf offers no threading of its own. Several
-                    # handles reading disjoint ranges do decompress in
-                    # parallel, though, so the read is split across workers
-                    # while one hasher consumes their output in order.
-                    hashers = [hash_md5, hash_sha1]
-                    if hash_sha256 is not None:
-                        hashers.append(hash_sha256)
-                    size = self._hash_ewf_parallel(
-                        filenames, total_size, hashers, progress_callback)
-                finally:
-                    ewf_handle.close()
-
-            elif image_type in ("virtual", "aff4", "live") or (
-                    image_type == "raw" and
-                    self.image_path.lower().endswith('.001')):
-                # A split raw image (x.001, x.002...) is read by TSK as one
-                # disk; hashing only the first segment's file gave a hash
-                # of part of it.
-                # The disk, not its container files: a split VMDK is many
-                # files, a VHDX's layout changes as it is compacted, and a
-                # differencing disk is meaningless without its parents. What
-                # the guest saw is what is evidence.
-                total_size = self.img_info.get_size()
-                hash_sha256 = hashlib.sha256()
-                position = 0
-                while position < total_size:
-                    chunk = self.img_info.read(
-                        position, min(CHUNK_SIZE, total_size - position))
-                    if not chunk:
-                        break
-                    for hasher in (hash_md5, hash_sha1, hash_sha256):
-                        hasher.update(chunk)
-                    position += len(chunk)
-                    size = position
-                    if progress_callback and total_size > 0:
-                        try:
-                            progress_callback(size, total_size)
-                        except Exception as e:
-                            logger.error(f"Progress callback error: {e}")
-
-            elif image_type == "raw":
-                try:
-                    total_size = os.path.getsize(self.image_path)
-                    hash_sha256 = hashlib.sha256()
-                    with open(self.image_path, "rb") as f:
-                        while True:
-                            chunk = f.read(CHUNK_SIZE)
-                            if not chunk:
-                                break
-
-                            hash_md5.update(chunk)
-                            hash_sha1.update(chunk)
-                            hash_sha256.update(chunk)
-                            size += len(chunk)
-
-                            # Report progress safely
-                            if progress_callback and total_size > 0:
-                                try:
-                                    progress_callback(size, total_size)
-                                except Exception as e:
-                                    logger.error(f"Progress callback error: {e}")
-                except Exception as e:
-                    logger.error(f"Error reading raw image: {e}")
-
-            # Compile the computed and stored hashes in a dictionary
-            hashes = {
-                'computed_md5': hash_md5.hexdigest(),
-                'computed_sha1': hash_sha1.hexdigest(),
-                'computed_sha256': hash_sha256.hexdigest() if hash_sha256 else None,
-                'size': size,
-                'path': self.image_path,
-                'stored_md5': stored_md5,
-                'stored_sha1': stored_sha1
-            }
-            if image_type == "aff4":
-                hashes['container_check'] = self._aff4_check()
-            if image_type == "live":
-                # What was read, when: a disk in use changes as it is read.
-                hashes['live'] = True
-
-            return hashes
-        except Exception as e:
-            logger.error(f"Error calculating hashes: {e}")
-            failed = {
-                'computed_md5': 'Error',
-                'computed_sha1': 'Error',
-                'computed_sha256': 'Error',
-                'size': 0,
-                'path': self.image_path,
-                'stored_md5': None,
-                'stored_sha1': None,
-                'error': str(e)
-            }
-            if image_type == "aff4":
-                # A damaged container (a segment failing the ZIP's CRC-32)
-                # cannot be hashed whole; its own check still says what is
-                # wrong.
-                failed['container_check'] = self._aff4_check()
-            return failed
+                    result[key] = handle.get_hash_value(algorithm) or None
+                except Exception as exc:
+                    logger.debug("No stored %s: %s", algorithm, exc)
+        finally:
+            handle.close()
+        try:
+            chunk_map = ewf_chunks.ChunkMap(filenames)
+        except ewf_chunks.NotEwf1:
+            hashers = evidence_hash.new_hashers()
+            size = self._hash_ewf_parallel(filenames, total,
+                                           list(hashers.values()),
+                                           progress_callback)
+            if size != total:
+                raise evidence_hash.HashingError(
+                    f"The image gave {size:,} bytes; its media is "
+                    f"{total:,}")
+            return evidence_hash.digests(hashers, size)
+        if chunk_map.media_size != total:
+            raise evidence_hash.HashingError(
+                f"The image's tables describe {chunk_map.media_size:,} "
+                f"bytes; libewf reads {total:,}")
+        damaged = []
+        hashers = evidence_hash.new_hashers()
+        position = 0
+        for offset, data, ok in ewf_chunks.read_media(chunk_map):
+            if not ok:
+                damaged.append(offset)
+            for hasher in hashers.values():
+                hasher.update(data)
+            position += len(data)
+            if progress_callback is not None:
+                progress_callback(min(position, total), total)
+        # The media counts whole sectors; a source that was not a whole
+        # number of them keeps its last bytes in the last chunk, and the
+        # hash the image stores covers them: they are hashed too.
+        if not total <= position <= total + ewf_chunks.TAIL_SLACK:
+            raise evidence_hash.HashingError(
+                f"The image gave {position:,} bytes; its media is "
+                f"{total:,}")
+        digests = evidence_hash.digests(hashers, position)
+        if position > total:
+            result['beyond_media'] = position - total
+        if damaged:
+            result['damaged'] = ewf_chunks.damaged_ranges(
+                damaged, chunk_map.chunk_size, self.sector_size or 512)
+        if chunk_map.problems:
+            result['container_problems'] = list(chunk_map.problems)
+        return digests
 
     def _aff4_check(self):
         """(ok, detail) from re-hashing an AFF4 image's streams against
@@ -788,113 +974,98 @@ class ImageHandler:
         """Logical evidence: files, no disk -- nothing to carve."""
         return self.logical_fs is not None
 
-    def _logical_hashes(self, progress_callback=None):
-        """Verification hashes of logical evidence.
+    def _logical_hashes(self, result, progress_callback=None):
+        """Verification hashes of logical evidence, into `result`
+        (stored hashes) and returned as digests.
 
         * AD1: the image-wide MD5 and SHA-1 as FTK Imager computes them
           (core/ad1.py), checked against the ones in its log (x.ad1.txt)
-          when the log is beside it.
+          when the log is beside it; no SHA-256 (FTK defines none).
         * L01: the media hash libewf computes, checked against the one
           the file records.
+        * iOS backup: every file as stored.
         * ZIP / TAR: the archive file itself.
-        * A folder: MD5 / SHA-1 / SHA-256 over every file, in sorted path
-          order, as path + NUL + content -- so a file added, removed,
-          renamed or changed changes it.
+        * A folder: over every file, in sorted path order, as path + NUL +
+          content -- so a file added, removed, renamed or changed changes
+          it. A file that cannot be read in full fails the hash.
         """
-        from trace_app.core import logical_sources
+        from trace_app.core import evidence_hash, logical_sources
         kind = logical_sources.kind_of(self.image_path)
-        result = {'computed_md5': None, 'computed_sha1': None,
-                  'computed_sha256': None, 'size': 0,
-                  'path': self.image_path, 'stored_md5': None,
-                  'stored_sha1': None}
-        try:
-            if kind == 'ad1':
-                from trace_app.core import ad1
-                computed = ad1.verify(
-                    self.image_path,
-                    progress=(lambda done, total: progress_callback(done,
-                                                                    total))
-                    if progress_callback else None)
-                result.update(computed or {})
-                result.update(ad1.logged_hashes(self.image_path))
-                result['size'] = sum(os.path.getsize(p) for p in
-                                     ad1.segment_paths(self.image_path))
-                return result
-            if kind == 'ios_backup':
-                # As stored -- encrypted or not, unlocked or not.
-                from trace_app.core import ios_backup
-                hashers = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
-                result['size'] = ios_backup.hash_folder(
-                    self.image_path, hashers, progress_callback)
-                result['computed_md5'], result['computed_sha1'], \
-                    result['computed_sha256'] = (h.hexdigest()
-                                                 for h in hashers)
-                return result
-            if kind == 'l01':
-                filenames = pyewf.glob(self.image_path)
-                handle = pyewf.handle()
-                handle.open(filenames)
-                try:
-                    total = handle.get_media_size()
-                    for algorithm, key in (('MD5', 'stored_md5'),
-                                           ('SHA1', 'stored_sha1')):
-                        try:
-                            result[key] = handle.get_hash_value(algorithm)
-                        except Exception:
-                            pass
-                finally:
-                    handle.close()
-                hashers = [hashlib.md5(), hashlib.sha1()]
-                result['size'] = self._hash_ewf_parallel(
-                    filenames, total, hashers, progress_callback)
-                result['computed_md5'] = hashers[0].hexdigest()
-                result['computed_sha1'] = hashers[1].hexdigest()
-                return result
-            hashers = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
-            if kind == 'folder':
-                files = [(self.logical_fs.path_of(n.inode), n)
-                         for n in self.logical_fs.nodes.values()
-                         if not n.is_dir]
-                files.sort(key=lambda pair: pair[0])
-                total = sum(n.size for _p, n in files) or 1
-                done = 0
-                for path, node in files:
-                    for hasher in hashers:
-                        hasher.update(path.encode('utf-8',
-                                                  'surrogateescape') + b'\0')
-                    position = 0
-                    while position < node.size:
-                        chunk = node.reader(position, min(CHUNK_SIZE,
-                                                          node.size - position))
-                        if not chunk:
-                            break
-                        for hasher in hashers:
-                            hasher.update(chunk)
-                        position += len(chunk)
-                        done += len(chunk)
-                        if progress_callback:
-                            progress_callback(done, total)
-                result['size'] = done
-            else:
-                total = os.path.getsize(self.image_path) or 1
-                with open(self.image_path, 'rb') as handle:
-                    while True:
-                        chunk = handle.read(CHUNK_SIZE)
-                        if not chunk:
-                            break
-                        for hasher in hashers:
-                            hasher.update(chunk)
-                        result['size'] += len(chunk)
-                        if progress_callback:
-                            progress_callback(result['size'], total)
-            result['computed_md5'], result['computed_sha1'], \
-                result['computed_sha256'] = (h.hexdigest() for h in hashers)
-            return result
-        except Exception as exc:
-            logger.error("Could not hash %s: %s", self.image_path, exc)
-            result.update({'computed_md5': 'Error', 'computed_sha1': 'Error',
-                           'computed_sha256': 'Error', 'error': str(exc)})
-            return result
+        if kind == 'ad1':
+            from trace_app.core import ad1
+            computed = ad1.verify(self.image_path,
+                                  progress=progress_callback) or {}
+            if not computed.get('computed_md5'):
+                raise evidence_hash.HashingError(
+                    "The AD1 image could not be read in full")
+            result.update(ad1.logged_hashes(self.image_path))
+            return {'md5': computed.get('computed_md5'),
+                    'sha1': computed.get('computed_sha1'),
+                    'sha256': computed.get('computed_sha256'),
+                    'size': sum(os.path.getsize(p) for p in
+                                ad1.segment_paths(self.image_path))}
+        if kind == 'ios_backup':
+            # As stored -- encrypted or not, unlocked or not.
+            from trace_app.core import ios_backup
+            hashers = evidence_hash.new_hashers()
+            size = ios_backup.hash_folder(self.image_path,
+                                          list(hashers.values()),
+                                          progress_callback)
+            return evidence_hash.digests(hashers, size)
+        if kind == 'l01':
+            filenames = pyewf.glob(self.image_path)
+            handle = pyewf.handle()
+            handle.open(filenames)
+            try:
+                total = handle.get_media_size()
+                for algorithm, key in (('MD5', 'stored_md5'),
+                                       ('SHA1', 'stored_sha1')):
+                    try:
+                        result[key] = handle.get_hash_value(algorithm) or None
+                    except Exception:
+                        pass
+            finally:
+                handle.close()
+            hashers = evidence_hash.new_hashers()
+            size = self._hash_ewf_parallel(filenames, total,
+                                           list(hashers.values()),
+                                           progress_callback)
+            if size != total:
+                raise evidence_hash.HashingError(
+                    f"The L01 gave {size:,} bytes; its media is {total:,}")
+            return evidence_hash.digests(hashers, size)
+        if kind == 'folder':
+            files = sorted(((self.logical_fs.path_of(n.inode), n)
+                            for n in self.logical_fs.nodes.values()
+                            if not n.is_dir), key=lambda pair: pair[0])
+            total = sum(n.size for _p, n in files)
+            hashers = evidence_hash.new_hashers()
+            done = 0
+            for path, node in files:
+                for hasher in hashers.values():
+                    hasher.update(path.encode('utf-8', 'surrogateescape')
+                                  + b'\0')
+                position = 0
+                while position < node.size:
+                    want = min(CHUNK_SIZE, node.size - position)
+                    try:
+                        chunk = node.reader(position, want)
+                    except Exception as exc:
+                        raise evidence_hash.HashingError(
+                            f"{path} could not be read at byte "
+                            f"{position:,}: {exc}") from exc
+                    if not chunk:
+                        raise evidence_hash.HashingError(
+                            f"{path} ended at byte {position:,}; it was "
+                            f"{node.size:,} bytes when the folder was read")
+                    for hasher in hashers.values():
+                        hasher.update(chunk)
+                    position += len(chunk)
+                    done += len(chunk)
+                    if progress_callback:
+                        progress_callback(done, total)
+            return evidence_hash.digests(hashers, done)
+        return evidence_hash.hash_file(self.image_path, progress_callback)
 
     def load_image(self):
         """Load the image and read its volume/filesystem information.
@@ -911,6 +1082,7 @@ class ImageHandler:
                 ewf_handle = pyewf.handle()
                 ewf_handle.open(filenames)
                 self.img_info = EWFImgInfo(ewf_handle)
+                self._check_segments(filenames)
             elif image_type == "raw":
                 self.img_info = pytsk3.Img_Info(self.image_path)
             elif image_type == "live":
@@ -925,6 +1097,12 @@ class ImageHandler:
                 from trace_app.core.aff4 import open_aff4
                 self.img_info, self.container_note = open_aff4(
                     self.image_path)
+            elif image_type == "assembled":
+                # Several member disks as one: an md array, a multi-disk
+                # Btrfs file system (core/assembly.py).
+                from trace_app.core.assembly import open_assembly
+                self.img_info, self.container_note, self._btrfs_others, \
+                    self._members = open_assembly(self.image_path)
             elif image_type == "virtual":
                 try:
                     self.img_info, self.container_note = \
@@ -970,6 +1148,34 @@ class ImageHandler:
             self.is_wiped_image = True
             return False
 
+    def _check_segments(self, filenames):
+        """A segment set missing a file, or with one cut short, opens and
+        then fails at the first read past the gap. Say so up front (the
+        tree's tooltip, evidence intake) and make those reads say why."""
+        from trace_app.core import ewf_check
+        try:
+            missing = ewf_check.problem(filenames)
+        except Exception as exc:
+            logger.debug("Segment check failed: %s", exc)
+            return
+        if not missing:
+            return
+        size = self.img_info.get_size()
+        end = ewf_check.data_end(self.img_info.read, size)
+        self.img_info.incomplete = (missing, end)
+        self.container_note = (
+            f"Incomplete E01: {missing}; data up to "
+            f"{FileSystemUtils.get_readable_size(end)} of "
+            f"{FileSystemUtils.get_readable_size(size)}")
+        logger.warning("%s: %s", self.image_path,
+                       incomplete_message((missing, end)))
+
+    def incomplete(self):
+        """incomplete_message() for an image whose segment set is not
+        whole, else None."""
+        state = getattr(self.img_info, 'incomplete', None)
+        return incomplete_message(state) if state else None
+
     def has_filesystem(self, start_offset):
         fs_info = self.get_fs_info(start_offset)
         return fs_info is not None
@@ -991,6 +1197,9 @@ class ImageHandler:
         (0x400, b'HX', 'HFSX'),
         (0x20, b'NXSB', 'APFS'),
         (0, b'XFSB', 'XFS'),
+        # Linux RAID (md) members: superblock 1.2 at 4 KiB, 1.1 at 0.
+        (4096, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
+        (0, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
         (0x10040, b'_BHRfS_M', 'Btrfs'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
@@ -1002,6 +1211,54 @@ class ImageHandler:
         (65536 + 1372, _UFS2_MAGIC_LE, 'UFS2'),
         (65536 + 1372, _UFS2_MAGIC_BE, 'UFS2'),
     )
+
+    #: The Sleuth Kit's type to force for each signature detect_filesystems
+    #: names, so a layered partition's file systems open one at a time.
+    _TSK_TYPES = {'NTFS': 'NTFS_DETECT', 'FAT': 'FAT_DETECT',
+                  'FAT12': 'FAT_DETECT', 'FAT16': 'FAT_DETECT',
+                  'FAT32': 'FAT_DETECT', 'ExFAT': 'EXFAT',
+                  'ISO9660': 'ISO9660_DETECT', 'Ext2/3/4': 'EXT_DETECT',
+                  'HFS+': 'HFS_DETECT', 'HFSX': 'HFS_DETECT',
+                  'UFS1': 'FFS_DETECT', 'UFS2': 'FFS_DETECT'}
+
+    def fs_layers(self, start_sector):
+        """The file systems layered in one partition -- formatted again
+        without being wiped, so both sets of structures are intact (DFTT
+        #10: NTFS under Ext2, NTFS under UFS) -- each opened on its own:
+        [{'key', 'name', 'index'}], or [] when there is one or none. The
+        Sleuth Kit's own detection refuses such a partition outright, and
+        showing it empty hides both."""
+        if start_sector in self._layers:
+            return self._layers[start_sector]
+        layers = []
+        if self.logical_fs is None and \
+                start_sector < containers.SHADOW_KEY_BASE and \
+                start_sector not in self._volumes:
+            kinds = list(dict.fromkeys(
+                self._TSK_TYPES[name]
+                for name in self.detect_filesystems(start_sector)
+                if name in self._TSK_TYPES))
+            if len(kinds) > 1:
+                for index, kind in enumerate(kinds):
+                    try:
+                        fs = pytsk3.FS_Info(
+                            self.img_info, start_sector * self.sector_size,
+                            getattr(pytsk3, 'TSK_FS_TYPE_' + kind))
+                    except Exception:
+                        continue
+                    key = containers.layer_key(start_sector, index)
+                    self.fs_info_cache[key] = fs
+                    layers.append({'key': key, 'index': index})
+                if len(layers) < 2:
+                    layers = []
+                for layer in layers:
+                    layer['name'] = self.get_fs_type(layer['key'])
+                if layers:
+                    logger.info("Sector %d holds %d file systems layered: %s",
+                                start_sector, len(layers),
+                                ', '.join(l['name'] for l in layers))
+        self._layers[start_sector] = layers
+        return layers
 
     def detect_filesystems(self, start_offset):
         """Every filesystem signature present at this partition offset.
@@ -1080,14 +1337,58 @@ class ImageHandler:
         """Retrieve partitions from the loaded image, or indicate unpartitioned space."""
         return self.partitions
 
+    def partition_label(self, start_sector, description=None):
+        """What the examiner sees for the slot at `start_sector`: 'EFI
+        System Partition @ 2048', 'Linux Filesystem @ 4198400', 'GPT
+        Header' (core/partition_names.py). The GPT's own entries -- type
+        and name -- are read once."""
+        from trace_app.core import partition_names
+        if not hasattr(self, '_gpt_entries'):
+            self._gpt_entries = {}
+            if self.img_info is not None and self.logical_fs is None:
+                try:
+                    self._gpt_entries = partition_names.gpt_entries(
+                        self.read, self.sector_size)
+                except Exception as exc:
+                    logger.debug("GPT entries not read: %s", exc)
+        if description is None:
+            # Several slots can start at one sector (the MBR's own table
+            # and a partition at sector 0): the partition names it.
+            found = [d for _a, d, s, _l in self.get_partitions()
+                     if s == start_sector]
+            real = [d for d in found if partition_names.bookkeeping(
+                d.decode('utf-8', 'replace') if isinstance(d, bytes)
+                else d or '') is None]
+            description = (real or found or [None])[0]
+            if description is None and any(
+                    lost['start'] == start_sector
+                    for lost in self.lost_partitions()):
+                return f"Lost partition @ {start_sector}"
+            description = description or b''
+        try:
+            scheme = int(self.volume_info.info.vstype) \
+                if self.volume_info is not None else None
+        except Exception:
+            scheme = None
+        return partition_names.label(description, start_sector,
+                                     self._gpt_entries, scheme)
+
     def _get_partitions(self):
         """Internal method to actually retrieve partitions."""
         partitions = []
         if self.volume_info:
             for partition in self.volume_info:
-                if not partition.desc:
-                    continue
-                partitions.append((partition.addr, partition.desc, partition.start, partition.len))
+                description = partition.desc
+                if not description:
+                    # A GPT partition's description is its name, which is
+                    # optional: an unnamed one was dropped here, and every
+                    # file on it with it. Only unnamed table entries go.
+                    if not int(partition.flags) & \
+                            pytsk3.TSK_VS_PART_FLAG_ALLOC:
+                        continue
+                    description = b'Unnamed partition'
+                partitions.append((partition.addr, description,
+                                   partition.start, partition.len))
         return partitions
 
     #: Root inode to fall back on when a filesystem will not say. 5 is NTFS's,
@@ -1140,17 +1441,33 @@ class ImageHandler:
         if self.logical_fs is not None:
             return self.logical_fs if start_offset == 0 else None
         if start_offset not in self.fs_info_cache:
+            layer = containers.split_layer_key(start_offset)
+            if layer is not None:
+                # Opened by fs_layers, which forces each type in turn.
+                self.fs_layers(layer[0])
+                return self.fs_info_cache.get(start_offset)
             shadow = containers.split_shadow_key(start_offset)
             if shadow is not None and start_offset not in self._volumes:
                 self.shadow_copies(shadow[0])
             logical = containers.split_lvm_key(start_offset)
             if logical is not None and start_offset not in self._volumes:
                 self.logical_volumes(logical[0])
+            dynamic = containers.split_ldm_key(start_offset)
+            if dynamic is not None:
+                if start_offset not in self._volumes:
+                    self.dynamic_volumes(dynamic[0])
+                if start_offset not in self._volumes:
+                    return None
             apfs = containers.split_apfs_key(start_offset)
             if apfs is not None:
                 return self._apfs_file_system(start_offset, *apfs)
             if logical is not None and start_offset not in self._volumes:
                 return None
+            if start_offset < containers.SHADOW_KEY_BASE and \
+                    shadow is None:
+                # A Linux RAID member: what is inside the array, as the
+                # kernel presents /dev/mdN (md_array).
+                self.md_array(start_offset)
             try:
                 if start_offset in self._volumes:
                     fs_info = pytsk3.FS_Info(self._volumes[start_offset],
@@ -1172,17 +1489,25 @@ class ImageHandler:
 
     def _other_file_system(self, start_offset):
         """An XFS (libfsxfs) or Btrfs (core/btrfs.py) volume at a partition
-        (or an unpartitioned image), or None."""
-        if start_offset in self._volumes or \
-                start_offset >= containers.SHADOW_KEY_BASE:
+        (or an unpartitioned image), or inside a volume TRACE opened there
+        -- an md array, an unlocked LUKS volume, an LVM logical volume
+        (RHEL's default install is XFS on LVM) -- or None."""
+        volume = self._volumes.get(start_offset)
+        if volume is not None:
+            window = containers.ByteWindow(volume.read, 0, volume.get_size())
+        elif start_offset >= containers.SHADOW_KEY_BASE:
             return None
-        try:
-            window = self._partition_window(start_offset)
-        except KeyError:
-            return None
+        else:
+            try:
+                window = self._partition_window(start_offset)
+            except KeyError:
+                return None
         from trace_app.core.btrfs import open_btrfs
         from trace_app.core.xfs import open_xfs
-        return open_xfs(window) or open_btrfs(window)
+        # An assembled Btrfs file system: the other devices, by device.
+        others = getattr(self, '_btrfs_others', ()) \
+            if start_offset == 0 else ()
+        return open_xfs(window) or open_btrfs(window, others)
 
     # --- one file, read lazily --------------------------------------------------
 
@@ -1237,6 +1562,12 @@ class ImageHandler:
         raise KeyError(start_sector)
 
     def _partition_window(self, start_sector):
+        """The bytes a partition holds -- an md array's when it is a
+        member TRACE can read as one, so LVM or LUKS inside md opens as it
+        would on the machine."""
+        array = self._md.get(start_sector)
+        if array is not None:
+            return containers.ByteWindow(array.read, 0, array.size)
         offset, length = self.partition_bytes(start_sector)
         return containers.ByteWindow(self.read, offset, length)
 
@@ -1253,8 +1584,180 @@ class ImageHandler:
         self._directory_cache.clear()
 
     @containers.holding_libyal
+    def inner_kind(self, start_sector):
+        """What an unlocked encrypted volume holds that The Sleuth Kit
+        cannot open by itself -- 'lvm' for the usual Linux install, LVM
+        inside LUKS -- or None (a file system, or still locked)."""
+        if start_sector not in self._bitlocker:
+            return None
+        key = ('inner', start_sector)
+        if key not in self._kinds:
+            try:
+                self._kinds[key] = containers.volume_kind(
+                    self._volume_stream(start_sector))
+            except Exception:
+                self._kinds[key] = None
+        return self._kinds[key]
+
+    # --- partitions no table points at (core/lost_partitions.py) -----------
+
+    def lost_partitions(self):
+        """File systems found where no partition table entry points:
+        [{'start', 'fs', 'size'}], start in sectors -- a wiped table, a
+        broken extended chain, a deleted GPT entry. Searched once, outside
+        the partitions the table lists (an extended container is searched:
+        its logical partitions are what goes missing)."""
+        if hasattr(self, '_lost'):
+            return self._lost
+        self._lost = []
+        if self.logical_fs is not None or self.img_info is None:
+            return self._lost
+        from trace_app.core import lost_partitions, partition_names
+        partitions = self.get_partitions()
+        if not partitions and (self.get_fs_info(0) is not None or
+                               self.volume_kind(0) is not None or
+                               self.fs_layers(0)):
+            # A volume image, or a container (LVM, LUKS, a RAID member...)
+            # whose own file systems are not lost partitions.
+            return self._lost
+        known = []
+        for _addr, desc, start, length in partitions:
+            text = desc.decode('utf-8', 'replace') if isinstance(
+                desc, bytes) else str(desc)
+            if partition_names.bookkeeping(text) is not None or \
+                    'Extended' in text:
+                continue
+            known.append((start, length))
+
+        def opens(start):
+            try:
+                fs = pytsk3.FS_Info(self.img_info,
+                                    offset=start * self.sector_size)
+            except IOError:
+                return None
+            self.fs_info_cache.setdefault(start, fs)
+            return (self.get_fs_type(start),
+                    fs.info.block_count * fs.info.block_size)
+        try:
+            self._lost = lost_partitions.scan(
+                self.read, self.get_size() // self.sector_size, known,
+                opens)
+        except Exception as exc:
+            logger.warning("Lost partition scan failed: %s", exc)
+        return self._lost
+
+    # --- Windows dynamic disks (core/ldm.py) -------------------------------
+
+    def _ldm_starts(self):
+        """Starts of the partitions that are a dynamic disk's data area:
+        MBR type 0x42, or GPT's 'LDM data partition'."""
+        from trace_app.core import ldm
+        if not hasattr(self, '_ldm_slots'):
+            self.partition_label(0)                      # the GPT entries
+            gpt = getattr(self, '_gpt_entries', {}) or {}
+            self._ldm_slots = [
+                start for _a, desc, start, _l in self.get_partitions()
+                if b'(0x42)' in (desc or b'') or
+                gpt.get(start, ('',))[0] == ldm.GPT_LDM_DATA]
+        return self._ldm_slots
+
+    def ldm_database(self):
+        """This disk's copy of its disk group's LDM database, or None."""
+        from trace_app.core import ldm
+        if not hasattr(self, '_ldm_db'):
+            self._ldm_db = None
+            if self.logical_fs is None and self.img_info is not None and \
+                    self._ldm_starts():
+                try:
+                    self._ldm_db = ldm.Database(
+                        self.read, self.get_size(),
+                        getattr(self, '_gpt_entries', None))
+                except (ldm.LdmError, IndexError, ValueError) as exc:
+                    logger.info("No LDM database: %s", exc)
+        return self._ldm_db
+
+    def dynamic_volumes(self, start_sector):
+        """The disk group's volumes, from the dynamic disk at
+        `start_sector`: [{'key', 'index', 'name', 'kind', 'size', 'disks',
+        'readable', 'why'}] -- 'readable' when every extent it needs is on
+        this disk (simple volumes, a mirror's plex); the others need the
+        group's other disks (File > Assemble).
+
+        A volume of one extent here is a run of sectors on this disk: its
+        key is its real start sector, read in place like a partition --
+        so a simple volume at the partition's start keeps the references
+        it had before dynamic disks were read (p63:...). Only a volume put
+        together from several extents gets a containers.ldm_key."""
+        from trace_app.core import hwraid, ldm
+        database = self.ldm_database()
+        if database is None or start_sector not in self._ldm_starts():
+            return []
+        here = {database.disk_guid: (self.read,
+                                     database.data_start * self.sector_size)}
+        out = []
+        for index, volume in enumerate(database.volume_list()):
+            key = containers.ldm_key(start_sector, index)
+            readable, why = False, ''
+            run = self._single_extent(volume, database)
+            if run is not None:
+                out.append({'key': run, 'index': index,
+                            'name': volume['name'], 'kind': volume['kind'],
+                            'size': volume['size'],
+                            'disks': len(volume['disks']), 'readable': True,
+                            'group': database.group_name, 'why': ''})
+                continue
+            if key not in self._volumes:
+                try:
+                    reader = ldm.volume_reader(volume, here)
+                    self._volumes[key] = hwraid._Image(reader)
+                except (ldm.LdmError, hwraid.RaidError) as exc:
+                    why = str(exc)
+            readable = key in self._volumes
+            out.append({'key': key, 'index': index, 'name': volume['name'],
+                        'kind': volume['kind'], 'size': volume['size'],
+                        'disks': len(volume['disks']),
+                        'readable': readable,
+                        'group': database.group_name, 'why': why})
+        return out
+
+    def _ldm_allocation(self, start_sector):
+        """Carving's map of a dynamic disk's data partition: each volume
+        read in place by its file system's own allocation; the extents of
+        volumes put together from several (striped, RAID5, spanned --
+        their bytes here mean nothing alone) as used; the rest -- between
+        and after volumes, where deleted ones were -- free."""
+        database = self.ldm_database()
+        ranges = []
+        base = database.data_start * self.sector_size
+        for volume in self.dynamic_volumes(start_sector):
+            if volume['readable'] and volume['key'] < \
+                    containers.SHADOW_KEY_BASE:
+                ranges += self.build_allocation_map(volume['key'])
+        for volume in database.volume_list():
+            if self._single_extent(volume, database) is not None:
+                continue
+            for component in volume['components']:
+                ranges += [(base + e['start'], base + e['start'] + e['size'])
+                           for e in component['extents']
+                           if e['disk_guid'] == database.disk_guid]
+        # The database itself, at the disk's end.
+        size = self.get_size()
+        ranges.append((size - 2048 * self.sector_size, size))
+        return self._merge_ranges(ranges)
+
+    def _single_extent(self, volume, database):
+        """The start sector of a volume that is one extent on this disk
+        (in any of its plexes), else None."""
+        for component in volume['components']:
+            extents = component['extents']
+            if len(extents) == 1 and component['kind'] not in (1, 3) and \
+                    extents[0]['disk_guid'] == database.disk_guid:
+                return (database.data_start * self.sector_size +
+                        extents[0]['start']) // self.sector_size
+        return None
+
     def volume_kind(self, start_sector):
-        """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs' or None for a
+        """'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', 'ldm' or None for a
         partition (or an unpartitioned image at 0)."""
         if self.logical_fs is not None:
             # An encrypted iOS backup is locked until its password is given.
@@ -1263,13 +1766,95 @@ class ImageHandler:
         if start_sector not in self._kinds:
             if start_sector >= containers.SHADOW_KEY_BASE:
                 self._kinds[start_sector] = None
+            elif start_sector in self._ldm_starts() and \
+                    self.ldm_database() is not None:
+                self._kinds[start_sector] = 'ldm'
             else:
                 try:
                     self._kinds[start_sector] = containers.volume_kind(
                         self._partition_window(start_sector))
                 except Exception:
                     self._kinds[start_sector] = None
+                if self._kinds[start_sector] is None and \
+                        self.md_member(start_sector) is not None and \
+                        self.md_array(start_sector) is None:
+                    self._kinds[start_sector] = 'mdraid'
+                if self._kinds[start_sector] == 'fvde' and \
+                        self._open_core_storage(start_sector):
+                    self._kinds[start_sector] = 'corestorage'
         return self._kinds[start_sector]
+
+    def _open_core_storage(self, start_sector):
+        """Open a Core Storage volume that is not encrypted, as an
+        unlocked one is opened (so every reader, carving and the tree work
+        unchanged) -- it used to be shown as a locked FileVault volume,
+        asking for a password it does not have. False if encrypted."""
+        window = self._partition_window(start_sector)
+        try:
+            volume, keep = containers.open_core_storage(window)
+        except containers.ContainerError as exc:
+            logger.info("Sector %d: %s", start_sector, exc)
+            return False
+        if volume is None:
+            return False
+        self._bitlocker[start_sector] = volume
+        self._unlocked_kind[start_sector] = 'corestorage'
+        self._keep[start_sector] = keep + [window]
+        self._volumes[start_sector] = containers.LibyalImgInfo(
+            volume, volume.get_size(), keep=[])
+        self._forget_filesystem(start_sector)
+        logger.info("Core Storage volume at sector %d is not encrypted: "
+                    "opened", start_sector)
+        return True
+
+    # --- Linux software RAID ----------------------------------------------
+
+    def md_member(self, start_sector):
+        """The md superblock of a partition (or an unpartitioned image at
+        0), or None."""
+        if start_sector not in self._md_member:
+            member = None
+            if start_sector < containers.SHADOW_KEY_BASE and \
+                    self.logical_fs is None:
+                try:
+                    from trace_app.core import mdraid
+                    offset, length = self.partition_bytes(start_sector)
+                    member = mdraid.superblock(
+                        lambda o, n, base=offset: self.read(base + o, n),
+                        length)
+                except Exception as exc:
+                    logger.debug("No md superblock at %s: %s",
+                                 start_sector, exc)
+            self._md_member[start_sector] = member
+        return self._md_member[start_sector]
+
+    def md_array(self, start_sector):
+        """The md array a partition is a member of, when this image alone
+        holds enough of it -- one member of a mirror is the whole array;
+        striped levels need their other disks (an assembled evidence
+        item, core/assembly.py). Its bytes become the partition's: every
+        reader opens what is inside, as the kernel presents /dev/mdN."""
+        if start_sector in self._md:
+            return self._md[start_sector]
+        self._md[start_sector] = None
+        member = self.md_member(start_sector)
+        if member is None:
+            return None
+        from trace_app.core import mdraid
+        offset, _length = self.partition_bytes(start_sector)
+        try:
+            array = mdraid.Array([(member, lambda o, n, base=offset:
+                                   self.read(base + o, n))])
+        except mdraid.MdError as exc:
+            logger.info("RAID member at sector %s: %s (%s)", start_sector,
+                        member.describe(), exc)
+            return None
+        self._md[start_sector] = array
+        if start_sector not in self._volumes:
+            self._volumes[start_sector] = mdraid.MdImgInfo(array)
+        logger.info("RAID member at sector %s read as its array: %s",
+                    start_sector, array.describe())
+        return array
 
     def encryption(self, start_sector):
         """The kind of an encrypted volume at a partition, or None."""
@@ -1344,8 +1929,9 @@ class ImageHandler:
         'size', 'group'}]."""
         if start_sector not in self._lvm:
             try:
+                # Decrypted, when LVM is inside an unlocked LUKS volume.
                 handle, group, volumes = containers.open_lvm(
-                    self._partition_window(start_sector))
+                    self._volume_stream(start_sector))
             except Exception as exc:
                 logger.warning("LVM at %s unreadable: %s", start_sector, exc)
                 self._lvm[start_sector] = (_Closed(), None, [])
@@ -1426,11 +2012,18 @@ class ImageHandler:
         only). What analysis, indexing, activity and NTFS walk."""
         partitions = self.get_partitions()
         starts = [p[2] for p in partitions] if partitions else [0]
+        # File systems no partition table points at: read like the others.
+        starts += [lost['start'] for lost in self.lost_partitions()]
         out = []
         for start in dict.fromkeys(starts):
             kind = self.volume_kind(start)
-            if kind == 'lvm':
+            if kind == 'lvm' or self.inner_kind(start) == 'lvm':
                 out += [v['key'] for v in self.logical_volumes(start)]
+            elif kind == 'ldm':
+                out += [v['key'] for v in self.dynamic_volumes(start)
+                        if v['readable']]
+            elif self.fs_layers(start):
+                out += [layer['key'] for layer in self.fs_layers(start)]
             elif kind == 'apfs':
                 out += [v['key'] for v in self.apfs_volumes(start)
                         if not v['locked']]
@@ -1630,6 +2223,24 @@ class ImageHandler:
         except Exception:
             return None
 
+    def entry_times_text(self, start_offset, meta):
+        """{'accessed', 'modified', 'created', 'changed'} as the listing
+        shows them: UTC where the file system records it (NTFS, ext, HFS+,
+        and an exFAT entry with its UTC offset), "(local, no zone)" where
+        it does not (FAT; exFAT without one). See safe_datetime."""
+        if meta is None:
+            return dict.fromkeys(('accessed', 'modified', 'created',
+                                  'changed'), "N/A")
+        from trace_app.core import exfat
+        zoned = self.get_fs_type(start_offset) not in _TIMEZONE_NAIVE
+        values, zoned = exfat.entry_times(self, start_offset, meta,
+                                                zoned)
+        return {key: safe_datetime(values.get(field), zoned)
+                for key, field in (('accessed', 'atime'),
+                                   ('modified', 'mtime'),
+                                   ('created', 'crtime'),
+                                   ('changed', 'ctime'))}
+
     def get_directory_contents(self, start_offset, inode_number=None):
         """Get directory contents with caching for performance."""
         cache_key = f"{start_offset}_{inode_number}"
@@ -1643,9 +2254,6 @@ class ImageHandler:
             try:
                 directory = fs.open_dir(inode=inode_number) if inode_number else fs.open_dir(path="/")
                 entries = []
-                # FAT and exFAT store wall-clock time with no timezone; every
-                # other filesystem here stores UTC. See safe_datetime.
-                zoned = self.get_fs_type(start_offset) not in _TIMEZONE_NAIVE
 
                 for entry in directory:
                     if entry.info.name.name in [b".", b".."]:
@@ -1676,10 +2284,7 @@ class ImageHandler:
                         "is_directory": is_directory,
                         "inode_number": inode,
                         "size": meta.size if meta and meta.size is not None else 0,
-                        "accessed": safe_datetime(meta.atime, zoned) if hasattr(meta, 'atime') else "N/A",
-                        "modified": safe_datetime(meta.mtime, zoned) if hasattr(meta, 'mtime') else "N/A",
-                        "created": safe_datetime(meta.crtime, zoned) if hasattr(meta, 'crtime') else "N/A",
-                        "changed": safe_datetime(meta.ctime, zoned) if hasattr(meta, 'ctime') else "N/A",
+                        **self.entry_times_text(start_offset, meta),
                         # Whether the filesystem still considers this entry
                         # live. TSK reports it and the listing was discarding
                         # it, so a deleted file in a directory looked exactly
@@ -2185,10 +2790,7 @@ class ImageHandler:
                 "name": dir_name,
                 "path": full_path,
                 "size": 0,  # Directories don't have a size in this context
-                "accessed": safe_datetime(entry.info.meta.atime if entry.info.meta else None),
-                "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
-                "created": safe_datetime(entry.info.meta.crtime if hasattr(entry.info.meta, 'crtime') else None),
-                "changed": safe_datetime(entry.info.meta.ctime if entry.info.meta else None),
+                **self.entry_times_text(start_offset, entry.info.meta),
                 "inode_item": str(inode_number),
                 "inode_number": inode_number,
                 "start_offset": start_offset,
@@ -2240,10 +2842,7 @@ class ImageHandler:
                 "name": file_name,
                 "path": full_path,  # Now includes volume information
                 "size": entry.info.meta.size if entry.info.meta else 0,
-                "accessed": safe_datetime(entry.info.meta.atime if entry.info.meta else None),
-                "modified": safe_datetime(entry.info.meta.mtime if entry.info.meta else None),
-                "created": safe_datetime(entry.info.meta.crtime if hasattr(entry.info.meta, 'crtime') else None),
-                "changed": safe_datetime(entry.info.meta.ctime if entry.info.meta else None),
+                **self.entry_times_text(start_offset, entry.info.meta),
                 "inode_item": str(inode_number),  # For display compatibility
                 "inode_number": inode_number,  # For file content retrieval
                 "start_offset": start_offset,  # Partition offset needed for retrieval
@@ -2302,6 +2901,8 @@ class ImageHandler:
         return True
 
     def get_file_content(self, inode_number, offset):
+        #: Why the last read failed, in words, for the window to show.
+        self.last_read_error = None
         fs = self.get_fs_info(offset)
         if not fs:
             return None, None
@@ -2309,8 +2910,22 @@ class ImageHandler:
         try:
             file_obj = fs.open_meta(inode=inode_number)
             if file_obj.info.meta.size == 0:
+                # A deleted ext3/4 file: emptied, but its journal may still
+                # hold the inode as it was (core/ext_journal).
+                from trace_app.core import ext_journal
+                logged = ext_journal.read_deleted(self, offset,
+                                                  file_obj.info.meta)
+                if logged is not None:
+                    return logged, file_obj.info.meta
                 logger.info("File has no content or is a special metafile!")
                 return None, None
+
+            # A deleted exFAT file in pieces: its own cluster chain, not
+            # TSK's one-piece reading of it (core/exfat).
+            from trace_app.core import exfat
+            chained = exfat.read_deleted(self, offset, file_obj.info.meta)
+            if chained is not None:
+                return chained, file_obj.info.meta
 
             # For large files, read in chunks
             file_size = file_obj.info.meta.size
@@ -2331,6 +2946,9 @@ class ImageHandler:
             return content, metadata
 
         except Exception as e:
+            # TSK reports a failed image read in its own words; an
+            # incomplete image's reason is the one worth showing.
+            self.last_read_error = self.incomplete() or str(e)
             logger.error(f"Error reading file: {e}")
             return None, None
 

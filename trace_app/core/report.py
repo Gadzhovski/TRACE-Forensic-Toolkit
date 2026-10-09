@@ -164,6 +164,20 @@ def _facts(pairs):
     return f"<table class='facts'>{rows}</table>"
 
 
+#: Evidence status -> badge grade and wording in the report.
+_STATUS_GRADE = {'verified': 'clean', 'baseline': 'notable',
+                 'live': 'notable', 'changed': 'suspicious',
+                 'unreadable': 'suspicious', 'missing': 'suspicious'}
+_STATUS_WORDS = {
+    'verified': 'Verified: matches every recorded and acquisition hash',
+    'baseline': 'Hashed in full; no acquisition hash to compare with',
+    'changed': 'CHANGED: does not match what was recorded',
+    'unreadable': 'UNREADABLE: could not be read in full',
+    'missing': 'MISSING from its recorded location',
+    'live': 'Read live: not verifiable',
+    'pending': 'Never hashed'}
+
+
 def _badge(grade):
     grade = grade or ''
     return f"<span class='badge {e(grade)}'>{e(grade.capitalize())}</span>"
@@ -332,22 +346,39 @@ class _Builder:
                 ("File", _mono(row['path'])),
                 ("Size", e(_size(row.get('size')))),
                 ("Added to the case", e(row.get('added_utc'))),
-                ("MD5", _mono(row.get('md5'))),
-                ("SHA-1", _mono(row.get('sha1'))),
-                ("SHA-256", _mono(row.get('sha256'))),
-                ("MD5 stored in the image", _mono(row.get('stored_md5'))),
-                ("SHA-1 stored in the image", _mono(row.get('stored_sha1'))),
-                ("Last verification", e(row.get('last_status'))),
+                ("MD5 (first hashed in full)", _mono(row.get('md5'))),
+                ("SHA-1 (first hashed in full)", _mono(row.get('sha1'))),
+                ("SHA-256 (first hashed in full)", _mono(row.get('sha256'))),
+                (f"Acquisition MD5 ({row.get('stored_source') or 'none'})",
+                 _mono(row.get('stored_md5'))),
+                ("Acquisition SHA-1", _mono(row.get('stored_sha1'))),
+                ("Acquisition SHA-256", _mono(row.get('stored_sha256'))),
+                ("Last verification",
+                 _badge(_STATUS_GRADE.get(row.get('last_status'),
+                                          'notable')) + ' ' +
+                 e(_STATUS_WORDS.get(row.get('last_status'),
+                                     row.get('last_status') or
+                                     'never checked'))),
             ]))
             checks = list(reversed(self.case.verifications(row['id'],
                                                            limit=1000)))
-            out.append("<p class='caption'>Verification history</p>")
+            if row.get('last_status') in ('changed', 'unreadable',
+                                          'missing'):
+                last = checks[-1].get('detail') if checks else ''
+                out.append(
+                    "<div class='note'><p><b>This evidence did not verify "
+                    f"when last checked.</b> {e(last)} Findings drawn from "
+                    "it should be read with that in mind.</p></div>")
+            out.append("<p class='caption'>Verification history: every "
+                       "check, oldest first. Recorded hashes are never "
+                       "replaced; each check is compared with them and "
+                       "with the acquisition hashes.</p>")
             out.append(_table(
-                ['When (UTC)', 'Algorithm', 'Result', 'Expected',
+                ['When (UTC)', 'Hashes', 'Result', 'Detail', 'Expected',
                  'Computed'],
                 [[e(c.get('utc')), e(c.get('algorithm')),
-                  _badge('clean' if c.get('status') == 'verified'
-                         else 'suspicious') + ' ' + e(c.get('status')),
+                  _badge(_STATUS_GRADE.get(c.get('status'), 'notable'))
+                  + ' ' + e(c.get('status')), e(c.get('detail')),
                   _mono(c.get('expected')), _mono(c.get('computed'))]
                  for c in checks], css='small'))
         return ''.join(out)
@@ -890,6 +921,19 @@ class _Builder:
                    "and nothing was extracted to disk to be examined. Times "
                    "are UTC unless marked local (the source stored no time "
                    "zone).</p>")
+        out.append("<p>Verification: each piece of evidence was hashed in "
+                   "full -- MD5, SHA-1 and SHA-256 of every byte it holds "
+                   "(an E01's media, a virtual disk's disk, a raw file's "
+                   "bytes); a read that failed or came back short produced "
+                   "no hash, and was recorded as unreadable. An E01's "
+                   "chunks were each checked against their own checksums. "
+                   "Every check was compared with the hashes the case "
+                   "recorded when the evidence was first hashed and with "
+                   "the acquisition hashes (stored in the image, its "
+                   "acquisition log, or entered by the examiner); all had "
+                   "to match. Recorded hashes are never replaced, and the "
+                   "verification history and audit trail are append-only "
+                   "and hash-chained.</p>")
         # The case's settings that shaped what was found and sent
         # (core/settings.py) -- a reader needs them to judge the results.
         from trace_app.core import settings
@@ -940,11 +984,34 @@ class _Builder:
 
     def section_audit(self):
         out = [self.heading(1, 'audit', SECTION_TITLES['audit'])]
+        # The chain is checked as the report is written, and its newest
+        # hash stated: a trail later edited, or cut short, no longer ends
+        # in this hash.
+        check = self.case.verify_audit()
+        if check['ok']:
+            out.append(
+                f"<p>The audit trail's hash chain was checked when this "
+                f"report was written: {check['entries']:,} entries, each "
+                f"linked to the one before and unaltered. The newest "
+                f"entry's SHA-256 is {_mono(check['head'])}.</p>")
+        else:
+            out.append(
+                "<div class='note'><p><b>The audit trail's hash chain does "
+                "not verify</b> -- entries were changed, removed or "
+                "reordered after they were written:</p><ul>" + ''.join(
+                    f"<li>{e(p)}</li>" for p in check['problems'][:50])
+                + "</ul></div>")
         limit = int(self.options.get('audit_limit') or 5000)
         rows = list(reversed(self.case.activity(limit=limit)))
-        out.append(_table(['When (UTC)', 'Action', 'Detail'],
+        if check['entries'] > len(rows):
+            out.append(f"<p class='caption'>The newest {len(rows):,} of "
+                       f"{check['entries']:,} entries.</p>")
+        out.append(_table(['When (UTC)', 'Action', 'Detail', 'Examiner',
+                           'Account', 'Tool'],
                           [[e(r.get('utc')), e(r.get('action')),
-                            e(r.get('detail'))] for r in rows],
+                            e(r.get('detail')), e(r.get('examiner')),
+                            e(r.get('account')), e(r.get('tool'))]
+                           for r in rows],
                           css='small audit'))
         return ''.join(out)
 

@@ -11,16 +11,23 @@ opened, and what the system logged about them.
 * recently-used.xbel: GNOME/GTK's record of files opened, and by which
   application.
 * The systemd journal (activity/journal.py) and the syslog files
-  (auth.log, secure): only what an examiner reads them for -- logons local
-  and remote and their failures, sudo and pkexec commands, su, accounts
-  created or changed, USB devices, boots and shutdowns. A journal holds
-  everything a system logged; listing every CRON line would bury these.
+  (auth.log, secure, and the general syslog / messages, where rsyslog puts
+  the kernel's USB lines): only what an examiner reads them for -- logons
+  local and remote and their failures, sudo and pkexec commands, su,
+  accounts created or changed, USB devices, boots and shutdowns. A journal
+  holds everything a system logged; listing every CRON line would bury
+  these. logrotate's older copies (auth.log.1, auth.log.2.gz,
+  secure-20240101, wtmp.1, messages-20240101.xz) are read too, gzip / xz /
+  bzip2 decompressed in memory up to `MAX_LOG_BYTES`.
 
 Expected values in the tests are plaso's and dissect's for the same files.
 """
 
+import bz2
 import datetime
+import gzip
 import logging
+import lzma
 import re
 import struct
 import xml.etree.ElementTree as ElementTree
@@ -482,6 +489,39 @@ def _decode(data):
     return data.decode('utf-8', 'replace')
 
 
+#: A rotated log is decompressed in memory up to this much; past it the
+#: rest is left unread (and logged) rather than exhausting memory.
+MAX_LOG_BYTES = 512 * 1024 * 1024
+_OPENERS = (('.gz', lambda stream: gzip.GzipFile(fileobj=stream)),
+            ('.xz', lzma.LZMAFile), ('.bz2', bz2.BZ2File))
+
+
+def log_bytes(volume, entry):
+    """A log file's bytes, decompressed if logrotate compressed it."""
+    data = volume.read(entry)
+    name = entry.name.lower()
+    for suffix, opener in _OPENERS:
+        if name.endswith(suffix):
+            import io
+            try:
+                with opener(io.BytesIO(data)) as handle:
+                    data = handle.read(MAX_LOG_BYTES + 1)
+            except (OSError, EOFError, lzma.LZMAError) as exc:
+                logger.debug("%s not decompressed: %s", entry.path, exc)
+                return b''
+            if len(data) > MAX_LOG_BYTES:
+                logger.warning("%s holds more than %d bytes: the rest is "
+                               "not read", entry.path, MAX_LOG_BYTES)
+                data = data[:MAX_LOG_BYTES]
+            break
+    return data
+
+
+#: The syslog-format files read, by the start of their names: Debian's
+#: auth.log and syslog, Red Hat's secure and messages.
+_SYSLOG_FILES = ('auth.log', 'secure', 'syslog', 'messages')
+
+
 def shell_activity(volume, user, home, step):
     from trace_app.core.activity import _split
     out = []
@@ -569,17 +609,18 @@ def system_activity(volume, step):
         name = entry.name.lower()
         if entry.is_dir or not entry.size:
             continue
-        if name.startswith(('wtmp', 'btmp')) and not name.endswith('.gz'):
+        if name.startswith(('wtmp', 'btmp')):
             step(entry.path)
-            out += wtmp_activity(volume.read(entry), entry.path,
+            out += wtmp_activity(log_bytes(volume, entry), entry.path,
                                  volume.ref(entry),
                                  failed=name.startswith('btmp'))
-        elif (name.startswith(('auth.log', 'secure')) and
-              not name.endswith(('.gz', '.xz', '.bz2'))):
+        elif name.startswith(_SYSLOG_FILES):
             step(entry.path)
+            # The file's last change dates its newest line; a rotated
+            # copy's is when it was rotated.
             year = (entry.modified or datetime.datetime.now(times.UTC)).year
-            out += syslog_activity(_decode(volume.read(entry)), entry.path,
-                                   volume.ref(entry), year)
+            out += syslog_activity(_decode(log_bytes(volume, entry)),
+                                   entry.path, volume.ref(entry), year)
     journals = volume.find('var', 'log', 'journal')
     folders = [journals] + volume.children(journals, dirs=True) \
         if journals is not None else []
@@ -602,10 +643,12 @@ def is_linux(volume):
 
 
 def collect(volume, step, homes):
-    from trace_app.core.activity import linux_system
+    from trace_app.core.activity import linux_services, linux_system
     out = system_activity(volume, step)
     # The system, its accounts, its software and SSH (linux_system.py).
     out += linux_system.collect(volume, step, homes)
+    # Networks joined and containers run (linux_services.py).
+    out += linux_services.collect(volume, step, homes)
     for user, home in homes:
         out += shell_activity(volume, user, home, step)
         out += recent_files_activity(volume, user, home, step)

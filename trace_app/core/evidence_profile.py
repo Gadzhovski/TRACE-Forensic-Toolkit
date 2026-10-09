@@ -29,12 +29,23 @@ _TSK_FILE_SYSTEMS = ('NTFS', 'FAT12', 'FAT16', 'FAT32', 'ExFAT', 'Ext2',
                      'Btrfs')
 
 
+#: What a volume TRACE cannot read yet is, as the summary says it.
+_UNREAD = {'bitlocker': 'a locked BitLocker volume',
+           'fvde': 'a locked FileVault 2 volume',
+           'luks': 'a locked LUKS volume',
+           'apfs': 'a locked APFS volume',
+           'ios_backup': 'a locked (encrypted) iOS backup',
+           'mdraid': 'a RAID member whose other disks are not here'}
+
+
 def profile(image_handler):
     """{'filesystems', 'systems', 'logical', 'unreadable', 'summary'} for
     an open image."""
     from trace_app.core import containers
     from trace_app.core.activity import Volume, linux, macos
     filesystems, systems, unreadable = [], [], False
+    #: Why some of it is not read, in words: 'a locked LUKS volume'.
+    why = []
     logical = image_handler.logical_fs is not None
     # Locked containers first: a locked BitLocker To Go drive opens as its
     # FAT32 decoy, and a locked APFS volume is not among the volumes read.
@@ -44,9 +55,11 @@ def profile(image_handler):
             kind = image_handler.volume_kind(start)
             if kind == 'bitlocker' and not image_handler.is_unlocked(start):
                 unreadable = True
+                why.append('a locked BitLocker volume')
             elif kind == 'apfs' and any(
                     v['locked'] for v in image_handler.apfs_volumes(start)):
                 unreadable = True
+                why.append('a locked APFS volume')
         except Exception as exc:
             logger.debug("Container check at %s failed: %s", start, exc)
     for key in image_handler.volume_offsets():
@@ -57,8 +70,10 @@ def profile(image_handler):
             kind = None
         fs = image_handler.get_fs_info(key)
         if fs is None:
-            if kind in ('bitlocker', 'fvde', 'luks', 'apfs', 'ios_backup'):
+            if kind in ('bitlocker', 'fvde', 'luks', 'apfs', 'ios_backup',
+                        'mdraid'):
                 unreadable = True           # locked: what is inside is unknown
+                why.append(_UNREAD[kind])
             elif image_handler.detect_filesystems(key):
                 unreadable = True           # a file system TRACE cannot open
             continue
@@ -88,7 +103,9 @@ def profile(image_handler):
         parts.append(', '.join(dict.fromkeys(filesystems)))
     if systems:
         parts.append(' + '.join(systems))
-    if unreadable:
+    if why:
+        parts.append(', '.join(dict.fromkeys(why)))
+    elif unreadable:
         parts.append('a volume TRACE cannot read')
     return {'filesystems': filesystems, 'systems': systems,
             'logical': logical, 'unreadable': unreadable,

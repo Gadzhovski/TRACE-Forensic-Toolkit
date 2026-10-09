@@ -7,9 +7,10 @@ import os
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 from tests.conftest import pump
 
-JPEG_IMAGE = os.path.join(ROOT, 'test_images', '8-jpeg-search.dd')
+JPEG_IMAGE = testdata.locate('8-jpeg-search.dd') or ''
 
 
 @pytest.fixture

@@ -61,6 +61,16 @@ class UnifiedViewer(QWidget):
         self.placeholder.setWordWrap(True)
         self.layout.addWidget(self.placeholder, 1)
 
+        # A password-protected Office document: decrypted in memory with a
+        # password the examiner gives (msoffcrypto-tool), never written.
+        from PySide6.QtWidgets import QPushButton
+        self.unlock_button = QPushButton("Unlock with Password…", self)
+        self.unlock_button.setObjectName("unlockDocumentButton")
+        self.unlock_button.setVisible(False)
+        self.unlock_button.clicked.connect(self._ask_password)
+        self.layout.addWidget(self.unlock_button, 0, Qt.AlignHCenter)
+        self._locked = None             # (content, plan) awaiting a password
+
         # Initialize viewers as None for lazy loading
         self._pdf_viewer = None
         self._picture_viewer = None
@@ -70,6 +80,8 @@ class UnifiedViewer(QWidget):
         #: `reader(data)` -> the bytes of a database's -wal beside it, or
         #: None; set by the window, which knows the image.
         self.database_wal_reader = None
+        #: (content, label) -> show a database cell's bytes as a file.
+        self.database_blob_opener = None
 
         # Store media buffer for in-memory playback (keeps buffer alive during playback)
         self._media_buffer = None
@@ -110,6 +122,7 @@ class UnifiedViewer(QWidget):
             self._database_viewer.setVisible(False)
             self.layout.addWidget(self._database_viewer, 1)
         self._database_viewer.wal_reader = self.database_wal_reader
+        self._database_viewer.blob_opener = self.database_blob_opener
         return self._database_viewer
 
     def get_audio_video_player(self):
@@ -238,6 +251,8 @@ class UnifiedViewer(QWidget):
 
     def clear(self):
         """Clear all viewers and free up resources."""
+        self._locked = None
+        self.unlock_button.setVisible(False)
         # Hide all viewers
         if self._pdf_viewer:
             self._pdf_viewer.clear()
@@ -375,24 +390,62 @@ class UnifiedViewer(QWidget):
                 return self._showing(viewer)
 
             if plan.kind == VIEW_OFFICE:
-                try:
-                    markup, findings = document_preview.to_html(
-                        file_content, plan.subtype)
-                except document_preview.PreviewError as exc:
-                    return self._unavailable(
-                        f"This {plan.label} could not be read: {exc}",
-                        plan.note)
-                viewer = self.get_html_viewer()
-                viewer.display(markup, plan.label.capitalize(), [
-                    plan.note or f"{plan.label.capitalize()}.", *findings,
-                    "Text and structure only; the original layout, fonts "
-                    "and images are not reproduced."], from_evidence=False)
-                return self._showing(viewer)
+                return self._show_office(file_content, plan)
         except Exception as exc:
             logger.error("Could not display %s: %s", full_file_path, exc)
             return self._unavailable(f"Error loading content: {exc}")
 
         return self._unavailable("There is no preview for this kind of file.")
+
+    def _show_office(self, content, plan, decrypted=False):
+        try:
+            markup, findings = document_preview.to_html(content,
+                                                        plan.subtype)
+        except document_preview.EncryptedDocument as exc:
+            self._locked = (content, plan)
+            shown = self._unavailable(str(exc), plan.note)
+            self.unlock_button.setVisible(True)
+            return shown
+        except document_preview.PreviewError as exc:
+            return self._unavailable(
+                f"This {plan.label} could not be read: {exc}", plan.note)
+        viewer = self.get_html_viewer()
+        notes = [plan.note or f"{plan.label.capitalize()}."]
+        if decrypted:
+            notes.append("Decrypted in memory with the password given; "
+                         "nothing was written and the evidence is "
+                         "unchanged.")
+        if plan.subtype not in ('msg', 'pcap'):
+            findings = [*findings, "Text and structure only; the original "
+                        "layout, fonts and images are not reproduced."]
+        viewer.display(markup, plan.label.capitalize(), [*notes, *findings],
+                       from_evidence=False)
+        return self._showing(viewer)
+
+    def _ask_password(self):
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+        password, ok = QInputDialog.getText(
+            self, "Unlock Document", "Password for this document:",
+            QLineEdit.Password)
+        if ok and password:
+            self.unlock_document(password)
+
+    def unlock_document(self, password):
+        """Decrypt the document on screen with `password` and show it.
+        Returns True when it decrypted."""
+        if self._locked is None:
+            return False
+        content, plan = self._locked
+        try:
+            plain = document_preview.decrypt(content, password)
+        except document_preview.PreviewError as exc:
+            self.placeholder.setText(f"{exc}\n\nTry another password.")
+            return False
+        self._locked = None
+        self.unlock_button.setVisible(False)
+        from trace_app.core.filetypes import plan_view
+        inner = plan_view(self.current_path or '', plain) or plan
+        return bool(self._show_office(plain, inner, decrypted=True))
 
     def _showing(self, viewer, note=''):
         viewer.setVisible(True)

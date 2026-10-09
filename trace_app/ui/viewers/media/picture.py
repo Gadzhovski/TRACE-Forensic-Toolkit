@@ -171,9 +171,20 @@ class PictureViewer(QWidget):
 
         # If a location is chosen, save the image
         if file_name:
-            with open(file_name, 'wb') as f:
-                f.write(self.original_image_bytes)
-            message.information(self, "Export Success", "Image exported successfully!")
+            from trace_app.core import evidence_export
+            try:
+                digests = evidence_export.save_bytes(
+                    file_name, bytes(self.original_image_bytes),
+                    'picture exported',
+                    getattr(self, 'source_name', None) or 'picture shown')
+            except Exception as exc:
+                message.warning(self, "Export Error", str(exc))
+                return
+            message.information(
+                self, "Export Success",
+                f"Exported as stored, unchanged.\n\nSHA-256 "
+                f"{digests['sha256']}\nWritten copy: "
+                f"{digests['written_copy_check']}")
 
 
 def _decode_with_pillow(content):

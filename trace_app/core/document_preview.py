@@ -52,6 +52,11 @@ class PreviewError(Exception):
     """The document could not be read as the format it claims to be."""
 
 
+class EncryptedDocument(Exception):
+    """The document is password-protected; `decrypt` with the password,
+    then preview what it gives."""
+
+
 def _count(number, noun):
     """'1 comment', '3 comments'."""
     return f"{number} {noun}{'' if number == 1 else 's'}"
@@ -72,17 +77,83 @@ def to_html(content, kind):
     Raises PreviewError when the bytes are not that format.
     """
     readers = {'docx': _docx, 'xlsx': _xlsx, 'pptx': _pptx,
-               'odt': _odf, 'ods': _odf, 'odp': _odf, 'legacy': _legacy}
+               'odt': _odf, 'ods': _odf, 'odp': _odf, 'legacy': _legacy,
+               'msg': _msg, 'pcap': _pcap}
     reader = readers.get(kind)
     if reader is None:
         raise PreviewError(f"No reader for {kind}.")
-    if kind == 'legacy':
+    if is_encrypted(content):
+        raise EncryptedDocument(
+            "This Office document is password-protected: its content is "
+            "encrypted. Unlock it with the password to read it.")
+    if kind == 'pcap':
         return reader(content)
+    if kind in ('legacy', 'msg'):
+        body, notices = reader(content)
+    else:
+        try:
+            with zipfile.ZipFile(io.BytesIO(content)) as package:
+                body, notices = reader(package)
+        except zipfile.BadZipFile as exc:
+            raise PreviewError(f"Not a valid {kind.upper()} package: {exc}")
+    return _with_macros(content, body, notices)
+
+
+def _with_macros(content, body, notices):
+    """The document's VBA source after its text, and a notice saying what
+    the macros do (core/vba.py). Escaped: shown, never run."""
+    from trace_app.core import vba
     try:
-        with zipfile.ZipFile(io.BytesIO(content)) as package:
-            return reader(package)
-    except zipfile.BadZipFile as exc:
-        raise PreviewError(f"Not a valid {kind.upper()} package: {exc}")
+        project = vba.extract(content)
+    except Exception as exc:
+        logger.debug("Macros not read: %s", exc)
+        project = None
+    if project is None:
+        return body, notices
+    found = vba.indicators(project)
+    section = (f'<hr><h2>Macros (VBA source, as stored)</h2>'
+               f'<p>{_esc(vba.summary(project, found))}</p>')
+    for module in project.modules:
+        section += (f'<h3>{_esc(module.name)}</h3>'
+                    f'<pre>{_esc(module.source)}</pre>')
+    grade = 'SUSPICIOUS: ' if found['grade'] == 'suspicious' else ''
+    return body + section, [f"{grade}{vba.summary(project, found)}",
+                            *notices]
+
+
+def is_encrypted(content):
+    """A password-protected Office file: an OOXML document encrypted into
+    an OLE 'EncryptedPackage', or a 97-2003 file with its encryption flag
+    or RC4/XOR header (msoffcrypto-tool's own test)."""
+    if not bytes(content[:8]) == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+        return False
+    if 'EncryptedPackage'.encode('utf-16-le') in content:
+        return True
+    try:
+        import msoffcrypto
+        handle = msoffcrypto.OfficeFile(io.BytesIO(content))
+        return bool(handle.is_encrypted())
+    except Exception:
+        return False
+
+
+def decrypt(content, password):
+    """The document's plain bytes, decrypted in memory with `password`
+    (msoffcrypto-tool: ECMA-376 agile/standard, RC4 CryptoAPI, XOR).
+    Raises PreviewError when the password is wrong or the scheme unknown."""
+    try:
+        import msoffcrypto
+    except ImportError as exc:
+        from trace_app.infra import capabilities
+        raise PreviewError(capabilities.reason('office_encrypted')) from exc
+    try:
+        handle = msoffcrypto.OfficeFile(io.BytesIO(content))
+        handle.load_key(password=password)
+        out = io.BytesIO()
+        handle.decrypt(out)
+    except Exception as exc:
+        raise PreviewError(f"The document did not decrypt: {exc}") from exc
+    return out.getvalue()
 
 
 # --- package helpers ------------------------------------------------------------
@@ -463,6 +534,48 @@ def _legacy(content):
     return _page(f'<pre>{_esc(text)}</pre>', [
         "Legacy binary Office format: showing the readable text it contains. "
         "Layout and formatting are not reconstructed."])
+
+
+# --- network captures ---------------------------------------------------------------
+
+def _pcap(content):
+    from trace_app.core import pcap
+    try:
+        summary = pcap.summarise(content)
+    except pcap.PcapError as exc:
+        raise PreviewError(str(exc)) from exc
+    except ImportError as exc:
+        from trace_app.infra import capabilities
+        raise PreviewError(capabilities.reason('pcap')) from exc
+    notices = [f"Network capture ({summary['format']}): "
+               f"{summary['packets']:,} packets, {len(summary['hosts']):,} "
+               f"hosts, {len(summary['dns']):,} DNS records, "
+               f"{len(summary['http']):,} HTTP requests, "
+               f"{len(summary['tls']):,} TLS server names."]
+    if summary.get('damaged'):
+        notices.append(f"Damaged: {summary['damaged']}.")
+    return pcap.page(summary), notices
+
+
+# --- Outlook messages --------------------------------------------------------------
+
+def _msg(content):
+    from trace_app.core import msgfile
+    try:
+        message = msgfile.Message.open(bytes(content))
+    except msgfile.MsgError as exc:
+        raise PreviewError(f"Not an Outlook message: {exc}") from exc
+    page = message.page().decode('utf-8')
+    inner = re.search(r'<body[^>]*>(.*)</body>', page, re.S | re.I)
+    attachments = message.attachments()
+    notices = [f"Outlook message (.msg). {len(attachments)} attachment"
+               f"{'s' if len(attachments) != 1 else ''}"
+               + (": open the file as an archive (double-click) to read "
+                  "them." if attachments else '.')]
+    hidden = [a['name'] for a in attachments if a['hidden']]
+    if hidden:
+        notices.append(f"Hidden attachments: {', '.join(hidden)}")
+    return (inner.group(1) if inner else page), notices
 
 
 # --- HTML files -----------------------------------------------------------------------

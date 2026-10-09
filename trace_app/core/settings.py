@@ -113,6 +113,12 @@ CASE = {
     'export_folder': ('', "Export to",
                       "Where exports and saved files are offered; empty: "
                       "the case's exports/ folder."),
+    'index_unallocated': (True, "Index text in unallocated space",
+                          "The text in free space -- between partitions, "
+                          "and the clusters no live file holds -- is indexed "
+                          "too, as items named by sector, so a search finds "
+                          "what is in no file. Off: files, slack and carves "
+                          "only (faster on a large, mostly empty disk)."),
     'indicators': (list(INDICATORS), "Indicators extracted",
                    "Which kinds indexing extracts. Phone numbers, for one, "
                    "can be noise in some cases."),
@@ -256,6 +262,8 @@ def apply_case(case):
     archives.MAX_NESTING = int(values['archive_depth'])
     archives.MAX_MEMBER_BYTES = int(values['archive_member_mb']) * MB
     search_index.ENABLED_INDICATORS = frozenset(values['indicators'])
+    from trace_app.core import indexer
+    indexer.INDEX_UNALLOCATED = bool(values['index_unallocated'])
     return values
 
 

@@ -13,6 +13,8 @@ places.
   every camera JPEG carries a thumbnail with its own end marker inside.
 * **Encryption**: password-protected archives, Office documents and PDFs,
   stated from the format rather than guessed from entropy.
+* **Macros**: VBA in Office documents (core/vba.py) -- notable; code that
+  runs itself and downloads, starts programs or writes files, suspicious.
 * **Photo metadata**: camera, capture time, editing software and GPS position
   from EXIF.
 * **Document authorship**: author, last saved by, company, application and
@@ -140,6 +142,7 @@ def inspect(name, data, modules, size=None):
         if data:
             findings += appended_data(data)
             findings += encryption(data)
+            findings += macros(data)
     if MODULE_PHOTO in modules and data:
         facts = photo_metadata(data)
         if facts:
@@ -371,6 +374,29 @@ def encryption(data):
     except Exception as exc:
         logger.debug("Encryption check failed: %s", exc)
     return []
+
+
+def macros(data):
+    """A finding for an Office document carrying VBA (or Excel 4.0)
+    macros: which modules, whether they run by themselves, what they do."""
+    if family(data[:16]) not in ('zip', 'ole'):
+        return []
+    from trace_app.core import vba
+    try:
+        project = vba.extract(data)
+    except Exception as exc:
+        logger.debug("Macro check failed: %s", exc)
+        return []
+    if project is None:
+        return []
+    found = vba.indicators(project)
+    return [Finding(MODULE_HIDDEN, 'macro', found['grade'],
+                    vba.summary(project, found),
+                    {'modules': [m.name for m in project.modules],
+                     'autoexec': found['autoexec'],
+                     'signs': found['signs'], 'urls': found['urls'],
+                     'files': found['files'], 'excel4': project.excel4,
+                     'problems': project.problems})]
 
 
 def _archive_encryption(data):

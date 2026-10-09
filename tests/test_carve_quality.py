@@ -19,7 +19,7 @@ import pytest
 
 from tests.conftest import ROOT, image_path
 
-GROUND_TRUTH = os.path.join(ROOT, 'tools', 'carve_ground_truth.json')
+GROUND_TRUTH = os.path.join(ROOT, 'tests', 'expected', 'carve_ground_truth.json')
 
 
 def carve_all(name, unallocated_only=False):

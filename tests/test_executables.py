@@ -18,9 +18,10 @@ import tarfile
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-CARVE = os.path.join(ROOT, 'test_images', 'carve_samples')
-ARTIFACTS = os.path.join(ROOT, 'test_images', 'artifact_samples')
+CARVE = testdata.CORPUS_SAMPLES
+ARTIFACTS = testdata.SAMPLES
 
 
 def sample(folder, name, member=None):
@@ -28,8 +29,8 @@ def sample(folder, name, member=None):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/carve_corpus.py and "
-                    "tools/fetch_artifact_samples.py")
+        pytest.skip("run tools/testdata/build/carve_corpus.py and "
+                    "tools/testdata/samples.py")
     if member is None:
         with open(path, 'rb') as handle:
             return handle.read()

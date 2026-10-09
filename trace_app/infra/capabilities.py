@@ -163,6 +163,8 @@ CAPABILITIES = (
                "(.vhd, .vhdx)", 'libvhdi', _module_version('pyvhdi')),
     Capability('qcow', 'Evidence images', "QEMU disks (.qcow2)", 'libqcow',
                _module_version('pyqcow')),
+    Capability('phdi', 'Evidence images', "Parallels Desktop disks (.hdd "
+               "bundles, .hds)", 'libphdi', _module_version('pyphdi')),
     Capability('modi', 'Evidence images', "Mac disk images (.dmg -- zlib, "
                "bzip2, LZFSE, LZMA, ADC -- .sparseimage, .sparsebundle)",
                'libmodi', _module_version('pymodi')),
@@ -188,8 +190,17 @@ CAPABILITIES = (
     Capability('btrfs', 'Volumes and encryption', "Btrfs file systems "
                "(Fedora, openSUSE: subvolumes, snapshots, zlib/LZO/zstd)",
                'TRACE (Python)', lambda: 'built in'),
-    Capability('luks', 'Volumes and encryption', "LUKS-encrypted Linux "
-               "volumes", 'libluksde', _module_version('pyluksde')),
+    Capability('luks', 'Volumes and encryption', "LUKS1-encrypted Linux "
+               "volumes (LVM inside them too)", 'libluksde',
+               _module_version('pyluksde')),
+    Capability('luks2', 'Volumes and encryption', "LUKS2-encrypted Linux "
+               "volumes (PBKDF2, Argon2i/Argon2id; LVM inside them too)",
+               'cryptography', _module_version('cryptography',
+                                               '__version__')),
+    Capability('mdraid', 'Volumes and encryption', "Linux software RAID "
+               "(md) arrays and multi-disk Btrfs, assembled from the "
+               "member disks' images", 'TRACE (Python)',
+               _built_in('trace_app.core.mdraid')),
     Capability('lvm', 'Volumes and encryption', "Linux LVM logical volumes",
                'libvslvm', _module_version('pyvslvm')),
     Capability('vss', 'Volumes and encryption', "Volume Shadow Copies",
@@ -203,6 +214,16 @@ CAPABILITIES = (
     Capability('ios_encrypted', 'Volumes and encryption', "Encrypted iPhone "
                "backups, opened with their password", 'cryptography',
                _module_version('cryptography', '__version__')),
+    Capability('office_encrypted', 'File analysis', "Password-protected "
+               "Office documents, opened with their password",
+               'msoffcrypto-tool', _module_version('msoffcrypto',
+                                                   '__version__')),
+    Capability('pcap', 'File analysis', "Network captures (pcap, pcapng): "
+               "hosts, DNS, HTTP, TLS server names", 'dpkt',
+               _module_version('dpkt', '__version__')),
+    Capability('pe_hashes', 'File analysis', "Program import hashes "
+               "(imphash) and Rich-header hashes", 'pefile',
+               _module_version('pefile', '__version__')),
     Capability('pdf', 'File analysis', "PDF and e-book reading, the case "
                "report's PDF", 'PyMuPDF', _module_version('pymupdf',
                                                          'VersionBind')),

@@ -14,15 +14,16 @@ import sqlite3
 import pytest
 
 from tests.conftest import ROOT, pump
+from tools import testdata
 
-PHOTO = os.path.join(ROOT, 'test_images', 'carve_samples', 'hopper.webp')
-OTHER = os.path.join(ROOT, 'test_images', 'carve_samples', 'gallery-1.webp')
+PHOTO = os.path.join(testdata.CORPUS_SAMPLES, 'hopper.webp')
+OTHER = os.path.join(testdata.CORPUS_SAMPLES, 'gallery-1.webp')
 
 
 @pytest.fixture
 def photo():
     if not os.path.exists(PHOTO) or not os.path.exists(OTHER):
-        pytest.skip("carve_samples are not in test_images/")
+        pytest.skip("the carving corpus samples are not in test_images/corpus")
     from PIL import Image
     return Image.open(PHOTO).convert('RGB').resize((640, 640))
 
@@ -132,7 +133,7 @@ def test_a_v16_case_gains_the_phash_column(tmp_path):
     try:
         columns = {r[1] for r in case._db.execute(
             "PRAGMA table_info(file_analysis)")}
-        assert 'phash' in columns and SCHEMA_VERSION == 17
+        assert 'phash' in columns and SCHEMA_VERSION >= 17
         assert case.picture_hashes() == []
     finally:
         case.close()

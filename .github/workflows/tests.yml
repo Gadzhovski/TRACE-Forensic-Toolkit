@@ -11,11 +11,13 @@
 #   * only public test images are used, downloaded from their publishers and
 #     checked against recorded SHA-256s -- no evidence is ever stored here.
 #
-# What runs depends on what changed (tools/ci_select.py, shown on each run's
-# summary page): a branch or pull request runs the test files that reach
-# the code it touched, downloads only the images those name, and scores the
-# carver only if carving changed. A push to the default branch, the weekly
-# run and a manual run test everything.
+# What runs depends on what changed (tools/testdata/ci_select.py, shown on
+# each run's summary page): a push or pull request runs the test files that
+# reach the code it touched, restores only the data groups those read, and
+# scores the carver only if carving changed. The weekly run and a manual run
+# test everything. CI only ever uses the small CI data set
+# (tools/testdata/catalog.py), cached by GitHub; the full data set runs on
+# maintainers' machines (tools/run_tests.py full).
 #
 # Where it runs depends on how close the change is to master
 # (ci_select.matrix): a branch push is one quick job (Ubuntu, Python 3.12);
@@ -66,12 +68,10 @@ jobs:
       run: ${{ steps.select.outputs.run }}
       full: ${{ steps.select.outputs.full }}
       tests: ${{ steps.select.outputs.tests }}
-      images: ${{ steps.select.outputs.images }}
       fetch_images: ${{ steps.select.outputs.fetch_images }}
-      images_key: ${{ steps.select.outputs.images_key }}
       artifacts: ${{ steps.select.outputs.artifacts }}
       corpus: ${{ steps.select.outputs.corpus }}
-      btrfs_deleted: ${{ steps.select.outputs.btrfs_deleted }}
+      linux_images: ${{ steps.select.outputs.linux_images }}
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
       oses: ${{ steps.select.outputs.oses }}
@@ -85,7 +85,7 @@ jobs:
           fetch-depth: 0
       - name: Select
         id: select
-        run: python3 tools/ci_select.py --github
+        run: python3 tools/testdata/ci_select.py --github
 
   test:
     name: ${{ matrix.os }} / Python ${{ matrix.python }}
@@ -99,7 +99,7 @@ jobs:
         # Ubuntu pinned to 24.04: "ubuntu-latest" moves to Ubuntu 26 on
         # 19 October 2026, and the installer's apt package names are
         # 24.04's. Move it on purpose, after trying 26.04.
-        # ci_select.ALL_OSES: windows-latest, macos-latest, macos-15-intel,
+        # tools/testdata/ci_select.ALL_OSES: windows-latest, macos-latest, macos-15-intel,
         # ubuntu-24.04.
         os: ${{ fromJSON(needs.plan.outputs.oses) }}
         python: ${{ fromJSON(needs.plan.outputs.pythons) }}
@@ -150,69 +150,109 @@ jobs:
           print("libmagic %s from %s" % libmagic_identity())
           EOF
 
-      # Keyed by the set of images too: a run needing other images starts
-      # from the nearest cache, fetches the rest, and saves the result.
-      - name: Cache public test images
+      # Test data is cached by GitHub, one cache per group, keyed only by
+      # that group's catalog: downloaded from the publishers once, then
+      # restored inside GitHub's network on every run. Image files are the
+      # same on every system, so all four share one copy
+      # (enableCrossOsArchive). Only the CI set is ever used here: the
+      # local, NIST and private data run on maintainers' machines
+      # (tools/run_tests.py full). The fetch verifies every SHA-256.
+      - name: Restore ci data
+        id: cache-ci
         if: needs.plan.outputs.fetch_images == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
-          path: test_images
-          key: test-images-${{ hashFiles('tools/fetch_test_images.py') }}-${{ needs.plan.outputs.images_key }}
-          restore-keys: |
-            test-images-${{ hashFiles('tools/fetch_test_images.py') }}-
+          path: test_images/ci
+          key: test-data-ci-${{ hashFiles('tools/testdata/catalog.py') }}
+          enableCrossOsArchive: true
 
-      # IMAGES empty = the whole catalog (a full run).
-      - name: Fetch and verify public test images
+      - name: Get ci data
         if: needs.plan.outputs.fetch_images == 'true'
         shell: bash
-        env:
-          IMAGES: ${{ needs.plan.outputs.images }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" tools/fetch_test_images.py $IMAGES
+          "$PY" -m tools.testdata.fetch --group ci
 
+      # Only master, the weekly and manual runs save: branches restore what
+      # master saved and never fill the repository's 10 GB with copies.
+      - name: Save ci data
+        if: needs.plan.outputs.fetch_images == 'true' && steps.cache-ci.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/ci
+          key: test-data-ci-${{ hashFiles('tools/testdata/catalog.py') }}
+          enableCrossOsArchive: true
       # Real published files of every format the DFTT/DFRWS images do not
-      # hold, pinned by SHA-256 (tools/carve_corpus.py). Cached with the
-      # other test images.
-      - name: Cache the carving corpus samples
+      # hold, pinned by SHA-256, laid out into carve-corpus.dd
+      # (tools/testdata/build/carve_corpus.py).
+      - name: Restore corpus data
+        id: cache-corpus
         if: needs.plan.outputs.corpus == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
-          path: test_images/carve_samples
-          key: carve-samples-${{ hashFiles('tools/carve_corpus.py') }}
+          path: test_images/corpus
+          key: test-data-corpus-${{ hashFiles('tools/testdata/build/carve_corpus.py') }}
+          enableCrossOsArchive: true
 
-      - name: Build the carving corpus
+      - name: Get corpus data
         if: needs.plan.outputs.corpus == 'true'
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" tools/carve_corpus.py
+          "$PY" tools/testdata/build/carve_corpus.py
 
-      # A Btrfs volume with known deleted files, made by the Linux kernel
-      # itself (tools/make_btrfs_deleted.py: loop-mounted, so root and
-      # Linux only). The tests that read it skip on Windows and macOS.
-      - name: Build the Btrfs volume with deleted files
-        if: runner.os == 'Linux' && needs.plan.outputs.btrfs_deleted == 'true'
-        run: |
-          sudo apt-get install -y -qq --no-install-recommends btrfs-progs >/dev/null
-          sudo python3 tools/make_btrfs_deleted.py
-          sudo chown "$USER" test_images/btrfs-deleted.raw*
-
-      # Real Windows and browser artifacts for the activity tests, pinned by
-      # SHA-256 (tools/fetch_artifact_samples.py).
-      - name: Cache the artifact samples
-        if: needs.plan.outputs.artifacts == 'true'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      # Only master, the weekly and manual runs save: branches restore what
+      # master saved and never fill the repository's 10 GB with copies.
+      - name: Save corpus data
+        if: needs.plan.outputs.corpus == 'true' && steps.cache-corpus.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
-          path: test_images/artifact_samples
-          key: artifact-samples-${{ hashFiles('tools/fetch_artifact_samples.py') }}
+          path: test_images/corpus
+          key: test-data-corpus-${{ hashFiles('tools/testdata/build/carve_corpus.py') }}
+          enableCrossOsArchive: true
 
-      - name: Fetch the artifact samples
+      # Images made by the Linux kernel and its own tools, on loop devices
+      # (so root, and Linux only; the tests reading them skip elsewhere),
+      # into test_images/built (tools/testdata/build/): a Btrfs volume with
+      # known deleted files, md RAID arrays of every level and superblock,
+      # and GPT -> LUKS1/LUKS2 -> LVM -> ext4 disks.
+      - name: Build the Linux images
+        if: runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
+        run: |
+          sudo apt-get install -y -qq --no-install-recommends btrfs-progs \
+            mdadm cryptsetup-bin lvm2 >/dev/null
+          sudo python3 tools/testdata/build/make_btrfs_deleted.py
+          sudo python3 tools/testdata/build/make_md_raid.py
+          sudo python3 tools/testdata/build/make_luks_lvm.py
+          sudo chown -R "$USER" test_images/built
+
+      # Real artifacts -- hives, logs, databases, small images -- pinned by
+      # SHA-256 (tools/testdata/samples.py).
+      - name: Restore samples data
+        id: cache-samples
+        if: needs.plan.outputs.artifacts == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/samples
+          key: test-data-samples-${{ hashFiles('tools/testdata/samples.py') }}
+          enableCrossOsArchive: true
+
+      - name: Get samples data
         if: needs.plan.outputs.artifacts == 'true'
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" tools/fetch_artifact_samples.py
+          "$PY" -m tools.testdata.fetch --group samples
+
+      # Only master, the weekly and manual runs save: branches restore what
+      # master saved and never fill the repository's 10 GB with copies.
+      - name: Save samples data
+        if: needs.plan.outputs.artifacts == 'true' && steps.cache-samples.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/samples
+          key: test-data-samples-${{ hashFiles('tools/testdata/samples.py') }}
+          enableCrossOsArchive: true
 
       # -rfE: every failure and error summarised at the end of the log;
       # the JUnit report feeds the run's summary page and the artifact.
@@ -234,7 +274,7 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" tools/carve_score.py 11-carve-fat.dd 12-carve-ext2.dd carve-corpus.dd
+          "$PY" tools/score/carve_score.py 11-carve-fat.dd 12-carve-ext2.dd carve-corpus.dd
 
       # Which tests failed, on the run's summary page -- not 600 lines
       # down a log.

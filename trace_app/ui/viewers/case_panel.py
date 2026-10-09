@@ -28,9 +28,10 @@ from PySide6.QtWidgets import (QApplication, QDialog,
                                QTableWidget, QTableWidgetItem, QTabWidget,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.case import (EVIDENCE_DETAILS, STATUS_CHANGED,
-                                 STATUS_LIVE, STATUS_MISSING, STATUS_PENDING,
-                                 STATUS_UNHASHED, STATUS_VERIFIED)
+from trace_app.core.case import (EVIDENCE_DETAILS, STATUS_BASELINE,
+                                 STATUS_CHANGED, STATUS_LIVE, STATUS_MISSING,
+                                 STATUS_PENDING, STATUS_UNHASHED,
+                                 STATUS_UNREADABLE, STATUS_VERIFIED)
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
@@ -45,20 +46,26 @@ logger = logging.getLogger('TRACE.CasePanel')
 #: so it does not get a bare one-word label.
 STATUS_TEXT = {
     STATUS_VERIFIED: "Verified",
+    STATUS_BASELINE: "Hashed -- nothing to compare with yet",
     STATUS_PENDING: "Not yet hashed",
     STATUS_UNHASHED: "No hash recorded",
     STATUS_MISSING: "MISSING from its recorded location",
-    STATUS_CHANGED: "CHANGED since it was added",
+    STATUS_CHANGED: "CHANGED -- does not match what was recorded",
+    STATUS_UNREADABLE: "UNREADABLE -- could not be read in full",
     STATUS_LIVE: "Read live (not verifiable)",
 }
+#: Statuses that mean the evidence cannot be relied on as recorded.
+STATUS_TROUBLE = (STATUS_MISSING, STATUS_CHANGED, STATUS_UNREADABLE)
 #: Status -> tone (virustotal.verdict_brush) and icon.
 STATUS_TONE = {STATUS_VERIFIED: 'clean', STATUS_MISSING: 'malicious',
-               STATUS_CHANGED: 'malicious', STATUS_LIVE: 'suspicious'}
+               STATUS_CHANGED: 'malicious', STATUS_UNREADABLE: 'malicious',
+               STATUS_LIVE: 'suspicious', STATUS_BASELINE: 'suspicious'}
 STATUS_ICON = {STATUS_VERIFIED: icons.VERIFY_OK, STATUS_MISSING: icons.ERROR,
-               STATUS_CHANGED: icons.ERROR, STATUS_LIVE: icons.ALERT}
+               STATUS_CHANGED: icons.ERROR, STATUS_UNREADABLE: icons.ERROR,
+               STATUS_LIVE: icons.ALERT, STATUS_BASELINE: icons.VERIFY}
 #: Evidence table columns.
 EVIDENCE_COLUMNS = ['Name', 'Exhibit', 'Status', 'Last checked', 'Size',
-                    'MD5', 'SHA-256', 'Path']
+                    'Contains', 'MD5', 'SHA-256', 'Path']
 
 
 def format_utc(text, seconds=False):
@@ -115,7 +122,24 @@ class EvidenceDetailsDialog(QDialog):
             field = QLineEdit(row.get(key) or '')
             self.fields[key] = field
             form.addRow(label, field)
+        # The hashes it was acquired as, from the custody paperwork or the
+        # imaging tool: what every verification compares with. An image
+        # that stores its own (an E01) keeps those; these are checked too.
+        self.hash_fields = {}
+        for name, label in (('md5', "Acquisition MD5"),
+                            ('sha1', "Acquisition SHA-1"),
+                            ('sha256', "Acquisition SHA-256")):
+            field = QLineEdit(row.get(f'stored_{name}') or '')
+            field.setObjectName("hashField")
+            field.setPlaceholderText("as recorded when it was acquired")
+            self.hash_fields[name] = field
+            form.addRow(label, field)
         layout.addLayout(form)
+        if row.get('stored_source'):
+            source = QLabel(f"Acquisition hashes from: {row['stored_source']}")
+            source.setObjectName("settingsHint")
+            source.setWordWrap(True)
+            layout.addWidget(source)
         note = QLabel("Changes are written to the case's activity log, with "
                       "the old and new values.")
         note.setObjectName("settingsHint")
@@ -128,6 +152,18 @@ class EvidenceDetailsDialog(QDialog):
         layout.addWidget(buttons)
 
     def accept(self):
+        from trace_app.ui.dialogs import message
+        hashes = {name: field.text().strip()
+                  for name, field in self.hash_fields.items()}
+        changed = any((self.row.get(f'stored_{n}') or '') != v.lower()
+                      for n, v in hashes.items())
+        if changed:
+            try:
+                self.case.set_acquisition_hashes(
+                    self.row['id'], 'entered by the examiner', **hashes)
+            except ValueError as exc:
+                message.warning(self, "Acquisition hash", str(exc))
+                return
         self.case.update_evidence_details(
             self.row['id'], **{key: field.text().strip()
                                for key, field in self.fields.items()})
@@ -146,6 +182,9 @@ class CasePanel(QWidget):
         super().__init__(parent)
         self.setObjectName("casePanel")
         self.case = None
+        #: row -> what the image holds ('GPT · Btrfs · Linux'), or None
+        #: while it is not open; set by the window.
+        self.profile_for = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -179,7 +218,8 @@ class CasePanel(QWidget):
         facts.setHorizontalSpacing(10)
         facts.setVerticalSpacing(3)
         self.facts = {}
-        for row, label in enumerate(("Opened", "Evidence", "Folder")):
+        for row, label in enumerate(("Opened", "Evidence", "Audit trail",
+                                     "Folder")):
             name = QLabel(label)
             name.setObjectName("caseFactLabel")
             value = QLabel()
@@ -328,6 +368,15 @@ class CasePanel(QWidget):
         self.facts["Folder"].setToolTip(folder)
         evidence = self.case.evidence()
         self.facts["Evidence"].setText(self._evidence_summary(evidence))
+        # The chain is checked every time the card is shown: an edit made
+        # to case.db outside TRACE shows here, not only in a report.
+        audit = self.case.verify_audit()
+        self.facts["Audit trail"].setText(
+            f"{audit['entries']:,} entries, chain intact" if audit['ok']
+            else "DOES NOT VERIFY -- entries were changed or removed")
+        self.facts["Audit trail"].setToolTip(
+            f"Newest entry SHA-256: {audit['head']}" if audit['ok']
+            else '\n'.join(audit['problems'][:20]))
         self.verify_button.setEnabled(bool(evidence))
         self._fill_evidence(evidence)
         self._fill_history(evidence)
@@ -348,14 +397,17 @@ class CasePanel(QWidget):
             status = row.get('last_status') or STATUS_PENDING
             counts[status] = counts.get(status, 0) + 1
         parts = [f"{len(evidence)} item{'s' if len(evidence) != 1 else ''}"]
-        for status in (STATUS_CHANGED, STATUS_MISSING, STATUS_VERIFIED,
-                       STATUS_LIVE, STATUS_UNHASHED, STATUS_PENDING):
+        for status in (STATUS_CHANGED, STATUS_UNREADABLE, STATUS_MISSING,
+                       STATUS_VERIFIED, STATUS_BASELINE, STATUS_LIVE,
+                       STATUS_UNHASHED, STATUS_PENDING):
             if counts.get(status):
                 word = {STATUS_VERIFIED: 'verified',
+                        STATUS_BASELINE: 'hashed, no reference',
                         STATUS_PENDING: 'not hashed',
                         STATUS_UNHASHED: 'no hash recorded',
                         STATUS_MISSING: 'MISSING',
                         STATUS_CHANGED: 'CHANGED',
+                        STATUS_UNREADABLE: 'UNREADABLE',
                         STATUS_LIVE: 'live'}[status]
                 parts.append(f"{counts[status]} {word}")
         return ' · '.join(parts)
@@ -368,7 +420,7 @@ class CasePanel(QWidget):
             cell.setForeground(verdict_brush(tone))
         if status in STATUS_ICON:
             cell.setIcon(icons.icon(STATUS_ICON[status]))
-        if status in (STATUS_MISSING, STATUS_CHANGED):
+        if status in STATUS_TROUBLE:
             # In the text as well as the colour, so the meaning survives a
             # screenshot or a colour-blind reader.
             cell.setToolTip("This evidence no longer matches what the case "
@@ -386,6 +438,7 @@ class CasePanel(QWidget):
             name = item.get('display_name') or os.path.basename(item['path'])
             custody = '\n'.join(f"{label}: {item[key]}" for key, label in
                                 EVIDENCE_DETAILS.items() if item.get(key))
+            contents = self._contents(item)
             cells = [
                 QTableWidgetItem(name),
                 QTableWidgetItem(item.get('exhibit_number') or '—'),
@@ -393,6 +446,7 @@ class CasePanel(QWidget):
                 QTableWidgetItem(format_utc(item.get('verified_utc'))),
                 QTableWidgetItem(FileSystemUtils.get_readable_size(size)
                                  if size is not None else '—'),
+                QTableWidgetItem(contents or '—'),
                 QTableWidgetItem(short_hash(item.get('md5'))),
                 QTableWidgetItem(short_hash(item.get('sha256'))),
                 QTableWidgetItem(item['path']),
@@ -402,12 +456,25 @@ class CasePanel(QWidget):
             cells[1].setToolTip(custody)
             if size is not None:
                 cells[4].setToolTip(f"{size:,} bytes")
-            cells[5].setToolTip(item.get('md5') or '')
-            cells[6].setToolTip(item.get('sha256') or '')
-            cells[7].setToolTip(item['path'])
+            cells[5].setToolTip(contents or "Not read yet: the image is not "
+                                            "open")
+            cells[6].setToolTip(item.get('md5') or '')
+            cells[7].setToolTip(item.get('sha256') or '')
+            cells[8].setToolTip(item['path'])
             for column, cell in enumerate(cells):
                 table.setItem(row, column, cell)
-        fit_columns(table, {7: 360})
+        fit_columns(table, {5: 260, 8: 360})
+
+    def _contents(self, item):
+        """What the image holds -- 'GPT · NTFS, Ext4 · Windows + Linux'
+        (core/evidence_profile) -- from the window, or None."""
+        if self.profile_for is None:
+            return None
+        try:
+            return self.profile_for(item)
+        except Exception as exc:
+            logger.debug("No profile for %s: %s", item.get('path'), exc)
+            return None
 
     def _evidence_row(self, index):
         item = self.evidence_table.item(index, 0)
@@ -425,9 +492,12 @@ class CasePanel(QWidget):
         table.setRowCount(len(history))
         for row, entry in enumerate(history):
             status = entry.get('status') or ''
+            # Evidence since removed keeps its history, under its name.
+            name = names.get(entry.get('evidence_id')) or (
+                f"{entry['evidence_name']} (removed)"
+                if entry.get('evidence_name') else '—')
             cells = [QTableWidgetItem(format_utc(entry.get('utc'), True)),
-                     QTableWidgetItem(names.get(entry.get('evidence_id'),
-                                                '—')),
+                     QTableWidgetItem(name),
                      self._status_cell(status),
                      QTableWidgetItem((entry.get('algorithm') or '—')
                                       .upper()),

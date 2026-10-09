@@ -7,10 +7,16 @@ Two rules every test relies on:
   those directories are pointed at a throwaway folder, so a test run can never
   read or overwrite the examiner's own settings -- and nothing personal can
   end up in a public CI log.
-* **Images are required in CI.** Locally, a test whose public image has not
-  been downloaded is skipped with a pointer to tools/fetch_test_images.py. In
-  CI (TRACE_REQUIRE_IMAGES=1) it fails instead, so CI cannot pass by quietly
-  testing nothing.
+* **Images are required in CI.** Test data lives in test_images/, one
+  folder per group (tools/testdata). Locally, a test whose data is not here
+  is skipped, saying how to get it. In CI (TRACE_REQUIRE_IMAGES=1) a missing
+  image of the CI set fails instead, so CI cannot pass by quietly testing
+  nothing; data CI never has (local, NIST, private) always skips.
+
+TRACE_TEST_TIER limits what a run reads (tools/run_tests.py sets it):
+'quick' skips every test that asks for data, 'ci' skips what CI does not
+have -- so a local 'ci' run is the CI run -- and 'full' (the default) reads
+everything present.
 """
 
 import os
@@ -19,8 +25,9 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IMAGE_DIR = os.path.join(ROOT, 'test_images')
 sys.path.insert(0, ROOT)
+
+from tools import testdata  # noqa: E402
 
 _SANDBOX = tempfile.mkdtemp(prefix='trace-tests-')
 for variable, sub in (('APPDATA', 'roaming'), ('LOCALAPPDATA', 'local'),
@@ -38,44 +45,48 @@ def pytest_sessionfinish(session, exitstatus):
     shutil.rmtree(_SANDBOX, ignore_errors=True)
 
 
-def _ci_images():
-    """The images CI has: what tools/fetch_test_images.py downloads, and
-    the corpus tools/carve_corpus.py builds."""
-    import ast
-    with open(os.path.join(ROOT, 'tools', 'fetch_test_images.py'),
-              encoding='utf-8') as handle:
-        tree = ast.parse(handle.read())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-                getattr(t, 'id', '') == 'CATALOG' for t in node.targets):
-            return {key.value for key in node.value.keys} | _built_images()
-    return _built_images()
+def _in_ci(name):
+    """Whether CI has the image `name`: the downloaded CI set, the carving
+    corpus it builds, and on Linux the images the kernel's own tools make
+    (tools/testdata/build: Btrfs with deleted files, md RAID, LUKS + LVM)."""
+    group = testdata.group_of(name)
+    if group in ('ci', 'corpus'):
+        return True
+    return group == 'built' and sys.platform.startswith('linux')
 
 
-def _built_images():
-    """Images CI makes rather than downloads: the carving corpus
-    everywhere, and on Linux the Btrfs volume the kernel deletes files on
-    (tools/make_btrfs_deleted.py loop-mounts it)."""
-    built = {'carve-corpus.dd'}
-    if sys.platform.startswith('linux'):
-        built.add('btrfs-deleted.raw')
-    return built
+def _missing(message, required):
+    if required and testdata.TIER != 'quick' and             os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
+        pytest.fail(message)
+    pytest.skip(message)
 
 
 def image_path(name):
-    """Path to a public test image, or skip/fail the test if it is missing.
+    """Path to a test image, or skip/fail the test if it is missing.
 
     With TRACE_REQUIRE_IMAGES=1 (CI) a missing image of the CI set fails;
-    the larger public images CI does not download (DFRWS, the other NIST
-    ones) are used locally and skip there.
+    the others (local, NIST, private) skip wherever they are absent.
     """
-    path = os.path.join(IMAGE_DIR, name)
+    path = testdata.locate(name)
+    if path is None:
+        _missing(f"{testdata.how_to_get(name)} -- not in test_images/",
+                 _in_ci(name))
+    return path
+
+
+def data_path(group, *parts):
+    """A file or folder of a data group: 'samples' (artifact files, in
+    CI), 'corpus' (the carving corpus's sources, in CI), 'nist', 'local',
+    'private' (never in CI). Skips -- or in CI fails, for CI groups -- when
+    it is not here."""
+    base = {'samples': testdata.SAMPLES, 'corpus': testdata.CORPUS_SAMPLES,
+            'nist': testdata.NIST, 'local': testdata.LOCAL,
+            'private': testdata.PRIVATE}[group]
+    path = os.path.join(base, *parts)
     if not os.path.exists(path):
-        message = (f"{name} is not in test_images/ -- run "
-                   f"'python tools/fetch_test_images.py'")
-        if os.environ.get('TRACE_REQUIRE_IMAGES') == '1' and                 name in _ci_images():
-            pytest.fail(message)
-        pytest.skip(message)
+        _missing(f"{os.path.join(group, *parts)} is not in test_images/ -- "
+                 f"{testdata.HOW.get(group, testdata.HOW['local'])}",
+                 group in ('samples', 'corpus'))
     return path
 
 

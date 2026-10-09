@@ -31,12 +31,15 @@ SHA-256 before it is kept:
   XML it was written from
 * logical evidence: AD1 images (pyad1, dissect.evidence) and EnCase L01
   files (ggeng2/Logical_Image_DataSet)
+* macOS Background Task Management files: hewigovens/BTMParser's
+  BackgroundItems-v13.btm and puffyCid/macos-loginitems' (MIT) v4 and
+  pre-Ventura backgrounditems.btm, one with PoisonApple's login item
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
-test_images/artifact_samples/ (gitignored, like every test image).
+test_images/samples/ (gitignored, like every test image).
 
-    python tools/fetch_artifact_samples.py
+    python -m tools.testdata.fetch --group samples
 """
 
 import hashlib
@@ -44,8 +47,9 @@ import os
 import sys
 import urllib.parse
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-FOLDER = os.path.join(ROOT, 'test_images', 'artifact_samples')
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+FOLDER = os.path.join(ROOT, 'test_images', 'samples')
 
 _PLASO = ('https://raw.githubusercontent.com/log2timeline/plaso/'
           'ac6460d7350c9160bdf69161726ee0e8d4545874/test_data/')
@@ -53,6 +57,21 @@ _EVTX = ('https://raw.githubusercontent.com/omerbenamram/evtx/'
          '47d63022caa8336ecdd0c42d335e2bb03381b00d/samples/')
 _DFVFS = ('https://raw.githubusercontent.com/log2timeline/dfvfs/'
           '917cefc9426d6ded2687d2b55164ded25b44fcb7/test_data/')
+_POI = ('https://raw.githubusercontent.com/apache/poi/'
+        'ae62bb5116b9aee19ebd5834e3a82066132c9f7f/test-data/')
+_MSO = ('https://raw.githubusercontent.com/nolze/msoffcrypto-tool/'
+        '6d9e72c58de2cf7df1ab45ac0d74ebedac8c58e3/tests/')
+_TCPDUMP = ('https://raw.githubusercontent.com/the-tcpdump-group/tcpdump/'
+            'eebca9915dc33ce4724ca55010c507c80f519c1b/tests/')
+_ZEEK = ('https://raw.githubusercontent.com/zeek/zeek/'
+         'b5bf5e5e42e9015d78be5105d2fd1e41eb75361f/testing/btest/Traces/')
+_CPYTHON39 = ('https://raw.githubusercontent.com/python/cpython/'
+              'v3.9.0/Lib/distutils/command/')
+_TSKDATA = ('https://raw.githubusercontent.com/sleuthkit/sleuthkit_test_data/'
+            'abcb05bd7f01313115d213dcd83826989fe93535/')
+_TSKDATA_LFS = ('https://media.githubusercontent.com/media/sleuthkit/'
+                'sleuthkit_test_data/'
+                'abcb05bd7f01313115d213dcd83826989fe93535/')
 _ZSTD = ('https://raw.githubusercontent.com/facebook/zstd/'
          '01b7154f1172432f8abe9b3bb9909e14a1176b7d/tests/')
 _CPYTHON = ('https://raw.githubusercontent.com/python/cpython/'
@@ -88,6 +107,12 @@ _REGIPY = ('https://raw.githubusercontent.com/mkorman90/regipy/'
 
 _ATTACK = ('https://raw.githubusercontent.com/sbousseaden/'
            'EVTX-ATTACK-SAMPLES/4ceed2f4706daf601c212a8f91c113dd85349a2c/')
+
+_BTMPARSER = ('https://raw.githubusercontent.com/hewigovens/BTMParser/'
+              '14d5a6ed816a11d674d965061e48df12f1d5328a/Tests/'
+              'BTMParserTests/Resources/')
+_LOGINITEMS = ('https://raw.githubusercontent.com/puffyCid/macos-loginitems/'
+               '75658db42a9adab87e9be6ef7d0e30d91d35fa7d/tests/test_data/')
 
 #: local name -> (URL, SHA-256)
 SAMPLES = {
@@ -263,6 +288,70 @@ SAMPLES = {
     'ufs2.raw': (
         _DFVFS + 'ufs2.raw',
         'ee5d99e5e60aa566b9e4dd0a5341c1e2b433cbbfcebffbdbf0ad2a3e2153cd67'),
+    # dfvfs's format corpus (tests/test_dfvfs_formats.py): a 2-segment E01
+    # and a split raw numbered from .000 (both the same 4 MB ext2 disk as
+    # ext2.raw), unencrypted Core Storage, LUKS2 (Argon2i, header only),
+    # an Apple Partition Map, a Parallels bundle, a gzip cut short, the
+    # same syslog as CPIO (four formats), LZMA-alone and raw zlib, and a
+    # database holding a database in a cell.
+    'ext2.raw': (
+        _DFVFS + 'ext2.raw',
+        'a6c2f0e39afe6c6ab432ca5465349fcefe8dc944398e97b2d957d3f89dbb5d80'),
+    'ext2.split.E01': (
+        _DFVFS + 'ext2.split.E01',
+        'd14f130c462b0ab8efb6bb44bbfe5680e00ffaa90538cde84579d1eb0dcac00f'),
+    'ext2.split.E02': (
+        _DFVFS + 'ext2.split.E02',
+        'b508375954ec1d1caeed8a6e5fc503f98493816ad6a3af89f5d220244c5f2864'),
+    'ext2.splitraw.000': (
+        _DFVFS + 'ext2.splitraw.000',
+        '2a864677a8f3c56a57ef5f02ca456205e06a274c5ba1b803c8235601d7930ee2'),
+    'ext2.splitraw.001': (
+        _DFVFS + 'ext2.splitraw.001',
+        '5647f05ec18958947d32874eeb788fa396a05d0bab7c1b71f112ceb7e9b31eee'),
+    'cs_single_volume.raw': (
+        _DFVFS + 'cs_single_volume.raw',
+        'b0e6e787d28816d6986f4c0489e00d99487abdb607c89ca23e0b62c9b72e4ec8'),
+    'luks2.raw': (
+        _DFVFS + 'luks2.raw',
+        '500cc79ca8e95122acccec7a3c155f2a203fc32776bba57fb166662513f51e67'),
+    'apm.dmg': (
+        _DFVFS + 'apm.dmg',
+        '897f487f4971e72c762e00460935e3b25176cda35620b508b490f65a7e0118ff'),
+    'hfsplus.hdd/DiskDescriptor.xml': (
+        _DFVFS + 'hfsplus.hdd/DiskDescriptor.xml',
+        '055612a450d55d0265fd117b5cf57355376ec4c62f9a80db78a6cdfe402c8a2a'),
+    'hfsplus.hdd/hfsplus.hdd.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds': (
+        _DFVFS + 'hfsplus.hdd/'
+        'hfsplus.hdd.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds',
+        '1b5192b42705b7b959da2590d590363cda0088a4834a29c2e2984d938eb1070c'),
+    'corrupt1.gz': (
+        _DFVFS + 'corrupt1.gz',
+        'a7524eeecdd46dbc0921aa8c5bde1a226d1cbc11d50b653573f2803e195b9014'),
+    'dfvfs-syslog': (
+        _DFVFS + 'syslog',
+        '0420b023f8dc1b71ff25191ce4ce88d10028f99f99f7c21532611f4c273aeae9'),
+    'syslog.bin.cpio': (
+        _DFVFS + 'syslog.bin.cpio',
+        '84bb569cf2a018db29e70d55d8b69d8463dcbd77d70f1213c2f9e7de0d21c5c7'),
+    'syslog.odc.cpio': (
+        _DFVFS + 'syslog.odc.cpio',
+        '78f919b358a5cf7beb78c84b9cd3028cd0b343386e5442ef50736647bba4f4ad'),
+    'syslog.newc.cpio': (
+        _DFVFS + 'syslog.newc.cpio',
+        '94e668bec666fbf9ce4d9d68fc9296ac4c3e231a6ab84f5e684bd90f49d8b53a'),
+    'syslog.crc.cpio': (
+        _DFVFS + 'syslog.crc.cpio',
+        'ae3e4ba73c0cb9c4b796b811ce893cfbef39d2101c075c3282873dcaa302ea15'),
+    'syslog.lzma': (
+        _DFVFS + 'syslog.lzma',
+        '434455b071dddb34481b128640ed9490c63f89b893fe9d0b673fdbd87f5d5ded'),
+    'syslog.zlib': (
+        _DFVFS + 'syslog.zlib',
+        '871a0bd83e24721a8ca2fc00f02665d8243baa98fe4726a6487dc40661ee6abe'),
+    'blob.db': (
+        _DFVFS + 'blob.db',
+        '0e93cfa66d0d6aebcc8c80a71a0839d75681ca82b056ef1ccb6d54ff581b5b0b'),
     'lvm.raw': (
         _DFVFS + 'lvm.raw',
         '565f564cd35e6ee304ea810631d52223e1ee3bb61d92ff1cd035c5a25f59e43e'),
@@ -487,6 +576,25 @@ SAMPLES = {
     'hfsplus.sparseimage': (
         _DFVFS + 'hfsplus.sparseimage',
         'f36c72c0571b2a9be9174ea2c12007808e1dbbee932652b1eb530f8536d01814'),
+    # Apple's unified log: a Mac's /private/var/db log tree (Persist,
+    # Special, Signpost, timesync, uuidtext, dsc) on APFS in a DMG --
+    # plaso's, whose tests give its entry counts and messages.
+    'unified_logging1.dmg': (
+        _PLASO + 'unified_logging1.dmg',
+        'e38da79f6eb911baf347ffc24650c7c6d22dea07139aca6a404b965e5419af08'),
+    # macOS Background Task Management (activity/btm.py).
+    'BackgroundItems-v13.btm': (
+        _BTMPARSER + 'BackgroundItems-v13.btm',
+        'a7d58d9f15c9bb876e0f64a3b7010f7b5349fdcc5f829b869d4c4b8f19b7d022'),
+    'BackgroundItems-v4.btm': (
+        _LOGINITEMS + 'BackgroundItems-v4.btm',
+        '5ed2ea43f0f7877a5fa568ee854379e8749a82d41e865362da2239ee15d04792'),
+    'backgrounditems_sierra.btm': (
+        _LOGINITEMS + 'backgrounditems_sierra.btm',
+        '8056ff7c70430866c5311c86def1cc9c10d46aa3881ac3cd43e7cd52ca6d22a6'),
+    'backgrounditemsPoisonApple.btm': (
+        _LOGINITEMS + 'backgrounditemsPoisonApple.btm',
+        '270395bc9ad1f262194da0ebd35682072f09ab4ec79ecbe0f31335c114ad8639'),
     # Dirty hives with their transaction logs (regipy's test data, MIT;
     # xz-compressed, read in memory by the tests).
     'regipy-transactions_NTUSER.DAT.xz': (
@@ -675,16 +783,173 @@ SAMPLES = {
     'l01-zip.L01': (
         _L01 + 'NTFS/zip.L01',
         '1306ead913d084f808cd9da09c428928e319cc31bfbafbd5565564d3b60ffe31'),
+    # Outlook .msg (Apache POI, Apache-2.0; tests/test_office_mail_pcap.py),
+    # Office macros with POI's own .vba source, encrypted Office documents
+    # with msoffcrypto-tool's decrypted copies (MIT; password
+    # 'Password1234_', the XOR one '123456789012345'), and captures from
+    # tcpdump's and Zeek's tests (BSD).
+    'poi-quick.msg': (
+        _POI + 'hsmf/quick.msg',
+        '5cf6dd0bd15c07b8b221f070f7d69590ee6803a6b64358b9deb93a147cf4611b'),
+    'poi-attachment_test_msg.msg': (
+        _POI + 'hsmf/attachment_test_msg.msg',
+        '4f5ab34d4e6bbb04945319dc0decdcfce785779bda618c89ca2eb0fe82e9caf0'),
+    'poi-attachment_msg_pdf.msg': (
+        _POI + 'hsmf/attachment_msg_pdf.msg',
+        '439a1fb117edd4c84b780fcf44bf1d5167166694130ced5743a70132a83c6970'),
+    'poi-chinese-traditional.msg': (
+        _POI + 'hsmf/chinese-traditional.msg',
+        'b84c12748155dc57b41de02c6d43aa47e82b879020df070290633e9fd5ce7fdd'),
+    'poi-cyrillic_message.msg': (
+        _POI + 'hsmf/cyrillic_message.msg',
+        '8378273915639c4affdbe74a07105a653e3da752cd61882444deb5df771562c8'),
+    'poi-HTMLBodyBinary_UTF-8.msg': (
+        _POI + 'hsmf/HTMLBodyBinary_UTF-8.msg',
+        '6e6a9b5ad0045dae5477608bc67827741f074f61c80d6f005466ae931894d336'),
+    'poi-document-SimpleMacro.doc': (
+        _POI + 'document/SimpleMacro.doc',
+        '39e9608c711d38f298ed20a5bfae12fcdaed6f4be2be4d26db670475216ca393'),
+    'poi-document-SimpleMacro.docm': (
+        _POI + 'document/SimpleMacro.docm',
+        'fd591958fcf5322f72c0a740e9606309c949254bda4c3d9bd966481ddf220563'),
+    'poi-document-SimpleMacro.vba': (
+        _POI + 'document/SimpleMacro.vba',
+        'adfa5f1157daf9b7983aa6fc36dc4308f960b10fbfb2de26bc487b6747c5b859'),
+    'poi-spreadsheet-SimpleMacro.xls': (
+        _POI + 'spreadsheet/SimpleMacro.xls',
+        '0e92c9bb018abd8a5f9121d65827c9e3bd280777219cb77a2efd70635143c00a'),
+    'poi-spreadsheet-SimpleMacro.xlsm': (
+        _POI + 'spreadsheet/SimpleMacro.xlsm',
+        'f76c986f4ebc25c2cc57c088b2511a1269f4bd61d6223a2ab58db351da348ba6'),
+    'poi-spreadsheet-SimpleMacro.vba': (
+        _POI + 'spreadsheet/SimpleMacro.vba',
+        '0d23333b21e8eba9008d5c953571e8f862aed8b9b2e5b30b6f3441a4378437b5'),
+    'poi-spreadsheet-xlmmacro.xlsm': (
+        _POI + 'spreadsheet/xlmmacro.xlsm',
+        'e9ac8d566a43e3c3b6949e7de538705211b22af3fa1d147762d6ff1383df8092'),
+    'poi-slideshow-SimpleMacro.pptm': (
+        _POI + 'slideshow/SimpleMacro.pptm',
+        '8a3573c82fd07a301d7f175b8bee646c0b58eb8a945bd0ff408225b6e2b89b15'),
+    'poi-slideshow-SimpleMacro.vba': (
+        _POI + 'slideshow/SimpleMacro.vba',
+        '305a8232b1ff305bf096524d74c444197f38aeea328ad27b6cf08ce90ed289ae'),
+    'mso-example_password.docx': (
+        _MSO + 'inputs/example_password.docx',
+        '0605624697328060fdc75ca9929ea20b9d63ebed9387ff1a97aaf9979757234a'),
+    'mso-example_password.xlsx': (
+        _MSO + 'inputs/example_password.xlsx',
+        '3f792e3902a615bf0e91771f3f3016b80d59098b8e492efcdc0752748e15b997'),
+    'mso-ecma376standard_password.docx': (
+        _MSO + 'inputs/ecma376standard_password.docx',
+        'd265dcf02f7d552486229b8c67a627ef3752fe6802b02fd2d2d485fcfbbac5de'),
+    'mso-rc4cryptoapi_password.doc': (
+        _MSO + 'inputs/rc4cryptoapi_password.doc',
+        '9c5217bea80fb1a7811ad7709dd9bb35f6c639bac7154580dd4c99d54e1fc0e0'),
+    'mso-rc4cryptoapi_password.xls': (
+        _MSO + 'inputs/rc4cryptoapi_password.xls',
+        'b804cba40c27ea88f2ea994b6b7d75145661532f9356e7246d2499f63d58abfe'),
+    'mso-xor_password_123456789012345.xls': (
+        _MSO + 'inputs/xor_password_123456789012345.xls',
+        'c75375186933e2413325c4e64ce76903452d51413816d0df1d5fd677ea4dd76d'),
+    'mso-plain-example.docx': (
+        _MSO + 'outputs/example.docx',
+        '8c8212db6e624bfc69286e94d09b7e68c753ee86b6826e51427a33c841f133d1'),
+    'mso-plain-example.xlsx': (
+        _MSO + 'outputs/example.xlsx',
+        '4dd9dd0ccbfc7fb8769f1f3307830d3cc4c5042e32d619f4b2835fada89d13c6'),
+    'mso-plain-ecma376standard_password_plain.docx': (
+        _MSO + 'outputs/ecma376standard_password_plain.docx',
+        'ca1c0ebb465553361b9034e696d4081df0a2d41918f820060325b3ca634eb69b'),
+    'mso-plain-rc4cryptoapi_password_plain.doc': (
+        _MSO + 'outputs/rc4cryptoapi_password_plain.doc',
+        '65eb884be862337c0e51e78bf57be6cb6601040a16055a87d1e4dd3de4c04303'),
+    'mso-plain-rc4cryptoapi_password_plain.xls': (
+        _MSO + 'outputs/rc4cryptoapi_password_plain.xls',
+        'ccaf6545a3abe5b42ca48b6513239d3fcda5ee900d8623eb20e5d604f4702f43'),
+    'mso-plain-xor_password_123456789012345_plain.xls': (
+        _MSO + 'outputs/xor_password_123456789012345_plain.xls',
+        '59eda76e923e7147dc584f93641f7c829180838e2642c97af1324450cdb3d527'),
+    'tcpdump-dns_udp.pcap': (
+        _TCPDUMP + 'dns_udp.pcap',
+        'dcb83420e7512dd4085e790d40a040bc5749decb5e551fb807da5689b990fa65'),
+    'tcpdump-dns_tcp.pcap': (
+        _TCPDUMP + 'dns_tcp.pcap',
+        '4eee693b9718b4fdaf1916ce19d825ce0cca18efb5998615c11bd86c9183acec'),
+    'tcpdump-ahcp.pcapng': (
+        _TCPDUMP + 'ahcp.pcapng',
+        '5dd83ed8a7a97f6012b6dd1bbda4a51c789c83213bd9a422ae5487d948265375'),
+    'zeek-http-get.pcap': (
+        _ZEEK + 'http/get.pcap',
+        '48c8c3a3560a13ffb03d4eb0ed14143fb57350ced7d6874761a963a8091b1866'),
+    'zeek-tls-chrome-34-google.pcap': (
+        _ZEEK + 'tls/chrome-34-google.pcap',
+        '706d75a08f7db96cb0877815c9b682df3eab475012606ca074d3a5b47229ab4f'),
+    # A program linked by Microsoft's linker (its Rich header), from
+    # CPython 3.9's distutils (PSF licence).
+    'cpython-wininst-14.0-amd64.exe': (
+        _CPYTHON39 + 'wininst-14.0-amd64.exe',
+        '0cf9864ae3a8679ed503f954a453452c93fa44f99ca6f39bbc5860abde7fd35e'),
+    # The Sleuth Kit's own test images (sleuthkit/sleuthkit_test_data; Git
+    # LFS objects) with the DFXML fiwalk wrote for some -- every file's
+    # path, size and MD5 (tests/test_sleuthkit_data.py).
+    'tsk-apfs-apfs_pool.E01': (
+        _TSKDATA_LFS + 'apfs/apfs_pool.E01',
+        'f08a7bb7565ee1778faa95a279215f3aca5fabfbffe0e34b96e0887059548400'),
+    'tsk-btrfs-btrfs_testimage_50MB.E01': (
+        _TSKDATA_LFS + 'btrfs/btrfs_testimage_50MB.E01',
+        '42c5bda5e887002eaf6292fb0d20e022187837553bcdf4e84bf2c222b1e70b93'),
+    'tsk-btrfs-btrfs_testimage_50MB.E01.xml': (
+        _TSKDATA + 'btrfs/btrfs_testimage_50MB.E01.xml',
+        'eb7808af05a4c93ea01f3efd467f592aad75ff527b2117fc0d6465da63547046'),
+    'tsk-btrfs-btrfs_zstd.E01': (
+        _TSKDATA_LFS + 'btrfs/btrfs_zstd.E01',
+        'c404949c4a72760dc7e394053aec06b3776903c52b442cc686977addc0e31942'),
+    'tsk-exfat-exfat1.E01': (
+        _TSKDATA_LFS + 'exfat/exfat1.E01',
+        '9249cbb06fef129cc411b5e1e65a6780cafad4dfa9f3566c583b5968504e5153'),
+    'tsk-from_brian-6-fat-undel.E01': (
+        _TSKDATA_LFS + 'from_brian/6-fat-undel.E01',
+        'a45d1ab4038cfb0d9be21c86e2d224789dff8b4f62671575cb5ba50027818960'),
+    'tsk-from_brian-6-fat-undel.dd.xml': (
+        _TSKDATA + 'from_brian/6-fat-undel.dd.xml',
+        '558750947abc3cb5ed33b0899350ccabdad07d38e788d9cff4c5cbb8a41f442d'),
+    'tsk-from_brian-fat32_with_efs_file.E01': (
+        _TSKDATA_LFS + 'from_brian/fat32_with_efs_file.E01',
+        '705109dfc554eceec4dc588bb489a8fc0cecd877eb9cd4a7044549338caa1f71'),
+    'tsk-from_brian-imageformat_mmls_1.E01': (
+        _TSKDATA_LFS + 'from_brian/imageformat_mmls_1.E01',
+        '5125bbc40154a6acdf96b7aded0fc28686e9c0882afb5b95ddf2dc8345ccf44e'),
+    'tsk-from_brian-imageformat_mmls_1.E01.xml': (
+        _TSKDATA + 'from_brian/imageformat_mmls_1.E01.xml',
+        'f02fc57a59ed75267e3cd2373d78c36a179329c3b943dee07b4552f052ac9f36'),
+    'tsk-from_brian-1-extend-part.zip': (
+        _TSKDATA + 'from_brian/1-extend-part.zip',
+        '771cc763798ed23d85f6362de4adff503bf83c33c56c5ac8dea689a3996c8ce3'),
+    'tsk-fuzzing-lvm_test_issue_3235.E01': (
+        _TSKDATA_LFS + 'fuzzing/lvm_test_issue_3235.E01',
+        '2209ee278d79031079923647283b425e8e425af3c082a6d3dba81abb3d688f97'),
+    'tsk-fuzzing-clusterfuzz-testcase-minimized-sleuthkit_fls_ntfs_fuzzer-5124116049166336': (
+        _TSKDATA + 'fuzzing/clusterfuzz-testcase-minimized-sleuthkit_fls_ntfs_fuzzer-5124116049166336',
+        'cde563ddb5efb41c31bd34e6fd49b56f82d33eac97e5b8fa417edf7f3ec63ee6'),
+    'tsk-gpt-gpt_130_partitions.E01': (
+        _TSKDATA_LFS + 'gpt/gpt_130_partitions.E01',
+        'c2ca9d37af9c8f249a9667b2a319bc25861d3b80ebdbdb7f4c74863e410a490f'),
+    'tsk-ufs-image.E01': (
+        _TSKDATA_LFS + 'ufs/image.E01',
+        'e94dfb49e8a6dc72b952127ebd32eba01396b4dfb62f359a38b89f360cbbbf30'),
+    'tsk-ufs-image_dd.xml': (
+        _TSKDATA + 'ufs/image_dd.xml',
+        '6dfba3511ad0fe855dd3e727f9e87e2d49dc4d537353ab755f442a003f05f6bc'),
+    'tsk-xfs-xfs-raw-2GB.E01': (
+        _TSKDATA_LFS + 'xfs/xfs-raw-2GB.E01',
+        '48397462ad7af18d4ac74534769fcbbe081712080918a0ca16e7063f62d5d772'),
 }
 
 
 def _download(url):
     """Fetch with retries and mirrors (tools/download.py)."""
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    try:
-        from download import download
-    finally:
-        sys.path.pop(0)
+    sys.path.insert(0, ROOT)
+    from tools.testdata.download import download
     return download(url)
 
 

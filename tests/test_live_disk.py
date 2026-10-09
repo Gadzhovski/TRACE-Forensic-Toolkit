@@ -14,9 +14,10 @@ import socket
 import pytest
 
 from trace_app.core import live_disk
+from tools import testdata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-JPEG_IMAGE = os.path.join(ROOT, 'test_images', '8-jpeg-search.dd')
+JPEG_IMAGE = testdata.locate('8-jpeg-search.dd') or ''
 
 
 @pytest.fixture

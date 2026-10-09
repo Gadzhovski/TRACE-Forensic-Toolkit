@@ -47,6 +47,23 @@ def configure_logging():
 #: JPEG ("Bogus marker length") is what carved and deleted pictures are.
 EVIDENCE_CATEGORIES = ('qt.gui.imageio',)
 
+#: (category, text) of Qt warnings that are noise, kept at DEBUG. Text
+#: from evidence holding a character the font lacks makes Qt search every
+#: installed font for it; Windows' legacy bitmap fonts (8514oem, Fixedsys,
+#: Terminal, MS Sans Serif...) cannot be opened through DirectWrite, and
+#: each logs "CreateFontFaceFromHDC() failed" -- while the character is
+#: drawn from another font all the same.
+NOISE = (('qt.qpa.fonts', 'CreateFontFaceFromHDC'),)
+
+
+def qt_level(level, category, text):
+    """The log level for one Qt message: DEBUG for warnings about the
+    evidence (EVIDENCE_CATEGORIES) and for known noise (NOISE)."""
+    if category.startswith(EVIDENCE_CATEGORIES) or any(
+            category == noisy and part in text for noisy, part in NOISE):
+        return logging.DEBUG
+    return level
+
 
 def route_qt_messages():
     """Qt's own messages into TRACE's log (logger 'TRACE.Qt').
@@ -65,9 +82,7 @@ def route_qt_messages():
 
     def handler(kind, context, text):
         category = getattr(context, 'category', None) or ''
-        level = levels.get(kind, logging.WARNING)
-        if category.startswith(EVIDENCE_CATEGORIES):
-            level = logging.DEBUG
+        level = qt_level(levels.get(kind, logging.WARNING), category, text)
         qt_log.log(level, "%s%s", f"{category}: " if category else '', text)
 
     qInstallMessageHandler(handler)

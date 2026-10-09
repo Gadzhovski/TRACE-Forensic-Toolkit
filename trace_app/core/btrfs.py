@@ -62,6 +62,11 @@ FS_TREE = 5
 ROOT_TREE_DIR = 6
 FIRST_FREE = 256
 ROOT_DIR = 256              # every subvolume's root directory
+#: The inode Linux gives a snapshot's placeholder for a nested subvolume
+#: (BTRFS_EMPTY_SUBVOL_DIR_OBJECTID): no item has it, so it is an empty
+#: directory -- and, unlike the 0 it had, it is not the root's identifier
+#: (opening one listed the volume's root again, snapshot and all).
+EMPTY_SUBVOL_DIR = 2
 CHUNK_TREE_DEVICES = 1      # DEV_ITEMs live under objectid 1
 
 # Chunk profile bits (block group flags).
@@ -285,13 +290,14 @@ class BtrfsVolume:
     """One Btrfs device, read through `source` (a file object over the
     partition): logical addresses, trees, inodes, extents."""
 
-    def __init__(self, source):
+    def __init__(self, source, others=()):
         self.source = source
         source.seek(0)
         head = source.read(SUPERBLOCK_OFFSET + 4096)
         if superblock_geometry(head) is None:
             raise BtrfsError("No Btrfs superblock")
         sb = head[SUPERBLOCK_OFFSET:SUPERBLOCK_OFFSET + 4096]
+        others = list(others)
         self.fsid = sb[0x20:0x30]
         (self.generation, root, chunk_root, _log, _log_transid,
          self.total_bytes, self.bytes_used, _root_dir,
@@ -306,6 +312,20 @@ class BtrfsVolume:
             'utf-8', 'replace')
         if self.incompat & (1 << 10):                   # METADATA_UUID
             self.fsid = sb[0x23b:0x24b]
+        #: devid -> file object: this device and any other given (the rest
+        #: of a multi-disk file system, each checked to be the same one).
+        self.devices = {self.devid: source}
+        for other in others:
+            other.seek(0)
+            theirs = other.read(SUPERBLOCK_OFFSET + 4096)
+            if superblock_geometry(theirs) is None:
+                raise BtrfsError("A device given is not Btrfs")
+            their_sb = theirs[SUPERBLOCK_OFFSET:SUPERBLOCK_OFFSET + 4096]
+            if their_sb[0x20:0x30] != sb[0x20:0x30]:
+                raise BtrfsError("A device given belongs to another Btrfs "
+                                 "file system")
+            self.devices[struct.unpack_from('<Q', their_sb, 0xc9)[0]] = \
+                other
         if not 4096 <= self.node_size <= 65536:
             raise BtrfsError(f"Implausible node size {self.node_size}")
         self._chunks = []
@@ -360,6 +380,13 @@ class BtrfsVolume:
 
     def _map(self, logical):
         """(physical offset on this device, bytes readable from there)."""
+        devid, physical, left = self._locate(logical, only=self.devid)
+        return physical, left
+
+    def _locate(self, logical, only=None):
+        """(device, physical offset on it, bytes readable from there) for a
+        logical address, on any device given (`only`: that one). Raises
+        BtrfsError naming what is missing."""
         index = bisect.bisect_right(self._starts, logical) - 1
         if index < 0:
             raise BtrfsError(f"No chunk maps logical {logical:#x}")
@@ -368,8 +395,21 @@ class BtrfsVolume:
         if within >= chunk.length:
             raise BtrfsError(f"No chunk maps logical {logical:#x}")
         stripes = chunk.stripes
+        have = self.devices if only is None else {only: None}
         if chunk.flags & (RAID5 | RAID6):
-            raise BtrfsError("RAID5/6 across several disks is not read")
+            # The kernel's read mapping: data stripes in order, the
+            # full stripe's parity rotating one disk on each time.
+            parity = 2 if chunk.flags & RAID6 else 1
+            data_stripes = len(stripes) - parity
+            number, inside = divmod(within, chunk.stripe_len)
+            full, index = divmod(number, data_stripes)
+            slot = (full + index) % len(stripes)
+            devid, offset = stripes[slot]
+            if devid not in have:
+                raise BtrfsError(f"Logical {logical:#x} is on a missing "
+                                 f"disk (device {devid})")
+            return (devid, offset + full * chunk.stripe_len + inside,
+                    chunk.stripe_len - inside)
         if chunk.flags & (RAID0 | RAID10):
             group = chunk.sub_stripes if chunk.flags & RAID10 else 1
             group = max(1, group)
@@ -384,23 +424,68 @@ class BtrfsVolume:
             base = within
             left = chunk.length - within
         for devid, offset in candidates:
-            if devid == self.devid:
-                return offset + base, left
+            if devid in have:
+                return devid, offset + base, left
         raise BtrfsError(f"Logical {logical:#x} is on another disk")
 
     def read(self, logical, length):
         out = bytearray()
         while length > 0:
-            physical, left = self._map(logical)
+            try:
+                devid, physical, left = self._locate(logical)
+            except BtrfsError:
+                rebuilt = self._rebuild(logical, length)
+                if rebuilt is None:
+                    raise
+                out += rebuilt
+                logical += len(rebuilt)
+                length -= len(rebuilt)
+                continue
             part = min(length, left)
-            self.source.seek(physical)
-            data = self.source.read(part)
+            source = self.devices[devid]
+            source.seek(physical)
+            data = source.read(part)
             if len(data) < part:
                 data += b'\0' * (part - len(data))
             out += data
             logical += part
             length -= part
         return bytes(out)
+
+    def _rebuild(self, logical, length):
+        """A RAID5/6 data stripe on a missing disk, rebuilt from the full
+        stripe's other data and its P parity (XOR); None when it cannot be
+        (not RAID5/6, or more than the parity covers missing)."""
+        index = bisect.bisect_right(self._starts, logical) - 1
+        if index < 0:
+            return None
+        chunk = self._chunks[index]
+        if not chunk.flags & (RAID5 | RAID6):
+            return None
+        stripes = chunk.stripes
+        parity = 2 if chunk.flags & RAID6 else 1
+        data_stripes = len(stripes) - parity
+        within = logical - chunk.start
+        number, inside = divmod(within, chunk.stripe_len)
+        full, data_index = divmod(number, data_stripes)
+        part = min(length, chunk.stripe_len - inside)
+        # Data stripes of this full stripe, then P (Q is not needed for
+        # one missing disk).
+        slots = [(full + i) % len(stripes) for i in range(data_stripes + 1)]
+        wanted = (full + data_index) % len(stripes)
+        result = 0
+        for slot in slots:
+            if slot == wanted:
+                continue
+            devid, offset = stripes[slot]
+            source = self.devices.get(devid)
+            if source is None:
+                return None                   # two missing: not rebuilt
+            source.seek(offset + full * chunk.stripe_len + inside)
+            piece = source.read(part)
+            piece += b'\0' * (part - len(piece))
+            result ^= int.from_bytes(piece, 'little')
+        return result.to_bytes(part, 'little')
 
     # --- trees ---------------------------------------------------------------
 
@@ -709,9 +794,15 @@ class BtrfsEntry:
 
     def get_sub_file_entry(self, index):
         name, tree, inode = self._list()[index]
+        if tree is None:
+            # A snapshot's copy of a nested subvolume: an empty directory
+            # in this tree, as Linux shows it.
+            return BtrfsEntry(self._volume, self.tree, EMPTY_SUBVOL_DIR,
+                              name.decode('utf-8', 'surrogateescape'),
+                              self.identifier, empty=True)
         return BtrfsEntry(self._volume, tree, inode,
                           name.decode('utf-8', 'surrogateescape'),
-                          self.identifier, empty=tree is None)
+                          self.identifier)
 
     # --- data --------------------------------------------------------------------
 
@@ -847,9 +938,10 @@ class BtrfsFileSystem(LibyalFileSystem):
         self.volume.close()
 
 
-def open_btrfs(source):
+def open_btrfs(source, others=()):
     """A BtrfsFileSystem over `source` (a file object over the
-    partition), or None when it is not a Btrfs volume TRACE can read."""
+    partition) -- and `others`, the rest of a multi-disk file system --
+    or None when it is not a Btrfs volume TRACE can read."""
     try:
         source.seek(0)
         head = source.read(SUPERBLOCK_OFFSET + 4096)
@@ -858,7 +950,7 @@ def open_btrfs(source):
     if superblock_geometry(head) is None:
         return None
     try:
-        return BtrfsFileSystem(BtrfsVolume(source))
+        return BtrfsFileSystem(BtrfsVolume(source, others))
     except (BtrfsError, struct.error, OSError, IOError) as exc:
         logger.warning("Btrfs volume not opened: %s", exc)
         return None

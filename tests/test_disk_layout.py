@@ -5,11 +5,11 @@ import os
 
 import pytest
 
-from tests.conftest import ROOT
+import tests.conftest  # noqa: F401  (sets up isolation)
+from tools import testdata
 
-IMAGES = os.path.join(ROOT, 'test_images')
-EXTENDED = os.path.join(IMAGES, 'ext-part-test-2.dd')
-PLAIN = os.path.join(IMAGES, '8-jpeg-search.dd')
+EXTENDED = testdata.locate('ext-part-test-2.dd') or 'ext-part-test-2.dd'
+PLAIN = testdata.locate('8-jpeg-search.dd') or '8-jpeg-search.dd'
 
 
 @pytest.mark.skipif(not os.path.exists(EXTENDED),
@@ -27,11 +27,19 @@ def test_every_sector_belongs_to_one_region_in_disk_order():
         for before, after in zip(regions, regions[1:]):
             assert before['start'] + before['sectors'] == after['start']
         labels = [disk_layout.label(r) for r in regions]
-        assert labels[:3] == ['Partition table', 'Unallocated',
-                              'FAT16 volume']
-        assert labels.count('FAT16 volume') == 6
-        assert labels.count('Partition table') == 3      # MBR + 2 EBRs
-        assert not any('Extended' in label for label in labels)
+        # Named as the tree names them; free space from where it really
+        # starts -- TSK's slot runs from sector 0, over the MBR.
+        assert labels[:3] == ['Master Boot Record', 'Unallocated Space @ 1',
+                              'DOS FAT16 (0x04) @ 63 (FAT16)']
+        assert sum(label.endswith('(FAT16)') for label in labels) == 6
+        assert labels.count('Extended Partition Table') == 2      # 2 EBRs
+        assert not any('DOS Extended' in label for label in labels)
+        # Every table and volume is the tree's own name for its slot.
+        for region in regions:
+            if region['kind'] != disk_layout.UNALLOCATED:
+                assert region['label'] == handler.partition_label(
+                    region['volume_start'],
+                    region['description'].encode('utf-8'))
     finally:
         handler.close_resources()
 
@@ -44,7 +52,7 @@ def test_an_unpartitioned_image_is_one_volume():
     handler = ImageHandler(PLAIN)
     try:
         [region] = disk_layout.regions(handler)
-        assert disk_layout.label(region) == 'NTFS volume'
+        assert disk_layout.label(region) == 'Volume (NTFS)'
         assert region['bytes'] == handler.get_size()
     finally:
         handler.close_resources()

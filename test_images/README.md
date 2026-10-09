@@ -5,6 +5,25 @@ is committed** — `.gitignore` excludes every image extension at any depth. The
 images are recorded here rather than stored in git so a checkout can be
 reconstructed without carrying a gigabyte of evidence in history.
 
+How the tests use them, the tiers and CI: `tests/README.md`. Every file
+is pinned by SHA-256 in `tools/testdata/` (`catalog.py`, `samples.py`,
+`nist.py`), and it lives in the folder of its group:
+
+| Folder | Group | In CI | Get it |
+|---|---|---|---|
+| `ci/` | public, small: DFTT, NPS, AFF4, Btrfs, media, two NIST DFR | yes | `python -m tools.testdata.fetch` |
+| `samples/` | artifact files (hives, logs, databases, small images) | yes | `... --group samples` |
+| `corpus/` | carving corpus sources + `carve-corpus.dd` | yes | `... --group corpus` |
+| `built/` | made by the Linux kernel's tools | Linux | `tools/testdata/build/make_*.py` |
+| `local/` | public, big or slow (DFRWS, NPS domexusers, ubnist1, Fedora) | no | `... --group local` |
+| `nist/` | NIST CFReDS sets | no | `... --group nist` |
+| `private/` | no public source | never | copied by hand |
+| `sources/` | whole upstream test-data repositories (dfvfs, sleuthkit_test_data) | no | reference only |
+
+`python -m tools.testdata.fetch --tier full` gets every public group;
+`--verify --tier full` hash-checks everything here. Names below are files;
+the table above says which folder each is in.
+
 Verify a download before trusting a result from it: a truncated image produces
 carving failures that look like tool defects.
 
@@ -12,7 +31,7 @@ carving failures that look like tool defects.
 
 Each of these ships an answer key naming every planted file, its MD5, its size
 and its sector runs. Those keys are transcribed into
-`tools/carve_ground_truth.json` and scored by `tools/carve_score.py`.
+`tests/expected/carve_ground_truth.json` and scored by `tools/score/carve_score.py`.
 
 | File | Size | Filesystem | Source |
 |---|---|---|---|
@@ -73,6 +92,7 @@ what a tool is expected to do with it.
 | `10-ntfs-disk.dd` | 94 MB | Two file systems layered in one partition | [#10](https://dftt.sourceforge.net/test10/index.html) |
 | `10-ntfs-part1.dd` | 47 MB | Partition 1 of the above: NTFS under Ext2 | [#10](https://dftt.sourceforge.net/test10/index.html) |
 | `10-ntfs-part2.dd` | 47 MB | Partition 2 of the above: NTFS under UFS2 | [#10](https://dftt.sourceforge.net/test10/index.html) |
+| `10-ntfs-part3.dd` | 78 MB | A third partition (10b's archive): NTFS under UFS1 | [#10](https://dftt.sourceforge.net/test10/index.html) |
 | `iso-dirtree1.iso` | 366 KB | ISO9660 directory structure | [#14](https://dftt.sourceforge.net/test14/index.html) |
 | `iso-dirtree2.iso` | 366 KB | ISO9660 directory structure, variant | [#14](https://dftt.sourceforge.net/test14/index.html) |
 | `iso-endian.iso` | 366 KB | ISO9660 byte-order handling | [#14](https://dftt.sourceforge.net/test14/index.html) |
@@ -91,7 +111,9 @@ Three of these earn particular attention:
   UFS, leaving both signature sets intact. In the authors' words: "The test is
   whether your tool will warn you that there are two valid file systems or if
   it will show you only one and hide the other." Showing an empty partition is
-  worse than either.
+  worse than either -- and was what TRACE did, since The Sleuth Kit's
+  detection refuses such a partition. Each file system is now opened on its
+  own (`ImageHandler.fs_layers`, `tests/test_layered.py`).
 
 ## Filesystems beyond FAT and NTFS
 
@@ -129,10 +151,48 @@ What these established, all measured rather than assumed:
   block pointers. The listing now says which deleted files can actually be
   opened and which are a name and nothing more.
 
+## NIST CFReDS (local, in `nist/`)
+
+Downloaded by hand from https://cfreds-archive.nist.gov/ (each file's
+SHA-256 is in the `.json` beside it); not yet in the fetch catalog -- how
+these reach CI is planned separately. `tests/test_nist_cfreds.py` skips
+what is absent.
+
+| Folder | Set | What it checks | Ground truth |
+|---|---|---|---|
+| `nist/dfr/` | Deleted File Recovery, 91 images (ext, FAT, exFAT, NTFS, HFS+; DFR-01..17) | deleted names, states, content, MAC times | `setup-july-10-2012.pdf`, parsed by `tools/score/nist_dfr_key.py`; `tools/score/dfr_score.py` |
+| `nist/carving/` | File Carving L0-L5 x Graphic/Archive/Audio/Video/Documents, 30 images + `TestFiles/` originals | carving | pieces identified by bytes against the originals (`tools/score/nist_carving_truth.py`); `tools/score/carve_score.py` |
+| `nist/containers/` | Searching Container Files (`files.dd`, `nested.dd`) | text inside 17 container types, nested | `content_info-2.txt` |
+| `nist/russian/` | Russian Tea Room (`CFReDS001.E01`) | UTF-16BE Cyrillic search, in files and free space | `russian-utf-16.zip` (the planted files) |
+| `nist/winreg/` | cfreds-2017-winreg (10 archives; extract to `nist/winreg/x/`) | deleted keys/values, corrupted and manipulated hives | the same hives before deletion; NIST's `.txt` per corrupted hive |
+
+What they found and fixed (details in CLAUDE.md):
+
+- exFAT times are UTC (each entry records its offset; TSK ignores it) and
+  deleted exFAT files are read from their own cluster chain (braided
+  files recovered byte-exact)
+- deleted files whose space a later, also-deleted file took were called
+  recoverable (FAT, NTFS); FAT files in pieces now say only their start
+  is known; NTFS files only `$LogFile` still names are listed (50 on
+  DFR-08/10/13); ext3/ext4 files emptied on deletion are recovered from
+  the journal's copy of their inode (279 on DFR-10, byte-exact)
+- file-system structures counted as free space (carving, deleted states,
+  free-space search); ext backup superblocks taken for lost partitions
+- free space was never searched (4 of the Russian menu's 8 sections are
+  in no file); UTF-16 in non-Latin alphabets was never extracted
+- CAB, LHA/LZH, ALZip, uuencode, Unix .Z were unreadable (16 of 17
+  container types now searchable; StuffIt X is proprietary)
+- BMP over 5,000,000 bytes not carved, GIFs cut at the first `00 3B`, MP3
+  carves running past a cut last frame, a nested ZIP's end record taken
+  for the outer one's
+- deleted registry keys and values were not recovered (81/81 keys,
+  163/168 values with their data, none attributed to a wrong key);
+  python-registry misreads inline REG_DWORD_BIG_ENDIAN
+
 ## Btrfs
 
 The Sleuth Kit in the pytsk3 wheels does not read Btrfs; TRACE does, in
-Python (`trace_app/core/btrfs.py`). Five of fox-it/dissect.btrfs's test
+Python (`trace_app/core/btrfs.py`). Thirteen of fox-it/dissect.btrfs's test
 volumes (128 MB each, gzip-packed, pinned to a commit) are in the CI set;
 the values `tests/test_btrfs.py` asserts are the ones dissect's own tests
 publish.
@@ -144,7 +204,10 @@ publish.
 | `btrfs-compression.raw` | zlib, LZO and zstd files, as extents and inline | dissect.btrfs |
 | `btrfs-sparse.raw` | Holes at the start, middle and end; a snapshot's partly rewritten copies | dissect.btrfs |
 | `btrfs-raid1-1.raw` | One disk of a two-disk RAID1, read alone | dissect.btrfs |
-| `btrfs-deleted.raw` (+ `.json` answer key) | **Built, not downloaded**: `tools/make_btrfs_deleted.py` has the Linux kernel write and delete known files (plain, inline, zstd, no-checksum, a folder, a subvolume; one overwritten for certain). CI builds it on Ubuntu; elsewhere run the script in a privileged Linux container (its docstring) | Deleted-file recovery: every file back byte for byte, the overwritten one never called recoverable |
+| `btrfs-raid1-2.raw`, `btrfs-raid0-1/2.raw`, `btrfs-raid5-1/2.raw`, `btrfs-raid6-1/2/3.raw` | Multi-disk pools, one image per device: assembled (`core/assembly.py`) whole, RAID6 with a device missing, RAID0's devices alone (`tests/test_assembly.py`) | dissect.btrfs |
+| `btrfs-deleted.raw` (+ `.json` answer key) | **Built, not downloaded**: `tools/testdata/build/make_btrfs_deleted.py` has the Linux kernel write and delete known files (plain, inline, zstd, no-checksum, a folder, a subvolume; one overwritten for certain). CI builds it on Ubuntu; elsewhere run the script in a privileged Linux container (its docstring) | Deleted-file recovery: every file back byte for byte, the overwritten one never called recoverable |
+| `md-<array>-<n>.raw` (+ `md-raid.json` answer key) | **Built, not downloaded**: `tools/testdata/build/make_md_raid.py` has mdadm make Linux software RAID arrays -- RAID0/1/5/6/10, superblocks 0.90, 1.0 and 1.2, left-symmetric and right-asymmetric RAID5, a member inside a GPT partition -- each with ext4 and known files. Linux CI builds them; elsewhere a privileged container (its docstring) | md arrays read across their members' images, and with a member missing where the level allows (`core/mdraid.py`) |
+| `luks1-lvm.raw`, `luks2-lvm.raw` (+ `luks-lvm.json` answer key) | **Built, not downloaded**: `tools/testdata/build/make_luks_lvm.py` has cryptsetup and lvm2 lay out a disk as Linux installers do -- GPT -> LUKS -> LVM (root, home) -> ext4 -- with LUKS1 (PBKDF2) and LUKS2 (argon2id, 4 KiB sectors), password `PASSWORD`, known files, and a PNG deleted in home. Linux CI builds them; elsewhere a privileged container (its docstring) | LUKS2 unlocked in Python (`core/luks2.py`), LVM found inside an unlocked volume, carving inside it (`tests/test_luks.py`) |
 | `Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2` | **Local only** (583 MB). A real Fedora 44 install: GPT, EFI FAT16, a Btrfs root with root/boot/home/var subvolumes, zstd throughout, in a compressed QCOW2 | [Fedora](https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/) (SHA-256 as Fedora's CHECKSUM file publishes it) |
 
 What the Fedora image established:
@@ -218,6 +281,7 @@ e6f1f3bc53d426ae6f81b2d7b75598bc95f7447853e38b8f9ca1d1b65f7b3512  6-fat-undel.dd
 4d2edfe4a8ee0079720a4b9e258ecf59ffa17783465a5a013101614b4ac64049  10-ntfs-disk.dd
 d6739c45d652c0eb67e59536e7b9c02b25ca99aaabf500fe9c374bb7f2ae8bc3  10-ntfs-part1.dd
 529c607152f8ca25a6f2645e6894a80b303b4f2b352b89bdfef0fde549e3c6e2  10-ntfs-part2.dd
+8e6c7b7709d52e6a41080002c0589ac3204f0e77d834f75b58d8f249d391d7bb  10-ntfs-part3.dd
 0418d266405e1baf1334a014b9fba984962e81ec65003f34b67a7f5c7b28e6ad  iso-dirtree1.iso
 5f4fe2707eb4227b2d8e35482f492c888a44937abca05b67a0b63f2a2e34e074  iso-dirtree2.iso
 70231746c40640efc6ea5a926ef9184910c44b43b0716d72026db41b40966b9c  iso-endian.iso
@@ -242,6 +306,14 @@ bdc211d245a6bc1adec4540ae9b9041fe88f3583c9663f0aa1fa3ba8f0f1c1c7  btrfs-subvolum
 2088190ca033e2a20c3fb93d2b5d2ca65313fbf32d193cb242d333ca5e0a538f  btrfs-compression.raw
 5d15ae65c1c45cdeb599294d9efacdbdb1d9133dff936200f6265521e089d258  btrfs-sparse.raw
 63a60b87e9c17313610885db8ddd6b54146e88e910bf0bab8d7091605c20add7  btrfs-raid1-1.raw
+236e3d135601e0d12d2268943a08b772ab3d0443111280e0c74634072f3da2f6  btrfs-raid1-2.raw
+50df8801d6e5ba9d2eff6d5eae77f5d20289b56de1954abd418c5f648e4abb7f  btrfs-raid0-1.raw
+e8e8a50e7f92c112cea0750eb857e2091dfafe207b96ee2266986176fee0ae79  btrfs-raid0-2.raw
+a70fe168247374bf8fa49f61d7dba18f776a780a4f9cf5fb6c4cc8f74fa2fd4c  btrfs-raid5-1.raw
+4017c940e5c6ebab590ee74f5efb9239d94a367155b91632352204b4542e97aa  btrfs-raid5-2.raw
+8362b35dee600402e8bb2707609d9d6911752890339bc02550cd3bdb79cae7a6  btrfs-raid6-1.raw
+2ee5262ef2e22dea37abbdce6489c1448de40e8fa3932753de88afa348739fa7  btrfs-raid6-2.raw
+25f51d61b044b96c221a46850a61928a8eb351aa505001c1b1e77aaedba76461  btrfs-raid6-3.raw
 28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f  Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
 6c18f662744d55e2769d9510f6173f04dab668c42b67ef27b675d22e628b4ed5  2020JimmyWilson.E01
 1196221c27515e4f9a5c855da529e006bd9bebfbc5703d37bb419476ea0db55d  BXS-1.E01
@@ -253,25 +325,25 @@ a621e46b88a6366c90cc5bc7d412b46f3f012a08b1fd7d3fcbea2d78b761af1d  Op Archway AXA
 `carve-corpus.dd` is built, not downloaded:
 
 ```bash
-python tools/carve_corpus.py
+python -m tools.testdata.fetch --group corpus   # = tools/testdata/build/carve_corpus.py
 ```
 
 It fetches 51 real published files of the formats the DFTT/DFRWS images do
 not hold (SQLite, PST, EVTX, registry hives, LNK, Office Open XML, HEIC,
-Opus, Matroska, Mach-O, RAR3/RAR5, 7z, a pre-POSIX V7 tar and more) into `carve_samples/`, checks each against
+Opus, Matroska, Mach-O, RAR3/RAR5, 7z, a pre-POSIX V7 tar and more) into `corpus/samples/`, checks each against
 its pinned SHA-256, and lays them out with a fixed seed -- so the image, and
-its answer key in `tools/carve_ground_truth.json`, are the same every time.
+its answer key in `tests/expected/carve_ground_truth.json`, are the same every time.
 
 ## The artifact samples
 
-`test_images/artifact_samples/` holds real Windows and browser artifacts for
+`test_images/samples/` holds real Windows and browser artifacts for
 the activity tests -- Prefetch from XP to Windows 11 (five compressed),
 NTUSER / UsrClass / SYSTEM / Amcache hives, Jump Lists, a shortcut, Recycle
 Bin records, event logs (including a damaged one) and Chrome, Firefox and
 Safari databases:
 
 ```bash
-python tools/fetch_artifact_samples.py
+python -m tools.testdata.fetch --group samples   # tools/testdata/samples.py
 ```
 
 They come from log2timeline/plaso's test_data (Apache 2.0) and
@@ -292,56 +364,25 @@ Windows XP machine) is used by a local end-to-end test when present.
 
 ## Re-downloading
 
-The public images the tests use are fetched and checksum-verified by
+Every public file here is fetched and checksum-verified by one command,
+from the source recorded in `tools/testdata/` -- DFTT and DFRWS archives,
+Digital Corpora, NIST's CFReDS archive, GitHub-pinned commits:
 
 ```bash
-python tools/fetch_test_images.py          # all of them
-python tools/fetch_test_images.py --list   # sources
+python -m tools.testdata.fetch                 # the CI set
+python -m tools.testdata.fetch --tier full     # every public group
+python -m tools.testdata.fetch --list          # sources
 ```
 
-It never overwrites an image already here; one whose checksum differs is
-reported, not replaced. The manual commands below remain for the rest.
-
-```bash
-curl -L -o dfrws-2006-challenge.zip \
-  "https://www.dropbox.com/s/genp058scvl8hbp/dfrws-2006-challenge.zip?dl=1"
-curl -L -o dfrws-2007-challenge.zip \
-  "https://www.dropbox.com/s/5ze0r2o1vjxf811/dfrws-2007-challenge.zip?dl=1"
-unzip dfrws-2006-challenge.zip && unzip dfrws-2007-challenge.zip
-```
-
-The NPS images come from Digital Corpora:
-
-```bash
-base="https://downloads.digitalcorpora.org/corpora/drives"
-curl -L -O "$base/nps-2009-ntfs1/ntfs1-gen2.E01"
-curl -L -O "$base/nps-2009-hfsjtest1/image.gen1.dmg"
-curl -L -O "$base/nps-2009-casper-rw/ubnist1.casper-rw.gen3.E01"
-```
-
-The NIST deleted-file-recovery images are bzip2-compressed; `xfat` means exFAT
-and `osx` means HFS+:
-
-```bash
-curl -L -O "https://cfreds-archive.nist.gov/dfr-images/dfr-01-xfat.dd.bz2"
-bunzip2 dfr-01-xfat.dd.bz2
-```
-
-The DFTT images come from <https://dftt.sourceforge.net/>, one page per test.
-Every test's archive is under the same SourceForge path:
-
-```bash
-base="https://sourceforge.net/projects/dftt/files/Test%20Images"
-curl -L -o 1-extend-part.zip "$base/1_%20Extended%20Partition/1-extend-part.zip/download"
-curl -L -o 7-undel-ntfs.zip  "$base/7_%20NTFS%20File%20Recovery%20%28and%20Leap%20Year%29%20%231/7-undel-ntfs.zip/download"
-# ...and so on; the directory names are visible at the base URL.
-```
+It never overwrites a file already here; one whose checksum differs is
+reported, not replaced. The NIST winreg archives are unpacked into
+`nist/winreg/x/`, which is what the tests read.
 
 ## Scoring the carvers
 
 ```bash
-python tools/carve_score.py                  # every image with a known key
-python tools/carve_score.py 11-carve-fat.dd  # one image
+python tools/score/carve_score.py                  # every image with a known key
+python tools/score/carve_score.py 11-carve-fat.dd  # one image
 ```
 
 Exits non-zero if a score falls below the baseline recorded in that script.

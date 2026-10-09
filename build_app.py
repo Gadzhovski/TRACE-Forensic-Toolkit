@@ -24,7 +24,7 @@ mounted read-only (macOS: straight from the DMG, as a user first runs it),
 and started with --self-test against the public test images
 (trace_app/selftest.py). Every check must pass, and what the packaged app
 reads from each image must equal the manifest the test suite verified
-(tests/manifests/) -- otherwise the build fails.
+(tests/expected/manifests/) -- otherwise the build fails.
 
 A macOS build runs on the architecture it was built on (Apple Silicon or
 Intel); the native engines have no universal wheels. Neither build is signed
@@ -54,7 +54,7 @@ APP_NAME = 'TRACE'
 
 #: Public images the packaged app is tested on, one per format/file system:
 #: E01 + NTFS (compressed, EFS), FAT, exFAT, ext3, HFS+, ISO 9660.
-#: `python tools/fetch_test_images.py` downloads them.
+#: `python -m tools.testdata.fetch` downloads them (the CI set).
 TEST_IMAGES = ('ntfs1-gen2.E01', '8-jpeg-search.dd', 'dfr-01-xfat.dd',
                'ext3-img-kw-1.dd', 'image.gen1.dmg', 'iso-endian.iso')
 
@@ -116,11 +116,12 @@ def main():
         return 0
 
     ui.step("Testing the package")
-    images = [os.path.join(ROOT, 'test_images', name) for name in TEST_IMAGES
-              if os.path.isfile(os.path.join(ROOT, 'test_images', name))]
+    from tools import testdata
+    images = [path for path in map(testdata.locate, TEST_IMAGES)
+              if path and os.path.isfile(path)]
     if not images:
         message = ("No public test image found; only the image-independent "
-                   "checks run. Fetch them: python tools/fetch_test_images.py")
+                   "checks run. Fetch them: python -m tools.testdata.fetch")
         if args.require_images:
             return ui.fail(message)
         ui.warn(message)
@@ -270,7 +271,7 @@ def _self_test(artifact, images, arch):
 
     matched, differed = [], []
     for name, manifest in sorted(result.get('manifests', {}).items()):
-        expected_path = os.path.join(ROOT, 'tests', 'manifests',
+        expected_path = os.path.join(ROOT, 'tests', 'expected', 'manifests',
                                      f'{name}.manifest.json')
         if not os.path.isfile(expected_path):
             ui.warn(f"No committed manifest for {name}; not compared")
@@ -282,7 +283,7 @@ def _self_test(artifact, images, arch):
               f"exactly as the test suite verified")
         ui.note(', '.join(matched), dim=True)
     for name in differed:
-        ui.bad(f"Reads {name} differently from tests/manifests/")
+        ui.bad(f"Reads {name} differently from tests/expected/manifests/")
     ui.note(f"Report: {os.path.relpath(report, ROOT)}", dim=True)
 
     ok_overall = not failed and not differed

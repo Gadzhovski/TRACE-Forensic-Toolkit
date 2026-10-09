@@ -220,7 +220,7 @@ class VolumeInfoMixin:
         # Set column count and headers
         volume_table.setColumnCount(14)
         volume_table.setHorizontalHeaderLabels([
-            'Volume', 'Filesystem', 'Offset (Sectors)', 'Block Size', 'Volume Size',
+            'Volume', 'Filesystem', 'Offset (Sectors)', 'Block Size', 'Size',
             'Total Blocks', 'First Block', 'Last Block', 'Inode Count', 'Root Inode',
             'Volume Serial', 'Operating System', 'Time Zone', 'Computer Name'
         ])
@@ -237,11 +237,10 @@ class VolumeInfoMixin:
         # Set header alignment
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-        # Populate table with partition data
-        partitions = self.image_handler.get_partitions()
-
-        if partitions:
-            self._populate_volume_table(volume_table, partitions)
+        # The same regions the map draws, named as the tree names them
+        # (core/disk_layout.py): every sector once, in disk order.
+        if regions:
+            self._populate_volume_table(volume_table, regions)
         else:
             # Show message in table if no partitions
             volume_table.setRowCount(1)
@@ -299,58 +298,43 @@ class VolumeInfoMixin:
         from trace_app.core import evidence_summary
         return evidence_summary.rows_for(case, row['id'])
 
-    def _populate_volume_table(self, table, partitions):
-        """Populate the volume table with partition information."""
-        table.setRowCount(len(partitions))
+    def _populate_volume_table(self, table, regions):
+        """One row per region of the disk (core/disk_layout.regions): the
+        name, offset and size the map and the tree give it, and for a
+        file system what it records."""
+        from trace_app.core import disk_layout
+        table.setRowCount(len(regions))
         table.setSortingEnabled(False)  # Disable sorting while populating
+        icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
 
-        for idx, partition in enumerate(partitions):
-            addr, desc, start, length = partition
-
-            # Get volume information
-            volume_info = self._extract_comprehensive_volume_info(start)
-
-            # Combine all info
+        for idx, region in enumerate(regions):
+            # A partition table or free space is not a volume: say what it
+            # is, and leave the file-system columns empty.
             all_info = {}
-            all_info.update(volume_info["basic"])
-            all_info.update(volume_info["filesystem"])
+            if region['kind'] == disk_layout.TABLE:
+                fs_type = "Partition table"
+            elif region['kind'] == disk_layout.UNALLOCATED:
+                fs_type = "Unallocated"
+            else:
+                fs_type = disk_layout.contents(region)
+                if region.get('name') and not region.get('encryption'):
+                    volume_info = self._extract_comprehensive_volume_info(
+                        region['volume_start'])
+                    all_info.update(volume_info["basic"])
+                    all_info.update(volume_info["filesystem"])
 
-            # Get filesystem type for icon
-            fs_type = all_info.get("Filesystem Type", "Unknown")
-            # A partition table or an unallocated run is not a volume: say
-            # what it is, and leave the volume's columns empty, not "—".
-            from trace_app.core import disk_layout
-            raw_desc = desc.decode('utf-8', 'replace') \
-                if isinstance(desc, bytes) else str(desc)
-            slot_kind = disk_layout._kind(raw_desc)
-            if slot_kind == disk_layout.TABLE:
-                fs_type, all_info = "Partition table", {}
-            elif slot_kind == disk_layout.UNALLOCATED:
-                fs_type, all_info = "Unallocated", {}
-            elif slot_kind is None:
-                fs_type, all_info = "Extended partition (container)", {}
-            icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
-
-            # Column 0: Volume (with icon)
-            desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
-            volume_text = f"vol{addr}"
-            if desc_str and desc_str.strip():
-                volume_text += f" ({desc_str})"
-
-            volume_item = QTableWidgetItem(volume_text)
+            # Column 0: Volume, named as the tree and the map name it
+            volume_item = QTableWidgetItem(region.get('label') or
+                                           disk_layout.label(region))
             volume_item.setIcon(QIcon(icon_path))
             table.setItem(idx, 0, volume_item)
 
-            # Column 1: Filesystem
-            fs_item = QTableWidgetItem(fs_type)
-            table.setItem(idx, 1, fs_item)
+            # Column 1: what it holds
+            table.setItem(idx, 1, QTableWidgetItem(fs_type))
 
-            # Column 2: Offset (Sectors)
-            offset_value = all_info.get("Partition Offset", "—")
-            # Extract just the sector count
-            if "sectors" in offset_value:
-                offset_value = offset_value.split("sectors")[0].strip()
-            offset_item = QTableWidgetItem(offset_value)
+            # Column 2: where it starts, in sectors (numbers sort as numbers)
+            offset_item = QTableWidgetItem()
+            offset_item.setData(Qt.DisplayRole, f"{region['start']:,}")
             table.setItem(idx, 2, offset_item)
 
             # Column 3: Block Size
@@ -358,10 +342,9 @@ class VolumeInfoMixin:
             block_size_item = QTableWidgetItem(block_size)
             table.setItem(idx, 3, block_size_item)
 
-            # Column 4: Volume Size
-            volume_size = all_info.get("Volume Size", "—")
-            volume_size_item = QTableWidgetItem(volume_size)
-            table.setItem(idx, 4, volume_size_item)
+            # Column 4: Size -- of the region, as the map gives it
+            table.setItem(idx, 4, QTableWidgetItem(
+                FileSystemUtils.get_readable_size(region['bytes'])))
 
             # Column 5: Total Blocks
             total_blocks = all_info.get("Total Blocks", "—")
@@ -555,6 +538,7 @@ class VolumeInfoMixin:
         # is most of what this section exists for -- has no partition list, so
         # its single filesystem sits at offset 0.
         starts = [p[2] for p in handler.get_partitions()]
+        partitioned = bool(starts)
         if not starts:
             starts = [0]
 
@@ -590,7 +574,10 @@ class VolumeInfoMixin:
             used = self._volume_usage(fs_info)
             if used:
                 size = used.replace(' formatted', '')
-                labels.append(f"Sector {start:,}  ·  {fs_type}  ·  {size}")
+                # Named as the tree, the map and the table name it.
+                name = handler.partition_label(start) if partitioned \
+                    else "Volume"
+                labels.append(f"{name}  ·  {fs_type}  ·  {size}")
 
             for path, description in self._MEDIA_SIGNATURES:
                 if description is None:

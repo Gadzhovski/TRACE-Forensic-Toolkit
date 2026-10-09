@@ -6,7 +6,7 @@ deleted, its four timestamps, and the SHA-256 of its contents. Two manifests
 of the same image diff cleanly, which is how an engine upgrade -- or a
 packaged build -- is shown not to change what an examiner is told: the tests
 and the packaged app's self-test compare a fresh walk against a manifest
-committed when the result was last checked by hand (tests/manifests/).
+committed when the result was last checked by hand (tests/expected/manifests/).
 
 It opens images through ImageHandler, the path TRACE itself uses, rather than
 through pytsk3 directly, so a regression in TRACE's own handling shows up too.

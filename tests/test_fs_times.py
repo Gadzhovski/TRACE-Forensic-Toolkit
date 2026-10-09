@@ -62,21 +62,40 @@ def test_btrfs_times_are_the_ones_its_inodes_record():
         handler.close_resources()
 
 
-def test_exfat_times_are_local_and_deleted_entries_count():
-    """FAT and exFAT keep wall-clock time with no zone: shown as local,
-    never as UTC. Deleted entries whose metadata is still theirs count."""
+def test_exfat_times_are_utc_when_entries_record_their_offset():
+    """exFAT keeps a UTC offset beside each time; NIST's DFR exFAT image
+    (made on a Mac) records it on every entry, so its times are UTC -- and
+    equal to NIST's key: Betelgeuse.txt modified 2000-02-29 18:12:00 UTC,
+    where the raw digits read 22:12. Deleted entries whose metadata is
+    still theirs count."""
     from trace_app.core import fs_times, timeline
     case, [(handler, evidence_id)] = _case_with('dfr-01-xfat.dd')
     try:
         fs_times.analyse_evidence(handler, case, evidence_id)
         events = _events(case, evidence_id)
-        assert events and {r[2] for r in events} == {'FS-local'}
+        assert events and {r[2] for r in events} == {'FS'}
         assert any(r[3] for r in events)                 # deleted ones
+        betelgeuse = {r[0][:19] for r in events
+                      if r[4] == '/Betelgeuse.txt' and 'M' in r[1]}
+        assert '2000-02-29 18:12:00' in betelgeuse
         with sqlite3.connect(os.path.join(case.folder, 'case.db')) as con:
             con.row_factory = sqlite3.Row
             rows = [r for r in timeline.iter_events(
                 con, timeline.default_filters()) if r['source'] == 'fs']
-        assert rows and all(r['local'] for r in rows)
+        assert rows and not any(r['local'] for r in rows)
+    finally:
+        case.close()
+        handler.close_resources()
+
+
+def test_fat_times_are_local():
+    """FAT keeps wall-clock time and no zone: shown as local, never UTC."""
+    from trace_app.core import fs_times
+    case, [(handler, evidence_id)] = _case_with('fat-img-kw.dd')
+    try:
+        fs_times.analyse_evidence(handler, case, evidence_id)
+        events = _events(case, evidence_id)
+        assert events and {r[2] for r in events} == {'FS-local'}
     finally:
         case.close()
         handler.close_resources()

@@ -1,6 +1,6 @@
 """Image handling: what TRACE reads out of evidence must not change.
 
-Each public test image has a manifest in tests/manifests -- every partition,
+Each public test image has a manifest in tests/expected/manifests -- every partition,
 volume, file and directory with its inode, size, deleted flag, timestamps and
 content hash -- recorded when the result was last checked against the old
 engine and the raw on-disk bytes. A fresh walk must match it exactly, on every
@@ -19,7 +19,7 @@ import pytest
 
 from tests.conftest import ROOT, image_path
 
-MANIFESTS = sorted(glob.glob(os.path.join(ROOT, 'tests', 'manifests',
+MANIFESTS = sorted(glob.glob(os.path.join(ROOT, 'tests', 'expected', 'manifests',
                                           '*.manifest.json')))
 pytestmark = pytest.mark.images
 
@@ -67,7 +67,7 @@ def test_trace_reads_every_file_byte_for_byte(name):
     """Through ImageHandler.get_file_content -- the path the viewers use --
     every file's bytes hash to what the manifest recorded."""
     from trace_app.core.image_handler import ImageHandler
-    manifest = _load(os.path.join(ROOT, 'tests', 'manifests',
+    manifest = _load(os.path.join(ROOT, 'tests', 'expected', 'manifests',
                                   f'{name}.manifest.json'))
     handler = ImageHandler(image_path(name))
     try:

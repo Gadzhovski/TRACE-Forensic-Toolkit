@@ -21,7 +21,6 @@ from trace_app.core.search_index import (INDEX_CANCELLED, INDEX_DONE,
                                          INDEX_FAILED, INDEX_RUNNING,
                                          MAX_FILE_BYTES, MAX_TEXT_PER_FILE)
 from trace_app.core.text_extract import extract_text
-from trace_app.infra.utils import safe_datetime
 
 logger = logging.getLogger('TRACE.Indexer')
 
@@ -32,6 +31,13 @@ MAX_DEPTH = 64
 #: One level covers the common case -- a ZIP of documents -- without letting a
 #: constructed archive dominate the run.
 ARCHIVE_DEPTH = 2
+
+
+#: Index the text in unallocated space (case setting 'index_unallocated').
+INDEX_UNALLOCATED = True
+#: Free space is indexed in pieces this size, each an item of its own with
+#: its byte span -- small enough that a hit says where to look.
+UNALLOCATED_PIECE = 1024 * 1024
 
 
 class IndexerCancelled(Exception):
@@ -86,6 +92,9 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
                 done, total, progress, should_stop)
             if done == before:
                 logger.debug("Volume at %s contributed nothing", offset)
+        if INDEX_UNALLOCATED:
+            _index_unallocated(image_handler, index, evidence_id, progress,
+                               should_stop)
 
         index.commit()
         index.set_state(evidence_id, INDEX_DONE, files_done=done,
@@ -240,7 +249,8 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
 
             _index_file(image_handler, index, evidence_id, offset, inode,
                         getattr(meta, 'seq', None), name, child_path,
-                        meta.size, _entry_times(meta))
+                        meta.size, _entry_times(image_handler, offset,
+                                                meta))
             if int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
                 _index_slack(image_handler, index, evidence_id, fs_info,
                              offset, inode, name, child_path, meta.size)
@@ -254,6 +264,50 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
 
     walk(fs_info.open_dir(path='/'), '', 0)
     return done
+
+
+def _index_unallocated(image_handler, index, evidence_id, progress=None,
+                       should_stop=None):
+    """The text in free space -- outside every partition and in clusters no
+    live file holds -- as items of kind 'unallocated', one per piece with
+    text, referenced by byte span so a hit previews from the image. Text in
+    no file was invisible to search: NIST's Russian Tea Room hides four of
+    its eight menu sections there. Returns the number of items."""
+    from trace_app.core import slack
+    from trace_app.core.carving import allocation_map, free_ranges
+    from trace_app.core.case import make_span_ref
+    size = image_handler.get_size()
+    if not size:
+        return 0                    # logical evidence: no free space
+    free = free_ranges(0, size, allocation_map(image_handler))
+    total = sum(end - begin for begin, end in free)
+    sector = image_handler.sector_size or 512
+    count = read = 0
+    for begin, end in free:
+        for at in range(begin, end, UNALLOCATED_PIECE):
+            if should_stop and should_stop():
+                raise IndexerCancelled()
+            length = min(UNALLOCATED_PIECE, end - at)
+            try:
+                text = slack.text_of(image_handler.read(at, length))
+            except Exception as exc:
+                logger.debug("Free space at %d unreadable: %s", at, exc)
+                continue
+            read += length
+            if progress:
+                progress(read, total, "Unallocated space")
+            if not text:
+                continue
+            first, last = at // sector, (at + length - 1) // sector
+            index.add_item(evidence_id, make_span_ref(0, at, at + length),
+                           'unallocated',
+                           f"Unallocated, sectors {first:,}-{last:,}",
+                           f"[unallocated]/sectors {first}-{last}", text,
+                           length)
+            count += 1
+    logger.info("Unallocated space: %d piece(s) with text in %.1f MB",
+                count, total / (1024 * 1024))
+    return count
 
 
 def _index_slack(image_handler, index, evidence_id, fs_info, offset, inode,
@@ -281,13 +335,11 @@ def _index_slack(image_handler, index, evidence_id, fs_info, offset, inode,
                        region[1])
 
 
-def _entry_times(meta):
-    """The four timestamps a listing shows, formatted as it formats them."""
+def _entry_times(image_handler, offset, meta):
+    """The four timestamps a listing shows, formatted as it formats them
+    (FAT's local times marked, never called UTC)."""
     return {
-        'created': safe_datetime(getattr(meta, 'crtime', None)),
-        'accessed': safe_datetime(getattr(meta, 'atime', None)),
-        'modified': safe_datetime(getattr(meta, 'mtime', None)),
-        'changed': safe_datetime(getattr(meta, 'ctime', None)),
+        **image_handler.entry_times_text(offset, meta),
         'is_deleted': not bool(int(meta.flags)
                                & pytsk3.TSK_FS_META_FLAG_ALLOC),
     }

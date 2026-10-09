@@ -65,6 +65,10 @@ OFFICE_EXTENSIONS = {
     'docx': 'docx', 'docm': 'docx', 'xlsx': 'xlsx', 'xlsm': 'xlsx',
     'pptx': 'pptx', 'pptm': 'pptx', 'odt': 'odt', 'ods': 'ods', 'odp': 'odp',
     'doc': 'legacy', 'xls': 'legacy', 'ppt': 'legacy',
+    'dotm': 'docx', 'dotx': 'docx', 'xltm': 'xlsx', 'xltx': 'xlsx',
+    'potm': 'pptx', 'ppsm': 'pptx', 'ppsx': 'pptx', 'dot': 'legacy',
+    'xlt': 'legacy', 'pot': 'legacy', 'pps': 'legacy',
+    'msg': 'msg',
 }
 
 # --- by content ----------------------------------------------------------------
@@ -92,6 +96,7 @@ _MIME_OFFICE = {
     'application/msword': 'legacy',
     'application/vnd.ms-excel': 'legacy',
     'application/vnd.ms-powerpoint': 'legacy',
+    'application/vnd.ms-outlook': 'msg',
 }
 _MIME_HTML = {'text/html', 'application/xhtml+xml'}
 #: libmagic 5.35+ says vnd.sqlite3; 5.32 (Windows' python-magic-bin) x-sqlite3.
@@ -117,6 +122,8 @@ _LABELS = {
     ('office', 'ods'): 'OpenDocument spreadsheet',
     ('office', 'odp'): 'OpenDocument presentation',
     ('office', 'legacy'): 'legacy Office document',
+    ('office', 'msg'): 'Outlook message',
+    ('office', 'pcap'): 'network capture',
     ('html', ''): 'HTML page',
     ('database', 'sqlite'): 'SQLite database',
 }
@@ -284,6 +291,23 @@ def plan_view(name, content=None, mime=None):
                          f"content, which a .{extension} file would not "
                          f"normally hold.")
         return plan
+    from trace_app.core.pcap import is_capture
+    if content and is_capture(content[:4]):
+        # A capture is known by its magic: pcap (either byte order, micro-
+        # or nanoseconds) or pcapng, whatever it is called.
+        return ViewPlan(VIEW_OFFICE, 'pcap', 'application/vnd.tcpdump.pcap')
+    if content and bytes(content[:8]) == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1' \
+            and extension != 'msg':
+        # An Outlook message renamed: libmagic calls every compound file
+        # 'CDFV2', so its streams say what it is.
+        from trace_app.core.msgfile import is_msg
+        if is_msg(content):
+            plan = ViewPlan(VIEW_OFFICE, 'msg', 'application/vnd.ms-outlook')
+            plan.note = ("Shown as an Outlook message: identified from its "
+                         "content" + (f", which a .{extension} file would "
+                                      f"not normally hold." if extension
+                                      else "; the file has no extension."))
+            return plan
     by_name = plan_from_name(name)
     if mime is None:
         mime = identify(content) if content else ''

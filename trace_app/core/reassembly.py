@@ -466,7 +466,8 @@ def _pdf_with_gap(src, start, entries, gap, logical, table=None):
     if shifts is None or gap <= 0:
         return None
     # Everything from the last cross-reference on lies past every gap.
-    tail = table if table is not None and objects[-1][0] < table < logical         else logical
+    tail = table if table is not None and objects[-1][0] < table < logical \
+        else logical
     if shifts[-1] != gap and tail == logical:
         return None
     pieces = [(start, objects[0][0])]

@@ -20,8 +20,9 @@ import zipfile
 import pytest
 
 from tests.conftest import ROOT
+from tools import testdata
 
-SAMPLES = os.path.join(ROOT, 'test_images', 'artifact_samples')
+SAMPLES = testdata.SAMPLES
 RELEASE = 'sigma_all_rules-r2026-07-01.zip'
 
 pytest.importorskip('yaml')
@@ -32,7 +33,7 @@ def sample(name):
     if not os.path.exists(path):
         if os.environ.get('TRACE_REQUIRE_IMAGES') == '1':
             pytest.fail(f"{name} missing")
-        pytest.skip("run tools/fetch_artifact_samples.py")
+        pytest.skip("run python -m tools.testdata.fetch --group samples")
     return path
 
 

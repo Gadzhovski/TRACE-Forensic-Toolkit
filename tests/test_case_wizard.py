@@ -128,18 +128,21 @@ def test_a_v15_case_gains_the_custody_columns(tmp_path):
 
 
 def test_a_first_hash_is_judged_against_what_the_image_stores():
-    from trace_app.core.case import (STATUS_CHANGED, STATUS_UNHASHED,
-                                     STATUS_VERIFIED, hash_verdict)
+    from trace_app.core.case import (STATUS_BASELINE, STATUS_CHANGED,
+                                     STATUS_UNREADABLE, STATUS_VERIFIED,
+                                     hash_verdict)
     both = {'computed_md5': 'aa', 'computed_sha1': 'bb',
             'stored_md5': 'AA', 'stored_sha1': 'BB'}
     assert hash_verdict(both)[0] == STATUS_VERIFIED
     # One stored hash differing is not "verified", whatever the other says.
     status, detail = hash_verdict(dict(both, stored_sha1='cc'))
     assert status == STATUS_CHANGED and 'SHA1 is bb' in detail
+    # Nothing stored: hashed, the reference -- not "verified".
     status, detail = hash_verdict({'computed_md5': 'aa'})
-    assert status == STATUS_VERIFIED and 'baseline' in detail
-    assert hash_verdict({'computed_md5': 'Error', 'error': 'x'})[0] == \
-        STATUS_UNHASHED
+    assert status == STATUS_BASELINE and 'reference' in detail
+    # A failed read is never judged, and gives no hash.
+    assert hash_verdict({'computed_md5': None, 'error': 'x'})[0] == \
+        STATUS_UNREADABLE
 
 
 def test_case_folder_names_are_valid_everywhere():
@@ -377,7 +380,8 @@ def test_a_missing_folder_is_kept_when_another_case_is_remembered(tmp_path):
 @pytest.mark.ui
 def test_verification_is_a_job_that_records_and_catches_a_change(
         qapp, tmp_path, quiet_dialogs):
-    from trace_app.core.case import (STATUS_CHANGED, STATUS_VERIFIED, Case)
+    from trace_app.core.case import (STATUS_BASELINE, STATUS_CHANGED,
+                                     STATUS_VERIFIED, Case)
     from trace_app.ui.main_window import MainWindow
     copy = tmp_path / 'copy.dd'
     shutil.copyfile(image_path(RAW), copy)
@@ -389,14 +393,18 @@ def test_verification_is_a_job_that_records_and_catches_a_change(
     try:
         assert pump(qapp, 60, lambda: len(window.evidence_files) == 2)
         window.start_case_setup({'verify': True, 'choice': None})
+        # The E01 verifies against the MD5 it stores; the dd stores
+        # nothing, so its first hash is the reference.
+        expected = {'E01': STATUS_VERIFIED, '.dd': STATUS_BASELINE}
         assert pump(qapp, 120, lambda: not window.job_bar.busy and all(
-            r['last_status'] == STATUS_VERIFIED for r in case.evidence()))
+            r['last_status'] == expected[r['path'][-3:]]
+            for r in case.evidence()))
         e01 = next(r for r in case.evidence() if r['path'].endswith('E01'))
         assert e01['md5'] == e01['stored_md5']
         history = case.verifications(e01['id'])
         # ntfs1-gen2.E01 stores an MD5 only.
         assert history[0]['detail'] == \
-            'MD5 matches the hash stored in the image.'
+            'MD5 matches the hash stored with the image.'
 
         # The examiner's copy changes: the next check says so, loudly.
         with open(copy, 'r+b') as handle:
@@ -460,3 +468,118 @@ def test_verification_order_follows_the_setting(qapp, monkeypatch):
         MainWindow.queue_setup(fake, [{}], {'verify': True,
                                             'choice': {'modules': []}})
         assert calls == expected, order
+
+
+# --- a folder of an image's segments ---------------------------------------------------
+
+def _segment_folder(tmp_path, extra=()):
+    """dfvfs's two-segment EWF image (ext2.split.E01 + .E02) in a folder of
+    its own, with an imager's log beside it, as images are handed over."""
+    from tests.conftest import data_path
+    folder = tmp_path / 'Exhibit 1'
+    folder.mkdir()
+    for name in ('ext2.split.E01', 'ext2.split.E02'):
+        shutil.copyfile(data_path('samples', name), folder / name)
+    (folder / 'ext2.split.E01.txt').write_text('Acquisition log')
+    for name in extra:
+        (folder / name).write_text('a collected file')
+    return folder
+
+
+def test_a_folder_of_segments_is_added_as_the_one_disk_they_make(qapp,
+                                                                 tmp_path):
+    """Adding the folder (Add Folder or a drop) used to make it folder
+    evidence: the segment files listed one by one, the disk unreadable.
+    The image is the evidence; its later segments are read with it."""
+    from trace_app.core import evidence_probe
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.widgets.evidence_intake import EvidenceIntake
+    folder = _segment_folder(tmp_path)
+    intake = EvidenceIntake()
+    try:
+        intake.add_paths([str(folder)])
+        assert [i['path'] for i in intake.items] == \
+            [os.path.normpath(str(folder / 'ext2.split.E01'))]
+        assert 'added as disk evidence' in intake.message.text()
+        assert pump(qapp, 30, lambda: not intake.pending())
+        assert intake.usable() and \
+            intake.items[0]['result']['status'] != evidence_probe.ERROR
+    finally:
+        intake.deleteLater()
+    # Both segments read: the media hash is the one the image stores.
+    handler = ImageHandler(str(folder / 'ext2.split.E01'))
+    try:
+        results = handler.calculate_hashes()
+    finally:
+        handler.close_resources()
+    assert results['computed_md5'] == results['stored_md5']
+
+
+def test_a_folder_with_more_than_an_image_stays_a_collection(qapp, tmp_path):
+    from trace_app.core.logical_sources import folder_images
+    folder = _segment_folder(tmp_path, extra=('notes.docx',))
+    images, other = folder_images(str(folder))
+    assert [os.path.basename(p) for p in images] == ['ext2.split.E01']
+    assert other
+    from trace_app.ui.widgets.evidence_intake import EvidenceIntake
+    intake = EvidenceIntake()
+    try:
+        intake.add_paths([str(folder)])
+        assert [i['path'] for i in intake.items] == \
+            [os.path.normpath(str(folder))]
+        assert 'also holds ext2.split.E01' in intake.message.text()
+        assert pump(qapp, 30, lambda: not intake.pending())
+    finally:
+        intake.deleteLater()
+    # A plain collection of files is untouched.
+    loose = tmp_path / 'KAPE'
+    loose.mkdir()
+    (loose / 'NTUSER.DAT').write_bytes(b'regf')
+    assert folder_images(str(loose)) == ([], True)
+
+
+def test_a_report_named_after_the_image_belongs_to_it(tmp_path):
+    """GNOME_Fedora.docx beside GNOME_Fedora.e01..e05 is the acquisition
+    report, not other evidence: the folder is still the image."""
+    from trace_app.core.logical_sources import folder_images
+    for name in ('GNOME_Fedora.e01', 'GNOME_Fedora.e02', 'GNOME_Fedora.e03',
+                 'GNOME_Fedora.docx'):
+        (tmp_path / name).write_bytes(b'')
+    assert folder_images(str(tmp_path)) == \
+        ([str(tmp_path / 'GNOME_Fedora.e01')], False)
+    (tmp_path / 'holiday.jpg').write_bytes(b'')
+    assert folder_images(str(tmp_path))[1] is True     # something else
+
+
+def test_split_raw_folders_add_the_first_part(tmp_path):
+    from trace_app.core.logical_sources import folder_images
+    for name in ('disk.000', 'disk.001', 'disk.002', 'disk.md5'):
+        (tmp_path / name).write_bytes(b'')
+    assert folder_images(str(tmp_path)) == \
+        ([str(tmp_path / 'disk.000')], False)
+
+
+def test_none_is_a_profile_and_the_case_opens_for_browsing(qapp):
+    """'None' -- no analysis -- is offered beside Quick/Standard/Full, and
+    the wizard then hands over no modules to run."""
+    from trace_app.ui.dialogs.analysis_modules import (
+        NONE, PROFILE_LABELS, QUICK, ModuleSelector)
+    selector = ModuleSelector()
+    try:
+        labels = [selector.profile_combo.itemText(i)
+                  for i in range(selector.profile_combo.count())]
+        assert labels[0] == PROFILE_LABELS[NONE][0] == 'None'
+        selector.apply_profile(QUICK)
+        selector.profile_combo.setCurrentIndex(0)
+        assert selector.profile() == NONE
+        assert not selector.any_selected()
+        assert selector.summary_text().startswith('Nothing selected')
+        assert selector.choice()['modules'] == [] and \
+            not selector.choice()['activity']
+        # Unticking everything by hand is the same answer.
+        selector.apply_profile(QUICK)
+        for box in selector.boxes.values():
+            box.setChecked(False)
+        assert selector.profile() == NONE
+    finally:
+        selector.deleteLater()

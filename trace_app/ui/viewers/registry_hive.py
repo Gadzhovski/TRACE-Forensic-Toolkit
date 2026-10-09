@@ -82,6 +82,13 @@ class _HiveLoader(QThread):
             handler = _own_handler(self.path, self.unlocks)
             data, facts = registry_hives.read_hive(handler, self.hive)
             root = Registry.Registry(io.BytesIO(data)).root()
+            # Deleted keys and values, from the hive's free cells.
+            from trace_app.core import regf_deleted
+            try:
+                facts['deleted'] = regf_deleted.recover(data)
+            except Exception as exc:
+                logger.warning("Deleted keys of %s not read: %s",
+                               self.hive.path, exc)
             if not self.isInterruptionRequested():
                 self.loaded.emit(root, facts)
         except Exception as exc:
@@ -421,6 +428,7 @@ class RegistryExtractor(QWidget):
         path, name, _handler = evidence
         self.shown = (path, hive)
         self.display_registry_hive(hive.label, root_key)
+        self._add_deleted(facts.get('deleted'))
         root = self.treeWidget.topLevelItem(0)
         root.setToolTip(0, f"{name}: {hive.path}")
         self._source_rows = [("Evidence", name), ("File", hive.path)]
@@ -464,6 +472,69 @@ class RegistryExtractor(QWidget):
         hive_item.setData(0, Qt.UserRole, root_key)
         self._mark_unpopulated(hive_item, root_key)
         hive_item.setExpanded(True)
+
+    #: What a node of the deleted part holds (Qt.UserRole + 2).
+    DELETED_ROLE = Qt.UserRole + 2
+
+    def _add_deleted(self, found):
+        """A node for what the hive's free cells still hold: each deleted
+        key by its path, with its values, and the deleted values whose key
+        is unknown (core/regf_deleted)."""
+        if not found or not (found['keys'] or found['values']):
+            return
+        top = QTreeWidgetItem(self.treeWidget, [
+            f"Deleted keys and values ({len(found['keys'])} keys, "
+            f"{len(found['values'])} values)"])
+        top.setIcon(0, icons.icon(icons.DELETED_FILES))
+        top.setToolTip(0, "Recovered from the hive's free cells: a deleted "
+                          "key or value stays there until something new is "
+                          "written over it.")
+        top.setData(0, self.DELETED_ROLE, ('values', found['values']))
+        key_icon = icons.icon(icons.REGISTRY_KEY)
+        for key in found['keys']:
+            item = QTreeWidgetItem(top, [key['path']])
+            item.setIcon(0, key_icon)
+            item.setData(0, self.DELETED_ROLE, ('key', key))
+            item.setData(0, self.POPULATED_ROLE, True)
+        orphans = [v for v in found['values'] if not v['key']]
+        if orphans:
+            item = QTreeWidgetItem(top, [f"Values whose key is unknown "
+                                         f"({len(orphans)})"])
+            item.setIcon(0, icons.icon(icons.REGISTRY_VALUE))
+            item.setData(0, self.DELETED_ROLE, ('values', orphans))
+            item.setData(0, self.POPULATED_ROLE, True)
+        top.setData(0, self.POPULATED_ROLE, True)
+
+    def _show_deleted(self, kind, payload):
+        if kind == 'key':
+            self.metadataPanel.set_rows(
+                [("Key", payload['path']), ("Deleted", "yes -- recovered "
+                 "from a free cell"), ("Last written", payload['written']
+                                       + " UTC"),
+                 ("Values recorded", payload['values']),
+                 ("Cell offset", f"0x{payload['offset']:x}")]
+                + self._source_rows)
+            values = payload['value_records']
+        else:
+            values = payload
+        from trace_app.core import regf_deleted
+        rows = []
+        for value in values:
+            where = value['key'] or (
+                f"key unknown -- listed with {value['listed_with']}"
+                if value.get('listed_with') else 'key unknown')
+            text = regf_deleted.value_text(value['type_code'], value['data'])
+            if not value['complete']:
+                text += "  (data partly overwritten)"
+            rows.append((value['name'], str(value['type']), text, where))
+        self.tableWidget.clear()
+        self.tableWidget.setRowCount(len(rows))
+        self.tableWidget.setColumnCount(4)
+        self.tableWidget.setHorizontalHeaderLabels(["Name", "Type", "Value",
+                                                    "Key"])
+        for i, row in enumerate(rows):
+            for column, text in enumerate(row):
+                self.tableWidget.setItem(i, column, QTableWidgetItem(text))
 
     def _mark_unpopulated(self, item, registry_key):
         """Give a node an expand arrow without building its children yet."""
@@ -562,15 +633,21 @@ class RegistryExtractor(QWidget):
         header.setSectionResizeMode(2, QHeaderView.Stretch)  # Value column stretches with window resize
 
         # Populate table rows
+        from trace_app.core import regf_deleted
         for i, value in enumerate(values):
             self.tableWidget.setItem(i, 0, QTableWidgetItem(value.name()))
             self.tableWidget.setItem(i, 1, QTableWidgetItem(str(value.value_type_str())))
-            self.tableWidget.setItem(i, 2, QTableWidgetItem(str(value.value())))
+            self.tableWidget.setItem(i, 2, QTableWidgetItem(
+                regf_deleted.live_value_text(value)))
 
     def display_values_in_table(self, values):
         self.setup_table(values)
 
     def on_item_clicked(self, item, column):
+        deleted = item.data(0, self.DELETED_ROLE)
+        if deleted:
+            self._show_deleted(*deleted)
+            return
         registry_object = item.data(0, Qt.UserRole)
 
         if isinstance(registry_object, RegistryKey):

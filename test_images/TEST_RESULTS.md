@@ -31,7 +31,7 @@ Last run: 2026-09-04, on Windows 11, against branch `refactor/cleanup-crossplatf
 
 ## Carving, scored against published answer keys
 
-`python tools/carve_score.py` re-runs this. Score counts files **located**;
+`python tools/score/carve_score.py` re-runs this. Score counts files **located**;
 byte-exactness is separate, because a fragmented file cannot be reproduced by a
 contiguous carver and counting that as failure would measure the wrong thing.
 
@@ -191,10 +191,10 @@ capability rather than a defect.
 
 ```bash
 # Carving, scored against the published keys
-python tools/carve_score.py
+python tools/score/carve_score.py
 
 # One image
-python tools/carve_score.py 11-carve-fat.dd
+python tools/score/carve_score.py 11-carve-fat.dd
 ```
 
 `carve_score.py` exits non-zero if a score falls below the baseline recorded in
