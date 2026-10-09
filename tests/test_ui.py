@@ -594,6 +594,22 @@ def test_qt_messages_reach_the_log(qapp, caplog):
         qInstallMessageHandler(None)
 
 
+def test_font_fallback_noise_is_kept_out_of_the_warnings():
+    """Evidence text with a glyph the font lacks makes Qt try every
+    Windows bitmap font, each logging CreateFontFaceFromHDC() failed;
+    that is DEBUG. Other font warnings are not."""
+    import logging
+    from trace_app.app import qt_level
+    noise = ("DirectWrite: CreateFontFaceFromHDC() failed (Indicates an "
+             "error in an input file such as a font file.) for "
+             "QFontDef(Family=\"8514oem\", ...)")
+    assert qt_level(logging.WARNING, 'qt.qpa.fonts', noise) == logging.DEBUG
+    assert qt_level(logging.WARNING, 'qt.qpa.fonts',
+                    'Unable to open default EUDC font') == logging.WARNING
+    assert qt_level(logging.WARNING, 'qt.gui.imageio',
+                    'Bogus marker length') == logging.DEBUG
+
+
 def test_a_disguised_file_is_shown_as_what_it_is(qapp, viewer):
     from PIL import Image
     buffer = io.BytesIO()

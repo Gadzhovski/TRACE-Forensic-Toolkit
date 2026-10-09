@@ -249,3 +249,36 @@ def test_a_real_xp_image_end_to_end(tmp_path):
     finally:
         handler.close_resources()
         case.close()
+
+
+def test_every_tile_is_the_same_size_and_its_caption_fits(qapp):
+    """A tall picture used to be taller than the grid's uniform item
+    (sized from the first one shown) and pushed its caption out of view;
+    and the second caption line ('file gone') was never drawn."""
+    from PySide6.QtGui import QImage
+    from trace_app.ui.viewers.thumbnails_panel import (PICTURE,
+                                                       ThumbnailsPanel,
+                                                       fitted)
+    for width, height in ((40, 400), (400, 40), (256, 256), (1, 1)):
+        image = QImage(width, height, QImage.Format_RGB32)
+        assert fitted(image).size() == PICTURE
+    assert fitted(None).size() == PICTURE
+    panel = ThumbnailsPanel()
+    try:
+        grid = panel.view.gridSize()
+        line = panel.view.fontMetrics().height()
+        hint = panel.view.itemDelegate().sizeHint(
+            panel.view.viewOptions() if hasattr(panel.view, 'viewOptions')
+            else _option(panel.view), panel.model.index(0))
+        assert grid.height() >= PICTURE.height() + 2 * line
+        assert hint.height() <= grid.height() and \
+            hint.width() <= grid.width()
+    finally:
+        panel.deleteLater()
+
+
+def _option(view):
+    from PySide6.QtWidgets import QStyleOptionViewItem
+    option = QStyleOptionViewItem()
+    option.initFrom(view)
+    return option

@@ -14,10 +14,11 @@ from collections import OrderedDict
 
 from PySide6.QtCore import (QAbstractListModel, QModelIndex, QSize, Qt,
                             Signal)
-from PySide6.QtGui import QIcon, QImage, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QHBoxLayout, QLabel, QListView, QSizePolicy,
-                               QVBoxLayout, QWidget)
+from PySide6.QtGui import QIcon, QImage, QPainter, QPalette, QPixmap
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox,
+                               QComboBox, QHBoxLayout, QLabel, QListView,
+                               QSizePolicy, QStyle, QStyledItemDelegate,
+                               QStyleOptionViewItem, QVBoxLayout, QWidget)
 
 from trace_app.infra.constants import CONTROL_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
@@ -26,6 +27,26 @@ from trace_app.ui.process_worker import ProcessWorker
 logger = logging.getLogger('TRACE.ThumbnailsPanel')
 
 TILE = 112
+#: The picture area of a tile. Every thumbnail is drawn centred on a
+#: canvas this size: the grid's items are uniform, so a picture taller
+#: than the first one shown used to push its caption out of the cell.
+PICTURE = QSize(TILE - 8, TILE - 24)
+
+
+def fitted(image):
+    """`image` scaled to fit PICTURE -- never cropped, a cropped
+    thumbnail hides what is at its edges -- centred on a transparent
+    canvas of exactly that size."""
+    canvas = QPixmap(PICTURE)
+    canvas.fill(Qt.transparent)
+    if image is not None and not image.isNull():
+        scaled = image.scaled(PICTURE, Qt.KeepAspectRatio,
+                              Qt.SmoothTransformation)
+        painter = QPainter(canvas)
+        painter.drawImage((PICTURE.width() - scaled.width()) // 2,
+                          (PICTURE.height() - scaled.height()) // 2, scaled)
+        painter.end()
+    return canvas
 _STATE_NOTES = {'absent': 'file gone', 'deleted': 'file deleted',
                 'folder': "the folder's picture"}
 
@@ -46,6 +67,53 @@ class ThumbnailsWorker(ProcessWorker):
 
     def on_done(self, count, error):
         self.finished_thumbnails.emit(count, error)
+
+
+class TileDelegate(QStyledItemDelegate):
+    """A tile: the picture centred at the top, then each caption line
+    (the name; what became of the original) elided on its own -- Qt's
+    icon mode elides the whole caption as one line, so 'file gone' never
+    showed."""
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        # From the model: initStyleOption has already turned '\n' into a
+        # Unicode line separator.
+        lines = str(index.data(Qt.DisplayRole) or '').split('\n')
+        opt.text = ''
+        opt.icon = QIcon()
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        # Background, hover and selection, as the theme draws them.
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        rect = option.rect
+        icon = index.data(Qt.DecorationRole)
+        top = rect.top() + 4
+        if isinstance(icon, QIcon) and not icon.isNull():
+            pixmap = icon.pixmap(PICTURE)
+            painter.drawPixmap(
+                rect.left() + (rect.width() - PICTURE.width()) // 2, top,
+                pixmap)
+        metrics = opt.fontMetrics
+        y = top + PICTURE.height() + 4
+        selected = bool(option.state & QStyle.State_Selected)
+        painter.save()
+        for number, line in enumerate(lines[:2]):
+            role = (QPalette.HighlightedText if selected else
+                    QPalette.Text if number == 0 else
+                    QPalette.PlaceholderText)
+            painter.setPen(opt.palette.color(role))
+            text = metrics.elidedText(line, Qt.ElideMiddle,
+                                      rect.width() - 8)
+            painter.drawText(rect.left() + 4, y, rect.width() - 8,
+                             metrics.height(), Qt.AlignHCenter | Qt.AlignTop,
+                             text)
+            y += metrics.height()
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        line = option.fontMetrics.height()
+        return QSize(PICTURE.width() + 20, PICTURE.height() + 2 * line + 12)
 
 
 def caption(row):
@@ -94,7 +162,7 @@ class ThumbnailModel(QAbstractListModel):
         self.names = {}
         self.reader = None
         self._icons = OrderedDict()
-        self._placeholder = QIcon()
+        self._placeholder = None
 
     def set_rows(self, rows, names):
         self.beginResetModel()
@@ -110,6 +178,8 @@ class ThumbnailModel(QAbstractListModel):
         if key in self._icons:
             self._icons.move_to_end(key)
             return self._icons[key]
+        if self._placeholder is None:
+            self._placeholder = QIcon(fitted(None))
         icon = self._placeholder
         if self.reader is not None and row.get('format'):
             try:
@@ -119,11 +189,7 @@ class ThumbnailModel(QAbstractListModel):
                 data = None
             image = QImage.fromData(data) if data else QImage()
             if not image.isNull():
-                # Scaled to fit, never cropped: a cropped thumbnail hides
-                # what is at its edges.
-                icon = QIcon(QPixmap.fromImage(image.scaled(
-                    TILE - 16, TILE - 32, Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation)))
+                icon = QIcon(fitted(image))
         self._icons[key] = icon
         while len(self._icons) > 1500:
             self._icons.popitem(last=False)
@@ -194,8 +260,9 @@ class ThumbnailsPanel(QWidget):
         self.view.setUniformItemSizes(True)
         self.view.setWordWrap(False)
         self.view.setTextElideMode(Qt.ElideMiddle)
-        self.view.setIconSize(QSize(TILE - 16, TILE - 32))
-        self.view.setGridSize(QSize(TILE + 8, TILE + 26))
+        self.view.setItemDelegate(TileDelegate(self.view))
+        self.view.setIconSize(PICTURE)
+        self._fit_grid()
         self.view.setSpacing(4)
         self.view.setSelectionMode(QAbstractItemView.SingleSelection)
         self.view.setModel(self.model)
@@ -210,6 +277,20 @@ class ThumbnailsPanel(QWidget):
         self.view.customContextMenuRequested.connect(self._menu)
         layout.addWidget(self.view, 1)
         self.refresh()
+
+    def _fit_grid(self):
+        """A cell: the picture, a gap, two lines of caption (the name,
+        and what became of the original -- 'file gone') and room around
+        them, measured from the font in use: the caption is never
+        clipped, whatever the font or display scaling."""
+        line = self.view.fontMetrics().height()
+        self.view.setGridSize(QSize(PICTURE.width() + 44,
+                                    PICTURE.height() + 2 * line + 18))
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == event.Type.FontChange:
+            self._fit_grid()
 
     def set_reader(self, reader):
         """`reader(row)` -> the picture's bytes, read from the image."""
