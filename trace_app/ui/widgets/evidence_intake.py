@@ -37,7 +37,8 @@ logger = logging.getLogger('TRACE.EvidenceIntake')
 DISK_IMAGE_PATTERNS = ("*.e01", "*.E01", "*.ex01", "*.Ex01", "*.s01", "*.S01",
                        "*.aff4", "*.AFF4",
                        "*.raw", "*.RAW", "*.img", "*.IMG", "*.dd", "*.DD",
-                       "*.iso", "*.ISO", "*.001", "*.dmg", "*.DMG",
+                       "*.iso", "*.ISO", "*.000", "*.001", "*.dmg",
+                       "*.DMG", "*.hdd", "*.HDD", "*.hds",
                        "*.sparse", "*.sparseimage", "*.vmdk", "*.VMDK",
                        "*.vhd", "*.VHD", "*.vhdx", "*.VHDX", "*.qcow2",
                        "*.QCOW2", "*.qcow")
@@ -78,6 +79,10 @@ def _key(path):
 
 
 def is_later_segment(path):
+    # A split raw image numbered from .000 has .001 as its second part.
+    if path.lower().endswith('.001') and \
+            os.path.exists(path[:-4] + '.000'):
+        return True
     return bool(_LATER_SEGMENT.search(path))
 
 

@@ -254,7 +254,8 @@ def open_shadow_copies(window):
 # --- other encrypted volumes, LVM, APFS ----------------------------------------
 
 #: What an encrypted volume is called, for labels and the audit trail.
-ENCRYPTION_NAMES = {'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
+ENCRYPTION_NAMES = {'corestorage': 'Core Storage (not encrypted)',
+                    'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
                     'luks': 'LUKS', 'apfs': 'APFS encryption',
                     'ios_backup': 'iOS backup encryption'}
 
@@ -338,6 +339,28 @@ def volume_kind(window):
         except Exception:
             continue
     return None
+
+
+def open_core_storage(window):
+    """An Apple Core Storage logical volume that is not encrypted --
+    (logical volume, [objects to keep]) -- or (None, []) when it is
+    (FileVault 2 is Core Storage with encryption on; libfvde's signature
+    check names both). Fusion Drives and converted volumes are plain Core
+    Storage: their file system opens without a key."""
+    import pyfvde
+    volume = pyfvde.volume()
+    try:
+        volume.open_file_object(window)
+        volume.open_physical_volume_files_as_file_objects([window])
+        group = volume.get_volume_group()
+        logical = group.get_logical_volume(0)
+        if logical.is_locked():
+            _close_quietly(volume)
+            return None, []
+    except (IOError, OSError) as exc:
+        _close_quietly(volume)
+        raise ContainerError(f"Core Storage unreadable: {exc}") from exc
+    return logical, [volume, group]
 
 
 def unlock_fvde(window, password=None, recovery_password=None):
@@ -470,7 +493,37 @@ def unlock_apfs(volume, password=None, recovery_password=None):
 VIRTUAL_DISK_EXTENSIONS = {'.vmdk': 'vmdk', '.vhd': 'vhdi', '.vhdx': 'vhdi',
                            '.qcow2': 'qcow', '.qcow': 'qcow',
                            '.dmg': 'modi', '.sparseimage': 'modi',
-                           '.sparsebundle': 'modi'}
+                           '.sparsebundle': 'modi', '.hdd': 'phdi',
+                           '.hds': 'phdi'}
+
+#: A Parallels disk bundle's descriptor.
+PARALLELS_DESCRIPTOR = 'DiskDescriptor.xml'
+
+
+def parallels_descriptor(path):
+    """The DiskDescriptor.xml of a Parallels disk, from any way of
+    naming it: the bundle folder (x.hdd/), the descriptor itself, or one
+    of its .hds data files; None for anything else (a single-file
+    Parallels 2 .hdd has no descriptor)."""
+    trimmed = path.rstrip('/\\')
+    if os.path.isdir(trimmed):
+        candidate = os.path.join(trimmed, PARALLELS_DESCRIPTOR)
+    elif os.path.basename(trimmed).lower() == PARALLELS_DESCRIPTOR.lower():
+        candidate = trimmed
+    elif trimmed.lower().endswith('.hds'):
+        candidate = os.path.join(os.path.dirname(trimmed),
+                                 PARALLELS_DESCRIPTOR)
+    else:
+        return None
+    return candidate if os.path.isfile(candidate) else None
+
+
+def is_parallels(path):
+    """A Parallels Desktop disk: a bundle, its descriptor or data file,
+    or a single-file .hdd."""
+    trimmed = path.rstrip('/\\')
+    return parallels_descriptor(trimmed) is not None or (
+        trimmed.lower().endswith('.hdd') and os.path.isfile(trimmed))
 
 #: Deepest chain of differencing disks followed (snapshots of snapshots).
 MAX_PARENTS = 32
@@ -502,6 +555,8 @@ def open_virtual_disk(path):
     # libyal, like libewf, rejects mixed separators on Windows.
     path = os.path.normpath(path)
     kind = VIRTUAL_DISK_EXTENSIONS.get(os.path.splitext(path)[1].lower())
+    if is_parallels(path):
+        return _open_phdi(path)
     if kind == 'vmdk':
         return _open_vmdk(path)
     if kind == 'vhdi':
@@ -552,6 +607,26 @@ def _open_vhdi(path):
     note = f'{kind}, differencing ({len(chain) - 1} parent' \
         f'{"s" if len(chain) > 2 else ""})' if len(chain) > 1 else kind
     return LibyalImgInfo(top, size, chain[1:]), note
+
+
+def _open_phdi(path):
+    """A Parallels Desktop disk through libphdi: a bundle (DiskDescriptor
+    .xml + .hds extents, snapshots chained by the descriptor) or a
+    Parallels 2 single-file .hdd. Hashed by the disk it presents."""
+    import pyphdi
+    descriptor = parallels_descriptor(path)
+    handle = pyphdi.handle()
+    try:
+        handle.open(descriptor or path.rstrip('/\\'))
+        handle.open_extent_data_files()
+        size = handle.get_media_size()
+    except (IOError, OSError) as exc:
+        _close_quietly(handle)
+        raise ContainerError(f"Could not open the Parallels disk "
+                             f"{os.path.basename(path.rstrip(chr(92) + '/'))}"
+                             f": {exc}") from exc
+    note = 'Parallels disk' + (' (bundle)' if descriptor else '')
+    return LibyalImgInfo(handle, size, []), note
 
 
 def _open_qcow(path):

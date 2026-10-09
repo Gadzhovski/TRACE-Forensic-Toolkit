@@ -103,6 +103,15 @@ def incomplete_message(incomplete, offset=None):
             f"can be read.")
 
 
+#: First segments of a split raw image: dd/split number from .000 or
+#: .001 (dfvfs's ext2.splitraw.000). The Sleuth Kit finds the rest.
+SPLIT_RAW_FIRST = ('.000', '.001')
+
+
+def is_split_raw(path):
+    return path.lower().endswith(SPLIT_RAW_FIRST)
+
+
 class UnsupportedEvidence(ValueError):
     """A format TRACE recognises but cannot read; the message says what
     it is and what to do instead."""
@@ -687,7 +696,7 @@ class ImageHandler:
 
         ewf = [".e01", ".s01", ".ex01"]
         raw = [".raw", ".img", ".dd", ".iso",
-               ".001", ".sparse", ".bin", ""]
+               ".000", ".001", ".sparse", ".bin", ""]
         if extension == '.ctr' or _starts_with(self.image_path, b'XWFS'):
             raise UnsupportedEvidence(
                 "This is an X-Ways evidence file container (.ctr), a "
@@ -701,7 +710,8 @@ class ImageHandler:
             return "ewf"
         elif extension in raw:
             return "raw"
-        elif extension in containers.VIRTUAL_DISK_EXTENSIONS:
+        elif extension in containers.VIRTUAL_DISK_EXTENSIONS or \
+                containers.is_parallels(self.image_path):
             return "virtual"
         else:
             raise ValueError(f"Unsupported image type: {extension}")
@@ -829,7 +839,7 @@ class ImageHandler:
             elif image_type == "ewf":
                 digests = self._ewf_hashes(result, progress_callback)
             elif image_type == "raw" and not \
-                    self.image_path.lower().endswith('.001'):
+                    is_split_raw(self.image_path):
                 # The file's own bytes are the evidence.
                 digests = evidence_hash.hash_file(self.image_path,
                                                   progress_callback)
@@ -1332,8 +1342,13 @@ class ImageHandler:
                     for lost in self.lost_partitions()):
                 return f"Lost partition @ {start_sector}"
             description = description or b''
+        try:
+            scheme = int(self.volume_info.info.vstype) \
+                if self.volume_info is not None else None
+        except Exception:
+            scheme = None
         return partition_names.label(description, start_sector,
-                                     self._gpt_entries)
+                                     self._gpt_entries, scheme)
 
     def _get_partitions(self):
         """Internal method to actually retrieve partitions."""
@@ -1741,7 +1756,33 @@ class ImageHandler:
                         self.md_member(start_sector) is not None and \
                         self.md_array(start_sector) is None:
                     self._kinds[start_sector] = 'mdraid'
+                if self._kinds[start_sector] == 'fvde' and \
+                        self._open_core_storage(start_sector):
+                    self._kinds[start_sector] = 'corestorage'
         return self._kinds[start_sector]
+
+    def _open_core_storage(self, start_sector):
+        """Open a Core Storage volume that is not encrypted, as an
+        unlocked one is opened (so every reader, carving and the tree work
+        unchanged) -- it used to be shown as a locked FileVault volume,
+        asking for a password it does not have. False if encrypted."""
+        window = self._partition_window(start_sector)
+        try:
+            volume, keep = containers.open_core_storage(window)
+        except containers.ContainerError as exc:
+            logger.info("Sector %d: %s", start_sector, exc)
+            return False
+        if volume is None:
+            return False
+        self._bitlocker[start_sector] = volume
+        self._unlocked_kind[start_sector] = 'corestorage'
+        self._keep[start_sector] = keep + [window]
+        self._volumes[start_sector] = containers.LibyalImgInfo(
+            volume, volume.get_size(), keep=[])
+        self._forget_filesystem(start_sector)
+        logger.info("Core Storage volume at sector %d is not encrypted: "
+                    "opened", start_sector)
+        return True
 
     # --- Linux software RAID ----------------------------------------------
 

@@ -3458,7 +3458,8 @@ def _is_plain_image(path):
         kind = ImageHandler.get_image_type(_PathOnly(path))
     except Exception:
         return True
-    return kind == 'raw' and not path.lower().endswith('.001')
+    from trace_app.core.image_handler import is_split_raw
+    return kind == 'raw' and not is_split_raw(path)
 
 
 class _PathOnly:

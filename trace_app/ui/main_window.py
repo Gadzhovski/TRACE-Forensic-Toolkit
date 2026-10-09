@@ -114,7 +114,8 @@ CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
 #: when one is clicked or expanded; a name only earns the arrow).
 TREE_ARCHIVE_SUFFIXES = ('.zip', '.7z', '.rar', '.tar', '.gz', '.tgz',
                          '.bz2', '.tbz', '.tbz2', '.xz', '.txz', '.jar',
-                         '.apk', '.pst', '.ost', '.mbox')
+                         '.apk', '.pst', '.ost', '.mbox', '.cpio', '.lzma',
+                         '.zlib', '.cpgz')
 #: Archives the tree keeps read, so stepping through one is not a re-read.
 TREE_ARCHIVES_KEPT = 3
 #: ...and those that are archives inside but documents to an examiner: a
@@ -1629,6 +1630,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # A SQLite database shows in the Application tab like any other
         # format; its -wal is read from beside it on the image.
         self.application_viewer.database_wal_reader = self._sibling_wal
+        # A database cell holding a file (a BLOB, or TEXT that is not
+        # text) opens like an archive member: in memory, named by where
+        # it is.
+        self.application_viewer.database_blob_opener = \
+            self.open_database_cell
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
@@ -2087,6 +2093,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.current_selected_data = data
         self.update_viewer_with_file_content(content, data)
         self.set_status(f"{name} — read from inside an archive")
+
+    def open_database_cell(self, content, label):
+        """Show the bytes of a database cell -- 'mmssms.db > myblobs.blobs,
+        row 1' -- in the ordinary viewers, as an archive member is shown.
+        The database it came from is one click back in the tree."""
+        self.clear_viewers()
+        self.open_archive_member(label, content)
+        self.set_status(f"{label} -- {len(content):,} bytes stored in a "
+                        f"database cell")
+        self.viewer_dock.show()
 
     def open_carved_menu(self, row, position):
         """The context menu for a carved file.
@@ -2903,7 +2919,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 'is_recoverable': not member['encrypted'],
                 'parent_inode': None,
                 'sequence': None,
-                'attributes': 'encrypted' if member['encrypted'] else '',
+                # A damaged member (a stream cut short, a CPIO checksum
+                # failing) is shown with what could be recovered: say so.
+                'attributes': 'encrypted' if member['encrypted'] else (
+                    f"damaged: {member['damaged']}" if member.get('damaged')
+                    else ''),
                 # Routes the click, and marks the row as living in an archive.
                 'type': 'archive-member',
                 'archive_member': member['name'],
@@ -6993,7 +7013,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         inner_lvm = unlocked and handler.inner_kind(start) == 'lvm'
         holds = ('LVM volume group' if inner_lvm
                  else f"FS: {handler.get_fs_type(start)}")
-        state = (f"{holds}, {name} unlocked" if unlocked
+        state = (f"{holds}, {name}" if kind == 'corestorage'
+                 else f"{holds}, {name} unlocked" if unlocked
                  else f"{name}, locked -- right-click to unlock")
         size = (f"Size: {handler.get_readable_size(size_in_bytes)}, "
                 if size_in_bytes else '')

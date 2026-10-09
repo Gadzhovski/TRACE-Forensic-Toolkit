@@ -42,6 +42,9 @@ def kind_of(path):
         return None
     if path.lower().rstrip('/\\').endswith('.sparsebundle'):
         return None                 # a Mac disk image that is a folder
+    from trace_app.core.containers import parallels_descriptor
+    if parallels_descriptor(path):
+        return None                 # a Parallels disk bundle: a folder too
     if os.path.isdir(path):
         from trace_app.core.ios_backup import is_backup
         return 'ios_backup' if is_backup(path) else 'folder'

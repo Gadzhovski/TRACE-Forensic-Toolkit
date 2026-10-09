@@ -163,6 +163,8 @@ CAPABILITIES = (
                "(.vhd, .vhdx)", 'libvhdi', _module_version('pyvhdi')),
     Capability('qcow', 'Evidence images', "QEMU disks (.qcow2)", 'libqcow',
                _module_version('pyqcow')),
+    Capability('phdi', 'Evidence images', "Parallels Desktop disks (.hdd "
+               "bundles, .hds)", 'libphdi', _module_version('pyphdi')),
     Capability('modi', 'Evidence images', "Mac disk images (.dmg -- zlib, "
                "bzip2, LZFSE, LZMA, ADC -- .sparseimage, .sparsebundle)",
                'libmodi', _module_version('pymodi')),

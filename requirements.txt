@@ -32,6 +32,7 @@ libewf-python>=20260924
 libvmdk-python>=20260714    # VMware VMDK virtual disks
 libvhdi-python>=20260901    # Hyper-V / Virtual PC VHD and VHDX
 libqcow-python>=20260703    # QEMU QCOW / QCOW2
+libphdi-python>=20260902    # Parallels Desktop disks (.hdd bundles)
 libmodi-python>=20260902    # Mac disk images: DMG (compressed too), sparse
                             # images and sparse bundles
 libbde-python>=20260916     # BitLocker volumes, unlocked with a key given

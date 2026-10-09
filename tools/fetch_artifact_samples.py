@@ -272,6 +272,70 @@ SAMPLES = {
     'ufs2.raw': (
         _DFVFS + 'ufs2.raw',
         'ee5d99e5e60aa566b9e4dd0a5341c1e2b433cbbfcebffbdbf0ad2a3e2153cd67'),
+    # dfvfs's format corpus (tests/test_dfvfs_formats.py): a 2-segment E01
+    # and a split raw numbered from .000 (both the same 4 MB ext2 disk as
+    # ext2.raw), unencrypted Core Storage, LUKS2 (Argon2i, header only),
+    # an Apple Partition Map, a Parallels bundle, a gzip cut short, the
+    # same syslog as CPIO (four formats), LZMA-alone and raw zlib, and a
+    # database holding a database in a cell.
+    'ext2.raw': (
+        _DFVFS + 'ext2.raw',
+        'a6c2f0e39afe6c6ab432ca5465349fcefe8dc944398e97b2d957d3f89dbb5d80'),
+    'ext2.split.E01': (
+        _DFVFS + 'ext2.split.E01',
+        'd14f130c462b0ab8efb6bb44bbfe5680e00ffaa90538cde84579d1eb0dcac00f'),
+    'ext2.split.E02': (
+        _DFVFS + 'ext2.split.E02',
+        'b508375954ec1d1caeed8a6e5fc503f98493816ad6a3af89f5d220244c5f2864'),
+    'ext2.splitraw.000': (
+        _DFVFS + 'ext2.splitraw.000',
+        '2a864677a8f3c56a57ef5f02ca456205e06a274c5ba1b803c8235601d7930ee2'),
+    'ext2.splitraw.001': (
+        _DFVFS + 'ext2.splitraw.001',
+        '5647f05ec18958947d32874eeb788fa396a05d0bab7c1b71f112ceb7e9b31eee'),
+    'cs_single_volume.raw': (
+        _DFVFS + 'cs_single_volume.raw',
+        'b0e6e787d28816d6986f4c0489e00d99487abdb607c89ca23e0b62c9b72e4ec8'),
+    'luks2.raw': (
+        _DFVFS + 'luks2.raw',
+        '500cc79ca8e95122acccec7a3c155f2a203fc32776bba57fb166662513f51e67'),
+    'apm.dmg': (
+        _DFVFS + 'apm.dmg',
+        '897f487f4971e72c762e00460935e3b25176cda35620b508b490f65a7e0118ff'),
+    'hfsplus.hdd/DiskDescriptor.xml': (
+        _DFVFS + 'hfsplus.hdd/DiskDescriptor.xml',
+        '055612a450d55d0265fd117b5cf57355376ec4c62f9a80db78a6cdfe402c8a2a'),
+    'hfsplus.hdd/hfsplus.hdd.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds': (
+        _DFVFS + 'hfsplus.hdd/'
+        'hfsplus.hdd.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds',
+        '1b5192b42705b7b959da2590d590363cda0088a4834a29c2e2984d938eb1070c'),
+    'corrupt1.gz': (
+        _DFVFS + 'corrupt1.gz',
+        'a7524eeecdd46dbc0921aa8c5bde1a226d1cbc11d50b653573f2803e195b9014'),
+    'dfvfs-syslog': (
+        _DFVFS + 'syslog',
+        '0420b023f8dc1b71ff25191ce4ce88d10028f99f99f7c21532611f4c273aeae9'),
+    'syslog.bin.cpio': (
+        _DFVFS + 'syslog.bin.cpio',
+        '84bb569cf2a018db29e70d55d8b69d8463dcbd77d70f1213c2f9e7de0d21c5c7'),
+    'syslog.odc.cpio': (
+        _DFVFS + 'syslog.odc.cpio',
+        '78f919b358a5cf7beb78c84b9cd3028cd0b343386e5442ef50736647bba4f4ad'),
+    'syslog.newc.cpio': (
+        _DFVFS + 'syslog.newc.cpio',
+        '94e668bec666fbf9ce4d9d68fc9296ac4c3e231a6ab84f5e684bd90f49d8b53a'),
+    'syslog.crc.cpio': (
+        _DFVFS + 'syslog.crc.cpio',
+        'ae3e4ba73c0cb9c4b796b811ce893cfbef39d2101c075c3282873dcaa302ea15'),
+    'syslog.lzma': (
+        _DFVFS + 'syslog.lzma',
+        '434455b071dddb34481b128640ed9490c63f89b893fe9d0b673fdbd87f5d5ded'),
+    'syslog.zlib': (
+        _DFVFS + 'syslog.zlib',
+        '871a0bd83e24721a8ca2fc00f02665d8243baa98fe4726a6487dc40661ee6abe'),
+    'blob.db': (
+        _DFVFS + 'blob.db',
+        '0e93cfa66d0d6aebcc8c80a71a0839d75681ca82b056ef1ccb6d54ff581b5b0b'),
     'lvm.raw': (
         _DFVFS + 'lvm.raw',
         '565f564cd35e6ee304ea810631d52223e1ee3bb61d92ff1cd035c5a25f59e43e'),

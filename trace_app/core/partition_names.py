@@ -101,24 +101,43 @@ def gpt_entries(read, sector_size=512):
     return {}
 
 
-def bookkeeping(description):
-    """The name of a table or free-space slot, or None for a partition."""
+#: TSK calls every scheme's table slot 'Partition Table': named by the
+#: volume system it belongs to (pytsk3 TSK_VS_TYPE_*: DOS 1, BSD 2,
+#: Sun 4, Mac 8, GPT 16). A BSD disklabel was shown as a GPT table.
+TABLE_NAMES = {1: 'Partition Table', 2: 'BSD Disklabel', 4: 'Sun VTOC',
+               8: 'Apple Partition Map', 16: 'GPT Partition Table'}
+VS_BSD = 2
+
+
+def bookkeeping(description, scheme=None):
+    """The name of a table or free-space slot, or None for a partition.
+    `scheme` is the volume system's TSK type."""
+    if description == 'Table':
+        # The Apple Partition Map's own slot, as TSK names it.
+        return TABLE_NAMES.get(scheme, 'Partition Table')
     for prefix, name in _BOOKKEEPING:
         if description.startswith(prefix):
+            if prefix == 'Partition Table' and scheme in TABLE_NAMES:
+                return TABLE_NAMES[scheme]
             return name
     return None
 
 
-def label(description, start, gpt=None):
+def label(description, start, gpt=None, scheme=None):
     """What the examiner sees for one slot: 'EFI System Partition @ 2048',
     'Linux Filesystem @ 4198400', 'Microsoft Basic Data @ 1050624',
-    'NTFS / exFAT (0x07) @ 63', 'GPT Header', 'Unallocated Space @ 0'."""
+    'NTFS / exFAT (0x07) @ 63', 'GPT Header', 'Unallocated Space @ 0',
+    'BSD Disklabel'. `scheme` is the volume system's TSK type."""
     text = description.decode('utf-8', 'replace') \
         if isinstance(description, bytes) else (description or '')
     text = text.strip()
     if text == 'Unnamed partition':
         text = ''
-    special = bookkeeping(text)
+    if scheme == VS_BSD and text.startswith('Unused'):
+        # A BSD slot whose fstype field is 0 -- the whole-disk 'c' slot,
+        # or one newfs never typed: it still holds what it holds.
+        text = 'BSD partition'
+    special = bookkeeping(text, scheme)
     if special is not None:
         return special if special != 'Unallocated Space' else \
             f"{special} @ {start}"

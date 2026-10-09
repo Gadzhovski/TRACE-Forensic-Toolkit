@@ -70,6 +70,8 @@ class UnifiedViewer(QWidget):
         #: `reader(data)` -> the bytes of a database's -wal beside it, or
         #: None; set by the window, which knows the image.
         self.database_wal_reader = None
+        #: (content, label) -> show a database cell's bytes as a file.
+        self.database_blob_opener = None
 
         # Store media buffer for in-memory playback (keeps buffer alive during playback)
         self._media_buffer = None
@@ -110,6 +112,7 @@ class UnifiedViewer(QWidget):
             self._database_viewer.setVisible(False)
             self.layout.addWidget(self._database_viewer, 1)
         self._database_viewer.wal_reader = self.database_wal_reader
+        self._database_viewer.blob_opener = self.database_blob_opener
         return self._database_viewer
 
     def get_audio_video_player(self):

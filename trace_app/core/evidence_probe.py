@@ -40,12 +40,14 @@ _CUSTODY_FROM_HEADER = {
 _FORMATS = {
     '.e01': 'EnCase image (E01)', '.ex01': 'EnCase image (Ex01)',
     '.s01': 'SMART image (S01)', '.dd': 'Raw image', '.raw': 'Raw image',
-    '.img': 'Raw image', '.001': 'Split raw image', '.iso': 'ISO image',
+    '.img': 'Raw image', '.000': 'Split raw image',
+    '.001': 'Split raw image', '.iso': 'ISO image',
     '.vmdk': 'VMware disk (VMDK)', '.vhd': 'Virtual PC disk (VHD)',
     '.vhdx': 'Hyper-V disk (VHDX)', '.qcow2': 'QEMU disk (QCOW2)',
     '.qcow': 'QEMU disk (QCOW)', '.dmg': 'Apple disk image (DMG)',
     '.sparseimage': 'Apple sparse image', '.sparse': 'Raw image',
     '.sparsebundle': 'Apple sparse bundle', '.ad1': 'FTK logical image (AD1)',
+    '.hdd': 'Parallels disk', '.hds': 'Parallels disk',
     '.aff4': 'AFF4 image',
     '.l01': 'EnCase logical evidence (L01)',
     '.lx01': 'EnCase logical evidence (Lx01)', '.zip': 'ZIP archive',
@@ -60,6 +62,9 @@ def format_name(path):
     lowered = trimmed.lower()
     if lowered.endswith(('.tar.gz', '.tgz', '.tar.bz2', '.tar.xz')):
         return 'TAR archive'
+    from trace_app.core.containers import is_parallels
+    if is_parallels(trimmed):
+        return 'Parallels disk'
     if os.path.isdir(trimmed) and not lowered.endswith('.sparsebundle'):
         from trace_app.core.logical_sources import kind_of
         return 'iOS backup' if kind_of(trimmed) == 'ios_backup' else 'Folder'
@@ -133,9 +138,12 @@ def probe(path):
 
 
 def _describe(handler, result):
-    if handler.container_note:
-        result['format'] = f"{result['format']} · {handler.container_note}" \
-            if handler.logical_fs is None else result['format']
+    note = handler.container_note
+    if note and handler.logical_fs is None:
+        # A note that only extends the format ('Parallels disk (bundle)')
+        # replaces it rather than repeating it.
+        result['format'] = note if note.startswith(result['format']) else \
+            f"{result['format']} · {note}"
 
     if handler.logical_fs is not None:
         fs = handler.logical_fs

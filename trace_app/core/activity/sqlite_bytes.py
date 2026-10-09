@@ -74,11 +74,31 @@ def _checksum(data, s0, s1, big):
     return s0, s1
 
 
+def lenient_text(value):
+    """TEXT as str, with any bytes that are not UTF-8 replaced. SQLite
+    stores whatever an application hands it as TEXT -- a whole database
+    in dfvfs's blob.db -- and Python's default decoder then fails the
+    entire query."""
+    return value.decode('utf-8', 'replace')
+
+
+def exact_text(value):
+    """TEXT as str when it is UTF-8, else its bytes, unchanged: what a
+    viewer shows and exports must be what is stored."""
+    try:
+        return value.decode('utf-8')
+    except UnicodeDecodeError:
+        return bytes(value)
+
+
 @contextlib.contextmanager
-def open_database(database, wal=None):
-    """A read-only connection to `database` (bytes), its WAL applied."""
+def open_database(database, wal=None, exact=False):
+    """A read-only connection to `database` (bytes), its WAL applied.
+    Text that is not UTF-8 reads as str with replacement characters, or,
+    with `exact`, as the bytes stored (exact_text)."""
     if database[:16] != HEADER:
         raise sqlite3.DatabaseError("not a SQLite database")
+    factory = exact_text if exact else lenient_text
     data = bytearray(apply_wal(database, wal))
     # Mark the copy as rollback-journal mode: in WAL mode SQLite would look
     # for -wal and -shm files that are not there (and already applied).
@@ -88,6 +108,7 @@ def open_database(database, wal=None):
         try:
             connection.deserialize(bytes(data))
             connection.execute('PRAGMA query_only = ON')
+            connection.text_factory = factory
             yield connection
         finally:
             connection.close()
@@ -98,6 +119,7 @@ def open_database(database, wal=None):
         with open(path, 'wb') as handle:
             handle.write(data)
         connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        connection.text_factory = factory
         try:
             yield connection
         finally:
