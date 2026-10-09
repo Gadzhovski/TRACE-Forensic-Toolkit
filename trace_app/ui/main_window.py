@@ -53,7 +53,6 @@ from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.viewers.registry_hive import RegistryExtractor
 from trace_app.ui.viewers.text import TextViewer
 from trace_app.ui.viewers.media import UnifiedViewer
-from trace_app.ui.dialogs.verification import VerificationWidget
 from trace_app.ui.viewers.registry_adapters import (ApplicationAdapter, HexAdapter,
                                      CaseAdapter, MetadataAdapter,
                                      NotesAdapter,
@@ -254,11 +253,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._listing_image = None
         self._evidence_profiles = {}
 
-        #: Verification results, keyed by image path. Verification is a fact
-        #: about one image, not about the session, so it is stored per image:
-        #: a second image loaded alongside a verified one is not itself
-        #: verified, and the previously toolbar-wide icon claimed otherwise.
+        #: The last verification outcome per image path: {'outcome':
+        #: {status, detail, ...}, 'results': the hashing run or None,
+        #: 'checked': UTC}. Filled only by the verification job (and, in a
+        #: case, seeded from the status the case recorded) -- never by a
+        #: dialog. Per image: a second image beside a verified one is not
+        #: itself verified.
         self.verification_results = {}
+
+        # Exports made outside the export job (a hex selection, a picture
+        # from the viewer) are audited in the case too.
+        from trace_app.core import evidence_export
+        evidence_export.set_recorder(
+            self.case.record_event if self.case else None)
 
         self.initialize_ui()
 
@@ -271,9 +278,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # Deferred: this runs during __init__, before the window is shown,
             # and loading an image can take seconds and wants to draw progress.
             QTimer.singleShot(0, self.load_case_evidence)
-            for path in self.evidence_files:
-                if path in self.verification_results:
-                    self.mark_image_verified(path, True)
 
     # ==================== HELPER METHODS ====================
 
@@ -1717,8 +1721,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # registry icon, so set_theme does not reach it. The green and amber
         # are the same in both themes, but rebuilding here keeps the icon
         # correct if the underlying artwork is ever theme-dependent.
-        for path, result in getattr(self, 'verification_results', {}).items():
-            self.mark_image_verified(path, result.get('verified', False))
+        for path in getattr(self, 'verification_results', {}):
+            self.mark_image_verified(path)
 
         try:
             with open(qss_file, 'r') as f:
@@ -1859,84 +1863,102 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return handler
 
     def verify_image(self, image_path=None):
-        """Show the verification dialog for one image.
+        """Verify one image, or show its last verification.
 
-        Defaults to the image currently loaded. Re-opening for an image already
-        verified this session renders the stored result instead of hashing the
-        whole image again.
+        Hashing is the verification job (`queue_verification`); this
+        shows its outcome in a read-only dialog once it ends. An image
+        already checked shows that check, with Verify Again. Nothing in
+        the dialog writes to the case.
         """
-        if self.image_handler is None:
-            message.warning(self, "Verify Image", "No image is currently loaded.")
-            return
-
         path = image_path or self.current_image_path
-        handler = self.handler_for(path)
-        if handler is None:
+        if not path:
             message.warning(self, "Verify Image",
-                            f"Could not open {path} for verification.")
+                            "No image is currently loaded.")
             return
+        if path in self.verification_results:
+            self.show_verification(path)
+            return
+        self.start_image_verification(path)
 
-        # A raw image has no hash inside it to check against, so the only
-        # meaningful comparison is with what the case recorded earlier.
-        expected = None
+    def start_image_verification(self, path):
+        """Queue a verification of `path` and show its result when done."""
+        row = self._verification_row(path)
+        if row is None:
+            message.warning(self, "Verify Image",
+                            f"{path} is not open in this session.")
+            return
+        if not self.queue_verification([row], show=True):
+            message.information(self, "Verify Image",
+                                f"{row['display_name']} is already being "
+                                f"verified.")
+
+    def _verification_row(self, path):
+        """The case's evidence row for `path`, or (quick triage) a row
+        naming it; None for a path not open here."""
         if self.case:
             row = self.case.evidence_for_path(path)
             if row:
-                expected = row.get('md5')
+                return dict(row)
+        if path in self._image_handlers or path in self.evidence_files:
+            return {'id': None, 'path': path,
+                    'display_name': os.path.basename(path)}
+        return None
 
-        self.verification_widget = VerificationWidget(
-            handler, cached=self.verification_results.get(path),
-            expected_md5=expected)
-        self.verification_widget.closeEvent = (
-            lambda event, p=path: self.on_verification_closed(event, p))
-        self.verification_widget.show()
+    def show_verification(self, path):
+        """The last verification of `path`, read-only."""
+        from trace_app.ui.dialogs.verification import VerificationDialog
+        kept = self.verification_results.get(path) or {}
+        row = self._verification_row(path) or {'path': path}
+        history = []
+        if self.case and row.get('id') is not None:
+            history = self.case.verifications(row['id'])
+        outcome = kept.get('outcome') or {
+            'status': row.get('last_status'),
+            'detail': history[0]['detail'] if history else ''}
+        dialog = VerificationDialog(row, kept.get('results'), outcome,
+                                    history, kept.get('checked'), self)
+        dialog.verify_again.connect(
+            lambda p=path: self.start_image_verification(p))
+        self.verification_dialog = dialog
+        dialog.show()
 
-    def on_verification_closed(self, event, image_path=None):
-        """Store the result against its image, and badge that image in the tree."""
-        widget = self.verification_widget
-        results = widget.results() if hasattr(widget, 'results') else None
-        if results and image_path:
-            self.verification_results[image_path] = results
-            self.mark_image_verified(image_path, results.get('verified', False))
-            # A case stores the digests themselves, so reopening it does not
-            # re-hash an image the examiner already waited for.
-            self.store_verification_in_case(image_path, results)
+    def mark_image_verified(self, image_path, status=None):
+        """Show an image's last verification on its own row in the tree.
 
-        QWidget.closeEvent(widget, event)
-
-    def mark_image_verified(self, image_path, verified):
-        """Show an image verification state on its own row in the tree.
-
-        The image's own icon carries the state: green once its hashes verify,
-        amber when they do not. Two earlier attempts put a separate mark beside
-        the icon -- first in its own column, then overlaid in its corner -- and
-        both were worse. The column pushed the row out of line with the volumes
-        beneath it; the overlay crammed a second glyph into a 16px icon.
-
-        This used to swap the toolbar button icon instead, which is a property
-        of the window rather than of an image: with two images loaded it
-        claimed both were verified.
+        The image's own icon carries the state: green once its hashes
+        verify, amber when a check found it changed, unreadable or
+        missing; the tooltip says which and why. Hashed with nothing to
+        compare against (a raw image without an acquisition hash) leaves
+        the icon as it is -- there is nothing verified to show.
         """
+        from trace_app.core.case import STATUS_VERIFIED
+        from trace_app.ui.viewers.case_panel import STATUS_TEXT, \
+            STATUS_TROUBLE
+        kept = self.verification_results.get(image_path) or {}
+        outcome = kept.get('outcome') or {}
+        status = status or outcome.get('status')
         root = self.tree_viewer.invisibleRootItem()
         disk_icon = self.db_manager.get_icon_path('device', 'media-optical')
         for i in range(root.childCount()):
             item = root.child(i)
             if self._root_image_path(item) != os.path.normpath(image_path):
                 continue
-            hue = icons.VERIFIED_HUE if verified else icons.UNVERIFIED_HUE
-            item.setIcon(0, icons.recoloured(disk_icon, hue, TREE_ICON_SIZE))
-            item.setToolTip(0, f"{image_path}\n" + (
-                            "Hashes verified against those stored in the image"
-                            if verified else
-                            "Checked this session: hashes did not match"))
+            if status == STATUS_VERIFIED or status in STATUS_TROUBLE:
+                hue = (icons.VERIFIED_HUE if status == STATUS_VERIFIED
+                       else icons.UNVERIFIED_HUE)
+                item.setIcon(0, icons.recoloured(disk_icon, hue,
+                                                 TREE_ICON_SIZE))
+            if status:
+                item.setToolTip(0, f"{image_path}\n"
+                                   f"{STATUS_TEXT.get(status, status)}: "
+                                   f"{outcome.get('detail') or ''}".rstrip(': '))
             return
 
     def verification_state(self, image_path):
-        """Return 'verified', 'failed', or None for an image."""
-        result = self.verification_results.get(image_path)
-        if result is None:
-            return None
-        return 'verified' if result.get('verified') else 'failed'
+        """The last verification status of an image, or None."""
+        outcome = (self.verification_results.get(image_path) or {}).get(
+            'outcome') or {}
+        return outcome.get('status')
 
     def show_verify_menu(self):
         """Toolbar Verify: pick an image when more than one is loaded.
@@ -1952,15 +1974,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.verify_image(self.evidence_files[0])
             return
 
+        from trace_app.ui.viewers.case_panel import STATUS_ICON, STATUS_TEXT
         menu = QMenu(self)
         for path in self.evidence_files:
             state = self.verification_state(path)
-            suffix = {'verified': "verified",
-                      'failed': "not verified"}.get(state, "not checked")
+            suffix = STATUS_TEXT.get(state, state) if state else "not checked"
             entry = menu.addAction(f"{path}  \u2014 {suffix}")
-            if state is not None:
-                entry.setIcon(icons.icon(
-                    icons.VERIFY_OK if state == 'verified' else icons.VERIFY))
+            if state in STATUS_ICON:
+                entry.setIcon(icons.icon(STATUS_ICON[state]))
             entry.triggered.connect(lambda _=False, p=path: self.verify_image(p))
         show_menu(menu, QCursor.pos())
 
@@ -3351,31 +3372,33 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # --- verification jobs ------------------------------------------------
 
-    def queue_verification(self, rows, summary=False):
-        """Hash (or re-check) each piece of evidence as a job on the bar.
-
-        Evidence never hashed is hashed and compared with the hashes it
-        stores (core/case.hash_verdict); evidence with a recorded hash is
-        checked against it. With `summary`, the outcome of the whole batch
-        is reported once it ends -- Case > Verify All Evidence.
+    def queue_verification(self, rows, summary=False, show=False):
+        """Hash each piece of evidence in full, as a job on the bar, and
+        judge it: Case.apply_verification records it in a case (never
+        replacing a recorded hash); in quick triage core/case.verdict
+        judges it against what the image stores, and nothing is written.
+        With `summary`, the batch's outcome is reported when it ends --
+        Case > Verify All Evidence; with `show`, each result opens in the
+        verification dialog -- Tools > Verify Image.
         """
         from trace_app.ui.dialogs.verification import EvidenceVerifyWorker
         from trace_app.ui.widgets.job_bar import MAIN, SIDE
-        if not self.case:
-            return 0
         # Beside the analysis queue unless Settings ▸ General says otherwise:
         # hashing a large image held up every finding behind it.
         lane = SIDE if case_settings.user('verify_order') == \
             'alongside analysis' else MAIN
-        batch = {'pending': 0, 'outcomes': [], 'summary': summary}
+        batch = {'pending': 0, 'outcomes': [], 'summary': summary,
+                 'show': show}
         queued = 0
         for row in rows:
-            evidence_id = row['id']
+            key = row.get('id') if row.get('id') is not None else row['path']
             name = row.get('display_name') or os.path.basename(row['path'])
 
             def start(job, row=row, name=name):
-                current = next((r for r in self.case.evidence()
-                                if r['id'] == row['id']), row)
+                current = row
+                if self.case and row.get('id') is not None:
+                    current = next((r for r in self.case.evidence()
+                                    if r['id'] == row['id']), row)
                 worker = EvidenceVerifyWorker(current, self)
                 worker.progressed.connect(
                     lambda done, total, job=job: self.job_bar.report(
@@ -3391,7 +3414,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             title = (f"Verifying {name}" if row.get('md5') or row.get('sha1')
                      or row.get('sha256') else f"Hashing {name}")
-            if self.job_bar.submit(Job(key=f"verify:{evidence_id}",
+            if self.job_bar.submit(Job(key=f"verify:{key}",
                                        title=title, start=start,
                                        stop=lambda worker: worker.stop()),
                                    lane=lane):
@@ -3408,72 +3431,68 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return FileSystemUtils.get_readable_size(size)
 
     def _verification_finished(self, out, name, batch, job=None):
-        """Record what a verification job found (on this thread, which owns
-        the case's database), badge the image, move its lane on."""
-        from trace_app.core.case import (STATUS_MISSING, STATUS_UNHASHED,
-                                         STATUS_VERIFIED, hash_verdict)
+        """Judge and record what a verification job read (on this thread,
+        which owns the case's database), badge the image, move its lane
+        on."""
+        from trace_app.core.case import _utc_now, verdict
         self.job_bar.job_finished(job)
         batch['pending'] -= 1
         row = out['row']
-        status, detail = None, ''
         if out.get('cancelled'):
             self.set_status(f"Verification of {name} cancelled; nothing "
                             f"recorded")
-        elif out.get('error'):
-            status, detail = STATUS_MISSING if not os.path.exists(
-                row['path']) else STATUS_UNHASHED, out['error']
-            self.case.record_check(row['id'], {'status': status,
-                                               'detail': detail})
-        elif out.get('mode') == 'hash':
-            results = out.get('results') or {}
-            status, detail = hash_verdict(results)
-            if status == STATUS_UNHASHED:
-                self.case.record_check(row['id'], {'status': status,
-                                                   'detail': detail})
-            else:
-                self.case.record_hashes(row['id'], results, status, detail)
-                self.verification_results[row['path']] = {
-                    'html': None, 'verified': status == STATUS_VERIFIED,
-                    'hashes': dict(results, path=row['path'])}
         else:
-            outcome = out.get('outcome') or {}
-            status, detail = outcome.get('status'), outcome.get('detail', '')
-            self.case.record_check(row['id'], outcome)
-            if status == STATUS_VERIFIED and row['path'] in \
-                    self.verification_results:
-                self.verification_results[row['path']]['verified'] = True
-
-        if status is not None:
-            batch['outcomes'].append((row, status, detail))
-            if row['path'] in self._image_handlers:
-                self.mark_image_verified(row['path'],
-                                         status == STATUS_VERIFIED)
-            self.set_status(f"{name}: {detail}")
-            logger.info("Verification of %s: %s (%s)", name, status, detail)
+            results = out.get('results') or {
+                'error': 'the verification ended without a result'}
+            if results.get('status'):
+                # Nothing to hash: the file is missing, or a live disk.
+                outcome = results
+                results = None
+                if self.case and row.get('id') is not None:
+                    self.case.record_check(row['id'], outcome)
+            elif self.case and row.get('id') is not None:
+                outcome = self.case.apply_verification(row['id'], results)
+            else:
+                outcome = verdict(results)
+            self.verification_results[row['path']] = {
+                'outcome': outcome, 'results': results,
+                'checked': _utc_now()}
+            batch['outcomes'].append((row, outcome['status'],
+                                      outcome['detail']))
+            self.mark_image_verified(row['path'])
+            self.set_status(f"{name}: {outcome['detail']}")
+            logger.info("Verification of %s: %s (%s)", name,
+                        outcome['status'], outcome['detail'])
+            if batch.get('show'):
+                self.show_verification(row['path'])
         if getattr(self, 'case_panel', None):
             self.case_panel.refresh()
         if batch['pending'] == 0:
             self._verification_batch_done(batch)
 
     def _verification_batch_done(self, batch):
-        from trace_app.core.case import STATUS_CHANGED, STATUS_MISSING
+        from trace_app.ui.viewers.case_panel import STATUS_TEXT, \
+            STATUS_TROUBLE
         trouble = [(row, status, detail) for row, status, detail
-                   in batch['outcomes']
-                   if status in (STATUS_MISSING, STATUS_CHANGED)]
+                   in batch['outcomes'] if status in STATUS_TROUBLE]
         if trouble:
             # Loudly, whether asked for or not: evidence that is not what
             # it was is the one result an examiner must not miss.
-            lines = [f"{row.get('display_name') or row['path']}: {detail}"
-                     for row, _status, detail in trouble]
+            lines = [f"{row.get('display_name') or row['path']}: "
+                     f"{STATUS_TEXT.get(status, status)} -- {detail}"
+                     for row, status, detail in trouble]
             message.warning(
                 self, "Evidence does not match",
-                "Some evidence is not as it was recorded.",
-                "\n\n".join(lines))
+                "Some evidence is not as it was recorded, or could not be "
+                "read in full.", "\n\n".join(lines))
         elif batch['summary'] and batch['outcomes']:
+            counts = {}
+            for _row, status, _detail in batch['outcomes']:
+                counts[status] = counts.get(status, 0) + 1
             message.information(
-                self, "Evidence verified",
-                f"All {len(batch['outcomes'])} piece(s) of evidence match "
-                f"what was recorded, or now have a recorded baseline.")
+                self, "Evidence checked",
+                "; ".join(f"{count} {STATUS_TEXT.get(status, status)}"
+                          for status, count in counts.items()) + ".")
 
     def queue_analysis(self, rows, modules):
         """Put one analysis job per piece of evidence on the shared queue."""
@@ -5927,30 +5946,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   "add the image again from its new location.")
 
     def _seed_verification_from_case(self):
-        """Rebuild the in-memory verification map from stored hashes.
-
-        A case records the digests themselves, so a reopened case can show an
-        image as verified without reading it again. Only evidence that was
-        actually hashed counts: an entry added but never verified stays
-        unverified rather than inheriting a green tick it never earned.
-        """
+        """The last status the case recorded for each piece of evidence,
+        so a reopened case shows it without reading the images again.
+        Only evidence that was checked counts: one added but never hashed
+        shows nothing."""
         for row in self.case.evidence():
-            if not (row.get('md5') or row.get('sha1')):
+            status = row.get('last_status')
+            if not status or status == 'pending':
                 continue
-            hashes = {
-                'computed_md5': row.get('md5'),
-                'computed_sha1': row.get('sha1'),
-                'computed_sha256': row.get('sha256'),
-                'stored_md5': row.get('stored_md5'),
-                'stored_sha1': row.get('stored_sha1'),
-                'size': row.get('size'),
-                'path': row['path'],
-            }
+            history = self.case.verifications(row['id'], limit=1)
             self.verification_results[row['path']] = {
-                'html': None,       # re-rendered on demand by the dialog
-                'verified': row.get('last_status') == 'verified',
-                'hashes': hashes,
-            }
+                'outcome': {'status': status,
+                            'detail': history[0]['detail'] if history
+                            else ''},
+                'results': None, 'checked': row.get('verified_utc')}
 
     def _case_title(self):
         """Window title, naming the case when there is one."""
@@ -5978,25 +5987,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # meant for the new image ran on every one.
         self.triage_panel.set_case(self.case)
         self._refresh_carving_targets()
-
-    def store_verification_in_case(self, image_path, results):
-        """Persist computed hashes against the case's evidence row."""
-        if not self.case or not results:
-            return
-        hashes = results.get('hashes')
-        if not hashes:
-            return
-        row = self.case.evidence_for_path(image_path)
-        if row is None:
-            row_id = self.case.add_evidence(image_path)
-        else:
-            row_id = row['id']
-        try:
-            self.case.record_hashes(row_id, hashes)
-        except Exception as exc:
-            logger.error("Could not store hashes in the case: %s", exc)
-        if getattr(self, 'case_panel', None):
-            self.case_panel.refresh()
 
     def show_case_properties(self):
         """Show, and allow editing of, the open case's details."""
@@ -6814,6 +6804,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                {"start_offset": 0,
                                                 "image_path": image_path})
         root_item_tree.setToolTip(0, image_path)
+        if image_path in self.verification_results:
+            QTimer.singleShot(0, lambda p=image_path:
+                              self.mark_image_verified(p))
 
         if self.image_handler.container_note:
             root_item_tree.setToolTip(
@@ -8455,58 +8448,88 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 for row in rows if self.listing_table.item(row, 0)])
             menu.addSeparator()
 
-            # Add the 'Export' option for any file or folder
-            export_action = menu.addAction("Export")
-            export_action.triggered.connect(lambda: self.handle_export(data, QFileDialog.getExistingDirectory(
-                self, "Select Destination Directory", case_settings.export_dir())))
+            # Export every selected file or folder, not only the row
+            # under the pointer.
+            chosen = [self.listing_table.item(row, 0).data(Qt.UserRole)
+                      for row in rows if self.listing_table.item(row, 0)]
+            chosen = [d for d in chosen if d and d.get('inode_number')
+                      is not None and d.get('name') != '..'] or [data]
+            export_action = menu.addAction(
+                "Export" if len(chosen) == 1 else
+                f"Export {len(chosen)} Items")
+            export_action.triggered.connect(lambda: self.handle_export(
+                chosen, QFileDialog.getExistingDirectory(
+                    self, "Select Destination Directory",
+                    case_settings.export_dir())))
 
             show_menu(menu, self.listing_table.viewport().mapToGlobal(position))
 
     def handle_export(self, data, dest_dir):
-        """Export the selected item in a background thread with progress display."""
+        """Export files or folders (one data dict or a list) from the
+        active image into `dest_dir`, as a background job: each file
+        streamed, hashed as written and its copy checked, with
+        export-manifest.csv beside them (core/evidence_export.py). The
+        case's audit trail records it with the manifest's SHA-256."""
         if not dest_dir:
             return
+        items = data if isinstance(data, list) else [data]
+        items = [dict(item) for item in items if item]
+        if not items or self.image_handler is None:
+            return
+        evidence = os.path.basename(self.current_image_path or '')
+        progress_dialog = QProgressDialog("Preparing to export...", "Cancel",
+                                          0, 0, self)
+        progress_dialog.setWindowTitle("Exporting Files")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.show()
 
-        try:
-            # Create a progress dialog
-            progress_dialog = QProgressDialog("Preparing to export...", "Cancel", 0, 100, self)
-            progress_dialog.setWindowTitle("Exporting Files")
-            progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.setMinimumDuration(0)
-            progress_dialog.setValue(0)
-            progress_dialog.show()
+        worker = ExportWorker(self.image_handler, items, dest_dir, evidence)
+        self.export_worker = worker
+        worker.status_update.connect(
+            lambda text: progress_dialog.setLabelText(
+                f"Exporting {text}"))
+        worker.done.connect(
+            lambda out, d=progress_dialog, e=evidence, i=items:
+            self._export_finished(out, d, e, i))
+        # requestInterruption, not terminate: the exporter checks it
+        # between blocks and removes the partial file it was writing.
+        progress_dialog.canceled.connect(worker.requestInterruption)
+        self._retain_worker(worker)
+        worker.start()
 
-            # Create and configure the worker (retained: a second export
-            # started before the first ends must not free it)
-            self.export_worker = ExportWorker(
-                self.image_handler,
-                data["inode_number"],
-                data["start_offset"],
-                dest_dir,
-                data["name"],
-                data["type"] == "directory"
-            )
-
-            # Connect worker signals
-            self.export_worker.progress.connect(
-                lambda current, total: progress_dialog.setValue(int(current * 100 / total) if total > 0 else 0)
-            )
-            self.export_worker.status_update.connect(progress_dialog.setLabelText)
-            self.export_worker.error.connect(lambda msg: message.warning(self, "Export Error", msg))
-            self.export_worker.finished.connect(progress_dialog.close)
-
-            # Connect the cancel button
-            # requestInterruption, not terminate: terminate kills the thread at an
-            # arbitrary point, which can leave the pytsk3 handle in a bad state
-            # mid-read. ExportWorker checks isInterruptionRequested() each entry.
-            progress_dialog.canceled.connect(self.export_worker.requestInterruption)
-
-            # Start the worker
-            self._retain_worker(self.export_worker)
-            self.export_worker.start()
-
-        except Exception as e:
-            message.critical(self, "Export Error", f"Error starting export: {str(e)}")
+    def _export_finished(self, out, progress_dialog, evidence, items):
+        """Audit an export and say what happened."""
+        progress_dialog.close()
+        names = ', '.join(i.get('path') or i.get('name') or '?'
+                          for i in items[:5])
+        if len(items) > 5:
+            names += f" and {len(items) - 5} more"
+        problems = out.get('problems') or []
+        detail = (f"{out.get('files', 0):,} file(s), "
+                  f"{out.get('bytes', 0):,} bytes from {evidence} ({names}) "
+                  f"to {out.get('folder')}; manifest "
+                  f"{out.get('manifest') or 'not written'}"
+                  + (f" SHA-256 {out['manifest_sha256']}"
+                     if out.get('manifest_sha256') else '')
+                  + (f"; {len(problems):,} not exported" if problems else '')
+                  + ("; cancelled" if out.get('cancelled') else '')
+                  + (f"; error: {out['error']}" if out.get('error') else ''))
+        if self.case:
+            self.case.record_event('files exported', detail)
+        logger.info("Export: %s", detail)
+        if problems or out.get('error'):
+            message.warning(
+                self, "Export",
+                f"{out.get('files', 0):,} file(s) exported; "
+                f"{len(problems):,} could not be. Each is listed in the "
+                f"manifest.",
+                "\n".join(problems[:50] + ([out['error']]
+                                            if out.get('error') else [])))
+        else:
+            self.set_status(
+                f"Exported {out.get('files', 0):,} file(s) to "
+                f"{out.get('folder')}; each verified, manifest written", 8000)
 
     def log_error(self, message):
         """Log an error message to the console and potentially to a log file."""

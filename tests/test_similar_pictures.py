@@ -132,7 +132,7 @@ def test_a_v16_case_gains_the_phash_column(tmp_path):
     try:
         columns = {r[1] for r in case._db.execute(
             "PRAGMA table_info(file_analysis)")}
-        assert 'phash' in columns and SCHEMA_VERSION == 17
+        assert 'phash' in columns and SCHEMA_VERSION >= 17
         assert case.picture_hashes() == []
     finally:
         case.close()

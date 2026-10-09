@@ -128,18 +128,21 @@ def test_a_v15_case_gains_the_custody_columns(tmp_path):
 
 
 def test_a_first_hash_is_judged_against_what_the_image_stores():
-    from trace_app.core.case import (STATUS_CHANGED, STATUS_UNHASHED,
-                                     STATUS_VERIFIED, hash_verdict)
+    from trace_app.core.case import (STATUS_BASELINE, STATUS_CHANGED,
+                                     STATUS_UNREADABLE, STATUS_VERIFIED,
+                                     hash_verdict)
     both = {'computed_md5': 'aa', 'computed_sha1': 'bb',
             'stored_md5': 'AA', 'stored_sha1': 'BB'}
     assert hash_verdict(both)[0] == STATUS_VERIFIED
     # One stored hash differing is not "verified", whatever the other says.
     status, detail = hash_verdict(dict(both, stored_sha1='cc'))
     assert status == STATUS_CHANGED and 'SHA1 is bb' in detail
+    # Nothing stored: hashed, the reference -- not "verified".
     status, detail = hash_verdict({'computed_md5': 'aa'})
-    assert status == STATUS_VERIFIED and 'baseline' in detail
-    assert hash_verdict({'computed_md5': 'Error', 'error': 'x'})[0] == \
-        STATUS_UNHASHED
+    assert status == STATUS_BASELINE and 'reference' in detail
+    # A failed read is never judged, and gives no hash.
+    assert hash_verdict({'computed_md5': None, 'error': 'x'})[0] == \
+        STATUS_UNREADABLE
 
 
 def test_case_folder_names_are_valid_everywhere():
@@ -377,7 +380,8 @@ def test_a_missing_folder_is_kept_when_another_case_is_remembered(tmp_path):
 @pytest.mark.ui
 def test_verification_is_a_job_that_records_and_catches_a_change(
         qapp, tmp_path, quiet_dialogs):
-    from trace_app.core.case import (STATUS_CHANGED, STATUS_VERIFIED, Case)
+    from trace_app.core.case import (STATUS_BASELINE, STATUS_CHANGED,
+                                     STATUS_VERIFIED, Case)
     from trace_app.ui.main_window import MainWindow
     copy = tmp_path / 'copy.dd'
     shutil.copyfile(image_path(RAW), copy)
@@ -389,14 +393,18 @@ def test_verification_is_a_job_that_records_and_catches_a_change(
     try:
         assert pump(qapp, 60, lambda: len(window.evidence_files) == 2)
         window.start_case_setup({'verify': True, 'choice': None})
+        # The E01 verifies against the MD5 it stores; the dd stores
+        # nothing, so its first hash is the reference.
+        expected = {'E01': STATUS_VERIFIED, '.dd': STATUS_BASELINE}
         assert pump(qapp, 120, lambda: not window.job_bar.busy and all(
-            r['last_status'] == STATUS_VERIFIED for r in case.evidence()))
+            r['last_status'] == expected[r['path'][-3:]]
+            for r in case.evidence()))
         e01 = next(r for r in case.evidence() if r['path'].endswith('E01'))
         assert e01['md5'] == e01['stored_md5']
         history = case.verifications(e01['id'])
         # ntfs1-gen2.E01 stores an MD5 only.
         assert history[0]['detail'] == \
-            'MD5 matches the hash stored in the image.'
+            'MD5 matches the hash stored with the image.'
 
         # The examiner's copy changes: the next check says so, loudly.
         with open(copy, 'r+b') as handle:

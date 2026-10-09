@@ -359,6 +359,11 @@ def _case_workflow(check, report, images, sandbox, app):
             index.close()
             outcomes = case.verify_evidence()
             assert len(outcomes) == len(images), outcomes
+            # Hashed in full and judged: never changed or unreadable.
+            assert all(status in ('verified', 'baseline')
+                       for _row, status, _detail in outcomes), outcomes
+            audit = case.verify_audit()
+            assert audit['ok'], audit['problems']
         finally:
             case.close()
         return (f"analysed {counts} files; {found} found by name search; "

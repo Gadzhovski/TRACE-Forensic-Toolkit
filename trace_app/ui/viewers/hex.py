@@ -1256,21 +1256,24 @@ class HexViewer(QWidget):
                 self, "Export Selection", f"{name}.{begin:x}-{end - 1:x}.bin")
             if not path:
                 return None
+        from trace_app.core import evidence_export
+        name = self.data.get('path') or self.data.get('name') or 'data'
+        source = f"{name} bytes {begin:,}-{end - 1:,}"
         try:
-            with open(path, 'wb') as handle:
-                position = begin
-                while position < end:
-                    piece = self.source.read(position,
-                                             min(4 << 20, end - position))
-                    if not piece:
-                        break
-                    handle.write(piece)
-                    position += len(piece)
-        except OSError as exc:
+            # Read in full and checked, or not written: a short read used
+            # to leave a truncated file named as the whole selection.
+            digests = evidence_export.save_reader(
+                path, lambda offset, length:
+                self.source.read(begin + offset, length), end - begin,
+                'byte range exported', source)
+        except Exception as exc:
             message.warning(self, "Export failed", str(exc))
             return None
-        message.information(self, "Selection exported",
-                            f"{end - begin:,} bytes written to\n{path}")
+        message.information(
+            self, "Selection exported",
+            f"{end - begin:,} bytes written to\n{path}\n\n"
+            f"SHA-256 {digests['sha256']}\n"
+            f"Written copy: {digests['written_copy_check']}")
         return path
 
     def _bookmark_refusal(self, selected):

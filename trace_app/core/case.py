@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -55,6 +55,11 @@ STATUS_MISSING = 'missing'      # the file is not where the case says it is
 STATUS_CHANGED = 'changed'      # present, but no longer the same bytes
 STATUS_UNHASHED = 'unhashed'    # present, but nothing to compare against
 STATUS_LIVE = 'live'            # a live disk: hashed as read, not verified
+STATUS_BASELINE = 'baseline'    # hashed in full; nothing yet to compare with
+STATUS_UNREADABLE = 'unreadable'  # present, but could not be read in full
+
+#: The digests recorded for evidence, compared on every check.
+HASH_NAMES = ('md5', 'sha1', 'sha256')
 
 #: Chain-of-custody details an evidence row can carry (schema v16), with
 #: how each reads. All optional: an image handed over with no paperwork is
@@ -226,6 +231,7 @@ class Case:
 
         case = cls(folder, cls._connect(db_path))
         case._create_schema()
+        case._custody_guards()
         now = _utc_now()
         case._set_many({
             'name': name,
@@ -422,12 +428,26 @@ class Case:
                    'last_status'] + list(details)
         values = [path, display_name or os.path.basename(path), size,
                   _utc_now(), STATUS_PENDING] + list(details.values())
+        # What the image was acquired as, from the imaging tool's log
+        # beside it (core/acquisition_log.py): the reference a raw image
+        # is verified against, which it cannot store itself.
+        logged, log_path = ({}, None) if live or assembled else \
+            _acquisition_log(path)
+        if logged:
+            columns += [f'stored_{n}' for n in logged] + ['stored_source']
+            values += list(logged.values()) + [
+                f"acquisition log {os.path.basename(log_path)}"]
         cursor = self._db.execute(
             f"INSERT INTO evidence ({', '.join(columns)}) VALUES "
             f"({', '.join('?' * len(columns))})", values)
         self._db.commit()
         recorded = '; '.join(f"{EVIDENCE_DETAILS[k].lower()} {v}"
                              for k, v in details.items() if v)
+        if logged:
+            recorded = '; '.join(filter(None, (
+                f"acquisition hashes from {log_path}: " + ' '.join(
+                    f"{n.upper()}={v}" for n, v in logged.items()),
+                recorded)))
         if live:
             recorded = '; '.join(filter(None, (
                 'live disk, read-only through an administrator helper; '
@@ -605,65 +625,140 @@ class Case:
         that the file found elsewhere is the same evidence.
         """
         new_path = os.path.normpath(os.path.abspath(new_path))
-        try:
-            size = os.path.getsize(new_path)
-        except OSError:
-            size = None
+        old = self._db.execute("SELECT path FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
         self._db.execute(
-            "UPDATE evidence SET path = ?, size = ?, last_status = ? "
-            "WHERE id = ?",
-            (new_path, size, STATUS_PENDING, evidence_id))
+            "UPDATE evidence SET path = ?, last_status = ? WHERE id = ?",
+            (new_path, STATUS_PENDING, evidence_id))
         self._db.commit()
-        self._record_activity('evidence relocated', new_path)
-
-    def record_hashes(self, evidence_id, results, status=STATUS_VERIFIED,
-                      detail='Hashes computed and recorded.'):
-        """Store the hashes verification computed.
-
-        `results` is the dict from ImageHandler.calculate_hashes: the computed
-        digests, and for an E01 the ones stored inside the image itself.
-        `status` / `detail` are the verdict (`hash_verdict`): an image whose
-        digests differ from the ones it stores is recorded as changed, with
-        its digests kept -- they are what it is now.
-        """
-        self._db.execute(
-            "UPDATE evidence SET md5 = ?, sha1 = ?, sha256 = ?, "
-            "stored_md5 = ?, stored_sha1 = ?, verified_utc = ?, "
-            "last_status = ? WHERE id = ?",
-            (results.get('computed_md5'), results.get('computed_sha1'),
-             results.get('computed_sha256'), results.get('stored_md5'),
-             results.get('stored_sha1'), _utc_now(), status,
-             evidence_id))
-        self._db.commit()
-        # The history is the record: a hash written now does not replace the
-        # fact that one was written before.
-        self.record_verification(
-            evidence_id, 'md5',
-            results.get('stored_md5') or '',
-            results.get('computed_md5') or '',
-            status, detail)
+        # The recorded size is kept with the hashes: the next check
+        # compares the file found here with both.
         self._record_activity(
-            'evidence hashed',
-            f"id={evidence_id} md5={results.get('computed_md5') or '-'} "
-            f"{status}: {detail}")
+            'evidence relocated',
+            f"id={evidence_id} {old['path'] if old else '?'} -> {new_path}"
+            f"; recorded hashes kept, to be checked")
+
+    def record_hashes(self, evidence_id, results, status=None, detail=None):
+        """Judge a hashing run (ImageHandler.calculate_hashes) and record
+        it: `apply_verification`. Kept under its old name; `status` and
+        `detail` are ignored -- the verdict is never the caller's."""
+        return self.apply_verification(evidence_id, results)
+
+    def apply_verification(self, evidence_id, results):
+        """Record what a hashing run of this evidence found. Returns the
+        outcome {status, detail, algorithm, expected, computed}.
+
+        The verdict (`verdict`) compares the run with everything the case
+        holds: the hashes recorded when it was first hashed, the hashes
+        the image stores itself (an E01's) and the acquisition hashes from
+        its log or entered by the examiner; it also reports damage the
+        image's own checksums show. Every one must match.
+
+        Recorded hashes are written once -- the first time the evidence is
+        hashed in full without contradicting anything -- and never
+        replaced: a check that finds the evidence changed is a row in the
+        history and the evidence's status, and the reference it was
+        checked against stays what it was. (A dialog that saved whatever
+        it had just computed as the new reference made an altered image
+        "verified" on the next check.)"""
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if row is None:
+            raise CaseError(f"No evidence {evidence_id} in this case")
+        row = dict(row)
+        recorded = {name: row.get(name) for name in HASH_NAMES
+                    if row.get(name)}
+        stored = acquisition_hashes(row, results)
+        outcome = verdict(results, recorded, stored)
+        first = not recorded and outcome['status'] in (
+            STATUS_VERIFIED, STATUS_BASELINE, STATUS_LIVE)
+        if first:
+            self._db.execute(
+                "UPDATE evidence SET md5 = ?, sha1 = ?, sha256 = ? "
+                "WHERE id = ? AND md5 IS NULL AND sha1 IS NULL AND "
+                "sha256 IS NULL",
+                tuple(results.get(f'computed_{n}') for n in HASH_NAMES)
+                + (evidence_id,))
+        # What the image stores itself is kept beside the row, so the
+        # report states it even for an image that is never opened again.
+        for name in ('md5', 'sha1'):
+            value = results.get(f'stored_{name}')
+            if value and not row.get(f'stored_{name}'):
+                self._db.execute(
+                    f"UPDATE evidence SET stored_{name} = ?, stored_source "
+                    f"= COALESCE(stored_source, 'the image') WHERE id = ?",
+                    (value, evidence_id))
+        if outcome['status'] == STATUS_VERIFIED:
+            self._db.execute("UPDATE evidence SET verified_utc = ? WHERE "
+                             "id = ?", (_utc_now(), evidence_id))
+        self._db.commit()
+        self._note_check(evidence_id, outcome['algorithm'],
+                         outcome['expected'], outcome['computed'],
+                         outcome['status'], outcome['detail'])
+        if first:
+            self._record_activity(
+                'evidence hashes recorded',
+                f"id={evidence_id} " + ' '.join(
+                    f"{n.upper()}={results.get(f'computed_{n}')}"
+                    for n in HASH_NAMES if results.get(f'computed_{n}'))
+                + f" over {results.get('size') or 0:,} bytes")
+        return outcome
+
+    def set_acquisition_hashes(self, evidence_id, source, **hashes):
+        """Record the hashes the evidence was acquired as -- from its
+        acquisition log, or as the examiner reads them off the custody
+        paperwork -- for every later check to compare with. Values are
+        checked as hex digests of the right length; the change is audited
+        with the old and new values. `source` says where they came from."""
+        lengths = {'md5': 32, 'sha1': 40, 'sha256': 64}
+        clean = {}
+        for name, value in hashes.items():
+            if name not in lengths:
+                raise ValueError(f"Not a recorded hash: {name}")
+            value = (value or '').strip().lower()
+            if value and not re.fullmatch(f'[0-9a-f]{{{lengths[name]}}}',
+                                          value):
+                raise ValueError(f"{name.upper()} must be "
+                                 f"{lengths[name]} hex digits")
+            clean[name] = value or None
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if row is None:
+            raise CaseError(f"No evidence {evidence_id} in this case")
+        changes = {n: (row[f'stored_{n}'], v) for n, v in clean.items()
+                   if (row[f'stored_{n}'] or None) != v}
+        if not changes:
+            return
+        for name, (_old, new) in changes.items():
+            self._db.execute(f"UPDATE evidence SET stored_{name} = ? WHERE "
+                             f"id = ?", (new, evidence_id))
+        self._db.execute("UPDATE evidence SET stored_source = ? WHERE id = ?",
+                         (source, evidence_id))
+        self._db.commit()
+        self._record_activity(
+            'acquisition hashes set',
+            f"id={evidence_id} from {source}: " + '; '.join(
+                f"{n.upper()} {old or '-'} -> {new or '-'}"
+                for n, (old, new) in changes.items()))
 
     def verify_evidence(self, progress=None):
         """Check every piece of evidence is still what the case recorded.
 
         Returns a list of `(evidence_row, status, detail)`. The status that
-        matters is CHANGED: a file still present whose bytes no longer match is
-        the one an examiner must be told about loudly, and it is exactly the
-        case a plain "could not open" message would hide.
+        matters is CHANGED: a file still present whose bytes no longer match
+        is the one an examiner must be told about loudly.
 
-        Only the recorded hash is recomputed, so an image added but never
-        verified reports UNHASHED rather than pretending to have checked it.
-        The window runs `check_evidence` on a thread and `record_check` here,
-        one row at a time; this is the same, in one call.
+        Each piece is hashed in full (`hash_evidence`) and judged by
+        `apply_verification`, as the window's verification job does.
         """
         outcomes = []
         for row in self.evidence():
-            outcome = check_evidence(row, progress)
-            self.record_check(row['id'], outcome)
+            results = hash_evidence(row, progress)
+            if results.get('status'):           # missing, or a live disk
+                self.record_check(row['id'], results)
+                outcome = results
+            else:
+                outcome = self.apply_verification(row['id'], results)
             outcomes.append((row, outcome['status'], outcome['detail']))
         return outcomes
 
@@ -706,11 +801,15 @@ class Case:
         from "this evidence matches", and only the first is defensible in a
         report.
         """
+        named = self._db.execute(
+            "SELECT COALESCE(display_name, path) AS name FROM evidence "
+            "WHERE id = ?", (evidence_id,)).fetchone()
         self._db.execute(
-            "INSERT INTO verifications (evidence_id, utc, algorithm, expected,"
-            " computed, status, detail) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (evidence_id, _utc_now(), algorithm, expected, computed, status,
-             detail))
+            "INSERT INTO verifications (evidence_id, evidence_name, utc, "
+            "algorithm, expected, computed, status, detail) VALUES "
+            "(?, ?, ?, ?, ?, ?, ?, ?)",
+            (evidence_id, named['name'] if named else None, _utc_now(),
+             algorithm, expected, computed, status, detail))
         self._db.commit()
 
     def verifications(self, evidence_id=None, limit=200):
@@ -862,6 +961,11 @@ class Case:
 
     def update_bookmark(self, bookmark_id, label=None, colour=None):
         """Rename or recolour a bookmark."""
+        old = self._db.execute("SELECT label, colour, artifact_ref FROM "
+                               "bookmarks WHERE id = ?",
+                               (bookmark_id,)).fetchone()
+        if old is None:
+            return
         if label is not None:
             self._db.execute("UPDATE bookmarks SET label = ? WHERE id = ?",
                              (label, bookmark_id))
@@ -869,16 +973,27 @@ class Case:
             self._db.execute("UPDATE bookmarks SET colour = ? WHERE id = ?",
                              (colour, bookmark_id))
         self._db.commit()
-        self._record_activity('bookmark edited', f'id={bookmark_id}')
+        changes = [f"{what} {old[what]!r} -> {new!r}"
+                   for what, new in (('label', label), ('colour', colour))
+                   if new is not None and new != old[what]]
+        if changes:
+            self._record_activity(
+                'bookmark edited',
+                f"id={bookmark_id} ({old['artifact_ref']}): "
+                + '; '.join(changes))
 
     def remove_bookmark(self, bookmark_id):
         """Delete a bookmark. Any notes on it are kept, and become free-standing."""
-        row = self._db.execute("SELECT label FROM bookmarks WHERE id = ?",
+        row = self._db.execute("SELECT label, artifact_ref, artifact_path "
+                               "FROM bookmarks WHERE id = ?",
                                (bookmark_id,)).fetchone()
         self._db.execute("DELETE FROM bookmarks WHERE id = ?", (bookmark_id,))
         self._db.commit()
         if row:
-            self._record_activity('bookmark removed', row['label'] or '')
+            self._record_activity(
+                'bookmark removed',
+                f"id={bookmark_id} {row['label'] or ''!r} on "
+                f"{row['artifact_path'] or row['artifact_ref']}")
 
     # --- notes ------------------------------------------------------------
 
@@ -909,9 +1024,12 @@ class Case:
             (evidence_id, artifact_ref, artifact_name, artifact_path, body,
              now, now, bookmark_id))
         self._db.commit()
+        # The whole text: the audit trail is where a note's history is
+        # kept once it is edited or removed.
         self._record_activity(
             'note added',
-            f"{artifact_name or 'case note'}: {body[:60]}")
+            f"id={cursor.lastrowid} on {artifact_name or 'the case'}: "
+            f"{body}")
         return cursor.lastrowid
 
     def notes(self, evidence_id=None, artifact_ref=None, bookmark_id=None):
@@ -940,16 +1058,27 @@ class Case:
 
     def update_note(self, note_id, body):
         """Rewrite a note's body, stamping when it changed."""
+        old = self._db.execute("SELECT body FROM notes WHERE id = ?",
+                               (note_id,)).fetchone()
+        if old is None or old['body'] == body:
+            return
         self._db.execute(
             "UPDATE notes SET body = ?, updated_utc = ? WHERE id = ?",
             (body, _utc_now(), note_id))
         self._db.commit()
-        self._record_activity('note edited', f'id={note_id}')
+        # Old and new in full: a finding's wording, once changed, is
+        # otherwise gone.
+        self._record_activity('note edited',
+                              f"id={note_id}: {old['body']!r} -> {body!r}")
 
     def remove_note(self, note_id):
+        old = self._db.execute("SELECT body FROM notes WHERE id = ?",
+                               (note_id,)).fetchone()
         self._db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
         self._db.commit()
-        self._record_activity('note removed', f'id={note_id}')
+        if old is not None:
+            self._record_activity('note removed',
+                                  f"id={note_id}: {old['body']!r}")
 
     def _evidence_exists(self, evidence_id):
         return self._db.execute(
@@ -975,19 +1104,122 @@ class Case:
         self._record_activity(action, detail)
 
     def _record_activity(self, action, detail=''):
-        """Append to the audit trail.
+        """Append to the audit trail, chained.
 
-        Deliberately swallows its own failures: an audit line must never be the
-        reason a case operation fails, and the operation itself is the thing
-        the examiner asked for.
+        Each entry records who (the examiner named in Settings, and the
+        operating-system account), with what (TRACE's version), and the
+        SHA-256 of the entry before it: `entry_hash` covers the entry's own
+        fields and `prev_hash`, so changing, removing or reordering any
+        entry breaks every hash after it (`verify_audit`). Triggers refuse
+        UPDATE and DELETE on the table (`_custody_guards`). The chain step
+        runs inside one write lock, so jobs writing from other processes
+        cannot interleave.
+
+        Deliberately swallows its own failures, logged as errors: an audit
+        line must never be the reason a case operation fails, and the
+        operation itself is the thing the examiner asked for.
         """
         try:
-            self._db.execute(
-                "INSERT INTO activity (utc, action, detail) VALUES (?, ?, ?)",
-                (_utc_now(), action, str(detail)))
-            self._db.commit()
+            if self._db.in_transaction:
+                self._db.commit()
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                last = self._db.execute(
+                    "SELECT id, entry_hash FROM activity ORDER BY id DESC "
+                    "LIMIT 1").fetchone()
+                sequence = self._db.execute(
+                    "SELECT seq FROM sqlite_sequence WHERE name = 'activity'"
+                ).fetchone()
+                entry = {'id': max(last['id'] if last else 0,
+                                   sequence['seq'] if sequence else 0) + 1,
+                         'utc': _utc_now(), 'action': action,
+                         'detail': str(detail),
+                         'examiner': self._examiner(),
+                         'account': _account(), 'tool': _tool(),
+                         'prev_hash': (last['entry_hash'] or '') if last
+                         else ''}
+                entry['entry_hash'] = audit_hash(entry)
+                self._db.execute(
+                    "INSERT INTO activity (id, utc, action, detail, "
+                    "examiner, account, tool, prev_hash, entry_hash) VALUES "
+                    "(:id, :utc, :action, :detail, :examiner, :account, "
+                    ":tool, :prev_hash, :entry_hash)", entry)
+                self._db.commit()
+            except BaseException:
+                self._db.rollback()
+                raise
         except sqlite3.Error as exc:
-            logger.warning("Could not record activity %r: %s", action, exc)
+            logger.error("Could not record activity %r: %s", action, exc)
+
+    def _examiner(self):
+        """The examiner using TRACE now: Settings' name, else the case's."""
+        try:
+            from trace_app.core import settings
+            name = settings.user('examiner')
+        except Exception:
+            name = ''
+        return (name or self._get('examiner', '') or '').strip()
+
+    def verify_audit(self):
+        """Check the audit trail's chain. Returns {'ok', 'entries',
+        'head', 'problems', 'started'}: `head` is the newest entry's hash
+        (a report states it, so a trail cut short after the report can be
+        told); `problems` names each entry whose hash or link fails;
+        `started` is the first entry written chained (entries migrated
+        from before schema 18 were chained when migrated, which the trail
+        itself says)."""
+        rows = self._db.execute(
+            "SELECT * FROM activity ORDER BY id").fetchall()
+        problems, previous, previous_id = [], '', 0
+        for row in rows:
+            row = dict(row)
+            if row['id'] != previous_id + 1 and previous_id:
+                problems.append(f"entries {previous_id + 1:,} to "
+                                f"{row['id'] - 1:,} are missing")
+            if (row.get('prev_hash') or '') != previous:
+                problems.append(f"entry {row['id']:,} does not follow the "
+                                f"one before it (changed, removed or "
+                                f"reordered)")
+            if audit_hash(row) != row.get('entry_hash'):
+                problems.append(f"entry {row['id']:,} ({row['action']}) "
+                                f"was altered after it was written")
+            previous, previous_id = row.get('entry_hash') or '', row['id']
+        return {'ok': not problems, 'entries': len(rows), 'head': previous,
+                'problems': problems}
+
+    def _custody_guards(self):
+        """Triggers that keep the custody record append-only: no UPDATE or
+        DELETE of an audit entry; a verification row is never changed,
+        except that removing its evidence detaches it (evidence_id NULL --
+        its name stays) rather than deleting it. Anyone can still edit the
+        database file by hand; the audit chain is what shows it."""
+        self._db.executescript("""
+            CREATE TRIGGER IF NOT EXISTS activity_no_update
+            BEFORE UPDATE ON activity BEGIN
+                SELECT RAISE(ABORT, 'the audit trail is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS activity_no_delete
+            BEFORE DELETE ON activity BEGIN
+                SELECT RAISE(ABORT, 'the audit trail is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS verifications_no_update
+            BEFORE UPDATE ON verifications
+            WHEN NOT (NEW.evidence_id IS NULL AND NEW.id IS OLD.id
+                      AND NEW.evidence_name IS OLD.evidence_name
+                      AND NEW.utc IS OLD.utc
+                      AND NEW.algorithm IS OLD.algorithm
+                      AND NEW.expected IS OLD.expected
+                      AND NEW.computed IS OLD.computed
+                      AND NEW.status IS OLD.status
+                      AND NEW.detail IS OLD.detail) BEGIN
+                SELECT RAISE(ABORT, 'verification history is append-only');
+            END;
+            CREATE TRIGGER IF NOT EXISTS verifications_no_delete
+            BEFORE DELETE ON verifications BEGIN
+                SELECT RAISE(ABORT, 'verification history is append-only');
+            END;
+        """)
+        self._db.commit()
 
     # --- schema -----------------------------------------------------------
 
@@ -2064,6 +2296,8 @@ class Case:
                 sha256        TEXT,
                 stored_md5    TEXT,
                 stored_sha1   TEXT,
+                stored_sha256 TEXT,
+                stored_source TEXT,
                 added_utc     TEXT,
                 verified_utc  TEXT,
                 last_status   TEXT,
@@ -2112,7 +2346,8 @@ class Case:
 
             CREATE TABLE IF NOT EXISTS verifications (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
+                evidence_id   INTEGER REFERENCES evidence(id) ON DELETE SET NULL,
+                evidence_name TEXT,
                 utc           TEXT NOT NULL,
                 algorithm     TEXT,
                 expected      TEXT,
@@ -2125,7 +2360,12 @@ class Case:
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 utc           TEXT NOT NULL,
                 action        TEXT NOT NULL,
-                detail        TEXT
+                detail        TEXT,
+                examiner      TEXT,
+                account       TEXT,
+                tool          TEXT,
+                prev_hash     TEXT,
+                entry_hash    TEXT
             );
 
             CREATE TABLE IF NOT EXISTS file_analysis (
@@ -2483,6 +2723,90 @@ class Case:
         self._db.commit()
         self._set('schema_version', SCHEMA_VERSION)
 
+    def _migrate_custody(self):
+        """Schema 18: acquisition hashes, a verification history that
+        survives its evidence, and a chained audit trail.
+
+        Entries written before have no chain; they are chained now, in
+        order, and an entry says so -- the chain proves nothing changed
+        after this point, not before it."""
+        for column in ('stored_sha256 TEXT', 'stored_source TEXT'):
+            try:
+                self._db.execute(f"ALTER TABLE evidence ADD COLUMN {column}")
+            except sqlite3.OperationalError:
+                pass
+        for column in ('examiner', 'account', 'tool', 'prev_hash',
+                       'entry_hash'):
+            try:
+                self._db.execute(
+                    f"ALTER TABLE activity ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                pass
+        self._db.execute("UPDATE evidence SET stored_source = 'the image' "
+                         "WHERE stored_source IS NULL AND (stored_md5 IS NOT "
+                         "NULL OR stored_sha1 IS NOT NULL)")
+        # verifications: ON DELETE SET NULL and the evidence's name, so
+        # removing evidence no longer erases its history. SQLite cannot
+        # change a foreign key in place: the table is rebuilt.
+        columns = [r['name'] for r in self._db.execute(
+            "PRAGMA table_info(verifications)").fetchall()]
+        if 'evidence_name' not in columns:
+            self._db.commit()
+            self._db.execute("PRAGMA foreign_keys = OFF")
+            self._db.executescript("""
+                BEGIN;
+                DROP TRIGGER IF EXISTS verifications_no_update;
+                DROP TRIGGER IF EXISTS verifications_no_delete;
+                CREATE TABLE verifications_v18 (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    evidence_id   INTEGER REFERENCES evidence(id)
+                                  ON DELETE SET NULL,
+                    evidence_name TEXT,
+                    utc           TEXT NOT NULL,
+                    algorithm     TEXT,
+                    expected      TEXT,
+                    computed      TEXT,
+                    status        TEXT NOT NULL,
+                    detail        TEXT
+                );
+                INSERT INTO verifications_v18 (id, evidence_id,
+                    evidence_name, utc, algorithm, expected, computed,
+                    status, detail)
+                SELECT v.id, v.evidence_id,
+                       (SELECT COALESCE(e.display_name, e.path)
+                        FROM evidence e WHERE e.id = v.evidence_id),
+                       v.utc, v.algorithm, v.expected, v.computed, v.status,
+                       v.detail
+                FROM verifications v;
+                DROP TABLE verifications;
+                ALTER TABLE verifications_v18 RENAME TO verifications;
+                COMMIT;
+            """)
+            self._db.execute("PRAGMA foreign_keys = ON")
+        unchained = self._db.execute(
+            "SELECT * FROM activity WHERE entry_hash IS NULL ORDER BY id"
+        ).fetchall()
+        if unchained:
+            previous = self._db.execute(
+                "SELECT entry_hash FROM activity WHERE entry_hash IS NOT "
+                "NULL ORDER BY id DESC LIMIT 1").fetchone()
+            previous = previous['entry_hash'] if previous else ''
+            for row in unchained:
+                row = dict(row, prev_hash=previous)
+                row['entry_hash'] = audit_hash(row)
+                self._db.execute(
+                    "UPDATE activity SET prev_hash = ?, entry_hash = ? "
+                    "WHERE id = ?", (row['prev_hash'], row['entry_hash'],
+                                     row['id']))
+                previous = row['entry_hash']
+        self._db.commit()
+        if unchained:
+            self._record_activity(
+                'audit trail chained',
+                f"entries 1 to {unchained[-1]['id']:,} were written before "
+                f"TRACE chained its audit trail; they were chained now, as "
+                f"found, so the chain shows changes after this point only")
+
     def _migrate(self):
         """Bring an existing case up to the current schema version."""
         # Read the version the case was written at BEFORE touching the schema.
@@ -2503,6 +2827,9 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 18:
+            self._migrate_custody()
 
         if version < 17:
             # A picture's perceptual hash, for Triage > Similar pictures.
@@ -2638,6 +2965,9 @@ class Case:
 
         if version != SCHEMA_VERSION:
             self._set('schema_version', SCHEMA_VERSION)
+
+        # After every step: a rebuilt table loses its triggers.
+        self._custody_guards()
 
 # --- module helpers -------------------------------------------------------
 
@@ -2916,56 +3246,123 @@ def _utc_now():
         microsecond=0).isoformat()
 
 
-def hash_verdict(results):
-    """(status, detail) for an image hashed for the first time: compared
-    with the hashes it stores itself (an E01's, an AD1's log). Every
-    stored hash must match -- one matching and one not is a damaged or
-    altered image, not a verified one. With none stored, the digests are
-    the baseline later checks compare with."""
-    computed = {a: (results.get(f'computed_{a}') or '').lower()
-                for a in ('md5', 'sha1')}
-    # A container's own check of what it stores (an AFF4 image's stream
-    # hashes) failing is the stronger finding: the data is not what was
-    # acquired, whether or not the disk could be hashed.
+def acquisition_hashes(row, results=None):
+    """{name: hex} the evidence should hash to, from outside TRACE's own
+    record: what the image stores (an E01's MD5/SHA-1, an AD1's log) and
+    the acquisition hashes kept on the evidence row (its log, or entered
+    by the examiner)."""
+    stored = {}
+    for name in HASH_NAMES:
+        value = (results or {}).get(f'stored_{name}') or \
+            (row or {}).get(f'stored_{name}')
+        if value:
+            stored[name] = str(value).lower()
+    return stored
+
+
+def verdict(results, recorded=None, stored=None):
+    """Judge one hashing run (ImageHandler.calculate_hashes): {status,
+    detail, algorithm, expected, computed}.
+
+    In order, the first that applies:
+
+    * the container's own check of what it stores fails (AFF4) -> CHANGED
+    * the run could not read the evidence in full -> UNREADABLE (no hash)
+    * a live disk -> LIVE (what was read, when; never verified)
+    * chunks failing the image's own checksums (an E01) -> CHANGED, with
+      the sectors
+    * any hash the case recorded, or the image or its acquisition records,
+      that differs from the run -> CHANGED, naming each
+    * everything compared matches -> VERIFIED, naming what was compared
+    * nothing to compare with -> BASELINE: hashed in full; these hashes
+      are the reference later checks use
+    """
+    recorded = {k: str(v).lower() for k, v in (recorded or {}).items() if v}
+    if stored is None:
+        stored = acquisition_hashes(None, results)
+    computed = {name: (results.get(f'computed_{name}') or '').lower()
+                for name in HASH_NAMES}
+    out = {'algorithm': '', 'expected': '', 'computed': ''}
     check = results.get('container_check')
     if check and check[0] is False:
-        return STATUS_CHANGED, check[1]
-    if results.get('live') and computed['md5'] and \
-            computed['md5'] != 'error':
-        return STATUS_LIVE, ("Read live: these are the hashes of what was "
-                             "read, when. A disk in use changes as it is "
-                             "read, so they verify nothing; for evidence, "
-                             "image it behind a write blocker.")
-    if not computed['md5'] or computed['md5'] == 'error':
-        return STATUS_UNHASHED, ("The image could not be hashed: "
-                                 f"{results.get('error') or 'read failed'}.")
-    stored = {a: (results.get(f'stored_{a}') or '').lower()
-              for a in ('md5', 'sha1')}
-    compared = [a for a in ('md5', 'sha1') if stored[a]]
-    # That check is of the stored data, not the disk, so it stands beside
-    # the disk's hashes rather than being compared with them.
+        return dict(out, status=STATUS_CHANGED, detail=check[1])
+    if results.get('error') or not any(computed.values()):
+        return dict(out, status=STATUS_UNREADABLE, detail=(
+            "The evidence could not be read in full, so it was not "
+            f"hashed: {results.get('error') or 'nothing was read'}."))
+    if results.get('live'):
+        return dict(out, status=STATUS_LIVE, detail=(
+            "Read live: these are the hashes of what was read, when. A "
+            "disk in use changes as it is read, so they verify nothing; "
+            "for evidence, image it behind a write blocker."))
+    findings = []
+    damaged = results.get('damaged') or []
+    if damaged:
+        sectors = sum(last - first + 1 for first, last in damaged)
+        shown = ', '.join(f"{first:,}-{last:,}" for first, last
+                          in damaged[:8])
+        findings.append(
+            f"{sectors:,} sectors fail the image's own chunk checksums "
+            f"(sectors {shown}{', ...' if len(damaged) > 8 else ''}); "
+            f"they read as zeros")
+    findings += [f"the image's structure is damaged: {problem}"
+                 for problem in results.get('container_problems') or []]
+    compared, expected_values, differ = [], [], []
+    for source, wanted in (('recorded by the case', recorded),
+                           ('stored with the image', stored)):
+        for name in HASH_NAMES:
+            value = wanted.get(name)
+            if not value:
+                continue
+            compared.append((name, source))
+            expected_values.append(value)
+            if computed[name] != value:
+                differ.append(f"{name.upper()} is {computed[name] or '-'}; "
+                              f"{source}: {value}")
+    out.update(algorithm='+'.join(sorted({n for n, _s in compared},
+                                         key=HASH_NAMES.index)) or
+               '+'.join(n for n in HASH_NAMES if computed[n]),
+               expected=' '.join(expected_values),
+               computed=' '.join(computed[n] for n in HASH_NAMES
+                                 if computed[n]))
+    if differ or findings:
+        return dict(out, status=STATUS_CHANGED,
+                    detail='; '.join(findings + differ) + '.')
+    if check and check[0] and not compared:
+        # An AFF4's stored streams re-hashed to what was recorded at
+        # acquisition: the data is verified; the disk's own hashes are
+        # the reference from here on.
+        return dict(out, status=STATUS_VERIFIED,
+                    detail=f"{check[1]} The disk's hashes are recorded as "
+                           f"the reference for later checks.")
     if not compared:
-        if check and check[0]:
-            return STATUS_VERIFIED, (f"{check[1]} The disk's hashes are "
-                                     f"recorded as the baseline.")
-        return STATUS_VERIFIED, ("Hashes computed and recorded; the image "
-                                 "stores none to compare with, so these are "
-                                 "the baseline.")
-    differ = [a for a in compared if stored[a] != computed[a]]
-    if differ:
-        return STATUS_CHANGED, '; '.join(
-            f"{a.upper()} is {computed[a]}; the image stored {stored[a]}"
-            for a in differ) + '.'
-    if len(compared) == 1:
-        return STATUS_VERIFIED, (f"{compared[0].upper()} matches the hash "
-                                 f"stored in the image.")
-    return STATUS_VERIFIED, "MD5 and SHA-1 match the hashes stored in the image."
+        return dict(out, status=STATUS_BASELINE, detail=(
+            f"Hashed in full ({results.get('size') or 0:,} bytes). Nothing "
+            f"was recorded to compare with -- no hash in the image and no "
+            f"acquisition hash -- so these hashes are the reference every "
+            f"later check uses."))
+    by_source = {}
+    for name, source in compared:
+        by_source.setdefault(source, []).append(name.upper())
+    return dict(out, status=STATUS_VERIFIED, detail='; '.join(
+        f"{' and '.join(names)} match{'es' if len(names) == 1 else ''} "
+        f"the hash{'es' if len(names) > 1 else ''} {source}"
+        for source, names in by_source.items()) + '.')
 
 
-def check_evidence(row, progress=None):
-    """Re-check one evidence row against its recorded hash, without the
-    case's database: safe on a worker thread. Returns {status, detail,
-    algorithm, expected, computed} for `Case.record_check`."""
+def hash_verdict(results):
+    """(status, detail) of a first hashing run with nothing recorded:
+    `verdict` against the hashes the image itself stores."""
+    outcome = verdict(results)
+    return outcome['status'], outcome['detail']
+
+
+def hash_evidence(row, progress=None):
+    """Hash one evidence row in full, without the case's database (safe on
+    a worker thread). Returns calculate_hashes' results -- or, when there
+    is nothing to hash, an outcome {status, detail, ...} for record_check:
+    the file is missing, or it is a live disk (re-reading one in use
+    proves nothing)."""
     path = row['path']
     out = {'algorithm': '', 'expected': '', 'computed': ''}
     from trace_app.core.live_disk import is_device_path
@@ -2976,44 +3373,76 @@ def check_evidence(row, progress=None):
     if not os.path.exists(path):
         return dict(out, status=STATUS_MISSING,
                     detail='The file is not at its recorded location.')
-
-    expected = row.get('md5') or row.get('sha1') or row.get('sha256')
-    if not expected:
-        return dict(out, status=STATUS_UNHASHED,
-                    detail='No hash was recorded, so nothing can be '
-                           'compared.')
-
-    # Size is far cheaper than a hash and settles most mismatches -- for a
-    # single raw file, whose bytes are what was hashed. An E01, a virtual
-    # disk or logical evidence was hashed by what it holds, not by its
-    # container's size.
-    plain = _is_plain_image(path)
+    if _is_plain_image(path):
+        from trace_app.core import evidence_hash
+        results = {'path': path, 'stored_md5': None, 'stored_sha1': None}
+        try:
+            digests = evidence_hash.hash_file(path, progress)
+        except evidence_hash.HashingError as exc:
+            return dict(results, error=str(exc), size=0)
+        results.update({f'computed_{n}': digests[n] for n in HASH_NAMES})
+        results['size'] = digests['size']
+        return results
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(path)
     try:
-        size = os.path.getsize(path) if plain else None
-    except OSError as exc:
-        return dict(out, status=STATUS_MISSING, detail=str(exc))
+        if not handler.loaded:
+            return {'path': path, 'error': handler.load_error or
+                    'The evidence could not be opened.'}
+        return handler.calculate_hashes(progress)
+    finally:
+        handler.close_resources()
 
-    if plain and row.get('size') is not None and size != row['size']:
-        return dict(out, algorithm='size', expected=str(row['size']),
-                    computed=str(size), status=STATUS_CHANGED,
-                    detail=f"The file is {size:,} bytes; the case recorded "
-                           f"{row['size']:,}.")
 
-    algorithm = ('md5' if row.get('md5') else
-                 'sha1' if row.get('sha1') else 'sha256')
-    digest = _hash_file(path, algorithm, progress) if plain else \
-        _hash_evidence(path, algorithm, progress)
-    out.update(algorithm=algorithm, expected=str(expected))
-    if digest is None:
-        return dict(out, status=STATUS_MISSING,
-                    detail='The file could not be read.')
-    out['computed'] = digest
-    if digest.lower() == str(expected).lower():
-        return dict(out, status=STATUS_VERIFIED,
-                    detail=f'{algorithm.upper()} matches.')
-    return dict(out, status=STATUS_CHANGED,
-                detail=f"{algorithm.upper()} is {digest}; the case recorded "
-                       f"{expected}.")
+def check_evidence(row, progress=None):
+    """Hash one evidence row and judge it against what the row records
+    (`verdict`), without the case's database. Returns {status, detail,
+    algorithm, expected, computed}; Case.apply_verification is what
+    records a run."""
+    results = hash_evidence(row, progress)
+    if results.get('status'):
+        return results
+    recorded = {n: row.get(n) for n in HASH_NAMES if row.get(n)}
+    return verdict(results, recorded, acquisition_hashes(row, results))
+
+
+def _acquisition_log(path):
+    try:
+        from trace_app.core import acquisition_log
+        return acquisition_log.logged_hashes(path)
+    except Exception as exc:
+        logger.warning("Acquisition log beside %s unreadable: %s", path, exc)
+        return {}, None
+
+
+def audit_hash(entry):
+    """The SHA-256 chaining an audit entry: over its id, time, action,
+    detail, examiner, account, tool and the previous entry's hash."""
+    payload = json.dumps([entry.get('id'), entry.get('utc'),
+                          entry.get('action'), entry.get('detail'),
+                          entry.get('examiner'), entry.get('account'),
+                          entry.get('tool'), entry.get('prev_hash') or ''],
+                         ensure_ascii=False, separators=(',', ':'))
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _account():
+    """user@host of the operating-system account running TRACE."""
+    import getpass
+    import platform
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = '?'
+    return f"{user}@{platform.node() or '?'}"
+
+
+def _tool():
+    try:
+        from trace_app import __version__
+    except ImportError:
+        __version__ = '?'
+    return f"TRACE {__version__}"
 
 
 def _is_plain_image(path):
@@ -3037,41 +3466,15 @@ class _PathOnly:
         self.image_path = path
 
 
-def _hash_evidence(path, algorithm, progress=None):
-    """The digest ImageHandler.calculate_hashes computes for `path`, the
-    same one record_hashes stored; None if it cannot be computed."""
-    from trace_app.core.image_handler import ImageHandler
-    handler = ImageHandler(path)
-    try:
-        if not handler.loaded:
-            return None
-        results = handler.calculate_hashes(progress)
-    finally:
-        handler.close_resources()
-    digest = results.get(f'computed_{algorithm}')
-    return None if not digest or digest == 'Error' else digest
-
-
 def _hash_file(path, algorithm='md5', progress=None):
-    """Hash a file in chunks. Returns the hex digest, or None if unreadable."""
-    digest = hashlib.new(algorithm)
-    chunk_size = 4 * 1024 * 1024
+    """A file's digest in `algorithm`, or None if it cannot be read in
+    full (core/evidence_hash.py)."""
+    from trace_app.core import evidence_hash
     try:
-        total = os.path.getsize(path)
-        done = 0
-        with open(path, 'rb') as handle:
-            while True:
-                chunk = handle.read(chunk_size)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                done += len(chunk)
-                if progress is not None:
-                    progress(done, total)
-    except OSError as exc:
+        return evidence_hash.hash_file(path, progress)[algorithm]
+    except evidence_hash.HashingError as exc:
         logger.error("Could not hash %s: %s", path, exc)
         return None
-    return digest.hexdigest()
 
 
 def is_case_folder(folder):

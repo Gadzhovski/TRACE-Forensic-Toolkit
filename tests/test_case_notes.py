@@ -20,6 +20,9 @@ def case(tmp_path):
     case.first = case.add_evidence(str(images / 'laptop.dd'),
                                    details={'exhibit_number': 'RG-01'})
     case.second = case.add_evidence(str(images / 'phone.dd'))
+    # Acquired as MD5 abab...: the first hash matches it, so verified.
+    case.set_acquisition_hashes(case.first, 'custody form',
+                                md5='ab' * 16)
     case.record_hashes(case.first, {'computed_md5': 'ab' * 16,
                                     'computed_sha256': 'cd' * 32})
     yield case

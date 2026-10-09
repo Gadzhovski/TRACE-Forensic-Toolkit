@@ -1,290 +1,40 @@
+"""Evidence verification: the job that hashes, and the dialog that shows
+what a check found.
+
+There is one way evidence is verified: `EvidenceVerifyWorker` hashes it
+in full on a thread (core/case.hash_evidence), and the window judges and
+records the run on its own thread (Case.apply_verification, or
+core/case.verdict in quick triage, where nothing is recorded). The
+dialog only shows the outcome; closing it writes nothing. An earlier
+dialog computed and judged hashes itself and saved whatever it had just
+computed as the case's reference when it was closed -- so a mismatch,
+once seen, became the baseline the next check matched.
+"""
+
 import logging
-from PySide6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QPushButton, QApplication, QProgressBar, QHBoxLayout,
-                               QTextEdit)
-from PySide6.QtCore import QThread, Signal, Qt
-from trace_app.infra.constants import BUTTON_WIDTH
-from trace_app.ui import fonts
+
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
+                               QPushButton, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QHeaderView)
+
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.Verify')
 
 
-class HashCalculationThread(QThread):
-    hashCalculated = Signal(dict)  # Signal for hash results
-    progressUpdated = Signal(float)  # Signal for progress updates (percentage 0-100)
-
-    def __init__(self, image_handler):
-        super().__init__()
-        self.image_handler = image_handler
-        self.isRunning = True
-        self._last_percent = -1
-
-    def run(self):
-        try:
-            # Pass a progress callback to update the progress bar
-            hash_results = self.image_handler.calculate_hashes(
-                progress_callback=self.update_progress
-            )
-            if self.isRunning:  # Check if we're still running before emitting the signal
-                self.hashCalculated.emit(hash_results)
-        except Exception as e:
-            logger.error(f"Error in hash calculation thread: {e}")
-            if self.isRunning:
-                self.hashCalculated.emit({})  # Empty dict indicates error
-
-    def update_progress(self, current, total):
-        """Report progress, at most once per whole percent.
-
-        A 16 GB image is thousands of chunks; emitting on every one queued
-        thousands of cross-thread signals to move a bar that only has a
-        hundred positions.
-        """
-        try:
-            if total > 0 and self.isRunning:
-                # Convert to float to avoid overflow and limit to 0-100 range
-                percentage = min(100.0, (float(current) / float(total)) * 100.0)
-                if int(percentage) != self._last_percent:
-                    self._last_percent = int(percentage)
-                    self.progressUpdated.emit(percentage)
-        except Exception as e:
-            logger.error(f"Progress update error: {e}")
-
-    def stop(self):
-        """Safely stop the thread."""
-        self.isRunning = False
-
-
-class VerificationWidget(QWidget):
-    def __init__(self, image_handler, parent=None, cached=None,
-                 expected_md5=None):
-        """Show hashes for `image_handler`.
-
-        `cached` is a previous result for this same image, as returned by
-        `results()`. Given one, the dialog renders it and does not recompute:
-        hashing a multi-gigabyte image takes minutes, and doing it again on a
-        second click to show the same numbers is the kind of wait that makes a
-        tool feel broken.
-        """
-        super().__init__(parent)
-        self.image_handler = image_handler
-        self.thread = None
-        self._results_html = None
-        #: The digests themselves, as ImageHandler computed them. The rendered
-        #: HTML above is for display; a case has to store real hash values, and
-        #: it cannot store what this layer threw away.
-        self._hash_results = None
-        #: What the case already recorded for this image, if anything. A raw
-        #: image has no internal hash to check against, so this is the only
-        #: thing a second verification can compare with.
-        self._expected_md5 = expected_md5
-        self.setWindowTitle("Trace - Image Verification")
-        self.setWindowIcon(icons.icon(icons.LOGO))
-        self.setGeometry(100, 100, 750, 400)  # Adjust size for better layout
-        self._verified = False  # Track verification status
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        self.software_info = QLabel("Trace - Forensic Analysis Tool", self)
-        self.software_info.setObjectName("softwareInfoLabel")
-        layout.addWidget(self.software_info)
-
-        self.subtitle = QLabel("Image Hash Verification", self)
-        self.subtitle.setObjectName("subtitleLabel")
-        layout.addWidget(self.subtitle)
-
-        self.hash_label = QTextEdit("Calculating hashes...")
-        self.hash_label.setReadOnly(True)
-        self.hash_label.setFont(fonts.monospace(10))
-        self.hash_label.setObjectName("hashResultBox")
-        layout.addWidget(self.hash_label)
-
-        progress_bar_container = QHBoxLayout()
-        progress_bar_container.addStretch()
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMinimum(0)
-        self.progress_bar.setMaximum(100)  # Set to 100 for percentage display
-        self.progress_bar.setFixedWidth(360)
-        self.progress_bar.setAlignment(Qt.AlignCenter)
-        self.progress_bar.setObjectName("verifyProgress")
-        progress_bar_container.addWidget(self.progress_bar)
-        progress_bar_container.addStretch()
-        layout.addLayout(progress_bar_container)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
-        self.close_button = QPushButton("Close", self)
-        self.close_button.setFixedWidth(BUTTON_WIDTH)
-        self.close_button.clicked.connect(self.close)
-        button_layout.addWidget(self.close_button)
-        # Stretch on both sides: with only one button left, right-aligning it
-        # stranded it in the corner of a 750px dialog.
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-
-        if cached:
-            self._restore(cached)
-        else:
-            # Start hash calculation with a slight delay to allow the UI to
-            # initialize
-            QApplication.processEvents()
-            self.start_hash_calculation()
-
-    def closeEvent(self, event):
-        """Override closeEvent to properly clean up resources."""
-        if self.thread and self.thread.isRunning():
-            self.thread.stop()  # Tell thread to stop processing
-            self.thread.wait(1000)  # Wait up to 1 second
-
-            # If thread is still running, terminate it
-            if self.thread.isRunning():
-                self.thread.terminate()
-                self.thread.wait()
-
-        super().closeEvent(event)
-
-    def start_hash_calculation(self):
-        # Clean up any previous thread
-        if self.thread and self.thread.isRunning():
-            self.thread.stop()
-            self.thread.wait()
-
-        self.thread = HashCalculationThread(self.image_handler)
-        self.thread.hashCalculated.connect(self.on_hash_calculated)
-        self.thread.progressUpdated.connect(self.update_progress)
-        self.thread.start()
-
-    def update_progress(self, percentage):
-        """Update progress bar with the given percentage.
-
-        No processEvents here. The hashing runs in a worker thread, so the
-        event loop is already free; calling it by hand on every chunk only
-        forced a full event pass thousands of times during a long hash.
-        """
-        try:
-            self.progress_bar.setValue(int(percentage))
-        except Exception as e:
-            logger.error(f"Error updating progress bar: {e}")
-
-    def on_hash_calculated(self, hash_results):
-        """Process hash results and update UI."""
-        try:
-            # Set the progress bar to 100% complete
-            self.progress_bar.setValue(100)
-
-            if hash_results and 'computed_md5' in hash_results:
-                verification_results = []
-
-                computed_md5 = hash_results.get('computed_md5')
-                computed_sha1 = hash_results.get('computed_sha1')
-                computed_sha256 = hash_results.get('computed_sha256')
-
-                # Check if the loaded image file is of E01 format
-                if self.image_handler and self.image_handler.get_image_type() == "ewf":
-                    stored_md5 = hash_results.get('stored_md5')
-                    stored_sha1 = hash_results.get('stored_sha1')
-
-                    # Compare the computed MD5 and SHA1 hashes with the stored hashes
-                    md5_result = "Match" if computed_md5 == stored_md5 else "Mismatch"
-                    sha1_result = "Match" if computed_sha1 == stored_sha1 else "Mismatch"
-
-                    # Set verification status
-                    self._verified = md5_result == "Match" or sha1_result == "Match"
-
-                    verification_results.append(f"<b>Stored MD5:</b> {stored_md5 or 'N/A'}")
-                    verification_results.append(f"<b>Computed MD5:</b> {computed_md5}")
-                    verification_results.append(
-                        f"<b>MD5 Verify result:</b> {md5_result}<br>")  # New line after MD5 verification result
-
-                    verification_results.append(f"<b>Stored SHA1:</b> {stored_sha1 or 'N/A'}")
-                    verification_results.append(f"<b>Computed SHA1:</b> {computed_sha1}")
-                    verification_results.append(
-                        f"<b>SHA1 Verify result:</b> {sha1_result}<br>")  # New line after SHA1 verification result
-
-                else:
-                    # A raw image carries no hash of its own, so there is
-                    # nothing inside it to verify against. If the case recorded
-                    # one earlier, that is the comparison worth making --
-                    # otherwise this run establishes the baseline. Previously
-                    # _verified stayed False here forever, so a .dd could never
-                    # show as verified no matter how many times it was checked.
-                    verification_results.append(f"<b>Computed MD5:</b> {computed_md5}")
-                    verification_results.append(f"<b>Computed SHA1:</b> {computed_sha1}")
-
-                    if self._expected_md5:
-                        matches = (computed_md5 or '').lower() == self._expected_md5.lower()
-                        self._verified = matches
-                        verification_results.append(
-                            f"<b>Recorded MD5:</b> {self._expected_md5}")
-                        verification_results.append(
-                            "<b>Case comparison:</b> "
-                            + ("Match" if matches else "MISMATCH — this is not "
-                               "the file the case recorded")
-                            + "<br>")
-                    else:
-                        verification_results.append(
-                            "<b>Case comparison:</b> no hash was recorded "
-                            "before, so this run establishes the baseline.<br>")
-
-                # SHA-256 is only computed when the image stores no hashes of
-                # its own, so there is nothing to show for a verified E01.
-                if computed_sha256:
-                    verification_results.append(
-                        f"<b>Computed SHA256:</b> {computed_sha256}")
-
-                # Convert size from bytes to megabytes
-                size_bytes = hash_results.get('size')
-                size_mb = size_bytes / (1024 * 1024)
-
-                hash_info = "<br>".join(verification_results)
-                hash_info += f"<br><br><b>Size:</b> {size_bytes} bytes ({size_mb:.2f} MB)<br><b>Path:</b> {hash_results.get('path')}"
-                self.hash_label.setHtml(hash_info)
-                self._results_html = hash_info
-                self._hash_results = dict(hash_results)
-            else:
-                self.hash_label.setText("Error calculating hashes. Please ensure the image is accessible.")
-        except Exception as e:
-            logger.error(f"Error processing hash results: {e}")
-            self.hash_label.setText(f"Error processing results: {str(e)}")
-
-    def _restore(self, cached):
-        """Render a previous run without touching the image again."""
-        self._results_html = cached.get('html')
-        self._verified = cached.get('verified', False)
-        self._hash_results = cached.get('hashes')
-        self.hash_label.setHtml(self._results_html or '')
-        self.progress_bar.setValue(100)
-        self.progress_bar.setFormat("Verified earlier this session")
-
-    def results(self):
-        """The finished result, or None while it is still being computed.
-
-        Returned as plain data so the caller can hold it per image and hand it
-        back to a later dialog.
-        """
-        if self._results_html is None:
-            return None
-        return {'html': self._results_html, 'verified': self._verified,
-                'hashes': self._hash_results}
-
-
-
 class EvidenceVerifyWorker(QThread):
-    """Hash or re-check one piece of evidence for the job bar.
+    """Hash one piece of evidence in full for the job bar.
 
-    Evidence never hashed is hashed (ImageHandler.calculate_hashes) and
-    compared with what it stores itself; evidence with a recorded hash is
-    re-checked against it (case.check_evidence). Only the reading happens
-    here -- the case is written on the UI thread, which owns its database
-    connection. Cancel is cooperative: the next progress report stops it.
+    Only the reading happens here; the verdict is recorded on the UI
+    thread, which owns the case's database connection. Cancel is
+    cooperative: the next progress report stops it.
     """
 
     #: (bytes done, bytes total) -- objects, as images pass 2**31 bytes.
     progressed = Signal(object, object)
-    #: {'row', 'mode': 'hash' | 'check', 'results' | 'outcome',
-    #:  'cancelled', 'error'}
+    #: {'row', 'results', 'cancelled'}: results are calculate_hashes' (or
+    #: an outcome with a 'status' when there was nothing to hash).
     verified = Signal(dict)
 
     def __init__(self, row, parent=None):
@@ -307,31 +57,185 @@ class EvidenceVerifyWorker(QThread):
                 self.progressed.emit(done, total)
 
     def run(self):
-        from trace_app.core.case import check_evidence
-        from trace_app.core.image_handler import (HashingCancelled,
-                                                  ImageHandler)
-        out = {'row': self.row, 'cancelled': False, 'error': ''}
-        recorded = (self.row.get('md5') or self.row.get('sha1')
-                    or self.row.get('sha256'))
+        from trace_app.core.case import hash_evidence
+        from trace_app.core.image_handler import HashingCancelled
+        out = {'row': self.row, 'cancelled': False, 'results': None}
         try:
-            if recorded:
-                out['mode'] = 'check'
-                out['outcome'] = check_evidence(self.row, self._progress)
-            else:
-                out['mode'] = 'hash'
-                handler = ImageHandler(self.row['path'])
-                try:
-                    if not handler.loaded:
-                        out['error'] = (handler.load_error or
-                                        'The evidence could not be opened.')
-                    else:
-                        out['results'] = handler.calculate_hashes(
-                            self._progress)
-                finally:
-                    handler.close_resources()
+            out['results'] = hash_evidence(self.row, self._progress)
         except HashingCancelled:
             out['cancelled'] = True
         except Exception as exc:
             logger.exception("Verifying %s failed", self.row.get('path'))
-            out['error'] = str(exc)
+            out['results'] = {'path': self.row.get('path'),
+                              'error': str(exc)}
         self.verified.emit(out)
+
+
+def summary_rows(row, results, outcome):
+    """[(algorithm, this check, recorded by the case, stored with the
+    image or its acquisition, result)] for the hashes a check involved."""
+    from trace_app.core.case import HASH_NAMES, acquisition_hashes
+    results = results or {}
+    stored = acquisition_hashes(row, results)
+    rows = []
+    for name in HASH_NAMES:
+        computed = (results.get(f'computed_{name}') or '').lower()
+        recorded = ((row or {}).get(name) or '').lower()
+        kept = stored.get(name, '')
+        if not (computed or recorded or kept):
+            continue
+        against = [v for v in (recorded, kept) if v]
+        if not computed:
+            result = 'not computed' if against else ''
+        elif not against:
+            result = 'nothing to compare'
+        elif all(v == computed for v in against):
+            result = 'match'
+        else:
+            result = 'DIFFERENT'
+        rows.append((name.upper(), computed, recorded, kept, result))
+    return rows
+
+
+class VerificationDialog(QDialog):
+    """What one check of one piece of evidence found -- read-only.
+
+    `row` is the case's evidence row (or {'path', 'display_name'} in
+    quick triage), `results` the hashing run (None when only the case's
+    record is known), `outcome` the verdict {status, detail}, `history`
+    the case's earlier checks, newest first. "Verify Again" emits
+    `verify_again`; nothing here writes to the case.
+    """
+
+    verify_again = Signal()
+
+    def __init__(self, row, results, outcome, history=(), checked=None,
+                 parent=None):
+        super().__init__(parent)
+        from trace_app.ui.viewers.case_panel import (STATUS_ICON,
+                                                     STATUS_TEXT,
+                                                     STATUS_TONE)
+        from trace_app.ui.viewers.virustotal import verdict_brush
+        from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+        self.setObjectName('verificationDialog')
+        name = row.get('display_name') or row.get('path')
+        self.setWindowTitle(f"Verification -- {name}")
+        self.setWindowIcon(icons.icon(icons.LOGO))
+        self.resize(820, 520)
+        status = outcome.get('status')
+        self._text = []
+
+        layout = QVBoxLayout(self)
+        heading = QLabel(name)
+        heading.setObjectName('subtitleLabel')
+        layout.addWidget(heading)
+        path = QLabel(row.get('path', ''))
+        path.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        path.setWordWrap(True)
+        layout.addWidget(path)
+
+        verdict = QTableWidget(1, 1)
+        verdict.setObjectName('verificationStatus')
+        verdict.horizontalHeader().hide()
+        verdict.verticalHeader().hide()
+        verdict.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        verdict.setItemDelegate(NoFocusDelegate(verdict))
+        cell = QTableWidgetItem(STATUS_TEXT.get(status, status or ''))
+        if STATUS_TONE.get(status):
+            cell.setForeground(verdict_brush(STATUS_TONE[status]))
+        if status in STATUS_ICON:
+            cell.setIcon(icons.icon(STATUS_ICON[status]))
+        verdict.setItem(0, 0, cell)
+        verdict.setFixedHeight(verdict.rowHeight(0) + 4)
+        verdict.setEditTriggers(QTableWidget.NoEditTriggers)
+        layout.addWidget(verdict)
+
+        detail = QLabel(outcome.get('detail') or '')
+        detail.setWordWrap(True)
+        detail.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        layout.addWidget(detail)
+        self._text += [f"Evidence: {name}", f"Path: {row.get('path', '')}",
+                       f"Status: {STATUS_TEXT.get(status, status)}",
+                       f"Detail: {outcome.get('detail') or ''}"]
+
+        facts = []
+        if results and results.get('size'):
+            facts.append(f"Bytes hashed: {results['size']:,}")
+        if checked:
+            facts.append(f"Checked: {checked} UTC")
+        if row.get('stored_source'):
+            facts.append(f"Acquisition hashes from: {row['stored_source']}")
+        if facts:
+            line = QLabel('   ·   '.join(facts))
+            layout.addWidget(line)
+            self._text += facts
+
+        hashes = summary_rows(row, results, outcome)
+        table = QTableWidget(len(hashes), 5)
+        table.setObjectName('verificationHashes')
+        table.setHorizontalHeaderLabels(
+            ["Hash", "This check", "Recorded by the case",
+             "Stored with the image / acquisition", "Result"])
+        table.verticalHeader().hide()
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setItemDelegate(NoFocusDelegate(table))
+        for r, values in enumerate(hashes):
+            for c, value in enumerate(values):
+                item = QTableWidgetItem(value or '—')
+                if c == 4 and value in ('match', 'DIFFERENT'):
+                    item.setForeground(verdict_brush(
+                        'clean' if value == 'match' else 'malicious'))
+                table.setItem(r, c, item)
+            self._text.append(' | '.join(v or '-' for v in values))
+        table.resizeColumnsToContents()
+        layout.addWidget(table)
+
+        if history:
+            label = QLabel("Every check of this evidence, newest first")
+            layout.addWidget(label)
+            past = QTableWidget(len(history), 3)
+            past.setObjectName('verificationHistory')
+            past.setHorizontalHeaderLabels(["When (UTC)", "Status",
+                                            "Detail"])
+            past.verticalHeader().hide()
+            past.setEditTriggers(QTableWidget.NoEditTriggers)
+            past.setItemDelegate(NoFocusDelegate(past))
+            self._text.append("History:")
+            for r, entry in enumerate(history):
+                state = entry.get('status')
+                cells = [entry.get('utc') or '',
+                         STATUS_TEXT.get(state, state or ''),
+                         entry.get('detail') or '']
+                for c, value in enumerate(cells):
+                    item = QTableWidgetItem(value)
+                    if c == 1 and STATUS_TONE.get(state):
+                        item.setForeground(verdict_brush(STATUS_TONE[state]))
+                    past.setItem(r, c, item)
+                self._text.append('  ' + ' | '.join(cells))
+            past.resizeColumnsToContents()
+            layout.addWidget(past)
+
+        buttons = QHBoxLayout()
+        copy = QPushButton("Copy")
+        icons.apply_to(copy, icons.COPY)
+        copy.clicked.connect(self.copy_text)
+        again = QPushButton("Verify Again")
+        icons.apply_to(again, icons.REFRESH)
+        again.clicked.connect(self._again)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(copy)
+        buttons.addStretch()
+        buttons.addWidget(again)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+
+    def text(self):
+        return '\n'.join(self._text)
+
+    def copy_text(self):
+        QApplication.clipboard().setText(self.text())
+
+    def _again(self):
+        self.verify_again.emit()
+        self.accept()

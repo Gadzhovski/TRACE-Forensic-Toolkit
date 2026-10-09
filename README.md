@@ -33,8 +33,12 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 
 - **Cases** — one investigation, any number of images, with custody details,
   an audit trail, bookmarks, notes and a PDF/HTML report.
-- **Integrity** — evidence is never mounted or written to; hashes are verified
-  against those stored in the image, and every check is kept.
+- **Integrity** — evidence is never mounted or written to. Every image is
+  hashed in full (MD5, SHA-1, SHA-256; a read that fails gives no hash) and
+  checked against the hashes it stores, its acquisition log and the case's
+  record, which is never replaced; an E01's chunk checksums locate damaged
+  sectors. Every check is kept, and the audit trail is append-only and
+  hash-chained. Exports are hashed, read back and listed in a manifest.
 - **Triage** — file types from content, entropy, hidden data, photo GPS,
   document authors, executables, duplicates and hash sets.
 - **User activity** — programs run, files opened, USB devices, logons, the
