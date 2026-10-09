@@ -6904,11 +6904,51 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
 
         sector_size = self.image_handler.sector_size
-        for addr, desc, start, length in partitions:
+        # Free space and containers as the disk is laid out
+        # (core/disk_layout.py), the same regions Image Information draws:
+        # TSK's 'Unallocated' slots overlap the partition tables, and an
+        # extended partition contains volumes listed on their own.
+        from trace_app.core import disk_layout
+        try:
+            layout = disk_layout.regions(self.image_handler)
+        except Exception as exc:
+            logger.warning("Could not lay out the disk: %s", exc)
+            layout = []
+        free_shown = set()
+
+        def disk_order(slot):
+            # Where what a slot shows begins: a free-space slot shows the
+            # free run inside it (after the tables it overlaps), so the
+            # nodes come in disk order, as Image Information lists them.
+            _addr, desc, start, length = slot
+            text = desc.decode('utf-8', 'replace') \
+                if isinstance(desc, bytes) else str(desc)
+            if disk_layout._kind(text) == disk_layout.UNALLOCATED:
+                inside = [r['start'] for r in layout
+                          if r['kind'] == disk_layout.UNALLOCATED
+                          and start <= r['start'] < start + length]
+                if inside:
+                    return min(inside)
+            return start
+
+        for addr, desc, start, length in sorted(partitions, key=disk_order):
             end = start + length - 1
             size_in_bytes = length * sector_size
             readable_size = self.image_handler.get_readable_size(size_in_bytes)
             desc_str = desc.decode('utf-8') if isinstance(desc, bytes) else desc
+            slot_kind = disk_layout._kind(desc_str or '')
+            if slot_kind is None:
+                continue                  # a container: its contents show
+            if slot_kind == disk_layout.UNALLOCATED and layout:
+                for region in layout:
+                    if region['kind'] != disk_layout.UNALLOCATED or \
+                            not start <= region['start'] <= end or \
+                            region['start'] in free_shown:
+                        continue
+                    free_shown.add(region['start'])
+                    self._add_free_space_node(root_item_tree, region,
+                                              desc_str, addr)
+                continue
             # A name as forensic tools give it -- 'EFI System Partition @
             # 2048', 'GPT Header' -- not the table's slot number; where it
             # is and what The Sleuth Kit called it go in the tooltip.
@@ -6956,12 +6996,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 continue
             fs_type = self.image_handler.get_fs_type(start)
             from trace_app.core.partition_names import bookkeeping
-            if bookkeeping(desc_str or '') is not None:
+            region = next((r for r in layout
+                           if r['kind'] == disk_layout.VOLUME
+                           and r['volume_start'] == start), None)
+            what = disk_layout.contents(region) if region else (
+                fs_type if fs_type and fs_type != 'N/A' else None)
+            if bookkeeping(desc_str or '') is not None or not what:
                 item_text = f"{label} ({readable_size})"
             else:
-                item_text = f"{label} ({fs_type}, {readable_size})" \
-                    if fs_type and fs_type != 'N/A' else \
-                    f"{label} ({readable_size})"
+                item_text = f"{label} ({what}, {readable_size})"
             icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
             data = {"inode_number": None, "start_offset": start,
                     "end_offset": end, "volume_label": label}
@@ -6988,6 +7031,28 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
                 self._add_shadow_copy_nodes(root_item_tree, start, label)
         self._add_lost_partition_nodes(root_item_tree)
+
+    def _add_free_space_node(self, parent, region, desc_str, addr):
+        """A run of space no volume or table holds, named and sized as
+        Image Information shows it ('Unallocated Space @ 34')."""
+        from trace_app.core import disk_layout
+        first = region['start']
+        last = first + region['sectors'] - 1
+        size = self.image_handler.get_readable_size(region['bytes'])
+        icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
+        item = self.create_tree_item(
+            parent, f"{disk_layout.label(region)} ({size})", icon_path,
+            {"inode_number": None, "start_offset": first,
+             "end_offset": last, "volume_label": region['label']})
+        item.setToolTip(0, f"Sectors {first:,}-{last:,} "
+                           f"({region['sectors']:,} sectors), in "
+                           f"{desc_str} (table slot {addr})")
+        item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+        self.create_tree_item(item, f"Unallocated Space: Size: {size}",
+                              self.db_manager.get_icon_path('file',
+                                                            'unknown'),
+                              {"is_unallocated": True, "start_offset": first,
+                               "end_offset": last})
 
     def _add_lost_partition_nodes(self, parent):
         """A node per file system no partition table entry points at
