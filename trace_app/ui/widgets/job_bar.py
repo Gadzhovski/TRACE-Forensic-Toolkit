@@ -96,6 +96,11 @@ class JobBar(QWidget):
         self.progress = self._progress_bar(PROGRESS_WIDTH)
         layout.addWidget(self.progress)
 
+        # Beside the bar it stops, saying what it does.
+        self.cancel_button = self._cancel_button()
+        self.cancel_button.clicked.connect(self.cancel_current)
+        layout.addWidget(self.cancel_button)
+
         # "Job 2 of 5": every job of this run, finished and waiting.
         self.steps_button = QToolButton()
         self.steps_button.setObjectName("jobBarSteps")
@@ -110,10 +115,6 @@ class JobBar(QWidget):
         self.steps_button.setMenu(self.steps_menu)
         layout.addWidget(self.steps_button)
 
-        self.cancel_button = self._cancel_button()
-        self.cancel_button.clicked.connect(self.cancel_current)
-        layout.addWidget(self.cancel_button)
-
         # The side lane: one job beside the queue (verification).
         self.side_label = QLabel()
         self.side_label.setObjectName("jobBarLabel")
@@ -124,6 +125,10 @@ class JobBar(QWidget):
         self.side_cancel_button = self._cancel_button()
         self.side_cancel_button.clicked.connect(self.cancel_side)
         layout.addWidget(self.side_cancel_button)
+        # Spare width after the controls, not between them: every one is a
+        # fixed width, and without this Qt spread the bar's extra space as
+        # gaps -- Cancel ended up far from the job it cancels.
+        layout.addStretch(1)
 
         self._queue = []
         self._current = None
@@ -148,15 +153,15 @@ class JobBar(QWidget):
 
     @staticmethod
     def _cancel_button():
-        # An icon, not a "Cancel" push button as wide as a word.
+        # A stop icon and the word: an x alone did not say what it closed.
         button = QToolButton()
         button.setObjectName("jobBarCancel")
-        side = CONTROL_HEIGHT - 6
-        button.setFixedSize(side, side)
+        button.setText("Cancel")
+        button.setFixedHeight(CONTROL_HEIGHT - 6)
         button.setIconSize(QSize(12, 12))
-        icons.apply_to(button, icons.CLOSE)
+        button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        icons.apply_to(button, icons.CANCEL)
         button.setToolTip("Cancel")
-        button.setAutoRaise(True)
         return button
 
     # --- queueing ------------------------------------------------------

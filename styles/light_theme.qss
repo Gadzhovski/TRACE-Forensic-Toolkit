@@ -1514,15 +1514,18 @@ QProgressBar#jobBarProgress::chunk {
     border-radius: 3px;
 }
 
-/* Cancel is an icon, not a push button as wide as a word. */
+/* Cancel: a stop icon and the word, beside the bar it stops. */
 QToolButton#jobBarCancel {
-    border: none;
+    color: #495057;
+    border: 1px solid #ced4da;
     border-radius: 3px;
-    padding: 0px;
+    padding: 0px 6px 0px 4px;
     background-color: transparent;
+    font-size: 11px;
 }
 QToolButton#jobBarCancel:hover {
     background-color: #f8d7da;
+    color: #842029;
 }
 
 /* "Job 2 of 5": opens the list of this run's jobs. */
