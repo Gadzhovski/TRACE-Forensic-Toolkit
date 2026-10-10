@@ -20,13 +20,15 @@ import logging
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractScrollArea,
-                               QApplication, QHeaderView, QPlainTextEdit,
-                               QTableView, QTextEdit)
+                               QApplication, QComboBox, QHeaderView,
+                               QPlainTextEdit, QTableView, QTextEdit)
 
 from trace_app.infra.paths import config_file
 
 logger = logging.getLogger('TRACE.TextZoom')
 
+#: What can be zoomed.
+_VIEWS = (QAbstractItemView, QPlainTextEdit, QTextEdit)
 #: The steps there are; the themes size each (styles/*.qss, 'Text zoom').
 LOWEST, HIGHEST = -2, 6
 PROPERTY = 'textZoom'
@@ -101,6 +103,8 @@ def zoomable(widget):
     while ancestor is not None:
         if ancestor.objectName().startswith('hex'):
             return None                     # its own font size
+        if isinstance(ancestor, QComboBox):
+            return None                     # a drop-down's own list
         ancestor = ancestor.parent()
     return view
 
@@ -179,10 +183,14 @@ class _Zoomer(QObject):
                 set_step(view, step_of(view) + (-1 if key == Qt.Key_Minus
                                                 else 1))
             return True
-        if kind == QEvent.Polish:
-            view = zoomable(watched)
-            if view is watched:
-                restore(view)
+        if kind == QEvent.Polish and isinstance(watched, _VIEWS) and                 not isinstance(watched, QHeaderView):
+            # Every widget is polished as it is made -- a drop-down's own
+            # list among them, half-built: only a kind with a step kept is
+            # looked at any further (walking a half-built drop-down's
+            # parents crashed).
+            saved = _remembered()
+            if saved and kind_of(watched) in saved:
+                restore(watched)
         return False
 
 
