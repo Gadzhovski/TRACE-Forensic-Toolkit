@@ -660,6 +660,45 @@ class Case:
             f"id={evidence_id} {old['path'] if old else '?'} -> {new_path}"
             f"; recorded hashes kept, to be checked")
 
+    def relocate_checked(self, evidence_id, new_path, results,
+                         accept_unverified=False):
+        """Point evidence at `new_path` only if the file there is the same
+        evidence: `results` (a hashing run of that file) must match every
+        hash the case recorded and every acquisition hash. A file with
+        nothing to compare against is taken only with `accept_unverified`
+        (the examiner's say-so, audited as such). Returns the outcome with
+        'relocated' True or False; a refusal is audited too, with what the
+        file there hashed to."""
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if row is None:
+            raise CaseError(f"No evidence {evidence_id} in this case")
+        row = dict(row)
+        recorded = {name: row.get(name) for name in HASH_NAMES
+                    if row.get(name)}
+        outcome = verdict(results, recorded, acquisition_hashes(row, results))
+        status = outcome['status']
+        if status == STATUS_VERIFIED or (status == STATUS_BASELINE
+                                         and accept_unverified):
+            self.relocate_evidence(evidence_id, new_path)
+            applied = self.apply_verification(evidence_id, results)
+            if status == STATUS_BASELINE:
+                self._record_activity(
+                    'evidence relocated unverified',
+                    f"id={evidence_id}: nothing recorded to compare "
+                    f"{os.path.abspath(new_path)} with; accepted by the "
+                    f"examiner")
+            return dict(applied, relocated=True)
+        computed = ' '.join(
+            f"{n.upper()}={results.get(f'computed_{n}')}"
+            for n in HASH_NAMES if results.get(f'computed_{n}'))
+        self._record_activity(
+            'evidence relocation refused',
+            f"id={evidence_id} {row['path']} -> "
+            f"{os.path.abspath(new_path)}: {outcome['detail']}"
+            + (f" ({computed})" if computed else ''))
+        return dict(outcome, relocated=False)
+
     def record_hashes(self, evidence_id, results, status=None, detail=None):
         """Judge a hashing run (ImageHandler.calculate_hashes) and record
         it: `apply_verification`. Kept under its old name; `status` and

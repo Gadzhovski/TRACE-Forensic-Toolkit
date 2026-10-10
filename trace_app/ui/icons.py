@@ -117,6 +117,8 @@ SHADOW_COPY = "Icons/tabler/clock.svg"
 JOB_WAITING = "Icons/tabler/clock.svg"
 #: Tags: the examiner's own verdicts on files.
 TAG = "Icons/tabler/tag.svg"
+#: A whole case in one file (Case > Export / Open Case Archive).
+ARCHIVE = "Icons/tabler/file-zip.svg"
 #: One per core.activity category, in the tree and on the Activity tab.
 ACTIVITY_CATEGORIES = {
     None: ACTIVITY,

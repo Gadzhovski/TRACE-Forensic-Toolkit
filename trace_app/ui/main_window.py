@@ -1241,13 +1241,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         case_menu.addAction(self.create_report_action)
 
         case_menu.addSeparator()
+        self.export_archive_action = QAction(
+            icons.icon(icons.ARCHIVE), "Export Case Archive...", self)
+        self.export_archive_action.setToolTip(
+            "The whole case in one checked file, to hand over or keep")
+        self.export_archive_action.triggered.connect(
+            self.export_case_archive)
+        case_menu.addAction(self.export_archive_action)
+        open_archive_action = QAction(icons.icon(icons.ARCHIVE),
+                                      "Open Case Archive...", self)
+        open_archive_action.triggered.connect(self.open_case_archive)
+        case_menu.addAction(open_archive_action)
+        case_menu.addSeparator()
         open_folder_action = QAction("Open Case Folder", self)
         open_folder_action.triggered.connect(self.open_case_folder)
         case_menu.addAction(open_folder_action)
         self.open_case_folder_action = open_folder_action
 
         for action in (self.case_properties_action, self.verify_case_action,
-                       self.create_report_action,
+                       self.create_report_action, self.export_archive_action,
                        self.open_case_folder_action):
             action.setEnabled(self.case is not None)
         if self.case is None:
@@ -1950,6 +1962,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.case_panel.profile_for = lambda row: (
             self.evidence_profile(row) or {}).get('summary')
         self.case_panel.set_case(self.case)
+        self.case_panel.locate_requested.connect(self.locate_evidence)
         self.case_panel.verify_requested.connect(
             lambda rows: self.queue_verification(rows, summary=True)
             if rows else None)
@@ -3842,7 +3855,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # --- verification jobs ------------------------------------------------
 
-    def queue_verification(self, rows, summary=False, show=False):
+    def queue_verification(self, rows, summary=False, show=False,
+                           relocate=None):
         """Hash each piece of evidence in full, as a job on the bar, and
         judge it: Case.apply_verification records it in a case (never
         replacing a recorded hash); in quick triage core/case.verdict
@@ -3858,7 +3872,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         lane = SIDE if case_settings.user('verify_order') == \
             'alongside analysis' else MAIN
         batch = {'pending': 0, 'outcomes': [], 'summary': summary,
-                 'show': show}
+                 'show': show, 'relocate': relocate}
         queued = 0
         for row in rows:
             key = row.get('id') if row.get('id') is not None else row['path']
@@ -3866,7 +3880,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             def start(job, row=row, name=name):
                 current = row
-                if self.case and row.get('id') is not None:
+                # The case's row as it is now -- except for a file being
+                # located, which is hashed where the examiner found it.
+                if self.case and row.get('id') is not None and                         relocate is None:
                     current = next((r for r in self.case.evidence()
                                     if r['id'] == row['id']), row)
                 worker = EvidenceVerifyWorker(current, self)
@@ -3900,6 +3916,99 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.infra.utils import FileSystemUtils
         return FileSystemUtils.get_readable_size(size)
 
+    # --- case archives and moved evidence ---------------------------------
+
+    def export_case_archive(self):
+        if self.case is None:
+            return
+        from trace_app.ui.dialogs.case_archive import export_case_archive
+        if export_case_archive(self, self.case) and \
+                getattr(self, 'case_panel', None):
+            self.case_panel.refresh()
+
+    def open_case_archive(self):
+        """Unpack an archived case and switch to it: TRACE starts again on
+        it (as an interface-size change does), this window closing the
+        case it has open the ordinary way."""
+        if self.job_bar.busy:
+            message.information(self, "Open Case Archive",
+                                "Wait for the running jobs to finish, or "
+                                "cancel them, first.")
+            return
+        from trace_app.ui.dialogs.case_archive import open_case_archive
+        from trace_app.ui.dialogs.case_launcher import remember_case
+        case = open_case_archive(self)
+        if case is None:
+            return
+        folder, name = case.folder, case.name
+        case.close()
+        remember_case(folder, name)
+        os.environ['TRACE_REOPEN_CASE'] = folder
+        current, self.case = self.case, None
+        try:
+            self.restart()
+        finally:
+            if not getattr(self, '_restarting', False):
+                self.case = current
+                os.environ.pop('TRACE_REOPEN_CASE', None)
+
+    def locate_evidence(self, row):
+        """Point the case at evidence that has moved: the file chosen is
+        hashed in full, as a verification, and taken only if it matches
+        what the case recorded (Case.relocate_checked)."""
+        if self.case is None or row.get('id') is None:
+            return
+        name = row.get('display_name') or os.path.basename(row['path'])
+        start = os.path.dirname(row['path'])
+        if not os.path.isdir(start):
+            start = case_settings.user('case_folder') or ''
+        path, _filter = QFileDialog.getOpenFileName(
+            self, f"Locate {name}", start)
+        if not path:
+            return
+        candidate = dict(row, path=os.path.normpath(path))
+        self.queue_verification([candidate], relocate=row)
+
+    def _relocation_checked(self, out, name, relocate):
+        """A Locate… hash finished: relocate on a match, else refuse."""
+        results = out.get('results') or {}
+        if out.get('cancelled') or results.get('status') or \
+                results.get('error'):
+            message.warning(self, "Locate evidence",
+                            f"{out['row']['path']} could not be read in "
+                            f"full; the case still points at "
+                            f"{relocate['path']}.",
+                            results.get('detail') or results.get('error')
+                            or '')
+            return
+        accept = False
+        if not any(relocate.get(n) for n in ('md5', 'sha1', 'sha256',
+                                             'stored_md5', 'stored_sha1',
+                                             'stored_sha256')):
+            accept = message.question(
+                self, "Locate evidence",
+                f"The case recorded no hash for {name}, so nothing proves "
+                f"{out['row']['path']} is the same evidence.",
+                "Use it anyway? The audit trail will say it was accepted "
+                "without a hash to compare.")
+        outcome = self.case.relocate_checked(relocate['id'],
+                                             out['row']['path'], results,
+                                             accept_unverified=accept)
+        if outcome['relocated']:
+            new_path = out['row']['path']
+            self.verification_results[new_path] = {
+                'outcome': outcome, 'results': results}
+            if self.open_evidence_image(new_path, record_in_case=False):
+                self.mark_image_verified(new_path)
+            self.set_status(f"{name} relocated to {new_path}: "
+                            f"{outcome['detail']}")
+        else:
+            message.warning(
+                self, "Locate evidence",
+                f"{out['row']['path']} is not the evidence the case "
+                f"recorded; the case still points at {relocate['path']}.",
+                outcome['detail'])
+
     def _verification_finished(self, out, name, batch, job=None):
         """Judge and record what a verification job read (on this thread,
         which owns the case's database), badge the image, move its lane
@@ -3908,6 +4017,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished(job)
         batch['pending'] -= 1
         row = out['row']
+        if batch.get('relocate') and self.case is not None:
+            # A file found for moved evidence: nothing is recorded against
+            # the evidence unless its hashes prove it the same.
+            self._relocation_checked(out, name, batch['relocate'])
+            if getattr(self, 'case_panel', None):
+                self.case_panel.refresh()
+            return
         if out.get('cancelled'):
             self.set_status(f"Verification of {name} cancelled; nothing "
                             f"recorded")

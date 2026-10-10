@@ -170,6 +170,11 @@ class EvidenceDetailsDialog(QDialog):
         super().accept()
 
 
+def _is_device(path):
+    from trace_app.core.live_disk import is_device_path
+    return is_device_path(path)
+
+
 class CasePanel(QWidget):
     """Case metadata and its evidence, with hash status."""
 
@@ -177,6 +182,8 @@ class CasePanel(QWidget):
     verify_requested = Signal(list)
     #: The case's own details (the Case Properties dialog).
     properties_requested = Signal()
+    #: Locate… on evidence not where the case recorded it: (row).
+    locate_requested = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -546,6 +553,14 @@ class CasePanel(QWidget):
         if row is None:
             return
         menu = QMenu(self)
+        if not os.path.exists(row['path']) and \
+                not _is_device(row['path']):
+            # A case opened on another machine, or an image moved: point
+            # the case at it again (accepted only when its hashes match).
+            locate = menu.addAction(icons.icon(icons.OPEN_FOLDER),
+                                    "Locate…")
+            locate.triggered.connect(
+                lambda: self.locate_requested.emit(dict(row)))
         verify = menu.addAction(icons.icon(icons.VERIFY), "Verify")
         verify.triggered.connect(lambda: self.verify_requested.emit([row]))
         edit = menu.addAction("Edit Exhibit Details…")
