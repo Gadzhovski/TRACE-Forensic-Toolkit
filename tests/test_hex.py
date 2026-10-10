@@ -400,3 +400,37 @@ def test_the_qt_calls_each_hex_cell_makes_keep_none_alive(qapp):
         table.setItem(0, 1, cell)
     assert sys.getrefcount(None) > before - 50, \
         "PySide6 is releasing references to None (see requirements.txt)"
+
+
+def test_searches_stopped_mid_run_and_a_close_never_crash(qapp):
+    """Forty searches back to back over 48 MB, each stopping the one
+    before it while it may still be reading, then the viewer closed with
+    threads possibly alive. A stopped search used to lose its last
+    reference while running, and a finished worker was deleted on its
+    dying thread -- intermittent crashes on macOS CI. Only the last
+    search's results may arrive, and they must be right."""
+    from trace_app.ui.viewers.hex import HexViewer
+    _forget_view_choices()
+    block = bytearray(48 * 1024 * 1024)
+    block[1000:1004] = b'NEED'
+    block[-2000:-1996] = b'NEED'
+    viewer = HexViewer()
+    viewer.resize(1000, 400)
+    viewer.show()
+    viewer.display_hex_content(bytes(block))
+    viewer.search_kind.setCurrentIndex(viewer.search_kind.findData('text'))
+    for round_ in range(40):
+        viewer.search_bar.setText('need' if round_ % 2 else 'absent!')
+        viewer.trigger_search()
+        pump(qapp, 0.01)
+    viewer.search_bar.setText('need')
+    viewer.trigger_search()
+    assert pump(qapp, 60, lambda: not viewer._searches)
+    assert viewer.matches == [1000, len(block) - 2000]
+    # Closing with searches running waits for them, frees nothing early.
+    viewer.search_bar.setText('absent!')
+    viewer.trigger_search()
+    viewer.close()
+    assert not any(thread.isRunning() for thread in viewer._searches)
+    viewer.deleteLater()
+    pump(qapp, 0.5)

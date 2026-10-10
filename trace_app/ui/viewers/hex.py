@@ -143,6 +143,14 @@ class _SearchWorker(QObject):
         except Exception as exc:
             logger.warning("Hex search failed: %s", exc)
             matches = []
+        # Home to the GUI thread before the search thread ends, so the
+        # worker is freed there, by Python, once the viewer lets it go --
+        # never deleted on a thread that is shutting down while Python
+        # still holds it (intermittent crashes on macOS CI).
+        from PySide6.QtCore import QCoreApplication
+        application = QCoreApplication.instance()
+        if application is not None:
+            self.moveToThread(application.thread())
         if not self.stopped:
             self.finished.emit(matches, len(self.query_bytes),
                                self.generation)
@@ -251,6 +259,8 @@ class HexViewer(QWidget):
         self._last_search = None
         self._search_thread = None
         self._search_worker = None
+        #: Every search thread still running, with its worker.
+        self._searches = {}
         #: Bumped by every new or stopped search: a result from an older
         #: one is dropped when it arrives.
         self._search_generation = 0
@@ -1379,8 +1389,11 @@ class HexViewer(QWidget):
         # Before the deleteLaters, so it is posted first and sender() is
         # still the thread when it runs.
         thread.finished.connect(self._search_done)
-        thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        # Every search stays referenced until its thread has finished: a
+        # stopped search may still be running, and dropping the last
+        # reference to its worker freed the object it was running in.
+        self._searches[thread] = worker
         self._search_thread, self._search_worker = thread, worker
         thread.start()
 
@@ -1391,25 +1404,29 @@ class HexViewer(QWidget):
 
     @Slot()
     def _search_done(self):
+        thread = self.sender()
+        self._searches.pop(thread, None)
         if self._search_thread is not None and \
-                self._search_thread is self.sender():
+                self._search_thread is thread:
             self._search_thread = self._search_worker = None
 
-    def _stop_search(self):
-        worker, thread = self._search_worker, self._search_thread
+    def _stop_search(self, wait=False):
+        """Stop the current search: its result is ignored (generation),
+        its loop told to stop. It stays in `_searches` until its thread
+        has finished; `wait` (on closing) waits for every one."""
         self._search_generation += 1
-        if worker is not None:
+        for thread, worker in list(self._searches.items()):
             worker.stopped = True
-        if thread is not None:
             try:
                 thread.quit()
-                thread.wait(2000)
+                if wait:
+                    thread.wait(5000)
             except RuntimeError:
-                pass
+                self._searches.pop(thread, None)
         self._search_thread = self._search_worker = None
 
     def closeEvent(self, event):
-        self._stop_search()
+        self._stop_search(wait=True)
         super().closeEvent(event)
 
     def _set_result_count(self, count, capped=False, searching=False):
