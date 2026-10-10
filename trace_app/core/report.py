@@ -46,6 +46,9 @@ SECTIONS = (
     ('bookmarks', 'Bookmarks and notes',
      "What the examiner marked, with notes and a picture of each "
      "bookmarked image."),
+    ('tags', 'Tagged files',
+     "The files the examiner tagged, under each tag, with who tagged them "
+     "and when, and their hashes where analysed."),
     ('findings', 'Findings',
      "Type mismatches, high entropy, hidden data, located photos, "
      "document authors, YARA matches and thumbnails of files gone."),
@@ -442,6 +445,36 @@ class _Builder:
                 out.append(f"<div class='note'><p class='note-meta'>"
                            f"{e(note.get('created_utc'))}</p>"
                            f"{_paragraphs(note.get('body'))}</div>")
+        return ''.join(out)
+
+    def section_tags(self):
+        out = [self.heading(1, 'tags', SECTION_TITLES['tags'])]
+        rows = self.scope(self.case.tagged())
+        if not rows:
+            out.append("<p class='none'>No file is tagged.</p>")
+            return ''.join(out)
+        hashes = {}
+        for evidence_id in {r.get('evidence_id') for r in rows}:
+            refs = [r['artifact_ref'] for r in rows
+                    if r.get('evidence_id') == evidence_id]
+            for ref, facts in self.case.analysis_map(evidence_id,
+                                                     refs).items():
+                hashes[(evidence_id, ref)] = facts.get('sha256') or ''
+        for tag in self.case.tags():
+            mine = [r for r in rows if r['tag_id'] == tag['id']]
+            if not mine:
+                continue
+            self.check()
+            out.append(self.heading(2, f"tags-{tag['id']}",
+                                    f"{tag['name']} ({len(mine):,})"))
+            out.append(_table(
+                ['File', 'Evidence', 'Path', 'SHA-256', 'Tagged', 'By'],
+                [[e(r.get('name')), e(self.evidence_name(r.get('evidence_id'))),
+                  _mono(r.get('path')),
+                  _mono(hashes.get((r.get('evidence_id'),
+                                    r['artifact_ref']), '')),
+                  e(r.get('tagged_utc')), e(r.get('examiner'))]
+                 for r in mine], css='small'))
         return ''.join(out)
 
     def _grades(self):

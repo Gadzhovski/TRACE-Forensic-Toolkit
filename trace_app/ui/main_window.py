@@ -119,6 +119,17 @@ TREE_ARCHIVE_SUFFIXES = ('.zip', '.7z', '.rar', '.tar', '.gz', '.tgz',
                          '.zlib', '.cpgz', '.msg')
 #: Archives the tree keeps read, so stepping through one is not a re-read.
 TREE_ARCHIVES_KEPT = 3
+def _unwrapped(row):
+    """A tree node's finding or bookmark, else the row itself."""
+    if isinstance(row, dict):
+        for key in ('finding', 'bookmark'):
+            if row.get(f'is_{key}') and isinstance(row.get(key), dict):
+                return row[key]
+    return row
+
+
+#: Files listed under each tag in the tree; the rest are in Triage > Tags.
+TREE_TAGGED_SHOWN = 200
 #: ...and those that are archives inside but documents to an examiner: a
 #: double-click shows the document; "Browse Archive" opens its parts.
 CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
@@ -351,13 +362,26 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return row
         return None
 
-    def _menu_extras(self, menu, row):
+    def _menu_extras(self, menu, row, view=None):
         """Export File and Add Bookmark for any row naming a file on the
-        evidence, where the menu does not offer them already (the hook of
-        ui/widgets/context_menus.show_menu)."""
+        evidence, where the menu does not offer them already, and Tag ▸
+        (the hook of ui/widgets/context_menus.show_menu)."""
+        row = _unwrapped(row)
         data = self._file_data_for(row)
         if data is None:
             return
+        try:
+            self._file_menu_extras(menu, row, data)
+        finally:
+            if self.case is not None and not any(
+                    action.text().replace('&', '') == 'Tag'
+                    for action in menu.actions()):
+                rows = self._tag_rows(view, row)
+                if rows:
+                    menu.addSeparator()
+                    self.add_tag_menu(menu, rows)
+
+    def _file_menu_extras(self, menu, row, data):
         texts = [action.text().replace('&', '').lower()
                  for action in menu.actions()]
         evidence_id = row.get('evidence_id')
@@ -386,6 +410,258 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             menu.addSeparator()
         for label, slot in extras:
             menu.addAction(label).triggered.connect(slot)
+
+    # --- tags ------------------------------------------------------------
+
+    def _tag_rows(self, view, row=None):
+        """The files a menu or a key acts on, as rows for Case.tag_artifacts:
+        the selected rows of `view` (or `row` alone when the click was not
+        on the selection), each with its evidence id."""
+        from trace_app.ui.widgets.context_menus import selected_payloads
+        if view is not None and view is getattr(self, 'tree_viewer', None):
+            items = view.selectedItems()
+            if row is not None and not any(
+                    item.data(0, Qt.UserRole) == row for item in items):
+                current = view.currentItem()
+                items = [current] if current is not None else []
+            pairs = [(item.data(0, Qt.UserRole),
+                      self.evidence_id_for_path(self.image_of_item(item)))
+                     for item in items]
+        else:
+            payloads = selected_payloads(view, row) if view is not None \
+                else ([row] if row is not None else [])
+            listing = view is not None and view in (
+                getattr(self, 'listing_table', None),
+                getattr(self, 'listing_icon_view', None))
+            image = self._listing_image if listing else None
+            fallback = self.evidence_id_for_path(
+                image or self.current_image_path)
+            pairs = [(payload, payload.get('evidence_id', fallback)
+                      if isinstance(payload, dict) else fallback)
+                     for payload in payloads]
+        out, seen = [], set()
+        for payload, evidence_id in pairs:
+            inner = _unwrapped(payload)
+            if inner is not payload:
+                payload, evidence_id = inner, inner.get('evidence_id')
+            if not isinstance(payload, dict) or payload.get('is_carved'):
+                continue
+            data = self._file_data_for(payload)
+            if data is None:
+                continue
+            ref = payload.get('artifact_ref') or self.artifact_ref_for(data)
+            if not ref or (evidence_id, ref) in seen:
+                continue
+            seen.add((evidence_id, ref))
+            out.append({'evidence_id': evidence_id, 'artifact_ref': ref,
+                        'name': data.get('name') or '',
+                        'path': data.get('path') or ''})
+        return out
+
+    def add_tag_menu(self, menu, rows):
+        """Tag ▸ on `menu`: each tag (its key beside the first three), New
+        Tag…, Remove Tag ▸ for the tags these files carry, Manage Tags…"""
+        from trace_app.ui.viewers.tags_panel import tag_icon
+        sub = menu.addMenu(icons.icon(icons.TAG), "Tag")
+        tags = self.case.tags()
+        carried = {}
+        for evidence_id in {r['evidence_id'] for r in rows}:
+            refs = [r['artifact_ref'] for r in rows
+                    if r['evidence_id'] == evidence_id]
+            for marks in self.case.tags_for(evidence_id, refs).values():
+                for mark in marks:
+                    carried[mark['id']] = mark
+        for number, tag in enumerate(tags, start=1):
+            text = tag['name'] + (f"\t{number}" if number <= 3 else '')
+            action = sub.addAction(tag_icon(tag['colour']), text)
+            action.triggered.connect(
+                lambda _=False, t=tag['id']: self.tag_rows(t, rows))
+        sub.addSeparator()
+        new = sub.addAction(icons.icon(icons.TAG), "New Tag…")
+        new.triggered.connect(lambda: self.tag_rows_with_new(rows))
+        if carried:
+            remove = sub.addMenu(icons.icon(icons.DELETE), "Remove Tag")
+            for tag in sorted(carried.values(), key=lambda t: t['id']):
+                action = remove.addAction(tag_icon(tag['colour']),
+                                          tag['name'])
+                action.triggered.connect(
+                    lambda _=False, t=tag['id']: self.untag_rows(rows, t))
+            remove.addSeparator()
+            every = remove.addAction(icons.icon(icons.DELETE),
+                                     "Every Tag\t0")
+            every.triggered.connect(lambda: self.untag_rows(rows))
+        sub.addSeparator()
+        sub.addAction(icons.icon(icons.TAG), "Manage Tags…").triggered \
+            .connect(self.show_manage_tags)
+        return sub
+
+    def tag_rows(self, tag_id, rows):
+        if self.case is None or not rows:
+            return 0
+        added = self.case.tag_artifacts(tag_id, rows)
+        self.tags_changed()
+        return added
+
+    def tag_rows_with_new(self, rows):
+        from trace_app.ui.dialogs.manage_tags import ask_new_tag
+        tag_id = ask_new_tag(self, self.case)
+        if tag_id is not None:
+            self.tag_rows(tag_id, rows)
+
+    def untag_rows(self, rows, tag_id=None):
+        if self.case is None or not rows:
+            return 0
+        removed = self.case.untag(rows, tag_id)
+        self.tags_changed()
+        return removed
+
+    def _tag_key(self, view, key):
+        """1, 2, 3 put the first three tags on a list's selected files; 0
+        takes every tag off them (the key hook of context_menus)."""
+        if self.case is None or not self.case.is_open:
+            return False
+        rows = self._tag_rows(view)
+        if not rows:
+            return False
+        if key == Qt.Key_0:
+            self.untag_rows(rows)
+            return True
+        tags = self.case.tags()
+        index = {Qt.Key_1: 0, Qt.Key_2: 1, Qt.Key_3: 2}[key]
+        if index >= len(tags):
+            return False
+        self.tag_rows(tags[index]['id'], rows)
+        self.statusBar().showMessage(
+            f"Tagged {len(rows):,} file(s) {tags[index]['name']!r}", 4000)
+        return True
+
+    def tags_changed(self):
+        """Every view of tags shows what the case holds now."""
+        panel = getattr(self, 'tags_panel', None)
+        if panel is not None:
+            panel.refresh()
+        self.refresh_tags_tree()
+        self.mark_tagged_rows()
+
+    def show_manage_tags(self):
+        if self.case is None:
+            message.information(self, "Manage Tags",
+                                "Tags are kept in a case.",
+                                "File ▸ New Case starts one.")
+            return
+        from trace_app.ui.dialogs.manage_tags import ManageTagsDialog
+        dialog = ManageTagsDialog(self.case, self)
+        dialog.exec()
+        if dialog.changed:
+            self.tags_changed()
+
+    def mark_tagged_rows(self):
+        """A dot in the tag's colour in the Listing's Flag column, the tags
+        named in its tip (beside whatever the analysis flagged)."""
+        if not self.case or not hasattr(self, 'listing_table') or \
+                self.listing_table.columnCount() < 15:
+            return
+        from trace_app.ui.viewers.tags_panel import tag_icon
+        evidence_id = self.evidence_id_for_path(self._listing_image)
+        if evidence_id is None:
+            return
+        refs = {}
+        for row in range(self.listing_table.rowCount()):
+            item = self.listing_table.item(row, 0)
+            data = (item.data(Qt.UserRole) if item else None) or {}
+            if data.get('inode_number') is None:
+                continue
+            refs[make_artifact_ref(data.get('start_offset', 0),
+                                   data['inode_number'],
+                                   data.get('sequence'))] = row
+        if not refs:
+            return
+        marks = self.case.tags_for(evidence_id, refs.keys())
+        for ref, row in refs.items():
+            cell = self.listing_table.item(row, 14)
+            tagged = marks.get(ref)
+            if cell is None:
+                if not tagged:
+                    continue
+                cell = QTableWidgetItem('')
+                self.listing_table.setItem(row, 14, cell)
+            tip = cell.data(Qt.UserRole + 7)
+            if tip is None:
+                tip = cell.toolTip()
+                cell.setData(Qt.UserRole + 7, tip)
+            if not tagged:
+                cell.setIcon(QIcon())
+                cell.setToolTip(tip)
+                if cell.data(Qt.UserRole + 8):
+                    cell.setText('')
+                    cell.setData(Qt.UserRole + 8, False)
+                continue
+            names = ', '.join(t['name'] for t in tagged)
+            cell.setIcon(tag_icon(tagged[0]['colour']))
+            if not cell.text() or cell.data(Qt.UserRole + 8):
+                cell.setText(names)
+                cell.setData(Qt.UserRole + 8, True)
+            cell.setToolTip(f"Tagged: {names}" + (f"\n{tip}" if tip else ''))
+
+    def refresh_tags_tree(self):
+        """The Tags node: a group per tag with its files, absent when no
+        file is tagged (like Bookmarks and Findings)."""
+        if not hasattr(self, 'tree_viewer'):
+            return
+        from trace_app.ui.viewers.tags_panel import tag_icon
+        for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
+            data = self.tree_viewer.topLevelItem(index).data(
+                0, Qt.UserRole) or {}
+            if data.get('is_tags_root'):
+                self.tree_viewer.takeTopLevelItem(index)
+        if not self.case or not self.case.is_open:
+            return
+        rows = self.case.tagged()
+        if not rows:
+            return
+        root = QTreeWidgetItem()
+        files = len({(r.get('evidence_id'), r['artifact_ref'])
+                     for r in rows})
+        root.setText(0, f"Tags ({files:,})")
+        root.setIcon(0, icons.icon(icons.TAG))
+        root.setData(0, Qt.UserRole, {'is_tags_root': True})
+        position = 0
+        for index in range(self.tree_viewer.topLevelItemCount()):
+            data = self.tree_viewer.topLevelItem(index).data(
+                0, Qt.UserRole) or {}
+            if data.get('is_bookmarks_root') or data.get('is_analysis_root'):
+                position = index + 1
+        self.tree_viewer.insertTopLevelItem(position, root)
+        for tag in self.case.tags():
+            mine = [r for r in rows if r['tag_id'] == tag['id']]
+            if not mine:
+                continue
+            group = QTreeWidgetItem(root)
+            group.setText(0, f"{tag['name']} ({len(mine):,})")
+            group.setIcon(0, tag_icon(tag['colour']))
+            group.setData(0, Qt.UserRole, {'is_tags_group': True,
+                                           'tag_id': tag['id']})
+            for row in mine[:TREE_TAGGED_SHOWN]:
+                child = QTreeWidgetItem(group)
+                name = row.get('name') or row['artifact_ref']
+                child.setText(0, name)
+                child.setToolTip(0, row.get('path') or name)
+                if '.' in name:
+                    child.setIcon(0, self._get_file_icon(
+                        name.rsplit('.', 1)[-1].lower()))
+                child.setData(0, Qt.UserRole, {'is_finding': True,
+                                               'finding': {
+                    'evidence_id': row.get('evidence_id'),
+                    'artifact_ref': row['artifact_ref'],
+                    'name': row.get('name') or '',
+                    'path': row.get('path') or ''}})
+            if len(mine) > TREE_TAGGED_SHOWN:
+                more = QTreeWidgetItem(group)
+                more.setText(0, f"… {len(mine) - TREE_TAGGED_SHOWN:,} more "
+                                f"in Triage ▸ Tags")
+                more.setData(0, Qt.UserRole, {'is_tags_group': True,
+                                              'tag_id': tag['id']})
+        root.setExpanded(True)
 
     def _get_file_icon(self, file_extension: str) -> QIcon:
         """Get icon for file extension with caching."""
@@ -1139,6 +1415,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                   "Keyword Lists...", self)
         keywords_action.triggered.connect(self.show_keyword_lists)
         tools_menu.addAction(keywords_action)
+        tags_action = QAction(icons.icon(icons.TAG), "Manage Tags...", self)
+        tags_action.triggered.connect(self.show_manage_tags)
+        tools_menu.addAction(tags_action)
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
@@ -1651,8 +1930,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.hex_viewer.sector_size = lambda: int(
             getattr(self.image_handler, 'sector_size', 512) or 512)
         self.hex_viewer.bookmarks_enabled = lambda: self.case is not None
-        from trace_app.ui.widgets.context_menus import set_row_hook
+        from trace_app.ui.widgets.context_menus import (set_key_hook,
+                                                         set_row_hook)
         set_row_hook(self._menu_extras)
+        set_key_hook(self._tag_key)
         self.hex_viewer.bookmark_requested.connect(self.bookmark_byte_range)
         self.text_viewer = TextViewer(self)
         self.text_viewer.bookmark_requested.connect(
@@ -1725,6 +2006,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.bookmarks_panel.bookmarks_changed.connect(
             self.refresh_bookmarks_tree)
         self.triage_panel.add_bookmarks_tab(self.bookmarks_panel)
+
+        # Tags: the examiner's own verdicts, grouped (ui/viewers/tags_panel).
+        from trace_app.ui.viewers.tags_panel import TagsPanel
+        self.tags_panel = TagsPanel()
+        self.tags_panel.file_selected.connect(self.preview_artifact)
+        self.tags_panel.file_activated.connect(self.open_finding)
+        self.tags_panel.file_menu_requested.connect(self.open_finding_menu)
+        self.tags_panel.manage_requested.connect(self.show_manage_tags)
+        self.triage_panel.add_tags_tab(self.tags_panel)
 
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')
@@ -3247,7 +3537,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             for index in range(self.tree_viewer.topLevelItemCount()):
                 item = self.tree_viewer.topLevelItem(index)
                 data = item.data(0, Qt.UserRole) or {}
-                if data.get('is_bookmarks_root'):
+                if data.get('is_bookmarks_root') or \
+                        data.get('is_tags_root'):
                     continue        # the Bookmarks node is not itself a file
                 self.mark_bookmarked_tree_items(
                     item, self.evidence_id_for_path(self.image_of_item(item)))
@@ -4783,7 +5074,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for index in range(self.tree_viewer.topLevelItemCount()):
             data = self.tree_viewer.topLevelItem(index).data(
                 0, Qt.UserRole) or {}
-            if data.get('is_bookmarks_root') or data.get('is_analysis_root'):
+            if data.get('is_bookmarks_root') or data.get('is_analysis_root') \
+                    or data.get('is_tags_root'):
                 position = index + 1
         self.tree_viewer.insertTopLevelItem(position, root)
         for key, label in CATEGORIES:
@@ -5572,6 +5864,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.set_status(f"{len(rows)} files share that hash")
 
     def mark_analysis_rows(self):
+        try:
+            self._mark_analysis_rows()
+        finally:
+            # Tags go over what the analysis wrote into the Flag column.
+            self.mark_tagged_rows()
+
+    def _mark_analysis_rows(self):
         """Fill the analysis columns for the rows currently listed.
 
         One query for the whole directory rather than one per row: drawing a
@@ -5767,6 +6066,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.mark_bookmarked_tree_items()
 
     def refresh_bookmarks_tree(self):
+        try:
+            self._refresh_bookmarks_tree()
+        finally:
+            # Tags sit below Bookmarks (and Findings); rebuilt with them so
+            # the evidence tree growing a root keeps them above it.
+            self.refresh_tags_tree()
+
+    def _refresh_bookmarks_tree(self):
         """Rebuild the Bookmarks node at the top of the tree.
 
         Bookmarks sit beside the evidence rather than in a panel of their own,
@@ -7864,6 +8171,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if data.get('is_bookmarks_root'):
             self.show_triage('bookmarks')
             return
+        if data.get('is_tags_root') or data.get('is_tags_group'):
+            self.show_triage('tags')
+            return
         if data.get('is_analysis_root'):
             self.show_triage()
             return
@@ -9029,6 +9339,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.tree_viewer.viewport().mapToGlobal(position))
                 return
             if data and (data.get('is_bookmarks_root')
+                         or data.get('is_tags_root')
+                         or data.get('is_tags_group')
                          or data.get('is_activity_root')
                          or data.get('is_activity_group')
                          or data.get('is_analysis_root')

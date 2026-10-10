@@ -115,6 +115,8 @@ VOLUME_UNLOCKED = "Icons/tabler/lock-open.svg"
 SHADOW_COPY = "Icons/tabler/clock.svg"
 #: A job waiting its turn in the job bar's list.
 JOB_WAITING = "Icons/tabler/clock.svg"
+#: Tags: the examiner's own verdicts on files.
+TAG = "Icons/tabler/tag.svg"
 #: One per core.activity category, in the tree and on the Activity tab.
 ACTIVITY_CATEGORIES = {
     None: ACTIVITY,

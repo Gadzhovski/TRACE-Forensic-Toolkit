@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -198,6 +198,18 @@ def parse_artifact_ref(ref):
     return {'kind': 'unknown', 'ref': ref}
 
 
+#: The tags a case starts with: (name, colour).
+DEFAULT_TAGS = (('Relevant', '#E5534B'), ('Needs review', '#E3A008'),
+                ('Ignore', '#8B949E'))
+
+
+def _tag_detail(tag, paths):
+    """An audit line's detail: the tag and the files, the first ten named."""
+    shown = '; '.join(paths[:10])
+    more = f" and {len(paths) - 10} more" if len(paths) > 10 else ''
+    return f"{tag}: {len(paths)} file(s): {shown}{more}"
+
+
 class CaseError(Exception):
     """A case could not be created, opened or written."""
 
@@ -233,6 +245,7 @@ class Case:
 
         case = cls(folder, cls._connect(db_path))
         case._create_schema()
+        case._seed_tags()
         case._custody_guards()
         now = _utc_now()
         case._set_many({
@@ -1003,6 +1016,170 @@ class Case:
                 'bookmark removed',
                 f"id={bookmark_id} {row['label'] or ''!r} on "
                 f"{row['artifact_path'] or row['artifact_ref']}")
+
+    # --- tags ---------------------------------------------------------------
+    #
+    # A tag is the examiner's own verdict on a file -- Relevant, Ignore, a
+    # name of their choosing -- kept by artifact_ref with the evidence id,
+    # like a bookmark, so it survives a reopen. Who tagged what, and when,
+    # is custody: every change is an audit line.
+
+    def _seed_tags(self):
+        """The tags a case starts with, unless it has any."""
+        if self._db.execute("SELECT COUNT(*) FROM tags").fetchone()[0]:
+            return
+        self._db.executemany("INSERT INTO tags (name, colour) VALUES (?, ?)",
+                             DEFAULT_TAGS)
+        self._db.commit()
+
+    def tags(self):
+        """Every tag, in the order made, with how many files carry it."""
+        return [dict(row) for row in self._db.execute(
+            "SELECT t.id, t.name, t.colour, COUNT(a.artifact_ref) AS files "
+            "FROM tags t LEFT JOIN artifact_tags a ON a.tag_id = t.id "
+            "GROUP BY t.id ORDER BY t.id")]
+
+    def add_tag(self, name, colour=''):
+        """A new tag; returns its id (an existing tag of that name's id)."""
+        name = (name or '').strip()
+        if not name:
+            raise CaseError("A tag needs a name.")
+        row = self._db.execute("SELECT id FROM tags WHERE name = ?",
+                               (name,)).fetchone()
+        if row:
+            return row['id']
+        cursor = self._db.execute(
+            "INSERT INTO tags (name, colour) VALUES (?, ?)", (name, colour))
+        self._db.commit()
+        self._record_activity('tag created', f"{name!r} {colour}".strip())
+        return cursor.lastrowid
+
+    def update_tag(self, tag_id, name=None, colour=None):
+        old = self._db.execute("SELECT name, colour FROM tags WHERE id = ?",
+                               (tag_id,)).fetchone()
+        if old is None:
+            return
+        if name is not None and name.strip():
+            self._db.execute("UPDATE tags SET name = ? WHERE id = ?",
+                             (name.strip(), tag_id))
+        if colour is not None:
+            self._db.execute("UPDATE tags SET colour = ? WHERE id = ?",
+                             (colour, tag_id))
+        self._db.commit()
+        changes = [f"{what} {old[what]!r} -> {new!r}"
+                   for what, new in (('name', name), ('colour', colour))
+                   if new is not None and new != old[what]]
+        if changes:
+            self._record_activity('tag edited', f"id={tag_id}: "
+                                  + '; '.join(changes))
+
+    def remove_tag(self, tag_id):
+        """Delete a tag, and its marks on files."""
+        row = self._db.execute("SELECT name FROM tags WHERE id = ?",
+                               (tag_id,)).fetchone()
+        if row is None:
+            return
+        files = self._db.execute(
+            "SELECT COUNT(*) FROM artifact_tags WHERE tag_id = ?",
+            (tag_id,)).fetchone()[0]
+        self._db.execute("DELETE FROM artifact_tags WHERE tag_id = ?",
+                         (tag_id,))
+        self._db.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+        self._db.commit()
+        self._record_activity('tag removed', f"{row['name']!r}, taken off "
+                              f"{files} file(s)")
+
+    def tag_artifacts(self, tag_id, rows):
+        """Put tag `tag_id` on files: rows of {'evidence_id', 'artifact_ref',
+        'name', 'path'}. Returns how many were newly tagged."""
+        tag = self._db.execute("SELECT name FROM tags WHERE id = ?",
+                               (tag_id,)).fetchone()
+        if tag is None:
+            raise CaseError("No such tag.")
+        now, who = _utc_now(), self.examiner
+        added = []
+        for row in rows:
+            evidence_id = row.get('evidence_id')
+            if evidence_id is not None and \
+                    not self._evidence_exists(evidence_id):
+                evidence_id = None
+            # Asked first: NULLs are distinct in the primary key, so a file
+            # with no evidence id would otherwise be tagged twice.
+            if self._db.execute(
+                    "SELECT 1 FROM artifact_tags WHERE tag_id = ? AND "
+                    "evidence_id IS ? AND artifact_ref = ?",
+                    (tag_id, evidence_id, row['artifact_ref'])).fetchone():
+                continue
+            cursor = self._db.execute(
+                "INSERT OR IGNORE INTO artifact_tags (tag_id, evidence_id, "
+                "artifact_ref, name, path, tagged_utc, examiner) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (tag_id, evidence_id, row['artifact_ref'],
+                 row.get('name') or '', row.get('path') or '', now, who))
+            if cursor.rowcount:
+                added.append(row.get('path') or row.get('name')
+                             or row['artifact_ref'])
+        self._db.commit()
+        if added:
+            self._record_activity('files tagged', _tag_detail(
+                tag['name'], added))
+        return len(added)
+
+    def untag(self, rows, tag_id=None):
+        """Take tag `tag_id` (None: every tag) off files. Returns how many
+        marks went."""
+        removed = []
+        for row in rows:
+            query = ("DELETE FROM artifact_tags WHERE evidence_id IS ? AND "
+                     "artifact_ref = ?")
+            args = [row.get('evidence_id'), row['artifact_ref']]
+            if tag_id is not None:
+                query += " AND tag_id = ?"
+                args.append(tag_id)
+            if self._db.execute(query, args).rowcount:
+                removed.append(row.get('path') or row.get('name')
+                               or row['artifact_ref'])
+        self._db.commit()
+        if removed:
+            name = 'every tag' if tag_id is None else repr(
+                (self._db.execute("SELECT name FROM tags WHERE id = ?",
+                                  (tag_id,)).fetchone() or {'name': '?'})
+                ['name'])
+            self._record_activity('files untagged', _tag_detail(name,
+                                                                removed))
+        return len(removed)
+
+    def tags_for(self, evidence_id, refs):
+        """{artifact_ref: [{'id', 'name', 'colour'}]} for the refs given."""
+        refs = list(refs)
+        found = {}
+        for start in range(0, len(refs), 500):
+            chunk = refs[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for row in self._db.execute(
+                    f"SELECT a.artifact_ref, t.id, t.name, t.colour "
+                    f"FROM artifact_tags a JOIN tags t ON t.id = a.tag_id "
+                    f"WHERE a.evidence_id IS ? AND a.artifact_ref IN "
+                    f"({marks}) ORDER BY t.id", [evidence_id] + chunk):
+                found.setdefault(row['artifact_ref'], []).append(
+                    {'id': row['id'], 'name': row['name'],
+                     'colour': row['colour']})
+        return found
+
+    def tagged(self, tag_id=None, evidence_id=None, limit=100000):
+        """Tagged files, with their tag: newest first."""
+        query = ("SELECT a.*, t.name AS tag, t.colour FROM artifact_tags a "
+                 "JOIN tags t ON t.id = a.tag_id WHERE 1 = 1")
+        args = []
+        if tag_id is not None:
+            query += " AND a.tag_id = ?"
+            args.append(tag_id)
+        if evidence_id is not None:
+            query += " AND a.evidence_id = ?"
+            args.append(evidence_id)
+        query += " ORDER BY t.id, a.tagged_utc DESC, a.path LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self._db.execute(query, args)]
 
     # --- notes ------------------------------------------------------------
 
@@ -2374,6 +2551,10 @@ class Case:
                 tag_id        INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
                 evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
                 artifact_ref  TEXT NOT NULL,
+                name          TEXT,
+                path          TEXT,
+                tagged_utc    TEXT,
+                examiner      TEXT,
                 PRIMARY KEY (tag_id, evidence_id, artifact_ref)
             );
 
@@ -2860,6 +3041,19 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 19:
+            # Tags in use (schema 19): which file, by whom, when -- the
+            # table was there unused; it gains what a list of tagged files
+            # shows, and the three tags every case starts with.
+            for column in ('name', 'path', 'tagged_utc', 'examiner'):
+                try:
+                    self._db.execute(
+                        f"ALTER TABLE artifact_tags ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass        # already present (created above at v19)
+            self._db.commit()
+            self._seed_tags()
 
         if version < 18:
             self._migrate_custody()

@@ -81,7 +81,7 @@ def test_menus_get_copy_entries_icons_and_file_actions(qapp, table):
     point = table.viewport().mapToGlobal(
         table.visualRect(table.model().index(1, 1)).center())
     seen = []
-    cm.set_row_hook(lambda m, row: seen.append(row))
+    cm.set_row_hook(lambda m, row, *_view: seen.append(row))
     try:
         assert cm.row_at(table, point) == {'name': 'b.jpg'}
         cm.add_view_actions(menu, table, point)
