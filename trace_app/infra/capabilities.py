@@ -190,6 +190,10 @@ CAPABILITIES = (
     Capability('btrfs', 'Volumes and encryption', "Btrfs file systems "
                "(Fedora, openSUSE: subvolumes, snapshots, zlib/LZO/zstd)",
                'TRACE (Python)', lambda: 'built in'),
+    Capability('f2fs', 'Volumes and encryption', "F2FS file systems "
+               "(Android /data, some Linux installs: inline data and "
+               "folders, LZ4/LZO/zstd compression)",
+               'TRACE (Python)', lambda: 'built in'),
     Capability('crc32c', 'Volumes and encryption', "Btrfs deleted files "
                "proved by their CRC-32C checksums", 'crc32c',
                lambda: 'crc32c ' + _dist_version('crc32c')),

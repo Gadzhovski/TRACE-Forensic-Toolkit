@@ -177,6 +177,11 @@ BUILT = {
     'vc-hidden.hc': 'make_veracrypt.py',
     'vc-serpent.hc': 'make_veracrypt.py',
     'vc-partition.raw': 'make_veracrypt.py',
+    'f2fs-key.json': 'make_f2fs.py',
+    'f2fs-sload.raw': 'make_f2fs.py',
+    'f2fs-lz4.raw': 'make_f2fs.py',
+    'f2fs-lzo.raw': 'make_f2fs.py',
+    'f2fs-kernel.raw': 'make_f2fs.py',
 }
 
 GROUPS = {'ci': CI, 'local': LOCAL, 'private': PRIVATE, 'built': BUILT}
@@ -188,7 +193,8 @@ def group_of(name):
         if name in entries:
             return group
     if name.startswith('md-') or name.startswith('luks') or \
-            name.startswith('btrfs-deleted') or name.startswith('vc-'):
+            name.startswith('btrfs-deleted') or name.startswith('vc-') or \
+            name.startswith('f2fs-'):
         return 'built'
     if name == 'carve-corpus.dd':
         return 'corpus'

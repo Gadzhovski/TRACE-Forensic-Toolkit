@@ -1203,6 +1203,7 @@ class ImageHandler:
         (4096, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
         (0, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
         (0x10040, b'_BHRfS_M', 'Btrfs'),
+        (0x400, b'\x10\x20\xf5\xf2', 'F2FS'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
         # accepted. UFS1 and UFS2 differ only in where the block sits.
@@ -1498,7 +1499,8 @@ class ImageHandler:
         return self.fs_info_cache[start_offset]
 
     def _other_file_system(self, start_offset):
-        """An XFS (libfsxfs) or Btrfs (core/btrfs.py) volume at a partition
+        """An XFS (libfsxfs), Btrfs (core/btrfs.py) or F2FS (core/f2fs.py)
+        volume at a partition
         (or an unpartitioned image), or inside a volume TRACE opened there
         -- an md array, an unlocked LUKS volume, an LVM logical volume
         (RHEL's default install is XFS on LVM) -- or None."""
@@ -1513,11 +1515,13 @@ class ImageHandler:
             except KeyError:
                 return None
         from trace_app.core.btrfs import open_btrfs
+        from trace_app.core.f2fs import open_f2fs
         from trace_app.core.xfs import open_xfs
         # An assembled Btrfs file system: the other devices, by device.
         others = getattr(self, '_btrfs_others', ()) \
             if start_offset == 0 else ()
-        return open_xfs(window) or open_btrfs(window, others)
+        return open_xfs(window) or open_btrfs(window, others) or \
+            open_f2fs(window)
 
     # --- one file, read lazily --------------------------------------------------
 
@@ -2189,6 +2193,7 @@ class ImageHandler:
             fs = self.get_fs_info(start_offset)
             from trace_app.core.apfs import is_apfs
             from trace_app.core.btrfs import is_btrfs
+            from trace_app.core.f2fs import is_f2fs_fs
             from trace_app.core.logical import is_logical
             from trace_app.core.xfs import is_xfs
             if is_apfs(fs):
@@ -2197,6 +2202,8 @@ class ImageHandler:
                 return "XFS"
             if is_btrfs(fs):
                 return "Btrfs"
+            if is_f2fs_fs(fs):
+                return "F2FS"
             if is_logical(fs):
                 return fs.label
             fs_type = fs.info.ftype

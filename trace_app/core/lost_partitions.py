@@ -56,6 +56,8 @@ def signature(head):
         return 'HFS+'
     if head[:4] == b'XFSB':
         return 'XFS'
+    if head[1024:1028] == b'\x10\x20\xf5\xf2':
+        return 'F2FS'
     if head[32:36] == b'NXSB':
         return 'APFS'
     return None

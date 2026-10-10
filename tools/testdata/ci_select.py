@@ -236,7 +236,7 @@ def catalog():
 #: Names of the images Linux CI builds (tests.yml's "Build the Linux
 #: images" step): a test file naming one needs that step.
 LINUX_BUILT = ('btrfs-deleted', 'md-raid', 'luks-lvm', 'luks1-lvm',
-               'luks2-lvm', 'vc-key.json')
+               'luks2-lvm', 'vc-key.json', 'f2fs-key.json')
 
 
 def needs(test_files, graph):
