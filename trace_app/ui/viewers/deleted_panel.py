@@ -34,7 +34,7 @@ _TONE = {deleted.RECOVERABLE: 'clean', deleted.RESIDENT: 'clean',
          deleted.PARTLY: 'suspicious', deleted.OVERWRITTEN: 'malicious',
          deleted.REUSED: 'unknown', deleted.NO_DATA: 'unknown',
          deleted.START_ONLY: 'suspicious',
-         deleted.POSSIBLY: 'suspicious'}
+         deleted.POSSIBLY: 'suspicious', deleted.NOT_ASSESSED: 'unknown'}
 _MEANING = {
     deleted.RECOVERABLE: "The entry is unused and none of its clusters is "
                          "held by a live file: its content is as it was.",
@@ -56,6 +56,10 @@ _MEANING = {
                         "start: it was in pieces. Only its first cluster is "
                         "known to be its own; what reads after it may be "
                         "another file's.",
+    deleted.NOT_ASSESSED: "Outside the run's scope (Analysis Modules ▸ "
+                          "Scope): listed by name, its data not checked. "
+                          "Run Deleted files again with a scope that takes "
+                          "its folder in to know what is left of it.",
 }
 
 

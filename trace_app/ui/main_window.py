@@ -3226,6 +3226,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         unavailable, in_use = availability(self.case,
                                            self._rule_libraries())
         preselected['unavailable'] = unavailable
+        # The case's own scope, whatever the last run's choice said.
+        preselected['scope'] = self._job_scope()
         # Rule-driven modules follow the case's own options, not the last
         # run: ticked when their sets are in use.
         for key in (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
@@ -3307,6 +3309,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         job is not queued for a Btrfs disk."""
         self._last_choice = {k: v for k, v in choice.items()
                              if k != 'per_evidence'}
+        if 'scope' in choice:
+            self._keep_scope(choice['scope'])
         per = choice.get('per_evidence') or {}
         groups, skipped_names = [], []
         for row in chosen:
@@ -3329,6 +3333,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(
                 f"Modules that cannot find anything there were left out on "
                 f"{', '.join(skipped_names)} (see the log)")
+
+    def _keep_scope(self, value):
+        """Make `value` (core/scope.Scope's dict) the case's scope -- what
+        the analysis, the index, YARA and the deleted-file check cover --
+        and say so in the audit trail."""
+        from trace_app.core import scope as scope_module
+        if self.case is None:
+            return
+        scope = scope_module.Scope.from_dict(value)
+        if scope.to_dict() != scope_module.setting_value(
+                self.case).to_dict():
+            self.case.set_setting('scope', scope.to_dict())
+        self.case.record_event('analysis scope', scope.describe())
+
+    def _job_scope(self):
+        """The case's scope as a job takes it (params['scope']), fixed
+        when the job is queued."""
+        from trace_app.core import scope as scope_module
+        return scope_module.setting_value(self.case).to_dict()
 
     def _queue_one_choice(self, chosen, choice):
         """Queue one choice over rows, in the order the jobs depend on
@@ -3540,11 +3563,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """One evidence row, one job."""
         evidence_id = row['id']
         name = row.get('display_name') or os.path.basename(row['path'])
+        scope = self._job_scope()
 
         def start(job):
             worker = AnalysisWorker(row['path'], self.case.folder,
                                     evidence_id, modules, self)
             worker.params['unlock'] = self._unlocks_for(row['path'])
+            worker.params['scope'] = scope
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
                     done, total, os.path.basename(path)))
@@ -3591,11 +3616,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _queue_indexing_job(self, row):
         evidence_id = row['id']
         name = row.get('display_name') or os.path.basename(row['path'])
+        scope = self._job_scope()
 
         def start(job):
             worker = IndexWorker(row['path'], self.case.folder, evidence_id,
                                  self)
             worker.params['unlock'] = self._unlocks_for(row['path'])
+            worker.params['scope'] = scope
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
                     done, total, os.path.basename(path)))
@@ -4063,11 +4090,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.ui.dialogs.yara_rules import YaraWorker
         evidence_id = row['id']
         name = row.get('display_name') or os.path.basename(row['path'])
+        scope = self._job_scope()
 
         def start(job):
             worker = YaraWorker(row['path'], self.case.folder, evidence_id,
                                 self.yara_library().folder, options, self)
             worker.params['unlock'] = self._unlocks_for(row['path'])
+            worker.params['scope'] = scope
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
                     done, total, os.path.basename(path)))
@@ -4179,6 +4208,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.case:
             return 0
         queued = 0
+        scope = self._job_scope()
         for row in rows:
             if not os.path.exists(row['path']):
                 continue
@@ -4189,6 +4219,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 worker = DeletedWorker(row['path'], self.case.folder,
                                        evidence_id, self)
                 worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.params['scope'] = scope
                 worker.progressed.connect(
                     lambda done, total, path: self.job_bar.report(
                         done, total, os.path.basename(path)))
@@ -4648,7 +4679,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
         if count != self._similar_groups:
             self._similar_groups = count
-            self.refresh_analysis_tree()
+            if self.case is not None and self.case.is_open:
+                self.refresh_analysis_tree()
 
     #: Findings groups in the order of Triage's sub-tabs, so the tree and
     #: the tab read alike.

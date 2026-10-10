@@ -28,7 +28,8 @@ PAGES = (
      "Who you are, where cases start, how sizes read. Kept for you on this "
      "computer, in every case.",
      ((None, 'user', ('examiner', 'organisation', 'case_folder')),
-      ("Working", 'user', ('size_units', 'verify_order')),
+      ("Working", 'user', ('size_units', 'verify_order',
+                           'worker_processes')),
       ("Troubleshooting", 'user', ('debug_log',)))),
     ("Display", icons.DISPLAY,
      "What the Listing shows, and the time zone shown beside UTC.",
@@ -64,6 +65,7 @@ RANGES = {
     'archive_depth': (0, 32, None),
     'archive_member_mb': (1, 4096, None),
     'carve_min_kb': (0, 1024 * 1024, None),
+    'worker_processes': (0, 64, None),
 }
 
 CHOICES = {

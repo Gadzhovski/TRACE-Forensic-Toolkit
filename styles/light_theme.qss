@@ -2344,3 +2344,24 @@ QCalendarWidget QAbstractItemView {
 QCalendarWidget QAbstractItemView:disabled {
     color: #9AA0A6;
 }
+
+/* ============ What a run covers (Scope) ============ */
+/* The editor's help and notes read like the modules dialog's; its summary
+   is the rules in words, ruled off above like the modules' summary. */
+QLabel#scopeNote {
+    color: #6c757d;
+}
+QLabel#scopeSummary {
+    padding-top: 6px;
+    border-top: 1px solid #E5E5E5;
+}
+QPlainTextEdit#scopeRules {
+    font-family: "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+    padding: 2px 4px;
+}
+QScrollArea#scopeScroll, QWidget#scopeFields {
+    background: transparent;
+}

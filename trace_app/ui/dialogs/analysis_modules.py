@@ -28,8 +28,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QScrollArea, QVBoxLayout,
-                               QWidget)
+                               QListWidgetItem, QPushButton, QScrollArea,
+                               QVBoxLayout, QWidget)
 
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
                                      MODULE_EXECUTABLES, MODULE_HASH,
@@ -409,6 +409,38 @@ class ModuleSelector(QWidget):
         top.addWidget(self.profile_note, 1)
         outer.addLayout(top)
 
+        # Scope row: what the file modules read (core/scope.py).
+        from trace_app.core.scope import Scope
+        from trace_app.ui.dialogs.scope_editor import preset_items
+        self._scope = Scope()
+        scope_row = QHBoxLayout()
+        scope_row.setSpacing(8)
+        label = QLabel("Scope")
+        label.setObjectName("moduleProfileLabel")
+        scope_row.addWidget(label)
+        self.scope_combo = QComboBox()
+        self.scope_combo.setObjectName("moduleScopeCombo")
+        for key, text in preset_items():
+            self.scope_combo.addItem(text, key)
+        self.scope_combo.currentIndexChanged.connect(self._scope_chosen)
+        scope_row.addWidget(self.scope_combo)
+        self.scope_button = QPushButton("Edit…")
+        self.scope_button.setObjectName("moduleScopeEdit")
+        self.scope_button.setToolTip("Folders in or out, file types, sizes, "
+                                     "dates and deleted files")
+        self.scope_button.clicked.connect(self.edit_scope)
+        scope_row.addWidget(self.scope_button)
+        self.scope_note = QLabel()
+        self.scope_note.setObjectName("moduleProfileNote")
+        self.scope_note.setWordWrap(True)
+        scope_row.addWidget(self.scope_note, 1)
+        outer.addLayout(scope_row)
+        # Labels of the two rows the same width, so their fields line up.
+        width = max(label.sizeHint().width(),
+                    top.itemAt(0).widget().sizeHint().width())
+        label.setMinimumWidth(width)
+        top.itemAt(0).widget().setMinimumWidth(width)
+
         # The grouped list, scrolling where the screen is short.
         body = QWidget()
         body.setObjectName("moduleList")
@@ -600,11 +632,54 @@ class ModuleSelector(QWidget):
             self.carve_types.set_selected(
                 [t.upper() for t in choice['carve_types']])
         self.unallocated_box.setChecked(choice.get('unallocated_only', True))
+        if 'scope' in choice:
+            self.set_scope(choice['scope'])
         self._set_combo(self._matching_profile())
         self._refresh()
 
     def profile(self):
         return self.profile_combo.currentData()
+
+    # --- scope ------------------------------------------------------------------
+
+    def scope(self):
+        """The run's Scope (core/scope.py)."""
+        return self._scope
+
+    def set_scope(self, value):
+        from trace_app.core.scope import CUSTOM, PRESETS, Scope
+        self._scope = Scope.from_dict(value)
+        key = self._scope.preset if self._scope.preset in PRESETS \
+            else CUSTOM
+        self.scope_combo.blockSignals(True)
+        self.scope_combo.setCurrentIndex(max(0, self.scope_combo
+                                             .findData(key)))
+        self.scope_combo.blockSignals(False)
+        self._show_scope()
+
+    def _scope_chosen(self, _index):
+        from trace_app.core.scope import PRESETS, Scope
+        key = self.scope_combo.currentData()
+        if key in PRESETS:
+            self._scope = Scope.preset_scope(key)
+            self._show_scope()
+        else:
+            self.edit_scope()
+
+    def edit_scope(self):
+        from trace_app.ui.dialogs.scope_editor import edit_scope
+        edited = edit_scope(self._scope, self)
+        if edited is not None:
+            self.set_scope(edited.to_dict())
+        else:
+            self.set_scope(self._scope.to_dict())   # the combo back
+
+    def _show_scope(self):
+        text = self._scope.describe()
+        self.scope_note.setText(text if len(text) <= 140
+                                else text[:137] + '…')
+        self.scope_note.setToolTip(text)
+        self.changed.emit()
 
     def choice(self):
         """{'modules', 'index', 'activity', ..., 'carve_types',
@@ -618,6 +693,7 @@ class ModuleSelector(QWidget):
                               if MODULE_CARVE in on else [])
         out['unallocated_only'] = self.unallocated_box.isChecked()
         out['profile'] = self.profile()
+        out['scope'] = self._scope.to_dict()
         return out
 
     def any_selected(self):
@@ -750,11 +826,13 @@ class AnalysisModulesDialog(QDialog):
             self.selector.apply_profile(choice['profile'])
         else:
             self.selector.set_choice(choice)
+        if 'scope' in choice:
+            self.selector.set_scope(choice['scope'])
         # As tall as the list where the screen allows, scrolling where not.
         screen = self.screen().availableGeometry().height() \
             if self.screen() is not None else 800
         self.selector.scroll.setMinimumHeight(
-            max(260, min(620, int(screen * 0.88) - 260)))
+            max(260, min(620, int(screen * 0.88) - 300)))
 
         # Several images: the list on the left (ticked = analysed, with
         # what each holds), the modules of the one selected on the right.

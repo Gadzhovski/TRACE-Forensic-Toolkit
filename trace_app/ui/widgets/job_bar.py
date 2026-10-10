@@ -26,6 +26,7 @@ progress and Cancel.
 """
 
 import logging
+import time
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QProgressBar,
@@ -71,6 +72,27 @@ class Job:
         self.cancelled = False
         #: The last progress it reported: (done, total, detail).
         self.reported = (0, 0, '')
+        #: time.monotonic() when it started and ended; None until then.
+        self.started = self.ended = None
+
+    def duration(self):
+        """'6m 12s' -- how long it ran (so far, while running); '' if it
+        has not started."""
+        if self.started is None:
+            return ''
+        return elapsed_text((self.ended or time.monotonic()) - self.started)
+
+
+def elapsed_text(seconds):
+    """'45s', '6m 12s', '2h 05m'."""
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, seconds = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m"
 
 
 class JobBar(QWidget):
@@ -218,6 +240,7 @@ class JobBar(QWidget):
         self._refresh_label()
         self._refresh_steps()
 
+        self._current.started = time.monotonic()
         try:
             self._current.worker = self._current.start(self._current)
         except Exception as exc:
@@ -261,10 +284,14 @@ class JobBar(QWidget):
         self._refresh_steps()
 
     def _record(self, job, error):
+        job.ended = time.monotonic()
         outcome = (FAILED if error else CANCELLED if job.cancelled
                    else DONE)
         self.history.append((job, outcome if not error
                              else f"{FAILED}: {error}"))
+        # Every job's time in the log, so the slow one is found without a
+        # profiler.
+        logger.info("%s: %s in %s", job.title, outcome, job.duration())
 
     def cancel_current(self):
         """Ask the running job to stop.
@@ -334,6 +361,7 @@ class JobBar(QWidget):
         self.side_progress.setValue(0)
         self._show_side(True)
         self._refresh_side()
+        self._side.started = time.monotonic()
         try:
             self._side.worker = self._side.start(self._side)
         except Exception as exc:
@@ -401,19 +429,21 @@ class JobBar(QWidget):
         menu = self.steps_menu
         menu.clear()
         for job, state in self.jobs():
+            took = job.duration()
             if state == 'running':
                 done, total, detail = job.reported
                 share = f"{done * 100 // total}%" if total else "running"
-                text = f"{job.title} — {share}"
+                text = f"{job.title} — {share}, {took}"
                 glyph = icons.RUN
             elif state == 'queued':
                 text, glyph = f"{job.title} — waiting", icons.JOB_WAITING
             elif state == DONE:
-                text, glyph = f"{job.title} — done", icons.SUCCESS
+                text, glyph = f"{job.title} — done in {took}", icons.SUCCESS
             elif state == CANCELLED:
-                text, glyph = f"{job.title} — cancelled", icons.CANCEL
+                text, glyph = (f"{job.title} — cancelled after {took}",
+                               icons.CANCEL)
             else:
-                text, glyph = f"{job.title} — {state}", icons.ERROR
+                text, glyph = f"{job.title} — {state} ({took})", icons.ERROR
             # Information, not commands -- but not greyed out either:
             # rebuilt each time the menu opens, so not theme-tracked.
             menu.addAction(icons.icon(glyph), text)

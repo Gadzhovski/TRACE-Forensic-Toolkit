@@ -516,8 +516,15 @@ class TriagePanel(QWidget):
             images = len(self._names)
             scope = (f" across {images} images" if self.evidence_id is None
                      and images > 1 else '')
+            # A narrowed run says so here: "nothing found" must not read as
+            # "nothing there" (core/scope.py).
+            from trace_app.core import scope as scope_module
+            covered = scope_module.setting_value(self.case)
+            narrowed = '' if covered.everything else \
+                f" · scope: {covered.label}"
             self.status_label.setText(
-                f"{summary['analysed']:,} file(s) analysed{scope}")
+                f"{summary['analysed']:,} file(s) analysed{scope}{narrowed}")
+            self.status_label.setToolTip(covered.describe())
 
         self._yara_count = summary.get('yara', 0)
         self._sigma_count = summary.get('sigma', 0)
