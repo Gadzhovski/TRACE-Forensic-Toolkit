@@ -509,6 +509,30 @@ def job_vss_compare(params, progress, item, should_stop):
         _close(handler)
 
 
+def job_pictures(params, progress, item, should_stop):
+    """Similar pictures (core/phash.py): 'groups' of the case's pictures,
+    'match' them with reference pictures, or 'hash_folder' the references.
+    CPU-bound Python: on a thread in the window it held the interpreter
+    lock, and every query the window ran waited on it -- a Fedora case took
+    minutes to open. The result is the one item."""
+    from trace_app.core import phash
+    operation = params['operation']
+    threshold = params.get('threshold', phash.DEFAULT_THRESHOLD)
+    if operation == 'groups':
+        result = phash.groups(params['items'], threshold, should_stop)
+    elif operation == 'match':
+        result = phash.match(params['references'], params['items'],
+                             threshold, should_stop)
+    elif operation == 'hash_folder':
+        result = phash.hash_folder(params['folder'], should_stop)
+    else:
+        raise ValueError(f"unknown pictures operation {operation!r}")
+    if should_stop():
+        return 0
+    item({'result': result})
+    return 1
+
+
 def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
@@ -539,5 +563,6 @@ JOBS = {
     'persistence': job_persistence,
     'carve': job_carve,
     'vss_compare': job_vss_compare,
+    'pictures': job_pictures,
     'ping': job_ping,
 }

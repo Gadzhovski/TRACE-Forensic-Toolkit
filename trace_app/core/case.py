@@ -119,6 +119,8 @@ REPORTED_MISMATCHES = ('suspicious', 'notable')
 #: The content-check grades worth showing; benign ones (a motion photo's
 #: clip, an owner-password PDF) are recorded but not put in front of anyone.
 REPORTED_FINDING_GRADES = ('suspicious', 'notable')
+#: Sigma matches Triage lists (and counts) at most.
+SIGMA_SHOWN = 50000
 
 #: Finding modules written by jobs of their own, not the file analysis.
 OWN_JOB_MODULES = ('ntfs', 'yara', 'sigma', 'persistence', 'keywords',
@@ -2272,8 +2274,20 @@ class Case:
 
         carved = self._db.execute(
             f"SELECT COUNT(*) FROM carved_files{where}", params).fetchone()[0]
+        # Counted here, not from the rows Triage lists, so its tabs can be
+        # labelled without filling them. YARA: files (a file matching three
+        # rules is one); Sigma: events, as its table lists them.
+        scope = " AND evidence_id = ?" if evidence_id is not None else ""
+        yara = self._db.execute(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT evidence_id, artifact_ref "
+            "FROM file_findings WHERE module = 'yara'" + scope + ")",
+            params).fetchone()[0]
+        sigma = self._db.execute(
+            "SELECT COUNT(*) FROM file_findings WHERE module = 'sigma'"
+            + scope, params).fetchone()[0]
 
         return {'analysed': analysed, 'mismatches': mismatches,
+                'yara': yara, 'sigma': min(sigma, SIGMA_SHOWN),
                 'carved': carved,
                 'high_entropy': entropy, 'duplicate_groups': duplicates,
                 'hidden': count('hidden', REPORTED_FINDING_GRADES),

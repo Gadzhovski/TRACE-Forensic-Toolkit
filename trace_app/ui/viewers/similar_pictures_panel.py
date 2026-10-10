@@ -16,9 +16,8 @@ Landing on a picture previews it; double-click goes to its folder.
 """
 
 import logging
-import os
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout,
                                QHeaderView, QLabel, QPushButton, QSizePolicy,
                                QSpinBox, QTreeWidget, QTreeWidgetItem,
@@ -27,52 +26,37 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout,
 from trace_app.core import phash
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
+from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.SimilarPictures')
 
-#: Reference pictures are read from these extensions.
-REFERENCE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff',
-                        '.heic', '.heif', '.bmp', '.gif'}
+#: Kept here for callers that found them in this module.
+REFERENCE_EXTENSIONS = phash.REFERENCE_EXTENSIONS
+hash_folder = phash.hash_folder
 
 
-class _Task(QThread):
-    """Runs a function off the UI thread; `done(result)` when it ends."""
+class _Task(ProcessWorker):
+    """One comparison in a child process (core/background.job_pictures);
+    `done(result)` when it ends -- an Exception if it failed. Not a thread
+    of the window's: comparing thousands of hashes in Python held the
+    interpreter lock, and every query the window made waited behind it."""
 
     done = Signal(object)
 
-    def __init__(self, function, parent=None):
-        super().__init__(parent)
-        self.function = function
+    kind = 'pictures'
 
-    def run(self):
-        try:
-            result = self.function()
-        except Exception as exc:
-            logger.exception("Similar pictures: %s", exc)
-            result = exc
-        self.done.emit(result)
+    def __init__(self, params, parent=None):
+        super().__init__(params, parent)
+        self._result = None
 
+    def on_item(self, record):
+        self._result = record.get('result')
 
-def hash_folder(folder):
-    """[{'name', 'path', 'phash', 'size'}] for the pictures under `folder`
-    (subfolders too) that decode."""
-    out = []
-    for root, _dirs, files in os.walk(folder):
-        for name in sorted(files):
-            if os.path.splitext(name)[1].lower() not in REFERENCE_EXTENSIONS:
-                continue
-            path = os.path.join(root, name)
-            try:
-                with open(path, 'rb') as handle:
-                    data = handle.read()
-            except OSError:
-                continue
-            value = phash.phash(data)
-            if value:
-                out.append({'name': name, 'path': path, 'phash': value,
-                            'size': len(data)})
-    return out
+    def on_done(self, count, error):
+        if self._stop.is_set():
+            return
+        self.done.emit(RuntimeError(error) if error else self._result)
 
 
 class SimilarPicturesPanel(QWidget):
@@ -167,6 +151,7 @@ class SimilarPicturesPanel(QWidget):
 
     def shutdown(self):
         if self._task is not None:
+            self._task.stop()
             self._task.wait(3000)
 
     def refresh(self):
@@ -187,22 +172,25 @@ class SimilarPicturesPanel(QWidget):
             self.count_changed.emit(0)
             return
         if self._mode == 'reference' and self._reference:
-            references = self._reference[1]
-            self._run(lambda: phash.match(references, items, threshold),
-                      self._show_matches)
+            self._run({'operation': 'match', 'items': items,
+                       'references': self._reference[1],
+                       'threshold': threshold}, self._show_matches)
         else:
-            self._run(lambda: phash.groups(items, threshold),
+            self._run({'operation': 'groups', 'items': items,
+                       'threshold': threshold},
                       lambda groups: self._show_groups(groups, len(items)))
         self.status_label.setText("Comparing…")
 
-    def _run(self, function, then):
+    def _run(self, params, then):
         if self._task is not None:
-            # A later request wins: the running one's result is dropped.
+            # A later request wins: the running one is stopped and its
+            # result dropped.
             try:
                 self._task.done.disconnect()
             except (RuntimeError, TypeError):
                 pass
-        task = _Task(function, self)
+            self._task.stop()
+        task = _Task(params, self)
         task.done.connect(lambda result: self._finished(result, then))
         task.finished.connect(lambda task=task: self._task_ended(task))
         self._task = task
@@ -267,7 +255,7 @@ class SimilarPicturesPanel(QWidget):
             self._mode = 'reference'
             self.groups_button.show()
             self.refresh()
-        self._run(lambda: hash_folder(folder), hashed)
+        self._run({'operation': 'hash_folder', 'folder': folder}, hashed)
 
     def _show_matches(self, matches):
         folder, references = self._reference

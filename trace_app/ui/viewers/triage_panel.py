@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHeaderView,
                                QTableWidgetItem, QTabWidget, QVBoxLayout,
                                QWidget)
 
-from trace_app.core.case import REPORTED_FINDING_GRADES, REPORTED_MISMATCHES
+from trace_app.core.case import (REPORTED_FINDING_GRADES, REPORTED_MISMATCHES,
+                                 SIGMA_SHOWN)
 from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
@@ -154,6 +155,7 @@ class TriagePanel(QWidget):
         # No base line: in document mode Qt rules one along the top of the
         # tab row, a stray line no other tab strip in TRACE has.
         self.tabs.tabBar().setDrawBase(False)
+        self.tabs.currentChanged.connect(self._fill_shown)
         layout.addWidget(self.tabs, 1)
 
         self.mismatch_table = self._make_table(
@@ -517,16 +519,30 @@ class TriagePanel(QWidget):
             self.status_label.setText(
                 f"{summary['analysed']:,} file(s) analysed{scope}")
 
-        self._fill_mismatches()
-        self._fill_entropy()
-        self._fill_duplicates()
-        self._fill_hidden()
-        self._fill_photos()
-        self._fill_authors()
-        self._fill_yara()
-        self._fill_executables()
-        self._fill_sigma()
+        self._yara_count = summary.get('yara', 0)
+        self._sigma_count = summary.get('sigma', 0)
         self._set_counts(summary)
+        # Only the table in front is filled now; the others when their tab
+        # is opened. Filling all nine on every refresh -- tens of thousands
+        # of rows on a big image, on the UI thread -- held a reopened case
+        # on a white window for seconds.
+        self._stale = set(self._finding_tables())
+        self._fill_shown()
+
+    def _fill_shown(self, _index=None):
+        table = self.tabs.currentWidget()
+        if self.case is None or table not in getattr(self, '_stale', ()):
+            return
+        self._stale.discard(table)
+        {self.mismatch_table: self._fill_mismatches,
+         self.entropy_table: self._fill_entropy,
+         self.duplicate_table: self._fill_duplicates,
+         self.hidden_table: self._fill_hidden,
+         self.photo_table: self._fill_photos,
+         self.author_table: self._fill_authors,
+         self.yara_table: self._fill_yara,
+         self.executable_table: self._fill_executables,
+         self.sigma_table: self._fill_sigma}[table]()
 
     def _finding_tables(self):
         return (self.mismatch_table, self.entropy_table, self.duplicate_table,
@@ -601,8 +617,6 @@ class TriagePanel(QWidget):
 
     def _fill_yara(self):
         rows = self.case.findings(self.evidence_id, 'yara', limit=20000)
-        self._yara_count = len({(r['evidence_id'], r['artifact_ref'])
-                                for r in rows})
         table = self.yara_table
         table.setRowCount(len(rows))
         for position, row in enumerate(rows):
@@ -665,11 +679,11 @@ class TriagePanel(QWidget):
 
     def _fill_sigma(self):
         """Every event a Sigma rule matched, most serious first."""
-        rows = self.case.findings(self.evidence_id, 'sigma', limit=50000)
+        rows = self.case.findings(self.evidence_id, 'sigma',
+                                  limit=SIGMA_SHOWN)
         rows.sort(key=lambda r: (_LEVEL_ORDER.get(
             (r.get('detail') or {}).get('level'), 5),
             (r.get('detail') or {}).get('time') or ''))
-        self._sigma_count = len(rows)
         table = self.sigma_table
         table.setRowCount(len(rows))
         for position, row in enumerate(rows):

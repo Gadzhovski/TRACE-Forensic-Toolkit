@@ -4840,6 +4840,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.tree_viewer.indexOfTopLevelItem(root)))
         root = self.tree_viewer.topLevelItem(position)
 
+        # A group's files are fetched when it is opened, not here: the tree
+        # is rebuilt after every job and on opening a case, and listing every
+        # group's files each time (thousands of rows, on the UI thread) held
+        # a reopened case on a white window.
+        self._findings_fetchers = {}
         for key, label, glyph, count, fetch in groups:
             if not count:
                 continue
@@ -4847,62 +4852,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             group.setText(0, f"{label} ({count})")
             group.setIcon(0, icons.icon(glyph))
             group.setData(0, Qt.UserRole, {'is_analysis_group': True,
-                                           'group': key})
-            findings = fetch()
-            images = sorted({f.get('evidence_id') for f in findings},
-                            key=lambda e: names.get(e, ''))
-            # Split by image once there is more than one, so which device a
-            # file came from is read off the tree, not looked up.
-            parents = {}
-            for image in images:
-                if len(images) == 1:
-                    parents[image] = group
-                    continue
-                count_here = len({f['artifact_ref'] for f in findings
-                                  if f.get('evidence_id') == image})
-                node = QTreeWidgetItem(group)
-                # Duplicates count sets at the group but files here; say so.
-                unit = ' files' if key == 'duplicates' else ''
-                node.setText(0, f"{names.get(image, f'#{image}')} "
-                                f"({count_here}{unit})")
-                node.setIcon(0, QIcon(self.db_manager.get_icon_path(
-                    'device', 'drive-harddisk')))
-                node.setData(0, Qt.UserRole, {'is_analysis_group': True,
-                                              'is_image_group': True,
-                                              'group': key,
-                                              'evidence_id': image})
-                parents[image] = node
-            # The tree is for getting to files, not for reading 4,000 of them;
-            # Triage has every row. What is left out is said, not dropped.
-            shown_limit = 400
-            if len(findings) > shown_limit:
-                more = QTreeWidgetItem(group)
-                more.setText(0, f"+{len(findings) - shown_limit:,} more — "
-                                f"open in Triage")
-                more.setData(0, Qt.UserRole, {'is_analysis_group': True,
-                                              'group': key})
-            for finding in findings[:shown_limit]:
-                child = QTreeWidgetItem(parents[finding.get('evidence_id')])
-                child.setText(0, finding.get('name') or '(unnamed)')
-                if key == 'photos' and 'latitude' in (finding.get('detail')
-                                                      or {}):
-                    child.setText(0, f"{finding.get('name') or ''}  \u2014 "
-                                     f"with location")
-                extension = (finding.get('extension') or
-                             (finding.get('name') or '').rsplit('.', 1)[-1]
-                             if '.' in (finding.get('name') or '') else '')
-                if key == 'photos' and 'latitude' in (finding.get('detail')
-                                                      or {}):
-                    child.setIcon(0, icons.icon(icons.FINDING_LOCATION))
-                else:
-                    child.setIcon(0, self._get_file_icon(extension
-                                                         or 'unknown'))
-                image = names.get(finding.get('evidence_id'), '')
-                child.setToolTip(0, '\n'.join(p for p in (
-                    finding.get('summary'), finding.get('path'),
-                    f"Evidence: {image}" if image else '') if p))
-                child.setData(0, Qt.UserRole, {'is_finding': True,
-                                               'finding': finding})
+                                           'group': key,
+                                           'findings_unfilled': True})
+            group.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+            self._findings_fetchers[key] = (fetch, names)
 
         # Keyword hits by list and term, like indicators by kind: the term
         # is the finding, its files are a click away in Triage.
@@ -7524,7 +7477,75 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for entry in entries:
             self._create_tree_item_for_entry(item, entry, data["start_offset"])
 
+    def _fill_findings_group(self, group):
+        """The files under a Findings group, fetched when it is opened."""
+        data = dict(group.data(0, Qt.UserRole) or {})
+        key = data.get('group')
+        if not data.pop('findings_unfilled', False) or \
+                key not in getattr(self, '_findings_fetchers', {}):
+            return
+        group.setData(0, Qt.UserRole, data)
+        fetch, names = self._findings_fetchers[key]
+        findings = fetch()
+        images = sorted({f.get('evidence_id') for f in findings},
+                        key=lambda e: names.get(e, ''))
+        # Split by image once there is more than one, so which device a
+        # file came from is read off the tree, not looked up.
+        parents = {}
+        for image in images:
+            if len(images) == 1:
+                parents[image] = group
+                continue
+            count_here = len({f['artifact_ref'] for f in findings
+                              if f.get('evidence_id') == image})
+            node = QTreeWidgetItem(group)
+            # Duplicates count sets at the group but files here; say so.
+            unit = ' files' if key == 'duplicates' else ''
+            node.setText(0, f"{names.get(image, f'#{image}')} "
+                            f"({count_here}{unit})")
+            node.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                'device', 'drive-harddisk')))
+            node.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                          'is_image_group': True,
+                                          'group': key,
+                                          'evidence_id': image})
+            parents[image] = node
+        # The tree is for getting to files, not for reading 4,000 of them;
+        # Triage has every row. What is left out is said, not dropped.
+        shown_limit = 400
+        if len(findings) > shown_limit:
+            more = QTreeWidgetItem(group)
+            more.setText(0, f"+{len(findings) - shown_limit:,} more — "
+                            f"open in Triage")
+            more.setData(0, Qt.UserRole, {'is_analysis_group': True,
+                                          'group': key})
+        for finding in findings[:shown_limit]:
+            child = QTreeWidgetItem(parents[finding.get('evidence_id')])
+            child.setText(0, finding.get('name') or '(unnamed)')
+            if key == 'photos' and 'latitude' in (finding.get('detail')
+                                                  or {}):
+                child.setText(0, f"{finding.get('name') or ''}  \u2014 "
+                                 f"with location")
+            extension = (finding.get('extension') or
+                         (finding.get('name') or '').rsplit('.', 1)[-1]
+                         if '.' in (finding.get('name') or '') else '')
+            if key == 'photos' and 'latitude' in (finding.get('detail')
+                                                  or {}):
+                child.setIcon(0, icons.icon(icons.FINDING_LOCATION))
+            else:
+                child.setIcon(0, self._get_file_icon(extension
+                                                     or 'unknown'))
+            image = names.get(finding.get('evidence_id'), '')
+            child.setToolTip(0, '\n'.join(p for p in (
+                finding.get('summary'), finding.get('path'),
+                f"Evidence: {image}" if image else '') if p))
+            child.setData(0, Qt.UserRole, {'is_finding': True,
+                                           'finding': finding})
+
     def on_item_expanded(self, item):
+        if (item.data(0, Qt.UserRole) or {}).get('findings_unfilled'):
+            self._fill_findings_group(item)
+            return
         # Check if the item already has children; if so, don't repopulate
         if item.childCount() > 0:
             return

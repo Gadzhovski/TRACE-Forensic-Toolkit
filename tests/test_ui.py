@@ -327,6 +327,7 @@ def test_tree_findings_are_split_by_image(window):
                 .get('is_analysis_root'))
     mismatches = next(root.child(i) for i in range(root.childCount())
                       if root.child(i).text(0).startswith('Type mismatches'))
+    tree.expandItem(mismatches)         # its files are fetched when opened
     images = [mismatches.child(i).text(0).split(' (')[0]
               for i in range(mismatches.childCount())
               if (mismatches.child(i).data(0, Qt.UserRole) or {})
@@ -745,6 +746,8 @@ def _findings_group(window, prefix):
         if (root.data(0, Qt.UserRole) or {}).get('is_analysis_root'):
             for j in range(root.childCount()):
                 if root.child(j).text(0).startswith(prefix):
+                    # A group's files are fetched when it is opened.
+                    window.tree_viewer.expandItem(root.child(j))
                     return root.child(j)
     return None
 
@@ -1635,6 +1638,7 @@ def test_yara_is_a_job_a_triage_tab_and_findings(qapp, window, tmp_path):
     found = window.case.findings(None, 'yara', limit=1000)
     assert found and {f['detail']['rule'] for f in found} == {'JPEG_JFIF'}
     triage = window.triage_panel
+    triage.show_group('yara')           # a tab is filled when opened
     assert triage.yara_table.rowCount() == len(found)
     assert triage.tabs.tabText(triage._tab_for['yara']).startswith('YARA (')
     group = _findings_group(window, 'YARA matches')
@@ -2020,6 +2024,7 @@ def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
         triage = window.triage_panel
         index = triage._tab_for['executables']
         assert triage.tabs.tabText(index) == 'Executables (2)'
+        triage.show_group('executables')    # filled when opened
         table = triage.executable_table
         cells = [[table.item(r, c).text() for c in range(table.columnCount())]
                  for r in range(table.rowCount())]
@@ -2084,6 +2089,7 @@ def test_sigma_detections_are_a_triage_tab_and_findings(qapp, window):
     try:
         triage = window.triage_panel
         assert triage.tabs.tabText(triage._tab_for['sigma']) == 'Sigma (3)'
+        triage.show_group('sigma')          # filled when opened
         table = triage.sigma_table
         assert [table.item(r, 3).text() for r in range(3)] == [
             'Mimikatz DC Sync', 'Whoami Execution', 'Process Creation']
