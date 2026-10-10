@@ -13,6 +13,9 @@ from trace_app.ui import icons
 #: below, which keeps it crisp on a hi-DPI display.
 LOGO_SIZE = 160
 
+WEBSITE = "https://trace.gadzhovski.com"
+SOURCE = "https://github.com/Gadzhovski/TRACE-Forensic-Toolkit"
+
 
 class AboutDialog(QDialog):
     """Application name, version and author."""
@@ -57,6 +60,20 @@ class AboutDialog(QDialog):
         licence.setObjectName("aboutMetaQuiet")
         licence.setAlignment(Qt.AlignCenter)
         layout.addWidget(licence)
+
+        layout.addSpacing(10)
+        # Opened in the examiner's browser when clicked; TRACE fetches
+        # nothing itself.
+        links = QLabel(
+            f'<a href="{WEBSITE}">trace.gadzhovski.com</a>'
+            f' &nbsp;·&nbsp; <a href="{SOURCE}">Source on GitHub</a>', self)
+        links.setObjectName("aboutLinks")
+        links.setAlignment(Qt.AlignCenter)
+        links.setTextFormat(Qt.RichText)
+        links.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        links.setOpenExternalLinks(True)
+        links.setToolTip(WEBSITE)
+        layout.addWidget(links)
 
         layout.addSpacing(24)
 

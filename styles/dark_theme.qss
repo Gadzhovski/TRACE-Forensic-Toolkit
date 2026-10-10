@@ -2364,3 +2364,82 @@ QLabel#scopeEstimate {
 QScrollArea#scopeScroll, QWidget#scopeFields {
     background: transparent;
 }
+
+/* ============ Find a Command (Ctrl+K) ============ */
+QDialog#commandSearch {
+    background-color: #2E2E2E;
+    border: 1px solid #5A5A5A;
+    border-radius: 8px;
+}
+QLineEdit#commandSearchBox {
+    min-height: 30px;
+    max-height: 30px;
+    font-size: 14px;
+    padding: 0px 8px;
+}
+QListWidget#commandSearchList {
+    border: none;
+    background-color: #2E2E2E;
+}
+QListWidget#commandSearchList::item {
+    padding: 5px 6px;
+    border-radius: 4px;
+}
+QLabel#commandSearchHint {
+    color: #9aa4b0;
+    font-size: 11px;
+    background: transparent;
+}
+
+/* About: the website and source links. */
+QLabel#aboutLinks {
+    font-size: 12px;
+    background: transparent;
+}
+
+/* ============ Text zoom (ui/widgets/text_zoom.py) ============ */
+/* One list's or viewer's text larger or smaller: Ctrl + wheel, or
+   Ctrl+= / Ctrl+- / Ctrl+0. A property, not a font set in code: the
+   QWidget font-size above would override that. Views with a
+   font-size rule of their own (#listingTable...) are named too:
+   name + property outranks name alone. Step 0 = no property. */
+QAbstractItemView[textZoom="-2"], QPlainTextEdit[textZoom="-2"], QTextEdit[textZoom="-2"],
+#listingTable[textZoom="-2"], QTableView#activityTable[textZoom="-2"],
+QPlainTextEdit#monoDetailView[textZoom="-2"] {
+    font-size: 11px;
+}
+QAbstractItemView[textZoom="-1"], QPlainTextEdit[textZoom="-1"], QTextEdit[textZoom="-1"],
+#listingTable[textZoom="-1"], QTableView#activityTable[textZoom="-1"],
+QPlainTextEdit#monoDetailView[textZoom="-1"] {
+    font-size: 12px;
+}
+QAbstractItemView[textZoom="1"], QPlainTextEdit[textZoom="1"], QTextEdit[textZoom="1"],
+#listingTable[textZoom="1"], QTableView#activityTable[textZoom="1"],
+QPlainTextEdit#monoDetailView[textZoom="1"] {
+    font-size: 14px;
+}
+QAbstractItemView[textZoom="2"], QPlainTextEdit[textZoom="2"], QTextEdit[textZoom="2"],
+#listingTable[textZoom="2"], QTableView#activityTable[textZoom="2"],
+QPlainTextEdit#monoDetailView[textZoom="2"] {
+    font-size: 16px;
+}
+QAbstractItemView[textZoom="3"], QPlainTextEdit[textZoom="3"], QTextEdit[textZoom="3"],
+#listingTable[textZoom="3"], QTableView#activityTable[textZoom="3"],
+QPlainTextEdit#monoDetailView[textZoom="3"] {
+    font-size: 18px;
+}
+QAbstractItemView[textZoom="4"], QPlainTextEdit[textZoom="4"], QTextEdit[textZoom="4"],
+#listingTable[textZoom="4"], QTableView#activityTable[textZoom="4"],
+QPlainTextEdit#monoDetailView[textZoom="4"] {
+    font-size: 20px;
+}
+QAbstractItemView[textZoom="5"], QPlainTextEdit[textZoom="5"], QTextEdit[textZoom="5"],
+#listingTable[textZoom="5"], QTableView#activityTable[textZoom="5"],
+QPlainTextEdit#monoDetailView[textZoom="5"] {
+    font-size: 24px;
+}
+QAbstractItemView[textZoom="6"], QPlainTextEdit[textZoom="6"], QTextEdit[textZoom="6"],
+#listingTable[textZoom="6"], QTableView#activityTable[textZoom="6"],
+QPlainTextEdit#monoDetailView[textZoom="6"] {
+    font-size: 28px;
+}

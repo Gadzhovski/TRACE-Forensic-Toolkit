@@ -39,6 +39,14 @@ USER = {
                      "Filled into reports' headers."),
     'case_folder': ('', "Default case folder",
                     "Where New Case and Open Case start looking."),
+    'ui_scale': ('100%', "Interface size",
+                 "Everything larger or smaller -- text, controls, icons -- "
+                 "on top of the scaling the system already applies for the "
+                 "screen. For a large or high-resolution screen. Takes "
+                 "effect when TRACE starts again (View ▸ Interface Size "
+                 "offers to restart). The text of one list can also be "
+                 "made larger on its own: Ctrl + mouse wheel, or Ctrl+= / "
+                 "Ctrl+- / Ctrl+0."),
     'size_units': ('binary', "Sizes",
                    "binary: 1 KB = 1,024 bytes (as Windows shows them); "
                    "decimal: 1 kB = 1,000 bytes (as drive makers and macOS "
@@ -148,7 +156,7 @@ def _config_path():
 def read_user():
     """Every user setting, the saved value or its default."""
     values = {key: spec[0] for key, spec in USER.items()}
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(_config_path())
         for key in USER:
@@ -160,7 +168,7 @@ def read_user():
 
 
 def save_user(values):
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(_config_path())
     except (configparser.Error, OSError):

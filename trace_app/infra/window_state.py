@@ -20,35 +20,58 @@ _SECTION = 'Window'
 LAYOUT_VERSION = 2
 
 
-def read_window_state():
-    """(geometry bytes, state bytes) or (None, None)."""
+def screen_signature(screens):
+    """A short key for a set of screens -- [(name, x, y, width, height)] --
+    so each arrangement (a laptop alone, the laptop docked to a monitor)
+    keeps a layout of its own."""
+    import hashlib
+    text = '|'.join(f"{n}:{x},{y}:{w}x{h}" for n, x, y, w, h in
+                    sorted(screens))
+    return hashlib.sha1(text.encode('utf-8', 'replace')).hexdigest()[:12]
+
+
+def _section(signature):
+    return f"{_SECTION} {signature}" if signature else _SECTION
+
+
+def read_window_state(signature=None):
+    """(geometry bytes, state bytes) or (None, None): the layout kept for
+    this screen arrangement (`signature`), else the last one kept."""
     parser = configparser.ConfigParser()
     try:
         parser.read(config_file())
-        if parser.getint(_SECTION, 'version', fallback=0) != LAYOUT_VERSION:
-            return None, None
-        geometry = parser.get(_SECTION, 'geometry', fallback='')
-        state = parser.get(_SECTION, 'state', fallback='')
-        return (base64.b64decode(geometry) if geometry else None,
-                base64.b64decode(state) if state else None)
+        for section in ([_section(signature)] if signature else []) + \
+                [_SECTION]:
+            if parser.getint(section, 'version', fallback=0) != \
+                    LAYOUT_VERSION:
+                continue
+            geometry = parser.get(section, 'geometry', fallback='')
+            state = parser.get(section, 'state', fallback='')
+            if geometry or state:
+                return (base64.b64decode(geometry) if geometry else None,
+                        base64.b64decode(state) if state else None)
+        return None, None
     except (configparser.Error, OSError, ValueError, binascii.Error) as exc:
         logger.debug("No saved window layout: %s", exc)
         return None, None
 
 
-def save_window_state(geometry, state):
+def save_window_state(geometry, state, signature=None):
+    """Keep the layout -- as the last one, and for this screen arrangement
+    when `signature` is given."""
     parser = configparser.ConfigParser()
     try:
         parser.read(config_file())
     except (configparser.Error, OSError):
         pass
-    if not parser.has_section(_SECTION):
-        parser.add_section(_SECTION)
-    parser.set(_SECTION, 'version', str(LAYOUT_VERSION))
-    parser.set(_SECTION, 'geometry',
-               base64.b64encode(bytes(geometry)).decode('ascii'))
-    parser.set(_SECTION, 'state', base64.b64encode(bytes(state)).decode(
-        'ascii'))
+    for section in [_SECTION] + ([_section(signature)] if signature else []):
+        if not parser.has_section(section):
+            parser.add_section(section)
+        parser.set(section, 'version', str(LAYOUT_VERSION))
+        parser.set(section, 'geometry',
+                   base64.b64encode(bytes(geometry)).decode('ascii'))
+        parser.set(section, 'state',
+                   base64.b64encode(bytes(state)).decode('ascii'))
     try:
         with open(config_file(), 'w', encoding='utf-8') as handle:
             parser.write(handle)
@@ -60,7 +83,12 @@ def forget_window_state():
     parser = configparser.ConfigParser()
     try:
         parser.read(config_file())
-        if parser.remove_section(_SECTION):
+        # Every arrangement's layout: Reset Layout means all of them.
+        gone = [section for section in parser.sections()
+                if section == _SECTION or section.startswith(_SECTION + ' ')]
+        for section in gone:
+            parser.remove_section(section)
+        if gone:
             with open(config_file(), 'w', encoding='utf-8') as handle:
                 parser.write(handle)
     except (configparser.Error, OSError) as exc:

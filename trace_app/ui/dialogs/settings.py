@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QCompleter, QDialog,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from trace_app.core import settings
+from trace_app.infra import ui_scale
 from trace_app.ui import icons
 
 #: The pages, in order: (title, icon, introduction, sections), each
@@ -33,7 +34,8 @@ PAGES = (
       ("Troubleshooting", 'user', ('debug_log',)))),
     ("Display", icons.DISPLAY,
      "What the Listing shows, and the time zone shown beside UTC.",
-     (("Listing", 'user', ('show_deleted', 'show_system')),
+     (("Interface", 'user', ('ui_scale',)),
+      ("Listing", 'user', ('show_deleted', 'show_system')),
       ("Times", 'case', ('display_zone',)))),
     ("Privacy & Network", icons.VOLUME_LOCKED,
      "Whether anything from this case may leave this computer.",
@@ -72,6 +74,7 @@ CHOICES = {
     'size_units': settings.SIZE_UNITS,
     'carve_source': settings.CARVE_SOURCES,
     'verify_order': settings.VERIFY_ORDERS,
+    'ui_scale': ui_scale.SCALES,
 }
 
 FOLDERS = ('case_folder', 'carved_folder', 'export_folder')

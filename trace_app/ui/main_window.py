@@ -3,6 +3,7 @@ import datetime
 import gc
 import logging
 import os
+import sys
 import posixpath
 import re
 import tempfile
@@ -38,7 +39,7 @@ from trace_app.ui.viewers.carved_panel import (CarvedFilesPanel,
 from trace_app.ui.viewers.hex import HexViewer
 from trace_app.core import archives
 from trace_app.core.carving import read_carved
-from trace_app.infra.theme import read_theme, save_theme
+from trace_app.infra.theme import save_theme
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.core.case import (REPORTED_FINDING_GRADES,
                                  REPORTED_MISMATCHES, make_artifact_ref,
@@ -394,7 +395,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return self._icon_cache[file_extension]
 
     def _confirm_exit(self) -> bool:
-        """Ask user to confirm exit."""
+        """Ask user to confirm exit (not when restarting: that was asked)."""
+        if getattr(self, '_restarting', False):
+            return True
         return message.question(self, 'Exit Confirmation',
                                 'Are you sure you want to exit?',
                                 'Any unsaved work will be lost.')
@@ -637,7 +640,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _restore_saved_layout(self):
         from trace_app.infra.window_state import read_window_state
-        geometry, state = read_window_state()
+        geometry, state = read_window_state(self._screen_signature())
         if not geometry or not self.restoreGeometry(QByteArray(geometry)):
             return False
         # A window saved on a monitor that is no longer attached would open
@@ -665,7 +668,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def save_layout(self):
         from trace_app.infra.window_state import save_window_state
-        save_window_state(self.saveGeometry().data(), self.saveState().data())
+        save_window_state(self.saveGeometry().data(), self.saveState().data(),
+                          self._screen_signature())
+
+    @staticmethod
+    def _screen_signature():
+        """Which screens are attached, and where: each arrangement keeps
+        its own layout (infra/window_state.py)."""
+        from trace_app.infra.window_state import screen_signature
+        return screen_signature([
+            (screen.name(), screen.geometry().x(), screen.geometry().y(),
+             screen.geometry().width(), screen.geometry().height())
+            for screen in QApplication.screens()])
 
     def reset_layout(self):
         """View > Reset Layout: the proportions a first run gets."""
@@ -1048,28 +1062,53 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)  # Only one theme can be selected at a time
 
-        # Light Theme Action
-        saved_theme = read_theme()
+        from trace_app.infra.theme import SYSTEM, read_choice
+        saved_choice = read_choice()
+        for choice, text in (('light', "Light Mode"), ('dark', "Dark Mode"),
+                             (SYSTEM, "Match System")):
+            action = QAction(text, self)
+            action.setCheckable(True)
+            action.setChecked(saved_choice == choice)
+            action.triggered.connect(
+                lambda _=False, c=choice: self.apply_stylesheet(c))
+            theme_group.addAction(action)
+            view_menu.addAction(action)
+        # 'Match System' follows the system as it changes, not only at start.
+        QApplication.instance().styleHints().colorSchemeChanged.connect(
+            self._system_scheme_changed)
 
-        light_theme_action = QAction("Light Mode", self)
-        light_theme_action.setCheckable(True)
-        light_theme_action.setChecked(saved_theme == 'light')
-        light_theme_action.triggered.connect(lambda: self.apply_stylesheet('light'))
-        theme_group.addAction(light_theme_action)
-        view_menu.addAction(light_theme_action)
-
-        # Dark Theme Action
-        dark_theme_action = QAction("Dark Mode", self)
-        dark_theme_action.setCheckable(True)
-        dark_theme_action.setChecked(saved_theme == 'dark')
-        dark_theme_action.triggered.connect(lambda: self.apply_stylesheet('dark'))
-        theme_group.addAction(dark_theme_action)
-        view_menu.addAction(dark_theme_action)
+        # Interface size: the whole window larger or smaller, from the next
+        # start (infra/ui_scale.py).
+        view_menu.addSeparator()
+        size_menu = view_menu.addMenu("Interface Size")
+        icons.apply_to(size_menu.menuAction(), icons.ZOOM_IN)
+        self._size_actions = QActionGroup(self)
+        self._size_actions.setExclusive(True)
+        from trace_app.infra import ui_scale
+        current = case_settings.user('ui_scale')
+        larger = size_menu.addAction("Larger")
+        icons.apply_to(larger, icons.ZOOM_IN)
+        larger.triggered.connect(lambda: self.set_interface_size(
+            ui_scale.step(case_settings.user('ui_scale'), +1)))
+        smaller = size_menu.addAction("Smaller")
+        icons.apply_to(smaller, icons.ZOOM_OUT)
+        smaller.triggered.connect(lambda: self.set_interface_size(
+            ui_scale.step(case_settings.user('ui_scale'), -1)))
+        size_menu.addSeparator()
+        for size in ui_scale.SCALES:
+            action = size_menu.addAction(
+                size + ("  (standard)" if size == ui_scale.DEFAULT else ''))
+            action.setCheckable(True)
+            action.setChecked(size == current)
+            action.setData(size)
+            action.triggered.connect(
+                lambda _=False, s=size: self.set_interface_size(s))
+            self._size_actions.addAction(action)
 
         # Whatever was chosen last time, not a hardcoded light. app.py has
         # already applied it to the application; this brings the window's own
         # icons and palette into line.
-        self.apply_stylesheet(saved_theme)
+        self.apply_stylesheet(saved_choice)
 
         tools_menu = QMenu('Tools', self)
 
@@ -1118,6 +1157,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         options_menu.addAction(features_action)
 
         help_menu = QMenu('Help', self)
+        # Any command by name (ui/dialogs/command_search.py).
+        find_command_action = QAction("Find a Command...", self)
+        find_command_action.setShortcut("Ctrl+K")
+        find_command_action.setToolTip("Type part of a command's name and "
+                                       "run it")
+        find_command_action.triggered.connect(self.find_command)
+        icons.apply_to(find_command_action, icons.SEARCH)
+        help_menu.addAction(find_command_action)
+        help_menu.addSeparator()
         about_action = QAction("About", self)
         about_action.triggered.connect(lambda: AboutDialog(self).exec())
         help_menu.addAction(about_action)
@@ -1701,7 +1749,69 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # disable all tabs before loading an image file
         self.enable_tabs(False)
 
+    def find_command(self):
+        """Help ▸ Find a Command (Ctrl+K)."""
+        from trace_app.ui.dialogs.command_search import find_command
+        find_command(self)
+
+    def _system_scheme_changed(self, _scheme=None):
+        """The system switched light/dark: follow it if asked to."""
+        from trace_app.infra.theme import SYSTEM, read_choice
+        if read_choice() == SYSTEM:
+            self.apply_stylesheet(SYSTEM)
+
+    def set_interface_size(self, size):
+        """Keep the interface size (Settings ▸ Display) and offer the
+        restart that applies it."""
+        values = case_settings.read_user()
+        if values.get('ui_scale') == size:
+            return
+        values['ui_scale'] = size
+        case_settings.save_user(values)
+        case_settings.apply_user(values)
+        for action in self._size_actions.actions():
+            action.setChecked(action.data() == size)
+        self.offer_restart(f"Interface size {size}")
+
+    def offer_restart(self, what):
+        """Ask whether to restart TRACE now, for a change that applies at
+        start; refuse while background jobs run."""
+        if self.job_bar.busy:
+            message.information(
+                self, "Restart Later",
+                f"{what} takes effect when TRACE starts again.",
+                "Background jobs are running: restart once they finish "
+                "(the change is kept).")
+            return
+        if not message.question(
+                self, "Restart TRACE?",
+                f"{what} takes effect when TRACE starts again.",
+                "Restart now? The case is saved and opened again."):
+            self.set_status(f"{what}: from the next start")
+            return
+        self.restart()
+
+    def restart(self):
+        """Start TRACE again (the same case), then close this window the
+        ordinary way -- the case is saved and closed, its audit line
+        written."""
+        from PySide6.QtCore import QProcess
+        program = sys.executable
+        arguments = list(sys.argv[1:]) if getattr(sys, 'frozen', False) \
+            else [os.path.abspath(sys.argv[0])] + list(sys.argv[1:])
+        if self.case is not None:
+            os.environ['TRACE_REOPEN_CASE'] = self.case.folder
+        if not QProcess.startDetached(program, arguments):
+            message.warning(self, "Could not restart",
+                            "Start TRACE again to apply the change.")
+            return
+        self._restarting = True
+        self.close()
+
     def apply_stylesheet(self, theme='light'):
+        # 'system': light or dark as the system is, the choice itself kept.
+        from trace_app.infra.theme import resolve
+        choice, theme = theme, resolve(theme)
         if theme == 'dark':
             qss_file = resource_path('styles/dark_theme.qss')
         else:
@@ -1750,7 +1860,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Remembered, so the next launch -- including its launcher -- opens in
         # the theme the examiner actually chose.
-        save_theme(theme)
+        save_theme(choice)
 
     #: Selection colours per theme: (highlight, highlighted text). These match
     #: the ::item:selected rules in the corresponding stylesheet.
@@ -1774,6 +1884,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         palette = QApplication.instance().palette()
         palette.setColor(QPalette.Highlight, QColor(highlight))
         palette.setColor(QPalette.HighlightedText, QColor(text))
+        # Links in labels (About, help text): Qt's default dark blue was
+        # unreadable on the dark theme.
+        link = '#6CB4FF' if theme == 'dark' else '#1A73E8'
+        palette.setColor(QPalette.Link, QColor(link))
+        palette.setColor(QPalette.LinkVisited, QColor(link))
         QApplication.instance().setPalette(palette)
 
     #: Matches url('Icons/...') / url("styles/...") / url(Icons/...) in QSS.
