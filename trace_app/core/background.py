@@ -485,6 +485,30 @@ def job_carve(params, progress, item, should_stop):
         _close(case, handler)
 
 
+def job_vss_compare(params, progress, item, should_stop):
+    """What changed between two states of a volume -- a shadow copy and a
+    later one, or the live volume (core/vss_compare.py). Read-only: each
+    difference is an item; nothing is stored."""
+    from trace_app.core import vss_compare
+    handler = None
+    try:
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        handler.shadow_copies(params['volume'])     # opens the snapshots
+        progress(0, 2, 'Reading both states of the volume', force=True)
+        try:
+            rows = vss_compare.compare_volumes(
+                handler, params['before'], params['after'],
+                system=params.get('system', False), should_stop=should_stop)
+        except vss_compare.Cancelled:
+            return 0
+        progress(2, 2, 'Compared', force=True)
+        for row in rows:
+            item(row)
+        return len(rows)
+    finally:
+        _close(handler)
+
+
 def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
@@ -514,5 +538,6 @@ JOBS = {
     'deleted': job_deleted,
     'persistence': job_persistence,
     'carve': job_carve,
+    'vss_compare': job_vss_compare,
     'ping': job_ping,
 }

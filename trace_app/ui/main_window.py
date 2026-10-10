@@ -7236,6 +7236,58 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self._add_shadow_copy_nodes(parent, start, label)
         return item
 
+    def _volume_has_shadows(self, start):
+        """Whether the active image's volume at `start` has shadow copies
+        (already read when its tree node was built)."""
+        from trace_app.core import containers
+        if not self.image_handler or \
+                containers.split_shadow_key(start) is not None:
+            return False
+        try:
+            return bool(self.image_handler.shadow_copies(start))
+        except Exception:
+            return False
+
+    def compare_shadow_copies(self, item):
+        """Tree ▸ Compare Shadow Copies…: what changed between a snapshot
+        and a later state of its volume (ui/dialogs/shadow_compare.py)."""
+        from trace_app.core import containers
+        from trace_app.ui.dialogs.shadow_compare import ShadowCompareDialog
+        if not self.activate_item_image(item):
+            return
+        data = item.data(0, Qt.UserRole) or {}
+        key = data.get('start_offset')
+        split = containers.split_shadow_key(key)
+        volume, before = (split[0], key) if split else (key, None)
+        try:
+            shadows = self.image_handler.shadow_copies(volume)
+        except Exception as exc:
+            logger.warning("Shadow copies at %s not read: %s", volume, exc)
+            shadows = []
+        if not shadows:
+            self.set_status("This volume has no shadow copies.", 5000)
+            return
+        image_path = self.image_of_item(item)
+        if not image_path:
+            return
+        dialog = ShadowCompareDialog(
+            image_path, volume, data.get('volume_label') or 'Volume',
+            shadows, unlock=self._unlocks_for(image_path), before=before,
+            parent=self)
+        dialog.file_requested.connect(self._open_shadow_version)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+        dialog.show()
+
+    @Slot(str, str, str)
+    def _open_shadow_version(self, image_path, ref, name):
+        """Open one version of a file from Compare Shadow Copies, on the
+        image it came from."""
+        if not self.activate_image(image_path):
+            return
+        self.preview_artifact({'artifact_ref': ref, 'name': name,
+                               'evidence_id':
+                               self.evidence_id_for_path(image_path)})
+
     def _add_shadow_copy_nodes(self, parent, start, label):
         """A node per Volume Shadow Copy of the volume at `start`, after
         it: the volume as it was when the snapshot was taken."""
@@ -8814,6 +8866,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.unlock_bitlocker_item(it))
                 show_menu(menu, self.tree_viewer.viewport().mapToGlobal(position))
                 return
+
+            # A shadow copy, or a volume that has them: compare its states.
+            if data and (data.get('is_shadow_copy') or (
+                    data.get('start_offset') is not None
+                    and data.get('inode_number') is None
+                    and not data.get('is_unallocated')
+                    and self._volume_has_shadows(data['start_offset']))):
+                compare = menu.addAction(icons.icon(icons.SHADOW_COPY),
+                                         "Compare Shadow Copies…")
+                compare.triggered.connect(
+                    lambda _=False, it=selected_item:
+                    self.compare_shadow_copies(it))
+                menu.addSeparator()
 
             # Check if the selected item is a root item (disk image)
             if selected_item and selected_item.parent() is None:
