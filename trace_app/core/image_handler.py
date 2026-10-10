@@ -1470,13 +1470,21 @@ class ImageHandler:
                 self.md_array(start_offset)
             try:
                 if start_offset in self._volumes:
-                    fs_info = pytsk3.FS_Info(self._volumes[start_offset],
-                                             offset=0)
+                    source, base = self._volumes[start_offset], 0
+                    fs_info = pytsk3.FS_Info(source, offset=0)
                 elif shadow is not None:
                     return None
                 else:
-                    fs_info = pytsk3.FS_Info(
-                        self.img_info, offset=start_offset * self.sector_size)
+                    source = self.img_info
+                    base = start_offset * self.sector_size
+                    fs_info = pytsk3.FS_Info(source, offset=base)
+                # ext: heavily fragmented block-mapped files are opened
+                # from their own block maps (core/ext_blockmap.py) -- TSK
+                # takes 40 s to open one of 132,000 runs, every time.
+                from trace_app.core.ext_blockmap import ExtFileSystem
+                fs_info = ExtFileSystem.wrap(
+                    fs_info, lambda offset, length, source=source,
+                    base=base: source.read(base + offset, length))
                 self.fs_info_cache[start_offset] = fs_info
             except Exception:
                 # What TSK cannot read, TRACE may: XFS (core/xfs.py,
