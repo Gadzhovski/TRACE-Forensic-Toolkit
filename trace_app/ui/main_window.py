@@ -2345,7 +2345,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"Carving {label} failed: {error}")
         else:
             self.set_status(f"Carved {count:,} file(s) from {label}")
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if self.case is not None:
             # The job indexed what it carved, through its own connection.
             self.search_panel.reload_index()
@@ -3571,7 +3571,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         else:
             self.set_status(f"Analysed {count:,} file(s)")
 
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         self.refresh_analysis_views()
 
     def queue_indexing(self, rows):
@@ -3618,7 +3618,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             logger.error("Indexing %s failed: %s", name, error)
         else:
             self.set_status(f"Indexed {count:,} item(s) from {name}")
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         # The job wrote through its own connection; reopen to see it.
         self.search_panel.reload_index()
         self.refresh_analysis_views()
@@ -3667,7 +3667,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             logger.error("Activity on %s failed: %s", name, error)
         else:
             self.set_status(f"Read {count:,} activity record(s) from {name}")
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         self.refresh_analysis_views()
 
     def queue_ntfs(self, rows):
@@ -3742,7 +3742,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return queued
 
     def _fs_times_finished(self, name, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"Reading file system times on {name} failed: "
                             f"{error}")
@@ -3763,7 +3763,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.set_status(f"Read {count:,} MFT entries from {name}")
         else:
             self.set_status(f"{name} has no NTFS volume to read")
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         self.refresh_analysis_views()
 
     def show_settings(self):
@@ -3833,7 +3833,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             stop=lambda worker: worker.stop()))
 
     def _report_finished(self, written, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"The report failed: {error}")
             message.warning(self, "Report not created",
@@ -4003,7 +4003,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return queued
 
     def _persistence_finished(self, name, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"Reading autostarts on {name} failed: {error}")
             logger.error("Persistence on %s failed: %s", name, error)
@@ -4082,7 +4082,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             start=start, stop=lambda worker: worker.stop()))
 
     def _yara_finished(self, name, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"YARA scan of {name} failed: {error}")
             logger.error("YARA on %s failed: %s", name, error)
@@ -4163,7 +4163,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             start=start, stop=lambda worker: worker.stop()))
 
     def _sigma_finished(self, name, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"Sigma check of {name} failed: {error}")
             logger.error("Sigma on %s failed: %s", name, error)
@@ -4207,7 +4207,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return queued
 
     def _deleted_finished(self, name, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"Listing deleted files on {name} failed: "
                             f"{error}")
@@ -4252,7 +4252,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return queued
 
     def _thumbnails_finished(self, name, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"Reading thumbnail caches on {name} failed: "
                             f"{error}")
@@ -4408,7 +4408,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             stop=lambda worker: worker.stop()))
 
     def _keywords_finished(self, worker, count, error):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"Keyword search failed: {error}")
             logger.error("Keyword search failed: %s", error)
@@ -4491,7 +4491,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             stop=lambda worker: worker.stop()))
 
     def _hash_matching_finished(self, count, error, options):
-        self.job_bar.job_finished()
+        self.job_bar.job_finished(error=error)
         self.refresh_analysis_views()
         if self.listing_table.rowCount():
             self.mark_analysis_rows()

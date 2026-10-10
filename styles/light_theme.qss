@@ -1507,9 +1507,36 @@ QProgressBar#jobBarProgress::chunk {
     border-radius: 3px;
 }
 
-QPushButton#jobBarCancel {
-    padding: 1px 10px;
+/* Cancel is an icon, not a push button as wide as a word. */
+QToolButton#jobBarCancel {
+    border: none;
+    border-radius: 3px;
+    padding: 0px;
+    background-color: transparent;
+}
+QToolButton#jobBarCancel:hover {
+    background-color: #f8d7da;
+}
+
+/* "Job 2 of 5": opens the list of this run's jobs. */
+QToolButton#jobBarSteps {
+    color: #495057;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    padding: 0px 18px 0px 6px;
+    background-color: transparent;
     font-size: 11px;
+}
+QToolButton#jobBarSteps:hover {
+    background-color: #e9ecef;
+}
+QToolButton#jobBarSteps::menu-indicator {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    width: 10px;
+    height: 10px;
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    right: 4px;
 }
 
 /* --- Analysis modules dialog ------------------------------------------ */

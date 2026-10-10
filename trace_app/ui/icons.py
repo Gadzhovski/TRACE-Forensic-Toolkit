@@ -113,6 +113,8 @@ REPORT = "Icons/tabler/trace/report.svg"
 VOLUME_LOCKED = "Icons/tabler/lock.svg"
 VOLUME_UNLOCKED = "Icons/tabler/lock-open.svg"
 SHADOW_COPY = "Icons/tabler/clock.svg"
+#: A job waiting its turn in the job bar's list.
+JOB_WAITING = "Icons/tabler/clock.svg"
 #: One per core.activity category, in the tree and on the Activity tab.
 ACTIVITY_CATEGORIES = {
     None: ACTIVITY,
