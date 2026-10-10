@@ -34,7 +34,7 @@ from PySide6.QtGui import (QColor, QFont, QGuiApplication, QIcon,
                            QIconEngine, QPainter,
                            QPixmap)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QDateTimeEdit, QFileDialog, QHBoxLayout,
+                               QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QMenu, QPushButton, QSizePolicy, QSplitter,
                                QTableView, QTextBrowser, QToolBar,
@@ -800,17 +800,10 @@ class TimelinePanel(QWidget):
 
     @staticmethod
     def _time_edit():
-        edit = QDateTimeEdit()
-        # As wide as a time and its buttons, not the style's default.
-        edit.setFixedWidth(edit.fontMetrics().horizontalAdvance(
-            '8888-88-88 88:88:88') + 52)
-        edit.setObjectName("timelineTimeEdit")
-        edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        edit.setTimeZone(QTimeZone.utc())
-        edit.setCalendarPopup(True)
-        edit.setMinimumDateTime(QDateTime.fromString(
-            "1601-01-01 00:00:00", "yyyy-MM-dd HH:mm:ss"))
-        return edit
+        # As wide as a whole time and its button; the calendar in TRACE's
+        # style (ui/widgets/date_fields.py).
+        from trace_app.ui.widgets.date_fields import utc_edit
+        return utc_edit("timelineTimeEdit")
 
     # --- the case ------------------------------------------------------------
 

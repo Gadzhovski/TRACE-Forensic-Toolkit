@@ -2209,3 +2209,94 @@ QLabel#diskBarCaption {
     font-size: 11px;
     background: transparent;
 }
+
+/* ============ Date and time fields, and their calendar ============ */
+/* A date-time field with a calendar has a drop-down button, not spin
+   arrows; drawn like the combo boxes' (it was the platform's own). */
+QDateTimeEdit::drop-down,
+QDateEdit::drop-down {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    border: none;
+    border-left: 1px solid #5A5A5A;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    background-color: #444444;
+}
+QDateTimeEdit::drop-down:hover,
+QDateEdit::drop-down:hover {
+    background-color: #555555;
+}
+/* The spin boxes' ':disabled' rule hides the arrow; a date field at its
+   earliest date counts as 'disabled' to step down, and lost its button. */
+QDateTimeEdit::down-arrow,
+QDateEdit::down-arrow,
+QDateTimeEdit::down-arrow:disabled,
+QDateEdit::down-arrow:disabled {
+    image: url('Icons/tabler/themed/chevron-down-dark.svg');
+    width: 12px;
+    height: 12px;
+}
+
+/* The calendar it opens: the month bar above, the days below. Qt names
+   its parts (qt_calendar_*); unstyled, the whole popup was the platform's. */
+QCalendarWidget {
+    background-color: #3C3C3C;
+    border: 1px solid #5A5A5A;
+    border-radius: 6px;
+}
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #2E2E2E;
+    border-bottom: 1px solid #5A5A5A;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    min-height: 32px;
+}
+QCalendarWidget QToolButton {
+    color: #E0E0E0;
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin: 2px;
+    font-weight: 600;
+}
+QCalendarWidget QToolButton:hover {
+    background-color: #555555;
+}
+QCalendarWidget QToolButton:pressed {
+    background-color: #1E90FF;
+    color: #FFFFFF;
+}
+QCalendarWidget QToolButton::menu-indicator {
+    image: none;
+    width: 0px;
+}
+QCalendarWidget QToolButton#qt_calendar_prevmonth {
+    qproperty-icon: url('Icons/tabler/themed/chevron-left-dark.svg');
+    qproperty-iconSize: 16px;
+}
+QCalendarWidget QToolButton#qt_calendar_nextmonth {
+    qproperty-icon: url('Icons/tabler/themed/chevron-right-dark.svg');
+    qproperty-iconSize: 16px;
+}
+QCalendarWidget QSpinBox#qt_calendar_yearedit {
+    min-width: 64px;
+    min-height: 22px;
+    max-height: 22px;
+}
+QCalendarWidget QAbstractItemView {
+    /* The weekday row is painted in the alternate colour -- in every
+       state: under ':enabled' only, a disabled calendar's row was white. */
+    alternate-background-color: #2E2E2E;
+    background-color: #3C3C3C;
+    color: #E0E0E0;
+    selection-background-color: #1E90FF;
+    selection-color: #FFFFFF;
+    border: none;
+    outline: none;
+}
+QCalendarWidget QAbstractItemView:disabled {
+    color: #6E7681;
+}
