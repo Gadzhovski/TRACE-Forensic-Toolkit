@@ -49,6 +49,9 @@ SECTIONS = (
     ('tags', 'Tagged files',
      "The files the examiner tagged, under each tag, with who tagged them "
      "and when, and their hashes where analysed."),
+    ('conversations', 'Conversations',
+     "The conversations the examiner added to the report (Triage > "
+     "Conversations), each in full."),
     ('findings', 'Findings',
      "Type mismatches, high entropy, hidden data, located photos, "
      "document authors, YARA matches and thumbnails of files gone."),
@@ -445,6 +448,30 @@ class _Builder:
                 out.append(f"<div class='note'><p class='note-meta'>"
                            f"{e(note.get('created_utc'))}</p>"
                            f"{_paragraphs(note.get('body'))}</div>")
+        return ''.join(out)
+
+    def section_conversations(self):
+        out = [self.heading(1, 'conversations',
+                            SECTION_TITLES['conversations'])]
+        chosen = self.case.report_items('conversation')
+        if not chosen:
+            out.append("<p class='none'>No conversation was added to the "
+                       "report.</p>")
+            return ''.join(out)
+        for number, item in enumerate(chosen, start=1):
+            self.check()
+            key = (item.get('detail') or {}).get('key')
+            rows = [r for r in self.scope(self.case.conversation(key))]
+            out.append(self.heading(2, f"conversation-{number}",
+                                    f"{item['title']} ({len(rows):,})"))
+            out.append(_table(
+                ['Time (UTC)', 'Direction', 'Sender', 'Text', 'Record',
+                 'Evidence'],
+                [[e(r.get('time_utc')), e({'out': 'sent', 'in': 'received'}
+                                          .get(r['direction'], '')),
+                  e(r.get('sender')), e(r.get('subject')), e(r.get('what')),
+                  e(self.evidence_name(r.get('evidence_id')))]
+                 for r in rows], css='small'))
         return ''.join(out)
 
     def section_tags(self):

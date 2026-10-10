@@ -1603,6 +1603,19 @@ class Case:
         return query_user_activity(self._db, evidence_id, category,
                                    limit=limit)
 
+    def _communication(self, evidence_id=None):
+        return query_user_activity(self._db, evidence_id, 'communication')
+
+    def conversations(self, evidence_id=None):
+        """Messages and calls grouped into threads (core/conversations)."""
+        from trace_app.core import conversations
+        return conversations.threads(self._communication(evidence_id))
+
+    def conversation(self, key, evidence_id=None):
+        """One thread's rows, oldest first (core/conversations.messages)."""
+        from trace_app.core import conversations
+        return conversations.messages(self._communication(evidence_id), key)
+
     def located_activity(self, evidence_id=None):
         """Activity rows whose detail holds a latitude and longitude, for
         the map (core/geo.py checks the values themselves)."""

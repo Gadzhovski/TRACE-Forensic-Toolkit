@@ -535,6 +535,55 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             f"Tagged {len(rows):,} file(s) {tags[index]['name']!r}", 4000)
         return True
 
+    # --- conversations ------------------------------------------------------
+
+    def open_conversation_menu(self, thread, rows, position):
+        menu = QMenu(self)
+        export = menu.addAction(icons.icon(icons.EXPORT),
+                                "Export Conversation…")
+        export.triggered.connect(
+            lambda: self.export_conversation(thread, rows))
+        report = menu.addAction(icons.icon(icons.REPORT), "Add to Report")
+        report.setEnabled(self.case is not None)
+        report.triggered.connect(
+            lambda: self.add_conversation_to_report(thread))
+        show_menu(menu, position, False)
+
+    def export_conversation(self, thread, rows, folder=None):
+        """Write the thread as HTML and CSV; audited in a case."""
+        from trace_app.core import conversations
+        if folder is None:
+            folder = QFileDialog.getExistingDirectory(
+                self, "Export Conversation", case_settings.export_dir())
+        if not folder:
+            return None
+        try:
+            written = conversations.export(thread, rows, folder)
+        except OSError as exc:
+            message.critical(self, "Export Conversation",
+                             "The conversation could not be written.",
+                             str(exc))
+            return None
+        if self.case is not None:
+            self.case.record_event(
+                'conversation exported',
+                f"{thread['app']} {thread['title']!r}, {len(rows)} item(s): "
+                + '; '.join(f"{path} SHA-256 {digest}"
+                            for path, digest in written))
+        self.set_status(f"Conversation written to {folder}")
+        return written
+
+    def add_conversation_to_report(self, thread):
+        if self.case is None:
+            return
+        added = self.case.add_report_items('conversation', [{
+            'evidence_id': None, 'artifact_ref': None,
+            'time': thread.get('last'),
+            'title': f"{thread['app']}: {thread['title']}",
+            'detail': {'key': thread['key']}}])
+        self.set_status("Conversation added to the report" if added else
+                        "That conversation is already in the report")
+
     def tags_changed(self):
         """Every view of tags shows what the case holds now."""
         panel = getattr(self, 'tags_panel', None)
@@ -2027,7 +2076,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tags_panel.file_activated.connect(self.open_finding)
         self.tags_panel.file_menu_requested.connect(self.open_finding_menu)
         self.tags_panel.manage_requested.connect(self.show_manage_tags)
+
+        # Messages and calls as conversations (ui/viewers/conversations_panel).
+        from trace_app.ui.viewers.conversations_panel import \
+            ConversationsPanel
+        self.conversations_panel = ConversationsPanel()
+        self.conversations_panel.message_selected.connect(
+            self.preview_activity_source)
+        self.conversations_panel.message_activated.connect(
+            self.open_activity_source)
+        self.conversations_panel.thread_menu_requested.connect(
+            self.open_conversation_menu)
         self.triage_panel.add_tags_tab(self.tags_panel)
+        self.triage_panel.add_conversations_tab(self.conversations_panel)
 
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')

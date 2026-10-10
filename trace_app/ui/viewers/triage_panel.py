@@ -398,6 +398,21 @@ class TriagePanel(QWidget):
         panel.count_changed.connect(self._set_bookmark_count)
         self._set_bookmark_count(panel.count)
 
+    def add_conversations_tab(self, panel):
+        """Messages and calls as threads (ui/viewers/conversations_panel),
+        following the same image filter."""
+        self._conversations_panel = panel
+        self._tab_for['conversations'] = self.tabs.addTab(
+            panel, icons.icon(icons.CONVERSATIONS), "Conversations")
+        panel.count_changed.connect(self._set_conversation_count)
+        panel.evidence_id = self.evidence_id
+        panel.set_case(self.case)
+
+    def _set_conversation_count(self, count):
+        index = self._tab_for.get('conversations')
+        if index is not None:
+            self.tabs.setTabText(index, f"Conversations ({count:,})")
+
     def add_tags_tab(self, panel):
         """The examiner's tags (ui/viewers/tags_panel.py), following the
         same image filter."""
@@ -501,7 +516,8 @@ class TriagePanel(QWidget):
                 getattr(self, '_deleted_panel', None),
                 getattr(self, '_map_panel', None),
                 getattr(self, '_similar_panel', None),
-                getattr(self, '_tags_panel', None))
+                getattr(self, '_tags_panel', None),
+                getattr(self, '_conversations_panel', None))
 
     def refresh(self):
         """Redraw from what the case holds now."""
