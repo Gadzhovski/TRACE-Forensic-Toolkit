@@ -200,6 +200,10 @@ CAPABILITIES = (
                "volumes (PBKDF2, Argon2i/Argon2id; LVM inside them too)",
                'cryptography', _module_version('cryptography',
                                                '__version__')),
+    Capability('veracrypt', 'Volumes and encryption', "VeraCrypt and "
+               "TrueCrypt volumes and containers, hidden volumes and PIMs "
+               "(AES; SHA-512, SHA-256, BLAKE2s)", 'cryptography',
+               _module_version('cryptography', '__version__')),
     Capability('mdraid', 'Volumes and encryption', "Linux software RAID "
                "(md) arrays and multi-disk Btrfs, assembled from the "
                "member disks' images", 'TRACE (Python)',

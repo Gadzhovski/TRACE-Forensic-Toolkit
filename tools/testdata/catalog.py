@@ -170,6 +170,13 @@ BUILT = {
     'luks1-lvm.raw': 'make_luks_lvm.py',
     'luks2-lvm.raw': 'make_luks_lvm.py',
     'md-raid.json': 'make_md_raid.py',
+    'vc-key.json': 'make_veracrypt.py',
+    'vc-sha512.hc': 'make_veracrypt.py',
+    'vc-sha256-pim.hc': 'make_veracrypt.py',
+    'vc-blake2s.hc': 'make_veracrypt.py',
+    'vc-hidden.hc': 'make_veracrypt.py',
+    'vc-serpent.hc': 'make_veracrypt.py',
+    'vc-partition.raw': 'make_veracrypt.py',
 }
 
 GROUPS = {'ci': CI, 'local': LOCAL, 'private': PRIVATE, 'built': BUILT}
@@ -181,7 +188,7 @@ def group_of(name):
         if name in entries:
             return group
     if name.startswith('md-') or name.startswith('luks') or \
-            name.startswith('btrfs-deleted'):
+            name.startswith('btrfs-deleted') or name.startswith('vc-'):
         return 'built'
     if name == 'carve-corpus.dd':
         return 'corpus'

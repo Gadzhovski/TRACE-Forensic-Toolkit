@@ -701,8 +701,10 @@ class ImageHandler:
         extension = extension.lower()
 
         ewf = [".e01", ".s01", ".ex01"]
+        # .hc / .tc: VeraCrypt / TrueCrypt containers, read raw until
+        # unlocked (unlock_volume, kind 'veracrypt').
         raw = [".raw", ".img", ".dd", ".iso",
-               ".000", ".001", ".sparse", ".bin", ""]
+               ".000", ".001", ".sparse", ".bin", ".hc", ".tc", ""]
         if extension == '.ctr' or _starts_with(self.image_path, b'XWFS'):
             raise UnsupportedEvidence(
                 "This is an X-Ways evidence file container (.ctr), a "
@@ -1867,17 +1869,50 @@ class ImageHandler:
     def encryption(self, start_sector):
         """The kind of an encrypted volume at a partition, or None."""
         kind = self.volume_kind(start_sector)
-        return kind if kind in ('bitlocker', 'fvde', 'luks', 'ios_backup') \
-            else None
+        if kind in ('bitlocker', 'fvde', 'luks', 'ios_backup'):
+            return kind
+        # VeraCrypt has no signature: known only once the examiner unlocked
+        # it as such.
+        if self._unlocked_kind.get(start_sector) == 'veracrypt':
+            return 'veracrypt'
+        return None
+
+    def may_be_veracrypt(self, start_sector):
+        """Whether a volume could be VeraCrypt: a real partition (or a
+        partition-less image at 0) that no file system or known volume
+        format opens. Nothing proves it is -- the password will."""
+        if start_sector >= containers.SHADOW_KEY_BASE or \
+                self.is_logical or start_sector in self._bitlocker:
+            return False
+        partitions = self.get_partitions()
+        if partitions:
+            from trace_app.core.partition_names import bookkeeping
+            starts = set()
+            for _addr, desc, start, _length in partitions:
+                text = desc.decode('utf-8', 'replace') \
+                    if isinstance(desc, bytes) else str(desc or '')
+                if bookkeeping(text) is None and 'Unallocated' not in text:
+                    starts.add(start)
+            if start_sector not in starts:
+                return False
+        elif start_sector != 0:
+            return False
+        if self.volume_kind(start_sector) is not None:
+            return False
+        try:
+            return self.get_fs_info(start_sector) is None
+        except Exception:
+            return True
 
     def unlocked_kind(self, start_sector):
         return self._unlocked_kind.get(start_sector)
 
     @containers.holding_libyal
     def unlock_volume(self, start_sector, kind, **secret):
-        """Unlock a BitLocker, FileVault 2 or LUKS volume at a partition;
-        its decrypted file system then replaces the partition's, at the same
-        key. Raises containers.ContainerError with the reason."""
+        """Unlock a BitLocker, FileVault 2, LUKS or VeraCrypt volume at a
+        partition; its decrypted file system then replaces the partition's,
+        at the same key. Raises containers.ContainerError with the
+        reason."""
         if start_sector in self._bitlocker:
             return True
         if kind == 'ios_backup' and self.logical_fs is not None:
@@ -1894,6 +1929,12 @@ class ImageHandler:
                 secret.get('recovery_password'))
         elif kind == 'luks':
             volume = containers.unlock_luks(window, secret.get('password'))
+        elif kind == 'veracrypt':
+            # No signature says a volume is VeraCrypt: the examiner does,
+            # by giving its password here.
+            volume = containers.unlock_veracrypt(
+                window, secret.get('password'), secret.get('pim'),
+                secret.get('hidden'))
         else:
             raise containers.ContainerError(f"Cannot unlock {kind} here")
         self._bitlocker[start_sector] = volume

@@ -257,7 +257,8 @@ def open_shadow_copies(window):
 ENCRYPTION_NAMES = {'corestorage': 'Core Storage (not encrypted)',
                     'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
                     'luks': 'LUKS', 'apfs': 'APFS encryption',
-                    'ios_backup': 'iOS backup encryption'}
+                    'ios_backup': 'iOS backup encryption',
+                    'veracrypt': 'VeraCrypt / TrueCrypt'}
 
 #: Logical volumes and APFS volumes are keyed like shadow copies, each in a
 #: range of its own above any real sector offset.
@@ -391,6 +392,24 @@ def unlock_fvde(window, password=None, recovery_password=None):
         _close_quietly(volume)
         raise ContainerError("That key does not unlock this volume.")
     return logical, [volume, group]
+
+
+def unlock_veracrypt(window, password=None, pim=None, hidden=None):
+    """A VeraCrypt or TrueCrypt volume, unlocked (core/veracrypt.py): the
+    decrypting volume, the hidden one when `password` is its password."""
+    from trace_app.core import veracrypt
+
+    def read(offset, length):
+        window.seek(offset)
+        return window.read(length)
+    try:
+        return veracrypt.unlock(read, window.get_size(), password,
+                                pim=pim or None, hidden=hidden)
+    except veracrypt.VeraCryptError as exc:
+        raise ContainerError(str(exc)) from exc
+    except ImportError as exc:
+        raise ContainerError(f"VeraCrypt needs the cryptography library: "
+                             f"{exc}") from exc
 
 
 def unlock_luks(window, password=None, key=None):

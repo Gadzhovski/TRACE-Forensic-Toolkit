@@ -8048,6 +8048,25 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.set_status(f"{label} unlocked: its files can now be browsed, "
                         f"and analysis reads them too.")
 
+    def unlock_veracrypt_item(self, item):
+        """Treat a volume nothing opens as VeraCrypt: the unlock dialog,
+        then (on success) the decrypted volume in its place."""
+        data = dict(item.data(0, Qt.UserRole) or {})
+        if data.get('is_unallocated'):
+            # A partition-less container shows as one unallocated run:
+            # it becomes the volume, under the image's own row.
+            data['volume_label'] = os.path.basename(
+                self.image_handler.image_path)
+        data.update(encryption='veracrypt',
+                    volume_label=data.get('volume_label') or 'Volume')
+        item.setData(0, Qt.UserRole, data)
+        self.unlock_bitlocker_item(item)
+        # Still there: not unlocked -- the node is what it was.
+        if item.treeWidget() is not None and \
+                not self.image_handler.is_unlocked(data['start_offset']):
+            data.pop('encryption', None)
+            item.setData(0, Qt.UserRole, data)
+
     def _unlocks_for(self, path):
         """The keys this session holds for an image, for a background job."""
         return dict(self._bitlocker_keys.get(os.path.normpath(path), {}))
@@ -9477,6 +9496,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.unlock_bitlocker_item(it))
                 show_menu(menu, self.tree_viewer.viewport().mapToGlobal(position))
                 return
+
+            # A volume nothing opens may be VeraCrypt: no signature says
+            # so, the examiner does by giving its password.
+            if data and data.get('inode_number') is None and \
+                    data.get('start_offset') is not None and \
+                    not data.get('is_bitlocker') and \
+                    not data.get('is_volume_group') and \
+                    self.activate_item_image(selected_item) and \
+                    self.image_handler.may_be_veracrypt(
+                        data['start_offset']):
+                veracrypt = menu.addAction(
+                    icons.icon(icons.VOLUME_LOCKED),
+                    "Unlock as VeraCrypt / TrueCrypt…")
+                veracrypt.triggered.connect(
+                    lambda _=False, it=selected_item:
+                    self.unlock_veracrypt_item(it))
+                menu.addSeparator()
 
             # A shadow copy, or a volume that has them: compare its states.
             if data and (data.get('is_shadow_copy') or (

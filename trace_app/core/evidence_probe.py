@@ -41,6 +41,7 @@ _FORMATS = {
     '.e01': 'EnCase image (E01)', '.ex01': 'EnCase image (Ex01)',
     '.s01': 'SMART image (S01)', '.dd': 'Raw image', '.raw': 'Raw image',
     '.img': 'Raw image', '.000': 'Split raw image',
+    '.hc': 'VeraCrypt container', '.tc': 'TrueCrypt container',
     '.001': 'Split raw image', '.iso': 'ISO image',
     '.vmdk': 'VMware disk (VMDK)', '.vhd': 'Virtual PC disk (VHD)',
     '.vhdx': 'Hyper-V disk (VHDX)', '.qcow2': 'QEMU disk (QCOW2)',

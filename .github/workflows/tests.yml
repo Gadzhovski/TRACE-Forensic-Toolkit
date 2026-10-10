@@ -215,15 +215,17 @@ jobs:
       # (so root, and Linux only; the tests reading them skip elsewhere),
       # into test_images/built (tools/testdata/build/): a Btrfs volume with
       # known deleted files, md RAID arrays of every level and superblock,
-      # and GPT -> LUKS1/LUKS2 -> LVM -> ext4 disks.
+      # GPT -> LUKS1/LUKS2 -> LVM -> ext4 disks, and VeraCrypt volumes made
+      # by the official VeraCrypt console (downloaded, SHA-256 pinned).
       - name: Build the Linux images
         if: runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
         run: |
           sudo apt-get install -y -qq --no-install-recommends btrfs-progs \
-            mdadm cryptsetup-bin lvm2 >/dev/null
+            mdadm cryptsetup-bin lvm2 dosfstools mtools >/dev/null
           sudo python3 tools/testdata/build/make_btrfs_deleted.py
           sudo python3 tools/testdata/build/make_md_raid.py
           sudo python3 tools/testdata/build/make_luks_lvm.py
+          sudo python3 tools/testdata/build/make_veracrypt.py
           sudo chown -R "$USER" test_images/built
 
       # Real artifacts -- hives, logs, databases, small images -- pinned by
