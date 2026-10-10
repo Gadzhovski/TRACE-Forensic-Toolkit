@@ -351,6 +351,10 @@ class SearchPanel(QWidget):
                 type_text = 'Carved file'
             elif kind == 'slack':
                 type_text = 'File slack'
+            elif kind == 'memory':
+                type_text = 'Memory file'
+            elif kind == 'unallocated':
+                type_text = 'Unallocated'
             elif row.get('is_deleted'):
                 type_text = 'Deleted File'
             else:

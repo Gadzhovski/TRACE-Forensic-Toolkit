@@ -132,6 +132,11 @@ CASE = {
     'export_folder': ('', "Export to",
                       "Where exports and saved files are offered; empty: "
                       "the case's exports/ folder."),
+    'index_memory_files': (True, "Index page, swap and hibernation files",
+                           "pagefile.sys, swapfile.sys and hiberfil.sys hold "
+                           "what was in memory: they are indexed in pieces "
+                           "as free space is, each hit pointing at its bytes "
+                           "on the image."),
     'index_unallocated': (True, "Index text in unallocated space",
                           "The text in free space -- between partitions, "
                           "and the clusters no live file holds -- is indexed "
@@ -143,7 +148,7 @@ CASE = {
                    "can be noise in some cases."),
 }
 
-CARVE_SOURCES = ('unallocated', 'slack', 'image')
+CARVE_SOURCES = ('unallocated', 'slack', 'memory', 'image')
 VERIFY_ORDERS = ('alongside analysis', 'after analysis', 'before analysis')
 SIZE_UNITS = ('binary', 'decimal')
 
@@ -283,6 +288,7 @@ def apply_case(case):
     search_index.ENABLED_INDICATORS = frozenset(values['indicators'])
     from trace_app.core import indexer
     indexer.INDEX_UNALLOCATED = bool(values['index_unallocated'])
+    indexer.INDEX_MEMORY_FILES = bool(values['index_memory_files'])
     return values
 
 

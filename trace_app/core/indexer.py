@@ -37,6 +37,9 @@ ARCHIVE_DEPTH = 2
 
 #: Index the text in unallocated space (case setting 'index_unallocated').
 INDEX_UNALLOCATED = True
+#: Index page, swap and hibernation files in pieces (case setting
+#: 'index_memory_files'; core/memory_files.py).
+INDEX_MEMORY_FILES = True
 #: Free space is indexed in pieces this size, each an item of its own with
 #: its byte span -- small enough that a hit says where to look.
 UNALLOCATED_PIECE = 1024 * 1024
@@ -116,6 +119,9 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
         if INDEX_UNALLOCATED and (scope is None or scope.covers_free_space):
             _index_unallocated(image_handler, index, evidence_id, progress,
                                should_stop)
+        if INDEX_MEMORY_FILES and (scope is None or scope.covers_free_space):
+            _index_memory_files(image_handler, index, evidence_id, progress,
+                                should_stop)
 
         index.commit()
         index.set_state(evidence_id, INDEX_DONE, files_done=done,
@@ -340,6 +346,48 @@ def _index_unallocated(image_handler, index, evidence_id, progress=None,
             count += 1
     logger.info("Unallocated space: %d piece(s) with text in %.1f MB",
                 count, total / (1024 * 1024))
+    return count
+
+
+def _index_memory_files(image_handler, index, evidence_id, progress=None,
+                        should_stop=None):
+    """The text in page, swap and hibernation files (core/memory_files),
+    as items of kind 'memory', one per piece with text, each referring to
+    its bytes on the image. Returns the number of items."""
+    from trace_app.core import memory_files, slack
+    from trace_app.core.case import make_span_ref
+    found = memory_files.find(image_handler, should_stop)
+    total = sum(length for item in found for _b, length in item['runs'])
+    count = read = 0
+    for item in found:
+        within = 0                      # offset in the file
+        for begin, length in item['runs']:
+            for at in range(begin, begin + length, UNALLOCATED_PIECE):
+                if should_stop and should_stop():
+                    raise IndexerCancelled()
+                piece = min(UNALLOCATED_PIECE, begin + length - at)
+                start = within + (at - begin)
+                try:
+                    text = slack.text_of(image_handler.read(at, piece))
+                except Exception as exc:
+                    logger.debug("%s at %d unreadable: %s", item['name'],
+                                 at, exc)
+                    continue
+                read += piece
+                if progress:
+                    progress(read, total, item['name'])
+                if not text:
+                    continue
+                index.add_item(
+                    evidence_id, make_span_ref(0, at, at + piece), 'memory',
+                    f"{item['name']}, bytes {start:,}-{start + piece - 1:,}",
+                    f"{item['path']} [memory]/bytes {start}-"
+                    f"{start + piece - 1}", text, piece)
+                count += 1
+            within += length
+    if found:
+        logger.info("Memory files: %d piece(s) with text in %.1f MB",
+                    count, total / (1024 * 1024))
     return count
 
 

@@ -103,3 +103,57 @@ def fat_volume_with_pngs():
     at = (reserved + fats * fat_sectors) * sector
     image[at:at + len(root)] = root
     return bytes(image)
+
+
+def fat16_volume(files, total_sectors=2048 * 16, free=()):
+    """A FAT16 volume (512-byte sectors, 4 sectors a cluster) holding
+    `files` -- [(8.3 name, bytes)] in the root, each in contiguous
+    clusters -- and `free`: [(byte offset in the volume, bytes)] written
+    afterwards into space no file holds (offsets past the files' data)."""
+    import struct
+    sector, per_cluster, reserved, fats, root_entries = 512, 4, 4, 2, 512
+    clusters_total = total_sectors // per_cluster
+    fat_sectors = -(-(clusters_total + 2) * 2 // sector)
+    root_sectors = root_entries * 32 // sector
+    data_start = reserved + fats * fat_sectors + root_sectors
+    boot = bytearray(sector)
+    boot[0:3] = b'\xeb\x3c\x90'
+    boot[3:11] = b'MSDOS5.0'
+    struct.pack_into('<HBHBHHBHHHII', boot, 11, sector, per_cluster,
+                     reserved, fats, root_entries,
+                     total_sectors if total_sectors < 65536 else 0, 0xF8,
+                     fat_sectors, 63, 255, 0,
+                     total_sectors if total_sectors >= 65536 else 0)
+    boot[36:62] = struct.pack('<BBBI11s8s', 0x80, 0, 0x29, 0x5678,
+                              b'TRACE TEST ', b'FAT16   ')
+    boot[510:512] = b'\x55\xaa'
+    image = bytearray(total_sectors * sector)
+    image[0:sector] = boot
+    fat = bytearray(fat_sectors * sector)
+    struct.pack_into('<HH', fat, 0, 0xFFF8, 0xFFFF)
+    root = bytearray(root_sectors * sector)
+    cluster = 2
+    placed = {}
+    for number, (name, data) in enumerate(files):
+        stem, _dot, extension = name.upper().partition('.')
+        clusters = max(1, -(-len(data) // (sector * per_cluster)))
+        for k in range(clusters):
+            struct.pack_into('<H', fat, (cluster + k) * 2,
+                             cluster + k + 1 if k < clusters - 1 else 0xFFFF)
+        start = (data_start + (cluster - 2) * per_cluster) * sector
+        image[start:start + len(data)] = data
+        placed[name] = start
+        root[number * 32:(number + 1) * 32] = struct.pack(
+            '<8s3sB10xHHHI', stem.encode().ljust(8)[:8],
+            extension.encode().ljust(3)[:3], 0x20, 0, 0x21,
+            cluster if data else 0, len(data))
+        cluster += clusters
+    for copy in range(fats):
+        at = (reserved + copy * fat_sectors) * sector
+        image[at:at + len(fat)] = fat
+    at = (reserved + fats * fat_sectors) * sector
+    image[at:at + len(root)] = root
+    for offset, data in free:
+        image[offset:offset + len(data)] = data
+    return bytes(image), placed, \
+        (data_start + (cluster - 2) * per_cluster) * sector

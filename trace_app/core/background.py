@@ -506,10 +506,15 @@ def job_carve(params, progress, item, should_stop):
             from trace_app.core import slack
             ranges = [(begin, length) for begin, length, _p, _r in
                       slack.slack_ranges(handler, should_stop)]
+        elif source == 'memory':
+            from trace_app.core import memory_files
+            ranges = [(begin, length) for begin, length, _p, _r in
+                      memory_files.ranges(handler, should_stop)]
         try:
             carve_image(handler, params['file_types'], sink,
                         source == 'unallocated', progress=report,
-                        should_stop=should_stop, ranges=ranges)
+                        should_stop=should_stop, ranges=ranges,
+                        alignment=1 if source == 'memory' else 512)
         except CarvingCancelled:
             pass
         return found[0]
