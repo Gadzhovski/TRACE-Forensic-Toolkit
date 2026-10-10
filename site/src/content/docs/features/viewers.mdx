@@ -62,7 +62,7 @@ The listing switches between details, a list and four icon sizes. From medium up
 <figcaption>Every hive on the evidence, by volume and user.</figcaption>
 </figure>
 
-The Registry tab finds every hive on the evidence you pick -- SYSTEM, SOFTWARE, SAM, SECURITY, their RegBack copies, Amcache, BCD, and each user's NTUSER.DAT and UsrClass.dat -- and replays their **transaction logs** (`.LOG1` / `.LOG2`) in memory first, so you see what Windows would have seen. The recovered hives are byte-identical to `yarp`'s.
+The Registry tab finds every hive on the evidence you pick -- SYSTEM, SOFTWARE, SAM, SECURITY, their RegBack copies, Amcache, BCD, and each user's NTUSER.DAT and UsrClass.dat -- and replays their **transaction logs** (`.LOG1` / `.LOG2`) in memory first, so you see what Windows would have seen. The recovered hives are byte-identical to `yarp`'s. **Deleted keys and values** are recovered from each hive's free cells, under their old paths, in a node of their own.
 
 <Aside type="tip" title="The disk, drawn">
 **Image information** draws the disk as it is -- a platter, a bar and a table, every sector assigned to one region -- so a gap or a hidden partition is visible at a glance, at its true size.

@@ -1,6 +1,6 @@
 ---
 title: Volumes and encryption
-description: TRACE unlocks BitLocker, FileVault 2, LUKS and encrypted APFS in place, browses Volume Shadow Copies, reads LVM, APFS, XFS and Btrfs, opens virtual disks with their parents, Mac disk images, AFF4 and logical images, and previews live disks read-only.
+description: TRACE unlocks BitLocker, FileVault 2, LUKS1/LUKS2 and encrypted APFS in place, browses Volume Shadow Copies, reads LVM, APFS, XFS and Btrfs, assembles RAID arrays and Windows dynamic disks, finds lost partitions, opens virtual disks with their parents, Mac disk images, AFF4 and logical images, and previews live disks read-only.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -13,11 +13,13 @@ import layout from '../../../assets/repo/disk-layout.png';
 |:--|:--|
 | **BitLocker** (including BitLocker To Go) | the 48-digit recovery key, the password, or a `.BEK` startup key file |
 | **FileVault 2** (Core Storage) | password or recovery key |
-| **LUKS** | passphrase |
+| **LUKS1 and LUKS2** | passphrase (PBKDF2 or Argon2) |
 | **Encrypted APFS** | password or recovery key |
 | **Encrypted iOS backups** | the backup password |
 
 An unlocked volume **replaces its partition's file system in place**: bookmarks, findings, the tree and every reader keep working exactly as for an unencrypted disk, and analysis, indexing and carving jobs receive the key too. Keys are held **in memory only**, for the session; the audit trail says *unlocked with a recovery key*, never the key.
+
+**LVM inside LUKS** -- the default encrypted Ubuntu and Fedora install -- opens as its logical volumes once the LUKS volume is unlocked, and is carved inside.
 
 <Aside type="note">
 TRACE detects BitLocker by asking libbde, not by a signature byte -- BitLocker To Go hides behind a FAT32 "discovery volume" that other tools open instead.
@@ -29,15 +31,20 @@ TRACE detects BitLocker by asking libbde, not by a signature byte -- BitLocker T
 - **LVM** -- each logical volume of a volume group.
 - **APFS** -- containers and their volumes, read through libfsapfs (The Sleuth Kit's wheels cannot read APFS), with nanosecond times.
 - **XFS** -- read through libfsxfs where The Sleuth Kit cannot.
-- **Btrfs** -- Fedora's and openSUSE's default, read by TRACE's own reader: every subvolume and snapshot where it is linked (Fedora's `root`, `home` and `var` side by side), zlib, LZO and zstd compression, sparse files, and one disk of a RAID1 on its own. User activity reads a Btrfs system as it was mounted, from its own `/etc/fstab`.
+- **Btrfs** -- Fedora's and openSUSE's default, read by TRACE's own reader: every subvolume and snapshot where it is linked (Fedora's `root`, `home` and `var` side by side), zlib, LZO and zstd compression, sparse files, and a multi-disk volume across its member images. **Deleted files** are recovered from the old copies copy-on-write leaves behind, each one only when every data sector matches the checksum Btrfs stored for it. User activity reads a Btrfs system as it was mounted, from its own `/etc/fstab`.
 - **NTFS, FAT12/16/32, exFAT, ext2/3/4, HFS+, UFS, ISO 9660** -- through The Sleuth Kit 4.15, including compressed and EFS-encrypted NTFS files.
+- **RAID and multi-disk volumes** -- Linux md arrays (RAID 0, 1, 4, 5, 6 and 10, every superblock version and layout, one missing member rebuilt), Windows **dynamic disks** (simple, spanned, striped, mirrored and RAID5) and **hardware RAID**, which records nothing on its disks: it is rebuilt from level, disk order and stripe size, which TRACE can find by trying the combinations and keeping the one whose files read whole. **File ▸ Assemble RAID or Multi-Disk Volume**; each member disk stays its own evidence.
+- **Lost partitions** -- a file system no partition table points at (a wiped table, a broken extended chain, a deleted GPT entry) is found by searching the gaps between partitions, and opens like any volume.
+- **Layered file systems** -- a partition formatted again without wiping keeps both file systems; TRACE opens each.
+- **Apple Core Storage** without encryption opens directly.
 
 ## Containers
 
-- **Virtual disks** -- VMDK, VHD, VHDX and QCOW2. QCOW2 is read by TRACE's own reader, compressed images and backing files included -- libqcow returns about half of a compressed image's data as zeros. A differencing VHD/VHDX or a VMDK snapshot chains its parents from the same folder by name, since the recorded path is the original machine's; a missing parent is named, not guessed.
+- **Virtual disks** -- VMDK, VHD, VHDX, QCOW2 and Parallels. QCOW2 is read by TRACE's own reader, compressed images and backing files included -- libqcow returns about half of a compressed image's data as zeros. A differencing VHD/VHDX or a VMDK snapshot chains its parents from the same folder by name, since the recorded path is the original machine's; a missing parent is named, not guessed.
 - **Mac disk images** -- DMG (zlib, bzip2, LZFSE, LZMA, ADC compression), sparseimage and sparsebundle.
 - **AFF4** -- read by TRACE's own pure-Python reader (maps, image streams, Snappy, LZ4 and deflate); the disk hashes match the reference implementation's on the AFF4 standard reference images, and the container's recorded stream hashes are re-checked on verification.
-- **E01 / Ex01**, split raw (`.001`), ISO.
+- **E01 / Ex01** -- every chunk's checksum is checked as it is hashed, and a set with a segment missing or cut short says where its data ends rather than reading zeros. Split raw (`.000` or `.001`), ISO.
+- **A folder of an image's segments** -- `x.E01`, `x.E02`… with the imager's log or a report named after the image -- is added as that one image, not as a folder of files.
 
 ## Logical evidence
 
@@ -53,6 +60,8 @@ Logical evidence opens as one file system at offset 0, so every module works on 
 **File ▸ Add Live Disk** reads an attached disk **without imaging it first** -- for preview and triage. TRACE starts a small read-only helper with administrator rights (one prompt), which opens the device read-only and serves sectors to TRACE over a local connection proven by a one-time token. Background jobs reuse the same helper; they never prompt.
 
 A live disk's hashes are recorded as *what was read, when* -- never as verified, because a disk in use changes. TRACE warns before you open the system disk.
+
+The tree, the disk map and the volume table name every region alike -- `GPT Header`, `Linux Filesystem @ 4096 (Ext4)`, `Unallocated Space @ 34` -- in disk order, with free space measured where it really is rather than over the partition tables.
 
 <figure>
 <Image src={layout} alt="TRACE's image information window drawing the disk's partitions as a platter, a bar and a table" />

@@ -32,7 +32,7 @@ Which sets a case uses is a case setting.
 
 ## Persistence
 
-The **Persistence** module lists what starts automatically -- on Windows: Run keys, services, scheduled tasks, startup folders, Image File Execution Options, Winlogon's Shell and Userinit, AppInit_DLLs and WMI event consumers; on Linux: enabled systemd units, cron, SysV and Upstart, `rc.local`, `ld.so.preload`, autostart entries and SSH authorized keys; on macOS: launch agents and daemons -- and grades each one by **the file it starts** on the image: Windows' own programs live *directly* in `System32`, `SysWOW64` or `Windows`, so a system name in a subfolder is a dropper. A started program's embedded signature is noted (present, never verified). On Linux and macOS, a program started from `/tmp` or `/dev/shm`, a hidden file, a download piped into a shell, a reverse shell or a preload library is flagged.
+The **Persistence** module lists what starts automatically -- on Windows: Run keys, services, scheduled tasks, startup folders, Image File Execution Options, Winlogon's Shell and Userinit, AppInit_DLLs and WMI event consumers; on Linux: enabled systemd units, cron, SysV and Upstart, `rc.local`, `ld.so.preload`, autostart entries and SSH authorized keys; on macOS: launch agents and daemons and login items (Background Task Management) -- and grades each one by **the file it starts** on the image: Windows' own programs live *directly* in `System32`, `SysWOW64` or `Windows`, so a system name in a subfolder is a dropper. A started program's embedded signature is noted (present, never verified). On Linux and macOS, a program started from `/tmp` or `/dev/shm`, a hidden file, a download piped into a shell, a reverse shell or a preload library is flagged.
 
 ## VirusTotal
 
