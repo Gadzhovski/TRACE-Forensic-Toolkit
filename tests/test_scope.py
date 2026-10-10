@@ -243,3 +243,84 @@ def test_an_index_run_covers_only_its_scope(tmp_path):
     finally:
         index.close()
         handler.close_resources()
+
+
+# --- the estimate and the folder picker ------------------------------------
+
+def test_the_count_equals_what_the_analysis_walk_reads():
+    from tests.conftest import image_path
+    from trace_app.core import analysis
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(image_path('ntfs1-gen2.E01'))
+    try:
+        assert handler.load_image()
+        volumes = scope.listing(handler)
+        for rules in (Scope(), Scope(preset='custom', types=['pictures']),
+                      Scope(preset='custom', exclude=['$Extend']),
+                      Scope.preset_scope('no_system')):
+            kept, total = scope.count(volumes, rules.to_dict())
+            walked = sum(analysis._count_files(
+                handler, o, None, rules.matcher(handler.get_fs_info(o)))
+                for o in handler.volume_offsets())
+            assert kept == walked, rules.describe()
+            assert total == sum(analysis._count_files(handler, o, None)
+                                for o in handler.volume_offsets())
+    finally:
+        handler.close_resources()
+
+
+def test_the_count_job_keeps_the_listing(qapp, tmp_path):
+    """job_scope_count lists an image once, then counts from the kept
+    listing; both answers agree."""
+    from tests.conftest import image_path
+    from trace_app.core import background
+    params = {'images': [{'path': image_path('8-jpeg-search.dd')}],
+              'scope': Scope(preset='custom', types=['pictures']).to_dict()}
+    first, second = [], []
+    background.job_scope_count(params, lambda *a, **k: None, first.append,
+                               lambda: False)
+    background.job_scope_count(params, lambda *a, **k: None, second.append,
+                               lambda: False)
+    assert first == second and first[0]['total'] >= first[0]['in_scope'] > 0
+
+
+def test_a_picked_folder_becomes_a_rule():
+    from trace_app.ui.dialogs.folder_picker import rule_for
+    assert rule_for('/Users/alex', ['/']) == '~/Users/alex'
+    assert rule_for('/root/usr/lib', ['/', '/root']) == '~/usr/lib'
+    assert rule_for('/home/alex', ['/', '/root']) == '~/home/alex'
+    # A system's top itself stays a path: '~' alone is every system tree.
+    assert rule_for('/root', ['/', '/root']) == '/root'
+    assert rule_for('/C/Users/bob', ['/C']) == '~/Users/bob'
+    assert rule_for('/evidence/x', ['/C']) == '/evidence/x'
+
+
+def test_the_editor_counts_and_browses(qapp):
+    from PySide6.QtCore import Qt
+    from tests.conftest import image_path, pump
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.dialogs.folder_picker import FolderPicker
+    from trace_app.ui.dialogs.scope_editor import ScopeEditor
+    path = image_path('ntfs1-gen2.E01')
+    handler = ImageHandler(path)
+    editor = None
+    try:
+        assert handler.load_image()
+        evidence = [{'name': 'ntfs1', 'path': path, 'handler': handler}]
+        editor = ScopeEditor(Scope(), None, evidence)
+        assert pump(qapp, 120, lambda: editor.estimate.text()
+                    .startswith('In scope'))
+        assert 'In scope:' in editor.estimate.text()
+        picker = FolderPicker(evidence)
+        volume = picker.tree.topLevelItem(0).child(0)
+        volume.setExpanded(True)
+        names = [volume.child(i).text(0) for i in range(volume.childCount())]
+        assert names, "the volume's folders are listed"
+        volume.child(0).setCheckState(0, Qt.Checked)
+        assert picker.rules() and picker.rules()[0].endswith(names[0])
+        picker.deleteLater()
+    finally:
+        if editor is not None:
+            editor.reject()
+            editor.deleteLater()
+        handler.close_resources()

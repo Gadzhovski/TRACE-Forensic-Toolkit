@@ -561,6 +561,78 @@ def job_pictures(params, progress, item, should_stop):
     return 1
 
 
+def job_scope_count(params, progress, item, should_stop):
+    """How many files a scope keeps, per image (core/scope.count): the
+    Scope editor's estimate. An image's folders and files are listed once
+    (the walk takes a while on a big one) and kept in the user data folder
+    by path, size and time -- after that each edit of the rules is counted
+    in a second or two. One item per image: {path, in_scope, total}."""
+    from trace_app.core import scope as scope_module
+    done = 0
+    for image in params['images']:
+        if should_stop():
+            return done
+        volumes = _scope_listing(image, progress, should_stop)
+        if volumes is None:
+            continue
+        try:
+            kept, total = scope_module.count(volumes, params['scope'],
+                                             should_stop)
+        except scope_module.Cancelled:
+            return done
+        item({'path': image['path'], 'in_scope': kept, 'total': total})
+        done += 1
+    return done
+
+
+def _scope_listing(image, progress, should_stop):
+    """listing() of one image, from the kept copy when the image has not
+    changed. None when cancelled or unreadable."""
+    import hashlib
+    import pickle
+    from trace_app.core import scope as scope_module
+    from trace_app.infra.paths import user_data_dir
+    path = image['path']
+    try:
+        stat = os.stat(path)
+        stamp = f"{os.path.normcase(os.path.abspath(path))}|{stat.st_size}|" \
+                f"{stat.st_mtime_ns}"
+    except OSError:
+        stamp = path                    # a live disk or a folder
+    folder = os.path.join(user_data_dir(), 'scope_listings')
+    kept = os.path.join(folder, hashlib.sha256(stamp.encode(
+        'utf-8', 'surrogatepass')).hexdigest()[:32] + '.pickle')
+    if os.path.exists(kept):
+        try:
+            with open(kept, 'rb') as handle:
+                return pickle.load(handle)
+        except Exception as exc:        # damaged or from another version
+            logger.debug("Listing %s not reused: %s", kept, exc)
+    handler = None
+    try:
+        handler = _open_image(path, image.get('unlock'))
+        name = os.path.basename(path)
+        volumes = scope_module.listing(
+            handler, should_stop,
+            lambda folders, where: progress(
+                folders, 0, f"Listing {name}: {folders:,} folders"))
+    except scope_module.Cancelled:
+        return None
+    except Exception as exc:
+        logger.warning("Could not list %s for the scope: %s", path, exc)
+        return None
+    finally:
+        _close(handler)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(kept + '.part', 'wb') as handle:
+            pickle.dump(volumes, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(kept + '.part', kept)
+    except OSError as exc:
+        logger.debug("Listing not kept: %s", exc)
+    return volumes
+
+
 def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
@@ -600,5 +672,6 @@ JOBS = {
     'carve': job_carve,
     'vss_compare': job_vss_compare,
     'pictures': job_pictures,
+    'scope_count': job_scope_count,
     'ping': job_ping,
 }

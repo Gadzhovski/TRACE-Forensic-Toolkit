@@ -413,6 +413,9 @@ class ModuleSelector(QWidget):
         from trace_app.core.scope import Scope
         from trace_app.ui.dialogs.scope_editor import preset_items
         self._scope = Scope()
+        #: What the Scope editor counts and browses: [{'name', 'path',
+        #: 'unlock', 'handler'}] -- set by the host (the window, the wizard).
+        self.scope_evidence = []
         scope_row = QHBoxLayout()
         scope_row.setSpacing(8)
         label = QLabel("Scope")
@@ -668,17 +671,15 @@ class ModuleSelector(QWidget):
 
     def edit_scope(self):
         from trace_app.ui.dialogs.scope_editor import edit_scope
-        edited = edit_scope(self._scope, self)
+        edited = edit_scope(self._scope, self, self.scope_evidence)
         if edited is not None:
             self.set_scope(edited.to_dict())
         else:
             self.set_scope(self._scope.to_dict())   # the combo back
 
     def _show_scope(self):
-        text = self._scope.describe()
-        self.scope_note.setText(text if len(text) <= 140
-                                else text[:137] + '…')
-        self.scope_note.setToolTip(text)
+        self.scope_note.setText(self._scope.describe(short=True))
+        self.scope_note.setToolTip(self._scope.describe())
         self.changed.emit()
 
     def choice(self):
@@ -828,6 +829,8 @@ class AnalysisModulesDialog(QDialog):
             self.selector.set_choice(choice)
         if 'scope' in choice:
             self.selector.set_scope(choice['scope'])
+        self.selector.scope_evidence = list(choice.get('scope_evidence')
+                                            or [])
         # As tall as the list where the screen allows, scrolling where not.
         screen = self.screen().availableGeometry().height() \
             if self.screen() is not None else 800

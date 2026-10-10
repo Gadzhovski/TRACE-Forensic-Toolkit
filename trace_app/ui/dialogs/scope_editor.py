@@ -7,16 +7,18 @@ event logs, thumbnail caches) or raw space (carving) do not, and the
 dialog says so.
 """
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog,
                                QDialogButtonBox, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QLineEdit,
-                               QPlainTextEdit, QScrollArea, QSpinBox,
+                               QPlainTextEdit, QPushButton, QScrollArea,
+                               QSpinBox,
                                QVBoxLayout, QWidget)
 
 from trace_app.core.scope import (CUSTOM, DELETED_EXCLUDE, DELETED_INCLUDE,
                                   DELETED_ONLY, PRESETS, TYPE_GROUPS, Scope)
 from trace_app.ui import icons
+from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets import date_fields
 
 #: What honours a scope, and what does not -- shown in the dialog.
@@ -60,6 +62,33 @@ class _Rows:
         self._row += 1
 
 
+class _CountWorker(ProcessWorker):
+    """core/background.job_scope_count: files in scope, per image."""
+
+    counted = Signal(int, int, str)        # in scope, total, error
+    progressed = Signal(str)
+
+    kind = 'scope_count'
+
+    def __init__(self, params, parent=None):
+        super().__init__(params, parent)
+        self._kept = self._total = 0
+
+    def on_progress(self, _done, _total, text):
+        self.progressed.emit(text)
+
+    def on_item(self, record):
+        self._kept += record['in_scope']
+        self._total += record['total']
+
+    def on_done(self, count, error):
+        if self._stop.is_set():
+            return
+        self.counted.emit(self._kept, self._total,
+                          error or ('' if count else 'nothing could be '
+                                    'listed'))
+
+
 def preset_items():
     """[(key, label)] for a preset drop-down, Custom last."""
     return [(key, PRESETS[key][0]) for key in PRESETS] + [(CUSTOM, "Custom")]
@@ -68,8 +97,17 @@ def preset_items():
 class ScopeEditor(QDialog):
     """Edit a Scope; `scope()` is the result once accepted."""
 
-    def __init__(self, scope=None, parent=None):
+    def __init__(self, scope=None, parent=None, evidence=None):
+        """`evidence`: [{'name', 'path', 'unlock', 'handler'}] -- what the
+        estimate counts (by path, in a background process) and Browse lists
+        (open images: a 'handler'). None or []: neither is offered."""
         super().__init__(parent)
+        self.evidence = list(evidence or [])
+        self._counter = None
+        self._count_timer = QTimer(self)
+        self._count_timer.setSingleShot(True)
+        self._count_timer.setInterval(600)
+        self._count_timer.timeout.connect(self._count)
         self.setWindowTitle("What to Examine")
         self.setObjectName("scopeEditor")
         self.setWindowIcon(icons.icon(icons.LOGO))
@@ -100,10 +138,14 @@ class ScopeEditor(QDialog):
 
         self.include_edit = self._rules_edit(
             "Empty: every folder.\n~/home\n~/Users")
-        form.addRow("Only in folders", self.include_edit)
+        form.addRow("Only in folders",
+                    self._with_browse(self.include_edit,
+                                      "Folders to Examine"))
         self.exclude_edit = self._rules_edit(
             "~/usr\n~/Windows/WinSxS\nnode_modules")
-        form.addRow("Leave out folders", self.exclude_edit)
+        form.addRow("Leave out folders",
+                    self._with_browse(self.exclude_edit,
+                                      "Folders to Leave Out"))
         rules_help = QLabel(RULE_HELP)
         rules_help.setObjectName("scopeNote")
         rules_help.setWordWrap(True)
@@ -179,6 +221,12 @@ class ScopeEditor(QDialog):
         self.summary.setObjectName("scopeSummary")
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        # How many files that leaves, counted in a background process
+        # (core/background.job_scope_count) a moment after each change.
+        self.estimate = QLabel()
+        self.estimate.setObjectName("scopeEstimate")
+        self.estimate.setWordWrap(True)
+        layout.addWidget(self.estimate)
         covered = QLabel(COVERED)
         covered.setObjectName("scopeNote")
         covered.setWordWrap(True)
@@ -196,6 +244,37 @@ class ScopeEditor(QDialog):
                     min(fields.sizeHint().height() + 260, int(screen * 0.9)))
 
     # --- building -----------------------------------------------------------
+
+    def _with_browse(self, edit, title):
+        """A rules box with a Browse button that ticks folders of the open
+        evidence into it."""
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(edit, 1)
+        button = QPushButton("Browse…")
+        button.setObjectName("scopeBrowse")
+        button.setToolTip("Choose folders from the open evidence")
+        icons.apply_to(button, icons.OPEN_FOLDER)
+        opened = [e for e in self.evidence if e.get('handler') is not None]
+        button.setEnabled(bool(opened))
+        if not opened:
+            button.setToolTip("Folders can be chosen once the evidence is "
+                              "open; type rules here meanwhile.")
+        button.clicked.connect(lambda _=False, e=edit, t=title:
+                               self._browse(e, t))
+        row.addWidget(button, 0, Qt.AlignTop)
+        return row
+
+    def _browse(self, edit, title):
+        from trace_app.ui.dialogs.folder_picker import pick_folders
+        opened = [e for e in self.evidence if e.get('handler') is not None]
+        rules = pick_folders(opened, title, self)
+        if not rules:
+            return
+        have = [line.strip() for line in edit.toPlainText().splitlines()
+                if line.strip()]
+        edit.setPlainText('\n'.join(have + [r for r in rules
+                                             if r not in have]))
 
     def _rules_edit(self, placeholder):
         edit = QPlainTextEdit()
@@ -322,12 +401,73 @@ class ScopeEditor(QDialog):
                                  "Your own rules.")
 
     def _refresh_summary(self):
-        self.summary.setText(self.scope().describe())
+        scope = self.scope()
+        self.summary.setText(scope.describe(short=True))
+        self.summary.setToolTip(scope.describe())
+        if self.evidence:
+            self._count_timer.start()       # counted once the edits pause
+        else:
+            self.estimate.setText(
+                "Add evidence to see how many files this leaves.")
+
+    # --- the estimate ------------------------------------------------------------
+
+    def _count(self):
+        if self._counter is not None:
+            # A later scope wins: the running count is stopped, its result
+            # dropped.
+            try:
+                self._counter.counted.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self._counter.stop()
+        images = [{'path': e['path'], 'unlock': e.get('unlock') or {}}
+                  for e in self.evidence]
+        worker = _CountWorker({'images': images,
+                               'scope': self.scope().to_dict()}, self)
+        worker.counted.connect(self._counted)
+        worker.progressed.connect(self._counting)
+        worker.finished.connect(lambda w=worker: self._count_ended(w))
+        self._counter = worker
+        self.estimate.setText("Counting the files this leaves…")
+        worker.start()
+
+    def _counting(self, text):
+        self.estimate.setText(f"Counting the files this leaves… ({text}; "
+                              f"the first count of an image lists it once)")
+
+    def _counted(self, kept, total, error):
+        if error and not total:
+            self.estimate.setText(f"Could not count the files: {error}")
+            return
+        share = f" ({kept * 100 / total:.1f}%)" if total else ''
+        self.estimate.setText(
+            f"In scope: {kept:,} of {total:,} files{share}"
+            + (" -- free space and file slack are not searched"
+               if not self.scope().covers_free_space else ''))
+
+    def _count_ended(self, worker):
+        if self._counter is worker:
+            self._counter = None
+        worker.deleteLater()
+
+    def done(self, result):
+        # A count still running is stopped, not left behind the dialog.
+        self._count_timer.stop()
+        if self._counter is not None:
+            try:
+                self._counter.counted.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            self._counter.stop()
+            self._counter.wait(3000)
+        super().done(result)
 
 
-def edit_scope(scope=None, parent=None):
-    """Ask; the edited Scope, or None when cancelled."""
-    dialog = ScopeEditor(scope, parent)
+def edit_scope(scope=None, parent=None, evidence=None):
+    """Ask; the edited Scope, or None when cancelled. `evidence` as
+    ScopeEditor takes it."""
+    dialog = ScopeEditor(scope, parent, evidence)
     if dialog.exec() == QDialog.Accepted:
         return dialog.scope()
     return None

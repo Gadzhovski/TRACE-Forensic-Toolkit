@@ -194,15 +194,22 @@ class Scope:
             return PRESETS[self.preset][0]
         return 'Custom'
 
-    def describe(self):
-        """The rules in words, for the audit trail and the report."""
+    def describe(self, short=False):
+        """The rules in words, for the audit trail and the report --
+        `short`: folder rules counted, past a few, for a dialog line (the
+        whole text is its tooltip)."""
         if self.everything:
             return "Everything (no files left out)."
+
+        def folders(rules):
+            if short and len(rules) > 4:
+                return '; '.join(rules[:3]) + f" and {len(rules) - 3} more"
+            return '; '.join(rules)
         parts = [f"{self.label}:"]
         if self.include:
-            parts.append("only in " + '; '.join(self.include))
+            parts.append("only in " + folders(self.include))
         if self.exclude:
-            parts.append("leaving out " + '; '.join(self.exclude))
+            parts.append("leaving out " + folders(self.exclude))
         if self.exclude_names:
             parts.append("files named " + '; '.join(self.exclude_names)
                          + " left out")
@@ -450,3 +457,104 @@ def file_time(meta):
     except (TypeError, ValueError):
         return None
     return value or None
+
+
+# --- what a scope leaves: counted, for the editor's estimate ------------------
+
+class Cancelled(Exception):
+    """The count was asked to stop."""
+
+
+def listing(image_handler, should_stop=None, progress=None):
+    """Every folder and file of an image as the analysis walk sees them,
+    per volume: [{'offset', 'roots', 'folders': [path],
+    'files': [(folder, name, size, mtime, deleted)]}]. Read once, kept by
+    the caller, and counted against any scope by count() -- the same walk,
+    the same files, the analysis and the index count."""
+    from trace_app.core.walk import volume_offsets
+    out, seen = [], [0]
+    for offset in volume_offsets(image_handler):
+        fs = image_handler.get_fs_info(offset)
+        if fs is None:
+            continue
+        volume = {'offset': offset, 'roots': system_roots(fs),
+                  'folders': [], 'files': []}
+        visited = set()
+
+        def walk(directory, path, depth):
+            if depth > 64:
+                return
+            for entry in directory:
+                if should_stop is not None and should_stop():
+                    raise Cancelled()
+                info = entry.info
+                if info.name is None or info.meta is None:
+                    continue
+                name = info.name.name.decode('utf-8', 'replace')
+                if name in ('.', '..'):
+                    continue
+                meta = info.meta
+                if meta.addr in visited:
+                    continue
+                visited.add(meta.addr)
+                child = f"{path}/{name}"
+                if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
+                    volume['folders'].append(child)
+                    seen[0] += 1
+                    if progress is not None and seen[0] % 200 == 0:
+                        progress(seen[0], child)
+                    try:
+                        walk(entry.as_directory(), child, depth + 1)
+                    except Cancelled:
+                        raise
+                    except Exception:
+                        continue
+                elif meta.size:
+                    volume['files'].append((
+                        path, name, int(meta.size), file_time(meta),
+                        not (int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC)))
+
+        try:
+            walk(fs.open_dir(path='/'), '', 0)
+        except Cancelled:
+            raise
+        except Exception as exc:
+            logger.debug("Volume at %s not listed: %s", offset, exc)
+        out.append(volume)
+    return out
+
+
+def count(volumes, scope, should_stop=None):
+    """(files in scope, files) of a listing(): a file counts when no folder
+    above it is skipped and it is not skipped itself -- what the walks do.
+    Folders are judged once each."""
+    scope = Scope.from_dict(scope)
+    kept = total = 0
+    for volume in volumes:
+        total += len(volume['files'])
+        matcher = scope.matcher(roots=volume['roots'])
+        if matcher is None:
+            kept += len(volume['files'])
+            continue
+        skipped = {'': False}
+
+        def folder_skipped(path):
+            # A folder is out when it, or any folder above it, is.
+            if path in skipped:
+                return skipped[path]
+            parent = path.rsplit('/', 1)[0]
+            out = folder_skipped(parent) or matcher.skips_folder(path)
+            skipped[path] = out
+            return out
+
+        for number, (folder, name, size, mtime, deleted) in \
+                enumerate(volume['files']):
+            if should_stop is not None and number % 4096 == 0 and \
+                    should_stop():
+                raise Cancelled()
+            if folder_skipped(folder):
+                continue
+            if not matcher.skips_file(f"{folder}/{name}", size, mtime,
+                                      deleted):
+                kept += 1
+    return kept, total

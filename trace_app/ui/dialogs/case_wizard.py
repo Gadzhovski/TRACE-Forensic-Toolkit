@@ -558,6 +558,11 @@ class ModulesPage(WizardPage):
         self.selector.setEnabled(has)
         self.selector.set_evidence_size(self.evidence_page.intake
                                         .total_bytes())
+        # Not open yet: the Scope editor can count them (a background
+        # process opens each), not browse them.
+        self.selector.scope_evidence = [
+            {'name': item['display_name'], 'path': item['path']}
+            for item in self.evidence_page.intake.usable()]
 
     def choice(self):
         """The modules chosen, or None when there is nothing to run them on

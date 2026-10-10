@@ -2362,6 +2362,12 @@ QPlainTextEdit#scopeRules {
     background-color: #FFFFFF;
     padding: 2px 4px;
 }
+/* How many files the rules leave: the line that answers "how much will
+   this run read?", so it reads first. */
+QLabel#scopeEstimate {
+    color: #212529;
+    font-weight: 600;
+}
 QScrollArea#scopeScroll, QWidget#scopeFields {
     background: transparent;
 }

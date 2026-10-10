@@ -3226,8 +3226,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         unavailable, in_use = availability(self.case,
                                            self._rule_libraries())
         preselected['unavailable'] = unavailable
-        # The case's own scope, whatever the last run's choice said.
+        # The case's own scope, whatever the last run's choice said; and
+        # the open evidence, for the Scope editor's count and Browse.
         preselected['scope'] = self._job_scope()
+        preselected['scope_evidence'] = self._scope_evidence()
         # Rule-driven modules follow the case's own options, not the last
         # run: ticked when their sets are in use.
         for key in (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
@@ -3346,6 +3348,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.case).to_dict():
             self.case.set_setting('scope', scope.to_dict())
         self.case.record_event('analysis scope', scope.describe())
+
+    def _scope_evidence(self):
+        """The case's open evidence as the Scope editor takes it."""
+        out = []
+        for row in (self.case.evidence() if self.case else []):
+            handler = self._image_handlers.get(os.path.normpath(row['path']))
+            out.append({'name': row.get('display_name')
+                        or os.path.basename(row['path']),
+                        'path': row['path'],
+                        'unlock': self._unlocks_for(row['path']),
+                        'handler': handler if handler is not None
+                        and handler.loaded else None})
+        return out
 
     def _job_scope(self):
         """The case's scope as a job takes it (params['scope']), fixed
