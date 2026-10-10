@@ -168,6 +168,10 @@ class _OrphanMeta:
         self.ctime = getattr(meta, 'ctime', 0)
 
 
+#: Logical evidence that is encrypted as a whole and opened with a password
+#: (an iOS backup, an adb backup): volume kind at 0 while locked.
+LOCKED_LOGICAL = ('ios_backup', 'android_backup')
+
 class ImageHandler:
     def __init__(self, image_path):
         # Normalise here so every consumer gets a well-formed path: libewf's
@@ -1873,7 +1877,7 @@ class ImageHandler:
     def encryption(self, start_sector):
         """The kind of an encrypted volume at a partition, or None."""
         kind = self.volume_kind(start_sector)
-        if kind in ('bitlocker', 'fvde', 'luks', 'ios_backup'):
+        if kind in ('bitlocker', 'fvde', 'luks') or kind in LOCKED_LOGICAL:
             return kind
         # VeraCrypt has no signature: known only once the examiner unlocked
         # it as such.
@@ -1919,8 +1923,8 @@ class ImageHandler:
         reason."""
         if start_sector in self._bitlocker:
             return True
-        if kind == 'ios_backup' and self.logical_fs is not None:
-            return self._unlock_backup(secret.get('password'))
+        if kind in LOCKED_LOGICAL and self.logical_fs is not None:
+            return self._unlock_backup(secret.get('password'), kind)
         window = self._partition_window(start_sector)
         keep = []
         if kind == 'bitlocker':
@@ -1952,9 +1956,10 @@ class ImageHandler:
                     containers.ENCRYPTION_NAMES.get(kind, kind), start_sector)
         return True
 
-    def _unlock_backup(self, password):
-        """An encrypted iOS backup's files, listed and decrypted as read."""
-        from trace_app.core import ios_backup
+    def _unlock_backup(self, password, kind='ios_backup'):
+        """An encrypted phone backup's files (iOS, or adb's), listed and
+        decrypted as read."""
+        from trace_app.core import android_backup, ios_backup
         unlock = self.logical_fs.facts.get('_unlock')
         if unlock is None:
             raise containers.ContainerError("This evidence has no password")
@@ -1966,12 +1971,13 @@ class ImageHandler:
                 capabilities.reason('ios_encrypted'))
         try:
             unlock(password)
-        except ios_backup.BackupError as exc:
+        except (ios_backup.BackupError, android_backup.BackupError) as exc:
             raise containers.ContainerError(str(exc)) from exc
-        self._unlocked_kind[0] = 'ios_backup'
+        self._unlocked_kind[0] = kind
         self._directory_cache.clear()
         self.get_fs_type.cache_clear()
-        logger.info("iOS backup unlocked")
+        logger.info("%s unlocked", containers.ENCRYPTION_NAMES.get(kind,
+                                                                   kind))
         return True
 
     # --- LVM and APFS: several volumes in one partition -------------------
@@ -2107,7 +2113,8 @@ class ImageHandler:
 
     def is_unlocked(self, start_sector):
         return start_sector in self._bitlocker or \
-            self._unlocked_kind.get(start_sector) in ('apfs', 'ios_backup')
+            self._unlocked_kind.get(start_sector) in \
+            ('apfs',) + LOCKED_LOGICAL
 
     def bitlocker_facts(self, start_sector):
         return containers.bitlocker_facts(self._partition_window(start_sector))

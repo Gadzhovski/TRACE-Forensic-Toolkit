@@ -258,6 +258,7 @@ ENCRYPTION_NAMES = {'corestorage': 'Core Storage (not encrypted)',
                     'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
                     'luks': 'LUKS', 'apfs': 'APFS encryption',
                     'ios_backup': 'iOS backup encryption',
+                    'android_backup': 'Android backup encryption',
                     'veracrypt': 'VeraCrypt / TrueCrypt'}
 
 #: Logical volumes and APFS volumes are keyed like shadow copies, each in a

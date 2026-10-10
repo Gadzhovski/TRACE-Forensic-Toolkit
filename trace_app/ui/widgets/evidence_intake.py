@@ -43,6 +43,7 @@ DISK_IMAGE_PATTERNS = ("*.e01", "*.E01", "*.ex01", "*.Ex01", "*.s01", "*.S01",
                        "*.vhd", "*.VHD", "*.vhdx", "*.VHDX", "*.qcow2",
                        "*.QCOW2", "*.qcow", "*.hc", "*.tc")
 LOGICAL_PATTERNS = ("*.ad1", "*.AD1", "*.l01", "*.L01", "*.lx01", "*.Lx01",
+                    "*.ab", "*.AB",
                     "*.zip", "*.ZIP", "*.tar", "*.tgz", "*.tar.gz",
                     "*.tar.bz2", "*.tar.xz")
 EVIDENCE_FILE_FILTER = ";;".join((

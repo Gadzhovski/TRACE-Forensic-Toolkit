@@ -54,6 +54,11 @@ _KEYS = {
          "password instead of the outer one's. Each hash VeraCrypt offers "
          "is tried, so checking can take a few seconds.", ''),
     ),
+    'android_backup': (
+        ('password', "Backup password",
+         "The password typed on the phone when the backup was made "
+         "(adb backup). Checking it takes a moment.", ''),
+    ),
     'ios_backup': (
         ('password', "Backup password",
          "The password set for encrypted backups in Finder or iTunes (not "

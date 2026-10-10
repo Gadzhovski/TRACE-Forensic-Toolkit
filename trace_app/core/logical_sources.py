@@ -33,7 +33,8 @@ CACHE_MEMBER = 64 * 1024 * 1024
 CACHED_MEMBERS = 4
 
 KIND_LABELS = {'folder': 'Folder', 'zip': 'ZIP', 'tar': 'TAR', 'ad1': 'AD1',
-               'l01': 'L01', 'ios_backup': 'iOS backup'}
+               'l01': 'L01', 'ios_backup': 'iOS backup',
+               'android_backup': 'Android backup'}
 
 
 def kind_of(path):
@@ -54,12 +55,24 @@ def kind_of(path):
         return 'ad1'
     if lowered.endswith(('.l01', '.lx01')):
         return 'l01'
+    if lowered.endswith('.ab') or _starts(path, b'ANDROID BACKUP\n'):
+        return 'android_backup'
     if lowered.endswith('.zip'):
         return 'zip'
     if lowered.endswith(('.tar', '.tgz', '.tar.gz', '.tar.bz2', '.tbz2',
                          '.tar.xz', '.txz')):
         return 'tar'
     return None
+
+
+def _starts(path, magic):
+    """Whether the file at `path` begins with `magic` (False for a folder
+    or anything unreadable)."""
+    try:
+        with open(path, 'rb') as handle:
+            return handle.read(len(magic)) == magic
+    except OSError:
+        return False
 
 
 #: Second and later segments of a segmented image: they are read with the
@@ -146,6 +159,9 @@ def open_logical(path):
     if kind == 'ios_backup':
         from trace_app.core.ios_backup import open_backup
         return open_backup(path)
+    if kind == 'android_backup':
+        from trace_app.core.android_backup import open_android_backup
+        return open_android_backup(path)
     opener = {'folder': open_folder, 'zip': open_zip, 'tar': open_tar,
               'l01': open_l01}.get(kind)
     if opener is None:

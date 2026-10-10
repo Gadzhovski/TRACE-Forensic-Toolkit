@@ -23,7 +23,8 @@ ERROR = 'error'
 
 #: Volume kinds that need a key before their files can be read.
 _ENCRYPTED = {'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
-              'luks': 'LUKS', 'ios_backup': 'Encrypted iOS backup'}
+              'luks': 'LUKS', 'ios_backup': 'Encrypted iOS backup',
+              'android_backup': 'Encrypted Android backup'}
 
 #: Volume kinds that hold further volumes.
 _POOLS = {'lvm': 'Linux LVM', 'apfs': 'APFS container'}
@@ -41,6 +42,7 @@ _FORMATS = {
     '.e01': 'EnCase image (E01)', '.ex01': 'EnCase image (Ex01)',
     '.s01': 'SMART image (S01)', '.dd': 'Raw image', '.raw': 'Raw image',
     '.img': 'Raw image', '.000': 'Split raw image',
+    '.ab': 'Android backup (adb)',
     '.hc': 'VeraCrypt container', '.tc': 'TrueCrypt container',
     '.001': 'Split raw image', '.iso': 'ISO image',
     '.vmdk': 'VMware disk (VMDK)', '.vhd': 'Virtual PC disk (VHD)',

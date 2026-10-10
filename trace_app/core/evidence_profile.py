@@ -35,6 +35,7 @@ _UNREAD = {'bitlocker': 'a locked BitLocker volume',
            'luks': 'a locked LUKS volume',
            'apfs': 'a locked APFS volume',
            'ios_backup': 'a locked (encrypted) iOS backup',
+           'android_backup': 'a locked (encrypted) Android backup',
            'mdraid': 'a RAID member whose other disks are not here'}
 
 
@@ -71,7 +72,7 @@ def profile(image_handler):
         fs = image_handler.get_fs_info(key)
         if fs is None:
             if kind in ('bitlocker', 'fvde', 'luks', 'apfs', 'ios_backup',
-                        'mdraid'):
+                        'android_backup', 'mdraid'):
                 unreadable = True           # locked: what is inside is unknown
                 why.append(_UNREAD[kind])
             elif image_handler.detect_filesystems(key):
