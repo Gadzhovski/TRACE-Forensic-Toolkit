@@ -2954,6 +2954,15 @@ class ImageHandler:
             return content, metadata
 
         except Exception as e:
+            # A deleted HFS+ file: no longer in the catalog TSK reads, but
+            # its old record still says where its data is
+            # (core/hfs_deleted.py).
+            if self.get_fs_type(offset) == 'HFS':
+                from trace_app.core import hfs_deleted
+                recovered = hfs_deleted.read_deleted(self, offset,
+                                                     int(inode_number))
+                if recovered is not None:
+                    return recovered, None
             # TSK reports a failed image read in its own words; an
             # incomplete image's reason is the one worth showing.
             self.last_read_error = self.incomplete() or str(e)
