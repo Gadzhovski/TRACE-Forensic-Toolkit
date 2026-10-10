@@ -2398,6 +2398,22 @@ QLabel#commandSearchHint {
     background: transparent;
 }
 
+/* About: Check for Updates' answer -- quiet while asking and when
+   current, green when a newer release exists, amber when it could not
+   ask. */
+QLabel#aboutUpdateStatus {
+    color: #6c757d;
+    font-size: 12px;
+    background: transparent;
+}
+QLabel#aboutUpdateStatus[state="newer"] {
+    color: #1E7E34;
+    font-weight: 600;
+}
+QLabel#aboutUpdateStatus[state="error"] {
+    color: #B26A00;
+}
+
 /* About: the website and source links. */
 QLabel#aboutLinks {
     font-size: 12px;

@@ -39,6 +39,11 @@ USER = {
                      "Filled into reports' headers."),
     'case_folder': ('', "Default case folder",
                     "Where New Case and Open Case start looking."),
+    'check_updates': (True, "Allow checking for new versions",
+                      "Help ▸ About ▸ Check for Updates asks GitHub for "
+                      "the newest release -- one request, carrying nothing "
+                      "but TRACE's version, made only when clicked. Never "
+                      "while a case is offline."),
     'ui_scale': ('100%', "Interface size",
                  "Everything larger or smaller -- text, controls, icons -- "
                  "on top of the scaling the system already applies for the "

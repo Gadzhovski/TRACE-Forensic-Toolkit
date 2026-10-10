@@ -181,3 +181,113 @@ def test_about_links_the_website_and_the_source(qapp):
     assert WEBSITE in links.text() and SOURCE in links.text()
     assert links.openExternalLinks()
     dialog.deleteLater()
+
+
+# --- Check for Updates -----------------------------------------------------------
+
+class _Answer:
+    def __init__(self, status, data):
+        self.status_code, self._data = status, data
+
+    def json(self):
+        return self._data
+
+
+class _GitHub:
+    """A stand-in for requests: records what was asked, answers as told."""
+
+    def __init__(self, status=200, data=None):
+        self.asked, self.status, self.data = [], status, data or {}
+
+    def get(self, url, **kwargs):
+        self.asked.append((url, kwargs))
+        return _Answer(self.status, self.data)
+
+
+def test_versions_compare_as_releases_do():
+    from trace_app.core.updates import newer, parse_version
+    assert newer('2.3.0', '2.2.0') and newer('v2.10.0', '2.9.9')
+    assert not newer('2.2.0', '2.2.0') and not newer('2.1.9', '2.2.0')
+    assert newer('2.3.0', '2.3.0-rc1') and not newer('2.3.0-rc1', '2.3.0')
+    assert newer('2.3.0-rc2', '2.3.0-rc1')
+    assert parse_version('nightly') is None and not newer('nightly', '2.2.0')
+
+
+def test_the_newest_release_is_asked_of_github_only(monkeypatch):
+    from trace_app import __version__
+    from trace_app.core import settings, updates
+    monkeypatch.setattr(settings, 'network_refusal', lambda kind='': None)
+    monkeypatch.setattr(settings, 'user',
+                        lambda key: True if key == 'check_updates' else None)
+    github = _GitHub(data={'tag_name': 'v99.0.0', 'published_at':
+                           '2030-01-02T00:00:00Z', 'html_url':
+                           'https://github.com/x/releases/tag/v99.0.0'})
+    ask = updates.latest
+    release = ask(github)
+    assert release['version'] == '99.0.0'
+    url, kwargs = github.asked[0]
+    assert url == updates.LATEST_URL
+    # What is sent: TRACE's version in the User-Agent, nothing else.
+    assert kwargs['headers']['User-Agent'] == \
+        f'TRACE/{__version__} (update check)'
+    assert 'params' not in kwargs and 'data' not in kwargs
+    monkeypatch.setattr(updates, 'latest', lambda: release)
+    status, text, _ = updates.check()
+    assert status == 'newer' and '99.0.0 is available' in text
+    monkeypatch.setattr(updates, 'latest',
+                        lambda: dict(release, version=__version__))
+    assert updates.check()[0] == 'current'
+    for answer in (_GitHub(status=404), _GitHub(status=500),
+                   _GitHub(data={'tag_name': 'nightly'})):
+        try:
+            ask(answer)
+        except updates.UpdateError:
+            pass
+        else:
+            raise AssertionError("an unusable answer was accepted")
+
+
+def test_nothing_is_asked_when_offline_or_turned_off(monkeypatch):
+    from trace_app.core import settings, updates
+    github = _GitHub(data={'tag_name': 'v99.0.0'})
+    monkeypatch.setattr(settings, 'user',
+                        lambda key: True if key == 'check_updates' else None)
+    monkeypatch.setattr(settings, 'network_refusal',
+                        lambda kind='': "This case is offline")
+    status, text, _ = updates.check()
+    assert status == 'error' and 'offline' in text
+    try:
+        updates.latest(github)
+    except updates.UpdateError:
+        pass
+    assert github.asked == []
+    monkeypatch.setattr(settings, 'network_refusal', lambda kind='': None)
+    monkeypatch.setattr(settings, 'user', lambda key: False)
+    assert 'turned off' in (updates.refusal() or '')
+
+
+def test_about_checks_and_shows_the_answer(qapp, monkeypatch):
+    from PySide6.QtWidgets import QLabel
+    from tests.conftest import pump
+    from trace_app.core import updates
+    from trace_app.ui.dialogs.about import AboutDialog
+    monkeypatch.setattr(updates, 'refusal', lambda: None)
+    monkeypatch.setattr(updates, 'check', lambda: (
+        'newer', 'TRACE 99.0.0 is available.',
+        {'url': 'https://github.com/x/releases/tag/v99.0.0'}))
+    dialog = AboutDialog()
+    try:
+        assert dialog.update_button.isEnabled()
+        dialog.check_for_updates()
+        status = dialog.findChild(QLabel, 'aboutUpdateStatus')
+        assert pump(qapp, 10, lambda: 'release page' in status.text())
+        assert '99.0.0' in status.text() and status.property('state') == \
+            'newer'
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+    monkeypatch.setattr(updates, 'refusal', lambda: "This case is offline")
+    dialog = AboutDialog()
+    assert not dialog.update_button.isEnabled()
+    assert 'offline' in dialog.update_button.toolTip()
+    dialog.deleteLater()
