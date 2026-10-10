@@ -1470,6 +1470,13 @@ QStatusBar QLabel, QStatusBar QSizeGrip, QStatusBar QWidget {
     background-color: transparent;
     border: none;
 }
+/* ...but not a menu a status-bar button opens (the job bar's list):
+   it is a QWidget inside the bar too, and drawn transparent it showed
+   the window under it through its text. */
+QStatusBar QMenu {
+    background-color: #3C3C3C;
+    border: 1px solid #5A5A5A;
+}
 
 QLabel#statusContext {
     background-color: transparent;
