@@ -1138,7 +1138,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 (normal_screen_action, icons.NORMAL_SCREEN),
                 (reset_layout_action, icons.RESET_LAYOUT),
                 (image_info_action, icons.IMAGE_INFO),
-                (verify_image_action, icons.VERIFY),
+                (verify_image_action, icons.VERIFY_IMAGE),
                 (hash_sets_action, icons.HASH_SETS),
                 (yara_action, icons.FINDING_YARA),
                 (sigma_action, icons.SIGMA),
