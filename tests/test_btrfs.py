@@ -644,3 +644,17 @@ def test_a_checksum_written_after_deletion_proves_nothing():
     assert scan._sum_for(0, deleted_in=6) == old      # the file's own
     assert scan._sum_for(0, deleted_in=4) is None     # none of its time
     assert scan._sum_for(0, deleted_in=12) == new
+
+
+def test_the_c_checksum_equals_the_reference():
+    """Btrfs checksums go through the crc32c wheel (C); its value must be
+    the pure-Python reference's, on the standard check string and on
+    blocks of every length a node or sector has."""
+    import random
+    from trace_app.core import btrfs_recover
+    assert btrfs_recover._fast_crc32c(b'123456789') == 0xE3069283
+    rng = random.Random(4)
+    for length in (0, 1, 7, 4096, 16384 - 0x20):
+        data = bytes(rng.getrandbits(8) for _ in range(length))
+        assert btrfs_recover._fast_crc32c(data) == \
+            btrfs_recover.crc32c(data) == _crc32c(data)

@@ -53,16 +53,36 @@ def start(kind, params):
     ctx = context()
     queue = ctx.Queue()
     stop = ctx.Event()
+    # Not a daemon: a daemonic process may not start processes, and
+    # indexing starts a pool (core/text_pool). It ends with the window all
+    # the same -- the window stops it, and watch_parent() ends it if the
+    # window is gone.
     process = ctx.Process(target=child_main, args=(kind, params, queue, stop),
-                          name=f'TRACE {kind}', daemon=True)
+                          name=f'TRACE {kind}')
     process.start()
     return process, queue, stop
 
 
 # --- in the child ------------------------------------------------------------
 
+def watch_parent():
+    """End this process when the one that started it is gone (killed, or
+    crashed in C): a job, or a worker of its pool, must not run on alone,
+    writing to a case nobody has open."""
+    import threading
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+
+    def watch():
+        parent.join()               # returns when the parent has exited
+        os._exit(1)
+    threading.Thread(target=watch, name='parent watch', daemon=True).start()
+
+
 def child_main(kind, params, queue, stop):
     """Entry point of the child process."""
+    watch_parent()
     root = logging.getLogger()
     root.handlers[:] = [logging.handlers.QueueHandler(_LogChannel(queue))]
     root.setLevel(logging.INFO)
@@ -128,6 +148,14 @@ def _open_image(path, unlock=None):
     return handler
 
 
+def _scope(params):
+    """The run's scope (core/scope.Scope) from its params, or None when it
+    covers everything."""
+    from trace_app.core.scope import from_params
+    scope = from_params(params)
+    return None if scope.everything else scope
+
+
 def _close(*things):
     for thing in things:
         if thing is None:
@@ -149,7 +177,7 @@ def job_index(params, progress, item, should_stop):
         done = index_evidence(
             handler, index, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
-            should_stop=should_stop)
+            should_stop=should_stop, scope=_scope(params))
         # The image's carved files too: a re-index cleared them with the
         # rest of the image's items.
         _index_carved(handler, index, params, should_stop)
@@ -182,7 +210,7 @@ def job_analysis(params, progress, item, should_stop):
         return analyse_evidence(
             handler, case, params['evidence_id'], params['modules'],
             progress=lambda done, total, path: progress(done, total, path),
-            should_stop=should_stop)
+            should_stop=should_stop, scope=_scope(params))
     finally:
         _close(case, handler)
 
@@ -300,7 +328,7 @@ def job_yara(params, progress, item, should_stop):
                 params.get('options'),
                 progress=lambda done, total, path: progress(done, total,
                                                             path),
-                should_stop=should_stop)
+                should_stop=should_stop, scope=_scope(params))
         except yara_rules.ScanCancelled:
             return 0
     finally:
@@ -365,7 +393,7 @@ def job_deleted(params, progress, item, should_stop):
                 handler, case, params['evidence_id'],
                 progress=lambda done, total, path: progress(done, total,
                                                             path),
-                should_stop=should_stop)
+                should_stop=should_stop, scope=_scope(params))
         except deleted.DeletedCancelled:
             return 0
     finally:
@@ -542,8 +570,16 @@ def job_ping(params, progress, item, should_stop):
                                 ntfs, persistence, report, thumbnails,
                                 timeline, yara_rules)
     import pytsk3  # noqa: F401
+    # Indexing's text pool starts processes of its own from this one: in a
+    # frozen build that is the app started again, twice over.
+    from trace_app.core.text_pool import TextPipeline
+    found = []
+    pool = TextPipeline(lambda text, entities, payload: found.append(
+        entities), workers=2)
+    pool.submit(b'write to ping@example.org', 'ping.txt', 1 << 16, 0)
+    pool.close()
     progress(1, 1, 'ping', force=True)
-    item({'pong': params.get('value')})
+    item({'pong': params.get('value'), 'pool': found})
     return 1
 
 

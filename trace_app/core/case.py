@@ -267,6 +267,13 @@ class Case:
         case._record_activity('case opened', case.name)
         return case
 
+    @property
+    def is_open(self):
+        """Whether the database is still open: a signal arriving after the
+        window closed the case (a panel's load finishing) asks this
+        first."""
+        return self._db is not None
+
     def close(self):
         """Close the database. Safe to call more than once."""
         if self._db is not None:

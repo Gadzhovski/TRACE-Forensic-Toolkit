@@ -113,6 +113,9 @@ _ENTITY_PATTERNS = {
         r'\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b'),
 }
 
+#: A character each match must contain: no such character, no match.
+_ENTITY_NEEDS = {'email': '@', 'url': '://', 'ipv6': ':', 'phone': '+'}
+
 #: IBAN length by country (ISO 13616 registry). A code not listed here is not
 #: an IBAN country, which rules out most upper-case words followed by digits.
 IBAN_LENGTHS = {
@@ -217,6 +220,40 @@ INDICATOR_KINDS = {
 #: directly: a bare pattern for "something.tld" matches half of every English
 #: sentence containing a full stop.
 _DOMAIN_FROM_URL = re.compile(r'^https?://([^/:\s]+)', re.IGNORECASE)
+
+
+def entities_of(text):
+    """{(kind, value)} of the indicators in `text`, of the kinds turned on
+    (ENABLED_INDICATORS). A pure function, so a worker process can run it
+    (core/text_pool)."""
+    found = set()
+    for kind, pattern in _ENTITY_PATTERNS.items():
+        # Patterns for kinds turned off are not run (a URL's or an
+        # address's domain still needs them), nor those whose one
+        # necessary character is absent: an unanchored pattern over a
+        # binary's strings tries at every position, and these scans were a
+        # sixth of indexing a Linux image.
+        if kind not in ENABLED_INDICATORS and not (
+                kind in ('url', 'email') and 'domain' in ENABLED_INDICATORS):
+            continue
+        needed = _ENTITY_NEEDS.get(kind)
+        if needed is not None and needed not in text:
+            continue
+        check = _ENTITY_CHECKS.get(kind)
+        for match in pattern.findall(text):
+            value = match.strip().rstrip('.,;:)')
+            if value and check is not None:
+                value = check(value)
+            if value:
+                found.add((kind, value))
+                if kind == 'url':
+                    domain = _DOMAIN_FROM_URL.match(value)
+                    if domain:
+                        found.add(('domain', domain.group(1).lower()))
+                elif kind == 'email' and '@' in value:
+                    found.add(('domain', value.rsplit('@', 1)[1].lower()))
+    return {(kind, value) for kind, value in found
+            if kind in ENABLED_INDICATORS}
 
 
 class SearchIndex:
@@ -327,7 +364,7 @@ class SearchIndex:
     def add_item(self, evidence_id, artifact_ref, kind, name, path,
                  body='', size=0, mtime_utc='', mime='', inode=None,
                  start_offset=None, created_utc='', accessed_utc='',
-                 changed_utc='', is_deleted=False):
+                 changed_utc='', is_deleted=False, entities=None):
         """Index one artifact. Returns its item id.
 
         `body` is the extracted text; an empty body still produces a row, so
@@ -358,29 +395,14 @@ class SearchIndex:
             (item_id, name or '', path or '', body or ''))
 
         if body:
-            self._store_entities(item_id, evidence_id, body)
+            self._store_entities(item_id, evidence_id, body, entities)
         return item_id
 
-    def _store_entities(self, item_id, evidence_id, text):
-        """Pull emails, URLs, IPs and hashes out of the text."""
-        found = set()
-        for kind, pattern in _ENTITY_PATTERNS.items():
-            check = _ENTITY_CHECKS.get(kind)
-            for match in pattern.findall(text):
-                value = match.strip().rstrip('.,;:)')
-                if value and check is not None:
-                    value = check(value)
-                if value:
-                    found.add((kind, value))
-                    if kind == 'url':
-                        domain = _DOMAIN_FROM_URL.match(value)
-                        if domain:
-                            found.add(('domain', domain.group(1).lower()))
-                    elif kind == 'email' and '@' in value:
-                        found.add(('domain', value.rsplit('@', 1)[1].lower()))
-
-        found = {(kind, value) for kind, value in found
-                 if kind in ENABLED_INDICATORS}
+    def _store_entities(self, item_id, evidence_id, text, found=None):
+        """Store the indicators in the text (`found`: already found, by a
+        worker process -- core/text_pool)."""
+        if found is None:
+            found = entities_of(text)
         if found:
             self._db.executemany(
                 "INSERT INTO entities (item_id, evidence_id, kind, value) "

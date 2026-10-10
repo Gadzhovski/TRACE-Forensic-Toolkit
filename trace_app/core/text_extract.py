@@ -54,6 +54,10 @@ _SCRIPT_UTF16 = {
 }
 
 
+#: High bytes of U+0300-06FF, where the alphabets above live.
+_SCRIPT_HIGH_BYTES = (b'\x03', b'\x04', b'\x05', b'\x06')
+
+
 def script_runs(data, min_length=MIN_STRING_LENGTH):
     """[(offset, text)] of UTF-16 runs (either byte order) holding letters
     of a non-Latin alphabet. A run counts when most of its characters are
@@ -62,11 +66,21 @@ def script_runs(data, min_length=MIN_STRING_LENGTH):
     run is the strings pass's.)"""
     found = []
     for encoding, pattern in _SCRIPT_UTF16.items():
+        # Where a code unit's high byte sits: odd bytes in LE, even in BE.
+        high = 1 if encoding == 'utf-16-le' else 0
         for match in pattern.finditer(data):
             raw = match.group()
             start = match.start()
             if len(raw) % 2:
                 raw = raw[:-1]
+            # A letter of these alphabets has high byte 03-06, so fewer such
+            # units than `min_length` cannot pass the test below. Counted in
+            # C before decoding: decoding and testing every run character
+            # by character -- most of them plain Latin UTF-16 in a binary --
+            # was 41% of indexing a Linux image.
+            units = raw[high::2]
+            if sum(map(units.count, _SCRIPT_HIGH_BYTES)) < min_length:
+                continue
             text = raw.decode(encoding, 'replace')
             foreign = sum(1 for c in text if c.isalpha() and ord(c) > 0x36F)
             letters = sum(1 for c in text if c.isalpha() or c.isspace())
@@ -87,12 +101,15 @@ def script_runs(data, min_length=MIN_STRING_LENGTH):
     return kept
 
 
-def extract_text(content, name='', limit=None):
+def extract_text(content, name='', limit=None, skip_packed=False):
     """Readable text from `content`, chosen by what the file actually is.
 
     Returns an empty string rather than raising: a file whose text cannot be
     read is still indexed by name and path, and that is more useful than
-    abandoning the run.
+    abandoning the run. `skip_packed`: a packed archive (packed_kind) that
+    no parser reads gives '' rather than the strings of its bytes -- for a
+    caller that has indexed its members (a damaged one keeps its strings:
+    they are all there is).
     """
     if not content:
         return ''
@@ -120,14 +137,20 @@ def extract_text(content, name='', limit=None):
                            '.htm', '.md', '.ini', '.cfg', '.conf', '.reg',
                            '.eml', '.rtf'):
             text = _from_plain(content)
+        elif skip_packed and packed_kind(content):
+            # A compressed or packed archive whose members the caller has
+            # read and indexed on their own (indexer._index_archive): the
+            # strings of its raw bytes are noise. Scanning them was a fifth
+            # of indexing a Linux image -- every kernel module is an .xz.
+            text = ''
         else:
-            text = extract_strings(content)
+            text = extract_strings(content, budget=limit)
     except Exception as exc:
         # Damaged input is the normal case here, not the exceptional one.
         logger.debug("No text from %s (%s): %s", name or '?',
                      type(exc).__name__, exc)
         try:
-            text = extract_strings(content)
+            text = extract_strings(content, budget=limit)
         except Exception:
             text = ''
 
@@ -145,6 +168,24 @@ def extract_text(content, name='', limit=None):
     if limit and len(text) > limit:
         text = text[:limit]
     return text
+
+
+#: Archive kinds (core/archives.detect_archive) whose own bytes hold no
+#: text worth reading: compressed, or packed with their members (which are
+#: indexed themselves).
+_PACKED = frozenset(('zip', '7z', 'rar', 'tar', 'cpio', 'gzip', 'bzip2',
+                     'xz', 'lzma', 'zlib', 'cab', 'lzh', 'alz', 'compress'))
+
+
+def packed_kind(content):
+    """The archive kind when `content` is a packed or compressed archive
+    (_PACKED), else None."""
+    from trace_app.core.archives import detect_archive
+    try:
+        kind = detect_archive(content)
+    except Exception:
+        return None
+    return kind if kind in _PACKED else None
 
 
 def _is_msg(content):
@@ -165,23 +206,52 @@ def _from_msg(content):
     return f"{facts}\n{names}\n{body}"
 
 
-def extract_strings(content, min_length=MIN_STRING_LENGTH):
+def extract_strings(content, min_length=MIN_STRING_LENGTH, budget=None):
     """Printable runs, in both ASCII and UTF-16LE.
 
     Windows stores most of its strings as UTF-16, so an ASCII-only pass misses
     registry values, shortcut targets and event log messages -- exactly the
     artifacts a search is most often looking for.
+
+    `budget`: the caller keeps only that many characters (extract_text's
+    limit), so the scan stops once it has them -- the text is the same as
+    scanning everything and cutting it, without reading a 200 MB library to
+    the end for strings that would be thrown away.
     """
     pieces = []
+    size = -1                           # length of '\n'.join(pieces)
 
-    for match in _PRINTABLE_ASCII.findall(content):
-        pieces.append(match.decode('ascii', errors='replace'))
+    def full():
+        return budget is not None and size >= budget
 
-    for match in _PRINTABLE_UTF16.findall(content):
-        pieces.append(match.decode('utf-16-le', errors='replace'))
+    for match in _PRINTABLE_ASCII.finditer(content):
+        pieces.append(match.group().decode('ascii', errors='replace'))
+        size += len(pieces[-1]) + 1
+        if full():
+            return '\n'.join(pieces)
 
-    pieces += [text for _start, text in script_runs(content, min_length)]
+    for match in _PRINTABLE_UTF16.finditer(content):
+        pieces.append(match.group().decode('utf-16-le', errors='replace'))
+        size += len(pieces[-1]) + 1
+        if full():
+            return '\n'.join(pieces)
+
+    if not _never_utf16_scripts(bytes(content[:4])):
+        pieces += [text for _start, text in script_runs(content, min_length)]
     return '\n'.join(pieces)
+
+
+def _never_utf16_scripts(head):
+    """Whether a file's format never holds UTF-16 text in a non-Latin
+    alphabet: ELF (Linux programs, libraries, kernel modules) and Mach-O.
+    The search for it is a regex over every byte, and on a Linux image
+    those formats are most of the bytes -- it was 41% of indexing one. PE
+    files keep it: their resources can be Cyrillic or Arabic UTF-16."""
+    return head == b'\x7fELF' or head in _MACHO_MAGICS
+
+
+_MACHO_MAGICS = {b'\xfe\xed\xfa\xce', b'\xce\xfa\xed\xfe', b'\xfe\xed\xfa\xcf',
+                 b'\xcf\xfa\xed\xfe', b'\xca\xfe\xba\xbe'}
 
 
 # --- format-specific ------------------------------------------------------

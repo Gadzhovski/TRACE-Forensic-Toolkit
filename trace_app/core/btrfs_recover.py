@@ -29,6 +29,14 @@ tree the root tree no longer has, and its files are listed under
 `DeletedScan(volume)` scans once; `records(offset)` yields rows in
 core/deleted.py's shape; `entry(identifier)` gives a recovered file to
 read like a live one (BtrfsEntry over the recovered inode and extents).
+
+Measured on a Fedora root (1 GB of metadata, 7.5 GB of data chunks), it
+never finished: every checksum was Python (CRC-32C now comes from the
+crc32c wheel), every deleted file's sectors were read 4 KB at a time (now
+an extent at a time), and every data sector's sums were kept -- millions
+of entries. The checksum leaves are now read in a second pass, keeping
+only the sums of the deleted files' own extents. Each stage reports
+progress and stops when asked.
 """
 
 import bisect
@@ -45,6 +53,8 @@ CSUM_TREE = 7
 EXTENT_CSUM_OBJECTID = (1 << 64) - 10
 EXTENT_CSUM = 128
 CSUM_SIZES = {0: 4, 1: 8, 2: 32, 3: 32}
+#: Bytes of a deleted file read at once when checking its sectors.
+READ_PIECE = 1024 * 1024
 _HEADER = 101
 _FIRST_FREE = 256
 _LAST_FREE = (1 << 64) - 256
@@ -66,16 +76,24 @@ _CRC = _crc32c_table()
 
 
 def crc32c(data, crc=0xFFFFFFFF):
+    """CRC-32C in Python: the reference the C one (`_fast_crc32c`) is
+    tested against. ~10 MB/s -- a Fedora root's deleted-file scan never
+    finished on it."""
     table = _CRC
     for byte in data:
         crc = table[(crc ^ byte) & 0xFF] ^ (crc >> 8)
     return crc ^ 0xFFFFFFFF
 
 
+def _fast_crc32c(data):
+    import crc32c as library        # wheels everywhere (requirements.txt)
+    return library.crc32c(data)
+
+
 def checksum(kind, data):
     """The bytes Btrfs stores for `data` under checksum type `kind`."""
     if kind == 0:
-        return struct.pack('<I', crc32c(data))
+        return struct.pack('<I', _fast_crc32c(data))
     if kind == 1:
         from trace_app.core.zstd_decode import xxh64
         return struct.pack('<Q', xxh64(bytes(data)))
@@ -149,18 +167,34 @@ def _extent(start, data):
 class DeletedScan:
     """Every deleted inode the metadata of one Btrfs device still holds."""
 
-    def __init__(self, volume, should_stop=None):
+    def __init__(self, volume, should_stop=None, progress=None):
         self.volume = volume
         self.csum_size = CSUM_SIZES.get(volume.csum_type, 4)
         self.found = {}            # (tree, inode) -> Recovered
-        #: data sector (logical) -> {generation: sum}: every version kept.
-        #: Once a deleted file's space is used again, the newest sum is the
-        #: new data's, and of course it matches -- the file's own is the
-        #: newest written no later than its deletion (`_sum_for`).
+        #: data sector (logical) -> {generation: sum}: every version kept,
+        #: of the deleted files' sectors only. Once a deleted file's space
+        #: is used again, the newest sum is the new data's, and of course
+        #: it matches -- the file's own is the newest written no later than
+        #: its deletion (`_sum_for`).
         self.sums = {}
         self.leaves = self.rejected = 0
-        self._scan(should_stop)
+        #: (logical, generation) of each intact checksum-tree leaf, read
+        #: again once it is known which sums are wanted.
+        self._csum_leaves = []
+        self._should_stop = should_stop
+        self._progress = progress
+        self._scan()
         self._drop_live()
+        self._keep_sums()
+
+    def _check(self):
+        if self._should_stop is not None and self._should_stop():
+            from trace_app.core.deleted import DeletedCancelled
+            raise DeletedCancelled()
+
+    def _report(self, done, total, text):
+        if self._progress is not None:
+            self._progress(done, total, text)
 
     # --- reading every metadata block -------------------------------------
 
@@ -173,12 +207,15 @@ class DeletedScan:
                                  node):
                 yield logical
 
-    def _scan(self, should_stop):
+    def _scan(self):
         volume = self.volume
+        total = sum(chunk.length // volume.node_size
+                    for chunk in volume._chunks
+                    if chunk.flags & (CHUNK_SYSTEM | CHUNK_METADATA))
         for count, logical in enumerate(self._blocks()):
-            if should_stop and count % 256 == 0 and should_stop():
-                from trace_app.core.deleted import DeletedCancelled
-                raise DeletedCancelled()
+            if count % 256 == 0:
+                self._check()
+                self._report(count, total, "Reading Btrfs metadata")
             try:
                 data = volume.read(logical, volume.node_size)
             except btrfs.BtrfsError:
@@ -196,20 +233,70 @@ class DeletedScan:
                 continue
             self.leaves += 1
             if owner == CSUM_TREE:
-                self._sums(data, generation)
+                self._csum_leaves.append((logical, generation))
             else:
                 self._fs_leaf(owner, data, generation)
 
-    def _sums(self, data, generation):
+    def _wanted(self):
+        """The deleted files' data extents, merged and sorted: the only
+        sectors whose sums are worth keeping."""
+        spans = sorted((e[4], e[4] + e[5])
+                       for found in self.found.values()
+                       for e in found.extents.values()
+                       if e[2] != btrfs.EXTENT_INLINE and e[4])
+        merged = []
+        for begin, end in spans:
+            if merged and begin <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([begin, end])
+        return merged
+
+    def _keep_sums(self):
+        """The second pass: the checksum leaves again, keeping the sums
+        of the deleted files' sectors."""
+        wanted = self._wanted()
+        if not wanted:
+            return
+        starts = [begin for begin, _end in wanted]
+        leaves = self._csum_leaves
+        for count, (logical, generation) in enumerate(leaves):
+            if count % 64 == 0:
+                self._check()
+                self._report(count, len(leaves), "Reading Btrfs checksums")
+            try:
+                data = self.volume.read(logical, self.volume.node_size)
+            except btrfs.BtrfsError:
+                continue
+            self._sums(data, generation, wanted, starts)
+
+    def _sums(self, data, generation, wanted=None, starts=None):
         size = self.csum_size
         sector = self.volume.sector_size
         for (objectid, kind, start), item in _leaf_items(data):
             if objectid != EXTENT_CSUM_OBJECTID or kind != EXTENT_CSUM:
                 continue
-            for index in range(len(item) // size):
-                where = start + index * sector
-                self.sums.setdefault(where, {})[generation] = \
-                    item[index * size:(index + 1) * size]
+            count = len(item) // size
+            end = start + count * sector
+            if wanted is None:
+                ranges = [(start, end)]
+            else:
+                # Only where the item meets a deleted file's extents.
+                index = max(0, bisect.bisect_right(starts, start) - 1)
+                ranges = []
+                while index < len(wanted) and wanted[index][0] < end:
+                    low = max(start, wanted[index][0])
+                    high = min(end, wanted[index][1])
+                    if high > low:
+                        ranges.append((low, high))
+                    index += 1
+            for low, high in ranges:
+                first = (low - start) // sector
+                last = -(-(high - start) // sector)
+                for index in range(first, last):
+                    where = start + index * sector
+                    self.sums.setdefault(where, {})[generation] = \
+                        item[index * size:(index + 1) * size]
 
     def _fs_leaf(self, tree, data, generation):
         for (objectid, kind, offset), item in _leaf_items(data):
@@ -321,24 +408,35 @@ class DeletedScan:
         volume = self.volume
         sector = volume.sector_size
         checked = matched = 0
-        unsummed = []
+        unsummed = 0               # sectors with no sum surviving
         spans = []
         for extent in stored:
             bytenr, disk_bytes = extent[4], extent[5]
             spans.append((bytenr, disk_bytes))
-            for where in range(bytenr, bytenr + disk_bytes, sector):
-                known = self._sum_for(where, found.deleted_in)
-                if known is None:
-                    unsummed.append(where)
+            # Read a piece at a time and check its sectors from memory:
+            # a read per 4 KB sector was most of a scan's time.
+            for piece in range(bytenr, bytenr + disk_bytes, READ_PIECE):
+                length = min(READ_PIECE, bytenr + disk_bytes - piece)
+                known = [self._sum_for(where, found.deleted_in)
+                         for where in range(piece, piece + length, sector)]
+                if not any(k is not None for k in known):
+                    unsummed += len(known)
                     continue
-                checked += 1
                 try:
-                    data = volume.read(where, sector)
+                    data = volume.read(piece, length)
                 except btrfs.BtrfsError:
-                    continue
-                if checksum(volume.csum_type, data)[:self.csum_size] == \
-                        known:
-                    matched += 1
+                    data = None
+                for index, expected in enumerate(known):
+                    if expected is None:
+                        unsummed += 1
+                        continue
+                    checked += 1
+                    if data is None:
+                        continue
+                    block = data[index * sector:(index + 1) * sector]
+                    if checksum(volume.csum_type, block)[:self.csum_size] \
+                            == expected:
+                        matched += 1
         total = sum(length for _b, length in spans)
         if checked:
             lost = (checked - matched) * sector
@@ -398,17 +496,26 @@ class DeletedScan:
 
     # --- rows and entries ---------------------------------------------------------
 
-    def records(self, offset, base):
+    def records(self, offset, base, should_stop=None, progress=None,
+                assess=None):
         """Rows in core/deleted.py's shape for the volume at `offset`
-        (`base`: its byte offset in the image)."""
+        (`base`: its byte offset in the image). `assess(path)`, when given,
+        says whether a file's data is checked (False: listed by name, its
+        state 'not assessed' -- outside the run's scope)."""
         import stat
         from trace_app.core.activity import times
         from trace_app.core.case import make_artifact_ref
-        for (tree, inode), found in sorted(self.found.items()):
+        found_all = sorted(self.found.items())
+        for count, ((tree, inode), found) in enumerate(found_all):
+            if should_stop is not None and should_stop():
+                from trace_app.core.deleted import DeletedCancelled
+                raise DeletedCancelled()
             meta = found.meta
             is_dir = stat.S_ISDIR(meta.mode)
             ident = btrfs.identifier(tree, inode)
             path = self.path_of(tree, inode)
+            if progress is not None and count % 32 == 0:
+                progress(count, len(found_all), path)
             record = {'volume': offset, 'path': path,
                       'name': path.rsplit('/', 1)[-1], 'inode': ident,
                       'is_dir': is_dir, 'sequence': None,
@@ -423,6 +530,9 @@ class DeletedScan:
             if is_dir:
                 from trace_app.core import deleted
                 record['state'] = deleted.RECOVERABLE
+            elif assess is not None and not assess(path):
+                from trace_app.core import deleted
+                record['state'] = deleted.NOT_ASSESSED
             else:
                 state, lost, spans, why = self.assess(found)
                 record['state'] = state

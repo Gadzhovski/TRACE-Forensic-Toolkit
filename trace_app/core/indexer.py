@@ -14,13 +14,15 @@ import os
 import pytsk3
 
 from trace_app.core.archives import (STREAMED_KINDS, ArchiveError,
-                                     detect_archive,
-                                     list_members, read_member)
+                                     detect_archive, iter_members)
+from trace_app.core import scope as scope_module
 from trace_app.core.case import make_artifact_ref
 from trace_app.core.search_index import (INDEX_CANCELLED, INDEX_DONE,
                                          INDEX_FAILED, INDEX_RUNNING,
                                          MAX_FILE_BYTES, MAX_TEXT_PER_FILE)
-from trace_app.core.text_extract import extract_text
+from trace_app.core.text_extract import extract_text, packed_kind
+from trace_app.core.text_pool import (MIN_FILES, TextPipeline,
+                                      default_workers)
 
 logger = logging.getLogger('TRACE.Indexer')
 
@@ -45,8 +47,9 @@ class IndexerCancelled(Exception):
 
 
 def index_evidence(image_handler, index, evidence_id, progress=None,
-                   should_stop=None):
-    """Index every file in one piece of evidence.
+                   should_stop=None, scope=None):
+    """Index every file in one piece of evidence -- every file in `scope`
+    (core/scope.Scope; None: every file, and the free space).
 
     `progress(done, total, path)` is called as the walk proceeds, and
     `should_stop()` is consulted often enough that Cancel feels immediate.
@@ -72,11 +75,16 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
         # FS_Info, gave a different answer on the worker thread than on the
         # one that loaded the image, and skipped every volume: indexing then
         # reported success having read nothing at all.
+        matchers = {offset: scope.matcher(image_handler.get_fs_info(offset))
+                    if scope is not None else None for offset in offsets}
         for offset in offsets:
-            total += _count_files(image_handler, offset, should_stop)
+            total += _count_files(image_handler, offset, should_stop,
+                                  matchers[offset])
 
-        logger.info("Indexing evidence %s: %d file(s) across %d volume(s)",
-                    evidence_id, total, len(offsets))
+        logger.info("Indexing evidence %s: %d file(s) across %d volume(s)%s",
+                    evidence_id, total, len(offsets),
+                    '' if scope is None or scope.everything else
+                    f"; scope: {scope.describe()}")
         if not total:
             logger.warning(
                 "Nothing to index in evidence %s. Volumes examined: %s",
@@ -85,14 +93,27 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
                           for o in offsets))
         index.set_state(evidence_id, INDEX_RUNNING, files_total=total)
 
-        for offset in offsets:
-            before = done
-            done = _index_partition(
-                image_handler, index, evidence_id, offset,
-                done, total, progress, should_stop)
-            if done == before:
-                logger.debug("Volume at %s contributed nothing", offset)
-        if INDEX_UNALLOCATED:
+        # Text and indicators on worker processes for a run worth it
+        # (core/text_pool); rows still written here, in walk order.
+        workers = default_workers() if total >= MIN_FILES else 1
+        texts = TextPipeline(_writer(index), workers,
+                             getattr(index, 'folder', None))
+        if texts.parallel:
+            logger.info("Extracting text on %d worker processes", workers)
+        try:
+            for offset in offsets:
+                before = done
+                done = _index_partition(
+                    image_handler, index, evidence_id, offset,
+                    done, total, progress, should_stop, matchers[offset],
+                    scope is None or scope.covers_free_space, texts)
+                if done == before:
+                    logger.debug("Volume at %s contributed nothing", offset)
+            texts.close()
+        except BaseException:
+            texts.close(cancel=True)
+            raise
+        if INDEX_UNALLOCATED and (scope is None or scope.covers_free_space):
             _index_unallocated(image_handler, index, evidence_id, progress,
                                should_stop)
 
@@ -163,7 +184,7 @@ def index_carved(read, case, index, evidence_id, should_stop=None):
     return count
 
 
-def _count_files(image_handler, offset, should_stop):
+def _count_files(image_handler, offset, should_stop, matcher=None):
     """How many files the walk will visit, for an honest progress bar."""
     count = 0
     fs_info = image_handler.get_fs_info(offset)
@@ -171,7 +192,7 @@ def _count_files(image_handler, offset, should_stop):
         logger.debug("No filesystem to count at offset %s", offset)
         return 0
 
-    def walk(directory, depth):
+    def walk(directory, path, depth):
         nonlocal count
         if depth > MAX_DEPTH:
             return
@@ -183,16 +204,22 @@ def _count_files(image_handler, offset, should_stop):
             name = entry.info.name.name.decode('utf-8', 'replace')
             if name in ('.', '..'):
                 continue
+            child_path = f"{path}/{name}"
+            if scope_module.entry_skipped(matcher, child_path,
+                                          entry.info.meta):
+                continue
             if entry.info.meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                 try:
-                    walk(entry.as_directory(), depth + 1)
+                    walk(entry.as_directory(), child_path, depth + 1)
+                except IndexerCancelled:
+                    raise
                 except Exception:
                     continue
             elif entry.info.meta.size:
                 count += 1
 
     try:
-        walk(fs_info.open_dir(path='/'), 0)
+        walk(fs_info.open_dir(path='/'), '', 0)
     except IndexerCancelled:
         raise
     except Exception as exc:
@@ -202,13 +229,16 @@ def _count_files(image_handler, offset, should_stop):
 
 
 def _index_partition(image_handler, index, evidence_id, offset, done, total,
-                     progress, should_stop):
+                     progress, should_stop, matcher=None, slack=True,
+                     texts=None):
     fs_info = image_handler.get_fs_info(offset)
     if fs_info is None:
         logger.debug("No filesystem to index at offset %s", offset)
         return done
 
     visited = set()
+    if texts is None:
+        texts = TextPipeline(_writer(index))
 
     def walk(directory, path, depth):
         nonlocal done
@@ -230,6 +260,9 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
             visited.add(inode)
 
             child_path = f"{path}/{name}".replace('//', '/')
+            # Out of scope (core/scope): a folder is not gone into at all.
+            if scope_module.entry_skipped(matcher, child_path, meta):
+                continue
 
             if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                 try:
@@ -250,15 +283,15 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
             _index_file(image_handler, index, evidence_id, offset, inode,
                         getattr(meta, 'seq', None), name, child_path,
                         meta.size, _entry_times(image_handler, offset,
-                                                meta))
-            if int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
+                                                meta), texts)
+            if slack and int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
                 _index_slack(image_handler, index, evidence_id, fs_info,
                              offset, inode, name, child_path, meta.size)
 
             # Committing periodically means a cancel or a crash keeps most of
             # the work rather than none of it.
             if done % 200 == 0:
-                index.commit()
+                index.commit()      # the rows written so far
                 index.set_state(evidence_id, INDEX_RUNNING, files_done=done,
                                 files_total=total, last_path=child_path)
 
@@ -345,9 +378,19 @@ def _entry_times(image_handler, offset, meta):
     }
 
 
+def _writer(index):
+    """write(text, indicators, payload) for a TextPipeline: one index row."""
+    def write(text, entities, payload):
+        evidence_id, ref, kind, name, path, size, facts = payload
+        index.add_item(evidence_id, ref, kind, name, path, text, size,
+                       entities=entities, **facts)
+    return write
+
+
 def _index_file(image_handler, index, evidence_id, offset, inode, sequence,
-                name, path, size, times=None):
+                name, path, size, times=None, texts=None):
     """Index one file, and the members of it if it is an archive."""
+    texts = texts or TextPipeline(_writer(index))
     ref = make_artifact_ref(offset, inode, sequence)
     times = times or {}
     facts = dict(inode=inode, start_offset=offset,
@@ -356,6 +399,7 @@ def _index_file(image_handler, index, evidence_id, offset, inode, sequence,
                  mtime_utc=times.get('modified', ''),
                  changed_utc=times.get('changed', ''),
                  is_deleted=times.get('is_deleted', False))
+    payload = (evidence_id, ref, 'file', name, path, size, facts)
 
     if (name.lower().endswith(('.pst', '.ost', '.mbox')) or
             size > MAX_FILE_BYTES) and \
@@ -364,73 +408,88 @@ def _index_file(image_handler, index, evidence_id, offset, inode, sequence,
         # held in memory -- and indexed message by message.
         stream = image_handler.open_file_object(inode, offset)
         if stream is not None and detect_archive(stream) in STREAMED_KINDS:
-            index.add_item(evidence_id, ref, 'file', name, path, '', size,
-                           **facts)
+            texts.put(payload)
             _index_archive(index, evidence_id, ref, stream, path,
-                           ARCHIVE_DEPTH)
+                           ARCHIVE_DEPTH, texts)
             return
 
     if size > MAX_FILE_BYTES:
         # Too large to read; still worth finding by name.
-        index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)
+        texts.put(payload)
         return
 
     try:
         content, _meta = image_handler.get_file_content(inode, offset)
     except Exception as exc:
         logger.debug("Could not read %s: %s", path, exc)
-        index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)
+        texts.put(payload)
         return
 
     if not content:
-        index.add_item(evidence_id, ref, 'file', name, path, '', size, **facts)
+        texts.put(payload)
         return
+    _index_content(index, evidence_id, ref, content, name, path, payload,
+                   ARCHIVE_DEPTH, texts)
 
-    text = extract_text(content, name, limit=MAX_TEXT_PER_FILE)
-    index.add_item(evidence_id, ref, 'file', name, path, text, size, **facts)
 
-    # An archive's members are what an examiner is looking for; the archive
-    # itself is just the container they arrived in.
+def _index_content(index, evidence_id, ref, content, name, path, payload,
+                   depth, texts):
+    """A file's (or member's) text, and the members of it if it is an
+    archive -- an examiner is looking for those; the archive is only the
+    container they arrived in. A packed one (zip, tar, xz...) has its
+    members read first: when they could be, the strings of its own bytes
+    are noise and are not kept (a damaged one keeps them -- they are all
+    there is)."""
+    if packed_kind(content):
+        opened = _index_archive(index, evidence_id, ref, content, path,
+                                depth, texts)
+        texts.submit(content, name, MAX_TEXT_PER_FILE, payload,
+                     skip_packed=opened)
+        return
+    texts.submit(content, name, MAX_TEXT_PER_FILE, payload)
     if detect_archive(content):
-        _index_archive(index, evidence_id, ref, content, path, ARCHIVE_DEPTH)
+        _index_archive(index, evidence_id, ref, content, path, depth, texts)
 
 
 def _index_archive(index, evidence_id, parent_ref, content, parent_path,
-                   depth):
-    """Index the members of an archive, and of archives inside it."""
+                   depth, texts=None):
+    """Index the members of an archive, and of archives inside it. Returns
+    whether it could be opened."""
     if depth <= 0:
-        return
+        return False
+    texts = texts or TextPipeline(_writer(index))
 
+    # The archive opened once, its members read in order (iter_members):
+    # opening it again for every member made an archive of n members cost
+    # n times its size.
+    opened = False
     try:
-        members = list_members(content)
+        for member, member_bytes in iter_members(content):
+            opened = True
+            _index_member(index, evidence_id, parent_ref, parent_path,
+                          member, member_bytes, depth, texts)
     except ArchiveError as exc:
         logger.debug("Could not list %s: %s", parent_path, exc)
+    return opened
+
+
+def _index_member(index, evidence_id, parent_ref, parent_path, member,
+                  member_bytes, depth, texts):
+    """One member of an archive, and the members of it if it is one."""
+    if member['is_dir'] or member['encrypted']:
+        # An encrypted member's name is still evidence and is indexed
+        # below; its contents cannot be read without the password.
+        if member['encrypted']:
+            texts.put((evidence_id, parent_ref, 'archive-member',
+                       member['name'], f"{parent_path}!/{member['name']}",
+                       member['size'], {}))
         return
-
-    for member in members:
-        if member['is_dir'] or member['encrypted']:
-            # An encrypted member's name is still evidence and is indexed
-            # below; its contents cannot be read without the password.
-            if member['encrypted']:
-                index.add_item(
-                    evidence_id, parent_ref, 'archive-member',
-                    member['name'], f"{parent_path}!/{member['name']}",
-                    '', member['size'])
-            continue
-
-        try:
-            member_bytes = read_member(content, member['name'])
-        except ArchiveError as exc:
-            logger.debug("Could not read %s from %s: %s",
-                         member['name'], parent_path, exc)
-            continue
-
-        member_path = f"{parent_path}!/{member['name']}"
-        text = extract_text(member_bytes, member['name'],
-                            limit=MAX_TEXT_PER_FILE)
-        index.add_item(evidence_id, parent_ref, 'archive-member',
-                       member['name'], member_path, text, member['size'])
-
-        if detect_archive(member_bytes):
-            _index_archive(index, evidence_id, parent_ref, member_bytes,
-                           member_path, depth - 1)
+    if member_bytes is None or isinstance(member_bytes, ArchiveError):
+        logger.debug("Could not read %s from %s: %s",
+                     member['name'], parent_path, member_bytes)
+        return
+    member_path = f"{parent_path}!/{member['name']}"
+    payload = (evidence_id, parent_ref, 'archive-member', member['name'],
+               member_path, member['size'], {})
+    _index_content(index, evidence_id, parent_ref, member_bytes,
+                   member['name'], member_path, payload, depth - 1, texts)

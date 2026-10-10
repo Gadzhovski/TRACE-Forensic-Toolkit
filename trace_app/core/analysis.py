@@ -18,11 +18,13 @@ from the background job that normally runs it.
 import hashlib
 import logging
 import math
+import operator
 
 import pytsk3
 from PIL import Image
 
 from trace_app.core import content_checks
+from trace_app.core import scope as scope_module
 from trace_app.core.case import make_artifact_ref
 from trace_app.core.content_checks import (MODULE_AUTHORS,
                                            MODULE_EXECUTABLES, MODULE_HIDDEN,
@@ -307,8 +309,7 @@ class Entropy:
     def feed(self, block):
         # Counted once, for the whole file's total and this block's score.
         counts = byte_counts(block)
-        for value in range(256):
-            self.counts[value] += counts[value]
+        self.counts = list(map(operator.add, self.counts, counts))
         self.total += len(block)
 
         if len(block) >= MIN_ENTROPY_BYTES:
@@ -322,12 +323,7 @@ class Entropy:
     def mean(self):
         if self.total < MIN_ENTROPY_BYTES:
             return 0.0
-        entropy = 0.0
-        for count in self.counts:
-            if count:
-                probability = count / self.total
-                entropy -= probability * math.log2(probability)
-        return entropy
+        return _entropy_of_counts(self.counts, self.total)
 
 
 #: Bytes counted per histogram: bounds the 1-pixel-high image's width.
@@ -354,6 +350,25 @@ def byte_counts(data):
     return counts
 
 
+#: c * log2(c) for every count a 64 KB block can hold: entropy is then
+#: log2(n) - sum(c log2 c) / n, summed in C (map over the table) rather
+#: than 256 Python steps a block -- per ELF section too, that was 32
+#: million log2 calls in two minutes of analysing a Linux image.
+_CLOG = [0.0] + [c * math.log2(c) for c in range(1, 65537)]
+
+
+def _entropy_of_counts(counts, total):
+    """Shannon entropy, bits per byte, of 256 byte counts summing to
+    `total`."""
+    if total <= 0:
+        return 0.0
+    if max(counts) < len(_CLOG):
+        weighted = sum(map(_CLOG.__getitem__, counts))
+    else:
+        weighted = sum(c * math.log2(c) for c in counts if c)
+    return max(0.0, math.log2(total) - weighted / total)
+
+
 def shannon(data, counts=None):
     """Entropy of one block, in bits per byte (`counts` when already
     counted)."""
@@ -361,13 +376,7 @@ def shannon(data, counts=None):
         return 0.0
     if counts is None:
         counts = byte_counts(data)
-    length = len(data)
-    entropy = 0.0
-    for count in counts:
-        if count:
-            probability = count / length
-            entropy -= probability * math.log2(probability)
-    return entropy
+    return _entropy_of_counts(counts, len(data))
 
 
 def is_high_entropy(mean, peak, mime):
@@ -534,8 +543,9 @@ def _analyse_stream(file_object, size, name, modules, magic):
 # --- the walk ------------------------------------------------------------
 
 def analyse_evidence(image_handler, case, evidence_id, modules,
-                     progress=None, should_stop=None):
-    """Run the selected modules over every file in one piece of evidence.
+                     progress=None, should_stop=None, scope=None):
+    """Run the selected modules over every file in one piece of evidence
+    -- every file in `scope` (core/scope.Scope; None: every file).
 
     `progress(done, total, path)` is called as the walk proceeds, and
     `should_stop()` is consulted per file so Cancel feels immediate.
@@ -570,12 +580,25 @@ def analyse_evidence(image_handler, case, evidence_id, modules,
     # than a clean stop.
     counter = [0]
 
+    matchers = {}
+
+    def matcher(offset):
+        if scope is None:
+            return None
+        if offset not in matchers:
+            matchers[offset] = scope.matcher(
+                image_handler.get_fs_info(offset))
+        return matchers[offset]
+
     try:
         for offset in offsets:
-            total += _count_files(image_handler, offset, should_stop)
+            total += _count_files(image_handler, offset, should_stop,
+                                  matcher(offset))
         case.set_analysis_state(evidence_id, 'running', files_total=total)
-        logger.info("Analysing evidence %s: %d file(s), modules %s",
-                    evidence_id, total, ', '.join(modules))
+        logger.info("Analysing evidence %s: %d file(s), modules %s%s",
+                    evidence_id, total, ', '.join(modules),
+                    '' if scope is None or scope.everything else
+                    f"; scope: {scope.describe()}")
 
         # counter is a list rather than a number because cancellation leaves
         # by an exception, and a returned count would be lost on the way out
@@ -584,7 +607,7 @@ def analyse_evidence(image_handler, case, evidence_id, modules,
         for offset in offsets:
             _analyse_partition(
                 image_handler, case, evidence_id, offset, modules, magic,
-                counter, total, progress, should_stop)
+                counter, total, progress, should_stop, matcher(offset))
         done = counter[0]
 
         case.commit()
@@ -610,8 +633,9 @@ def analyse_evidence(image_handler, case, evidence_id, modules,
         raise
 
 
-def _count_files(image_handler, offset, should_stop):
-    """How many files there are, so the progress bar can be honest."""
+def _count_files(image_handler, offset, should_stop, matcher=None):
+    """How many files there are (in scope), so the progress bar can be
+    honest."""
     fs_info = image_handler.get_fs_info(offset)
     if fs_info is None:
         return 0
@@ -619,7 +643,7 @@ def _count_files(image_handler, offset, should_stop):
     count = 0
     visited = set()
 
-    def walk(directory, depth):
+    def walk(directory, path, depth):
         nonlocal count
         if depth > MAX_DEPTH:
             return
@@ -635,9 +659,12 @@ def _count_files(image_handler, offset, should_stop):
             if meta.addr in visited:
                 continue
             visited.add(meta.addr)
+            child_path = f"{path}/{name}"
+            if scope_module.entry_skipped(matcher, child_path, meta):
+                continue
             if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                 try:
-                    walk(entry.as_directory(), depth + 1)
+                    walk(entry.as_directory(), child_path, depth + 1)
                 except AnalysisCancelled:
                     raise
                 except Exception:
@@ -646,7 +673,7 @@ def _count_files(image_handler, offset, should_stop):
                 count += 1
 
     try:
-        walk(fs_info.open_dir(path='/'), 0)
+        walk(fs_info.open_dir(path='/'), '', 0)
     except AnalysisCancelled:
         raise
     except Exception as exc:
@@ -655,7 +682,8 @@ def _count_files(image_handler, offset, should_stop):
 
 
 def _analyse_partition(image_handler, case, evidence_id, offset, modules,
-                       magic, counter, total, progress, should_stop):
+                       magic, counter, total, progress, should_stop,
+                       matcher=None):
     """Walk one volume. `counter` is the caller's running total, in a list so
     the count survives a cancellation leaving by an exception."""
     fs_info = image_handler.get_fs_info(offset)
@@ -684,6 +712,9 @@ def _analyse_partition(image_handler, case, evidence_id, offset, modules,
             visited.add(inode)
 
             child_path = f"{path}/{name}".replace('//', '/')
+            # Out of scope (core/scope): a folder is not gone into at all.
+            if scope_module.entry_skipped(matcher, child_path, meta):
+                continue
 
             if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
                 try:

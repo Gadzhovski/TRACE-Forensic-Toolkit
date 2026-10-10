@@ -53,7 +53,8 @@ class ProcessWorker(QThread):
             process = ctx.Process(
                 target=background.child_main,
                 args=(self.kind, self.params, channel, self._stop),
-                name=f'TRACE {self.kind}', daemon=True)
+                name=f'TRACE {self.kind}')  # not a daemon: see
+            # background.start -- indexing starts processes of its own
             process.start()
             self._process = process
             count, error = self._relay(channel, process)

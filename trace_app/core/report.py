@@ -939,10 +939,16 @@ class _Builder:
         from trace_app.core import settings
         out.append(self.heading(2, 'methods-settings',
                                 "Settings that shaped these results"))
-        out.append('<ul>' + ''.join(
-            f"<li>{e(line)}</li>"
-            for line in settings.statement(settings.for_case(self.case)))
-            + '</ul>')
+        # What the file modules covered (core/scope.py): a run that left
+        # folders out has to say so, or a reader takes "nothing found" for
+        # "nothing there".
+        from trace_app.core import scope as scope_module
+        covered = scope_module.setting_value(self.case)
+        lines = settings.statement(settings.for_case(self.case)) + [
+            "What the file analysis, search index, YARA and deleted-file "
+            "check covered: " + covered.describe()]
+        out.append('<ul>' + ''.join(f"<li>{e(line)}</li>" for line in lines)
+                   + '</ul>')
         out.append(self.heading(2, 'methods-tools', "Software"))
         out.append(_table(['Component', 'Version'],
                           [[e(name), _mono(version)]

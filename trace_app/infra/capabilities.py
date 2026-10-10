@@ -190,6 +190,9 @@ CAPABILITIES = (
     Capability('btrfs', 'Volumes and encryption', "Btrfs file systems "
                "(Fedora, openSUSE: subvolumes, snapshots, zlib/LZO/zstd)",
                'TRACE (Python)', lambda: 'built in'),
+    Capability('crc32c', 'Volumes and encryption', "Btrfs deleted files "
+               "proved by their CRC-32C checksums", 'crc32c',
+               lambda: 'crc32c ' + _dist_version('crc32c')),
     Capability('luks', 'Volumes and encryption', "LUKS1-encrypted Linux "
                "volumes (LVM inside them too)", 'libluksde',
                _module_version('pyluksde')),

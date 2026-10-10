@@ -922,11 +922,11 @@ class BtrfsFileSystem(LibyalFileSystem):
             entry = self.deleted_scan().entry(value)
         return entry
 
-    def deleted_scan(self, should_stop=None):
+    def deleted_scan(self, should_stop=None, progress=None):
         """core/btrfs_recover's scan of this volume, made once."""
         if getattr(self, '_deleted', None) is None:
             from trace_app.core.btrfs_recover import DeletedScan
-            self._deleted = DeletedScan(self.btrfs, should_stop)
+            self._deleted = DeletedScan(self.btrfs, should_stop, progress)
         return self._deleted
 
     def allocated_ranges(self):

@@ -56,8 +56,11 @@ logger = logging.getLogger('TRACE.Deleted')
  POSSIBLY) = ('recoverable', 'partly overwritten', 'overwritten', 'resident',
               'entry reused', 'no data recorded', 'start only',
               'possibly overwritten')
+#: Listed by name, its data not checked: outside the run's scope
+#: (core/scope.py).
+NOT_ASSESSED = 'not assessed'
 STATES = (RECOVERABLE, RESIDENT, POSSIBLY, PARTLY, OVERWRITTEN, START_ONLY,
-          NO_DATA, REUSED)
+          NO_DATA, REUSED, NOT_ASSESSED)
 #: ext: a deleted inode is emptied, and the journal may hold it as it was.
 _EXT_TYPES = ('Ext3', 'Ext4')
 
@@ -76,13 +79,15 @@ class DeletedCancelled(Exception):
 
 
 def analyse_evidence(image_handler, case, evidence_id, progress=None,
-                     should_stop=None):
+                     should_stop=None, scope=None):
     """List one image's deleted files into the case, replacing any;
-    returns how many."""
+    returns how many. Files outside `scope` (core/scope.Scope) are listed
+    by name with state 'not assessed': their data is not checked."""
     from trace_app.core.carving import allocation_map
     allocated = allocation_map(image_handler)
     rows = []
-    for record in deleted_files(image_handler, allocated, should_stop):
+    for record in deleted_files(image_handler, allocated, should_stop,
+                                progress, scope):
         rows.append(record)
         if progress and len(rows) % 200 == 0:
             progress(len(rows), 0, record['path'])
@@ -150,11 +155,13 @@ def _times(image_handler, offset, meta, zoned):
     return found
 
 
-def deleted_files(image_handler, allocated=None, should_stop=None):
+def deleted_files(image_handler, allocated=None, should_stop=None,
+                  progress=None, scope=None):
     """Every deleted file and folder on the image's file systems, as dicts
     (see the module docstring for 'state'). `allocated`: the image's merged
     allocated byte ranges (carving.allocation_map); measured against when
-    given."""
+    given. `progress(done, total, text)` hears from the long stages (a
+    Btrfs volume's scan)."""
     from trace_app.core.case import make_artifact_ref
     from trace_app.core.walk import volume_offsets
     for offset in volume_offsets(image_handler):
@@ -165,11 +172,15 @@ def deleted_files(image_handler, allocated=None, should_stop=None):
         fs = image_handler.get_fs_info(offset)
         if fs is None:
             continue
+        matcher = scope.matcher(fs) if scope is not None else None
+        in_scope = None if matcher is None else (
+            lambda path, m=matcher: not m.skips_path(path))
         from trace_app.core.btrfs import is_btrfs
         if is_btrfs(fs):
             # No deleted names in a Btrfs directory: the files survive in
             # the older leaves copy-on-write leaves (core/btrfs_recover).
-            yield from fs.deleted_scan(should_stop).records(offset, base)
+            yield from fs.deleted_scan(should_stop, progress).records(
+                offset, base, should_stop, progress, in_scope)
             continue
         block_size = fs.info.block_size
         from trace_app.core.image_handler import _TIMEZONE_NAIVE
@@ -236,6 +247,11 @@ def deleted_files(image_handler, allocated=None, should_stop=None):
                                                   record['sequence'])
                 if meta is None or not address:
                     record['state'] = REUSED
+                elif in_scope is not None and not is_dir and \
+                        not in_scope(child):
+                    # Outside the run's scope: listed, its data unread.
+                    record['state'] = NOT_ASSESSED
+                    record['size'] = int(meta.size or 0)
                 elif int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
                     # The entry belongs to another file now.
                     record['state'] = REUSED

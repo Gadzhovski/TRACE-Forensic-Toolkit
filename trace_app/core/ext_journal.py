@@ -57,6 +57,13 @@ class Journal:
         incompat = struct.unpack_from('<I', sb, 0x60)[0]
         self.desc = (struct.unpack_from('<H', sb, 0xFE)[0] or 64) \
             if incompat & 0x80 else 32
+        # How many block groups there are: the descriptor table is read
+        # in one piece, and only this many of its slots are groups.
+        blocks = struct.unpack_from('<I', sb, 4)[0]
+        if incompat & 0x80:
+            blocks |= struct.unpack_from('<I', sb, 0x150)[0] << 32
+        per_group = struct.unpack_from('<I', sb, 32)[0] or 1
+        self.groups = max(1, -(-(blocks - self.first_data) // per_group))
         journal_inode = struct.unpack_from('<I', sb, 0xE0)[0]
         self.copies = {}                   # fs block -> [data], oldest first
         self.positions = {}                # fs block -> [transaction]
@@ -146,10 +153,14 @@ class Journal:
     def _inode_table(self, group):
         if self._tables is None:
             self._tables = {}
+            # Every group's descriptor, no more: 64 blocks of them used
+            # to be read as that many groups (4,096 on a 1 GB /boot), and
+            # every logged block was then decoded as thousands of groups'
+            # inode tables -- the deleted-file check never finished.
             table = self.handler.read(
                 self.base + (self.first_data + 1) * self.block,
-                self.block * 64)
-            for index in range(len(table) // self.desc):
+                self.groups * self.desc)
+            for index in range(min(self.groups, len(table) // self.desc)):
                 entry = table[index * self.desc:(index + 1) * self.desc]
                 where = struct.unpack_from('<I', entry, 8)[0]
                 if self.desc >= 64:
@@ -355,32 +366,58 @@ class Journal:
         given to it once this file let them go. Direct pointers and
         in-inode extents are read (indirect blocks are not), so this finds
         most reuse, not all."""
-        mine = set()
+        mine = []
         for offset, length in runs:
             first = (offset - self.base) // self.block
-            mine.update(range(first, first + length // self.block))
-        taken = set()
-        per_block = self.block // self.inode_size
-        for group, table in (self._tables or {}).items():
-            for block in range(table, table + -(-self.inodes_per_group //
-                                                 per_block)):
-                for place, copy in zip(self.positions.get(block, []),
-                                       self.copies.get(block, [])):
-                    # The same transaction counts: two files cannot hold
-                    # one block, and the other logged it as its own
-                    # (NIST's DFR-07-one: Edasich over Chort, both in
-                    # transaction 7).
-                    if place < after:
-                        continue
-                    for slot in range(per_block):
-                        number = group * self.inodes_per_group + \
-                            (block - table) * per_block + slot + 1
-                        if number == inode:
-                            continue
-                        raw = copy[slot * self.inode_size:
-                                   (slot + 1) * self.inode_size]
-                        taken.update(mine & _named_blocks(raw))
-        return len(taken) * self.block
+            mine.append((first, first + length // self.block))
+        overlaps = []
+        for place, number, ranges in self._logged_inodes():
+            # The same transaction counts: two files cannot hold one block,
+            # and the other logged it as its own (NIST's DFR-07-one:
+            # Edasich over Chort, both in transaction 7).
+            if place < after or number == inode:
+                continue
+            for low, high in ranges:
+                for first, last in mine:
+                    start, end = max(low, first), min(high, last)
+                    if end > start:
+                        overlaps.append((start, end))
+        # Blocks named by several later inodes count once.
+        taken, reach = 0, None
+        for start, end in sorted(overlaps):
+            if reach is not None and start < reach:
+                if end > reach:
+                    taken += end - reach
+                    reach = end
+                continue
+            taken += end - start
+            reach = end
+        return taken * self.block
+
+    def _logged_inodes(self):
+        """[(place in the journal, inode number, [(first, last) block
+        ranges it names])] for every inode copy the journal logged -- read
+        once: reused() asks it for every deleted file, and decoding every
+        logged inode table block again for each one never finished on a
+        Fedora /boot (a few hundred deleted files, thousands of copies)."""
+        if getattr(self, '_inode_ranges', None) is None:
+            found = []
+            per_block = self.block // self.inode_size
+            for group, table in (self._tables or {}).items():
+                for block in range(table, table + -(-self.inodes_per_group //
+                                                     per_block)):
+                    for place, copy in zip(self.positions.get(block, []),
+                                           self.copies.get(block, [])):
+                        for slot in range(per_block):
+                            number = group * self.inodes_per_group + \
+                                (block - table) * per_block + slot + 1
+                            raw = copy[slot * self.inode_size:
+                                       (slot + 1) * self.inode_size]
+                            ranges = _named_ranges(raw)
+                            if ranges:
+                                found.append((place, number, ranges))
+            self._inode_ranges = found
+        return self._inode_ranges
 
     # --- names -------------------------------------------------------------
 
@@ -399,6 +436,35 @@ class Journal:
                     if name not in ('.', '..'):
                         found[inode] = (name, folder)
         return found
+
+
+def _named_ranges(raw):
+    """_named_blocks as [(first, last)] half-open block ranges: an extent
+    of 32,768 blocks is one range, not a set of 32,768 numbers."""
+    if len(raw) < 108:
+        return []
+    attributes = struct.unpack_from('<I', raw, 104)[0]
+    if len(raw) > 0x77:
+        attributes |= struct.unpack_from('<H', raw, 0x76)[0] << 32
+    named = [(attributes, attributes + 1)] if attributes else []
+    if not struct.unpack_from('<H', raw, 26)[0]:
+        return named                                   # no links: freed
+    flags = struct.unpack_from('<I', raw, 32)[0]
+    pointers = raw[40:100]
+    if flags & 0x80000 and struct.unpack_from('<H', pointers, 0)[0] == \
+            EXTENT_MAGIC:
+        entries, depth = struct.unpack_from('<HxxH', pointers, 2)
+        if depth:
+            return named
+        for index in range(min(entries, 4)):
+            _logical, length, high, low = struct.unpack_from(
+                '<IHHI', pointers, 12 + index * 12)
+            start = (high << 32) | low
+            if length & 0x7FFF:
+                named.append((start, start + (length & 0x7FFF)))
+        return named
+    return named + [(b, b + 1) for b in struct.unpack_from('<12I', pointers)
+                    if b]
 
 
 def _named_blocks(raw):

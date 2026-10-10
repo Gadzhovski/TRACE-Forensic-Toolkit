@@ -59,6 +59,12 @@ USER = {
     'debug_log': (False, "Detailed log",
                   "Write debug detail to trace.log -- for reporting a "
                   "problem; the log grows quickly."),
+    'worker_processes': (0, "Worker processes for indexing",
+                         "How many processes pull text out of files while "
+                         "an image is indexed. 0: automatic -- every core "
+                         "but two, at most 8. Fewer leaves the computer "
+                         "freer for other work; runs of under 2,000 files "
+                         "use one."),
 }
 
 #: Indicator kinds the search index can extract (search_index).
