@@ -13,12 +13,22 @@ enabled.
 
 No Qt here: the walk has to be drivable from a script and a test as well as
 from the background job that normally runs it.
+
+The files are read on several processes when there are many (`workers`):
+one walk lists them, each worker opens the image itself and analyses a
+chunk at a time, and the job writes the rows in the walk's order -- so the
+case holds the same rows whichever worker finished first.
 """
 
+import collections
 import hashlib
 import logging
 import math
+import multiprocessing
 import operator
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+from concurrent.futures.process import BrokenProcessPool
 
 import pytsk3
 from PIL import Image
@@ -542,13 +552,28 @@ def _analyse_stream(file_object, size, name, modules, magic):
 
 # --- the walk ------------------------------------------------------------
 
+#: Below this many files a pool is not worth starting (seconds to start).
+MIN_POOL_FILES = 1000
+#: Files per piece of work handed to a worker; a piece also ends once its
+#: files hold CHUNK_BYTES, so one worker is not handed every large file.
+CHUNK_FILES = 64
+CHUNK_BYTES = 64 * 1024 * 1024
+#: Pieces handed out per worker ahead of the one being written.
+IN_FLIGHT_PER_WORKER = 4
+
+
 def analyse_evidence(image_handler, case, evidence_id, modules,
-                     progress=None, should_stop=None, scope=None):
+                     progress=None, should_stop=None, scope=None,
+                     workers=1, image_path=None, unlock=None,
+                     case_folder=None):
     """Run the selected modules over every file in one piece of evidence
     -- every file in `scope` (core/scope.Scope; None: every file).
 
     `progress(done, total, path)` is called as the walk proceeds, and
     `should_stop()` is consulted per file so Cancel feels immediate.
+    `workers` > 1 reads the files on that many processes, each opening
+    `image_path` itself (with `unlock`, and `case_folder`'s settings), when
+    there are enough files to be worth it.
 
     Returns the number of files analysed. A cancelled run keeps what it read
     and records where it stopped, so resuming continues rather than starts
@@ -574,10 +599,10 @@ def analyse_evidence(image_handler, case, evidence_id, modules,
 
     total = 0
     done = 0
-    # Declared before the counting phase, not inside it: _count_files raises
-    # AnalysisCancelled too, and the handler reads this. Cancelling while the
-    # files were still being counted would otherwise be a NameError rather
-    # than a clean stop.
+    # Declared before the listing phase, not inside it: listing raises
+    # AnalysisCancelled too, and the handler reads this. Cancelling while
+    # the files were still being listed would otherwise be a NameError
+    # rather than a clean stop.
     counter = [0]
 
     matchers = {}
@@ -591,23 +616,34 @@ def analyse_evidence(image_handler, case, evidence_id, modules,
         return matchers[offset]
 
     try:
-        for offset in offsets:
-            total += _count_files(image_handler, offset, should_stop,
-                                  matcher(offset))
+        # One walk: what to read, and so how many (for an honest progress
+        # bar). It used to be walked twice, once to count.
+        listed = [(offset, _list_files(image_handler, offset, should_stop,
+                                       matcher(offset)))
+                  for offset in offsets]
+        total = sum(len(files) for _offset, files in listed)
         case.set_analysis_state(evidence_id, 'running', files_total=total)
-        logger.info("Analysing evidence %s: %d file(s), modules %s%s",
+        pool_size = _pool_size(workers, total, image_handler, image_path)
+        logger.info("Analysing evidence %s: %d file(s), modules %s%s%s",
                     evidence_id, total, ', '.join(modules),
                     '' if scope is None or scope.everything else
-                    f"; scope: {scope.describe()}")
+                    f"; scope: {scope.describe()}",
+                    f"; {pool_size} processes" if pool_size > 1 else '')
 
         # counter is a list rather than a number because cancellation leaves
         # by an exception, and a returned count would be lost on the way out
         # -- the run would then record having read nothing while its rows sat
         # on disk, and a resume would start over.
-        for offset in offsets:
-            _analyse_partition(
-                image_handler, case, evidence_id, offset, modules, magic,
-                counter, total, progress, should_stop, matcher(offset))
+        if pool_size > 1:
+            _analyse_on_pool(
+                image_handler, case, evidence_id, listed, modules, magic,
+                counter, total, progress, should_stop, pool_size,
+                (image_path, unlock, case_folder))
+        else:
+            for offset, files in listed:
+                _analyse_files(image_handler, case, evidence_id, offset,
+                               files, modules, magic, counter, total,
+                               progress, should_stop)
         done = counter[0]
 
         case.commit()
@@ -633,65 +669,34 @@ def analyse_evidence(image_handler, case, evidence_id, modules,
         raise
 
 
-def _count_files(image_handler, offset, should_stop, matcher=None):
-    """How many files there are (in scope), so the progress bar can be
-    honest."""
-    fs_info = image_handler.get_fs_info(offset)
-    if fs_info is None:
-        return 0
-
-    count = 0
-    visited = set()
-
-    def walk(directory, path, depth):
-        nonlocal count
-        if depth > MAX_DEPTH:
-            return
-        for entry in directory:
-            if should_stop and should_stop():
-                raise AnalysisCancelled()
-            if entry.info.name is None or entry.info.meta is None:
-                continue
-            name = entry.info.name.name.decode('utf-8', 'replace')
-            if name in ('.', '..'):
-                continue
-            meta = entry.info.meta
-            if meta.addr in visited:
-                continue
-            visited.add(meta.addr)
-            child_path = f"{path}/{name}"
-            if scope_module.entry_skipped(matcher, child_path, meta):
-                continue
-            if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
-                try:
-                    walk(entry.as_directory(), child_path, depth + 1)
-                except AnalysisCancelled:
-                    raise
-                except Exception:
-                    continue
-            elif meta.size:
-                count += 1
-
+def _pool_size(workers, total, image_handler, image_path):
+    """Processes to read with: one for a small run, for evidence a worker
+    cannot open by path, and for logical evidence and live disks -- a
+    folder's files and a disk read through one helper gain nothing from
+    several readers."""
+    if not workers or workers <= 1 or total < MIN_POOL_FILES or \
+            not image_path:
+        return 1
     try:
-        walk(fs_info.open_dir(path='/'), '', 0)
-    except AnalysisCancelled:
-        raise
-    except Exception as exc:
-        logger.debug("Could not count files at offset %s: %s", offset, exc)
-    return count
+        if image_handler.get_image_type() == 'logical':
+            return 1
+        from trace_app.core.live_disk import is_device_path
+        if is_device_path(image_path):
+            return 1
+    except Exception:
+        return 1
+    return min(workers, max(1, total // CHUNK_FILES))
 
 
-def _analyse_partition(image_handler, case, evidence_id, offset, modules,
-                       magic, counter, total, progress, should_stop,
-                       matcher=None):
-    """Walk one volume. `counter` is the caller's running total, in a list so
-    the count survives a cancellation leaving by an exception."""
+def _list_files(image_handler, offset, should_stop, matcher=None):
+    """Every file with content on one volume (in scope), in walk order:
+    [(inode, name, path, deleted, sequence, size)]."""
     fs_info = image_handler.get_fs_info(offset)
     if fs_info is None:
-        return
+        return []
 
+    files = []
     visited = set()
-    pending = []
 
     def walk(directory, path, depth):
         if depth > MAX_DEPTH:
@@ -727,41 +732,201 @@ def _analyse_partition(image_handler, case, evidence_id, offset, modules,
 
             if not meta.size:
                 continue
-
-            counter[0] += 1
-            if progress:
-                progress(counter[0], total, child_path)
-
-            sequence = getattr(entry.info.name, 'meta_seq', None)
-            deleted = not (int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC)
-
-            try:
-                file_object = fs_info.open_meta(inode=inode)
-                facts = _analyse_stream(file_object, meta.size, name,
-                                        modules, magic)
-            except Exception as exc:
-                logger.debug("Could not analyse %s: %s", child_path, exc)
-                continue
-
-            pending.append((
-                make_artifact_ref(offset, inode, sequence),
-                name, child_path, deleted, facts))
-
-            # Written in batches: a commit per file turns a 20,000-file image
-            # into 20,000 transactions, and the walk spends its time in
-            # SQLite rather than reading evidence.
-            if len(pending) >= 200:
-                case.add_analysis_batch(evidence_id, pending)
-                pending.clear()
+            files.append((
+                inode, name, child_path,
+                not (int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC),
+                getattr(entry.info.name, 'meta_seq', None), meta.size))
 
     try:
         walk(fs_info.open_dir(path='/'), '', 0)
     except AnalysisCancelled:
-        if pending:
-            case.add_analysis_batch(evidence_id, pending)
         raise
     except Exception as exc:
-        logger.debug("Analysis walk stopped at offset %s: %s", offset, exc)
+        logger.debug("Could not list files at offset %s: %s", offset, exc)
+    return files
 
-    if pending:
-        case.add_analysis_batch(evidence_id, pending)
+
+def _count_files(image_handler, offset, should_stop, matcher=None):
+    """How many files the analysis reads on one volume (in scope)."""
+    return len(_list_files(image_handler, offset, should_stop, matcher))
+
+
+def _analyse_one(fs_info, offset, entry, modules, magic):
+    """One listed file's row, or None when it cannot be read."""
+    inode, name, path, deleted, sequence, size = entry
+    try:
+        file_object = fs_info.open_meta(inode=inode)
+        facts = _analyse_stream(file_object, size, name, modules, magic)
+    except Exception as exc:
+        logger.debug("Could not analyse %s: %s", path, exc)
+        return None
+    return (make_artifact_ref(offset, inode, sequence), name, path,
+            deleted, facts)
+
+
+def _analyse_files(image_handler, case, evidence_id, offset, files, modules,
+                   magic, counter, total, progress, should_stop):
+    """Analyse one volume's listed files in this process. `counter` is the
+    caller's running total, in a list so the count survives a cancellation
+    leaving by an exception."""
+    fs_info = image_handler.get_fs_info(offset)
+    if fs_info is None:
+        return
+    pending = []
+    try:
+        for entry in files:
+            if should_stop and should_stop():
+                raise AnalysisCancelled()
+            counter[0] += 1
+            if progress:
+                progress(counter[0], total, entry[2])
+            row = _analyse_one(fs_info, offset, entry, modules, magic)
+            if row is not None:
+                pending.append(row)
+            # Written in batches: a commit per file turns a 20,000-file
+            # image into 20,000 transactions, and the walk spends its time
+            # in SQLite rather than reading evidence.
+            if len(pending) >= 200:
+                case.add_analysis_batch(evidence_id, pending)
+                pending.clear()
+    finally:
+        if pending:
+            case.add_analysis_batch(evidence_id, pending)
+
+
+# --- on several processes ---------------------------------------------------
+
+#: In a worker: the image it opened, its libmagic, the run's modules.
+_WORKER = {}
+
+
+def _start_worker(image_path, unlock, case_folder, modules):
+    """In each worker, first: the settings (as text_pool's workers), then
+    the image, opened once for every piece this worker is given."""
+    from trace_app.core.background import _open_image
+    from trace_app.core.text_pool import _start_worker as settings_first
+    settings_first(case_folder)
+    _WORKER['handler'] = _open_image(image_path, unlock)
+    _WORKER['magic'] = magic_reader() if MODULE_MAGIC in modules else None
+    _WORKER['modules'] = modules
+
+
+def _analyse_chunk(offset, entries):
+    """A worker's piece: the rows of `entries`, files of the volume at
+    `offset` (None where a file could not be read)."""
+    fs_info = _WORKER['handler'].get_fs_info(offset)
+    if fs_info is None:
+        return [None] * len(entries)
+    return [_analyse_one(fs_info, offset, entry, _WORKER['modules'],
+                         _WORKER['magic']) for entry in entries]
+
+
+def _chunks(listed):
+    """(offset, [entries]) pieces of the listing, in order."""
+    for offset, files in listed:
+        piece, held = [], 0
+        for entry in files:
+            piece.append(entry)
+            held += entry[5]
+            if len(piece) >= CHUNK_FILES or held >= CHUNK_BYTES:
+                yield offset, piece
+                piece, held = [], 0
+        if piece:
+            yield offset, piece
+
+
+def _analyse_on_pool(image_handler, case, evidence_id, listed, modules,
+                     magic, counter, total, progress, should_stop, workers,
+                     opening):
+    """Analyse the listing on `workers` processes; rows written in order.
+    A pool that cannot start, or loses a worker (a crash in C on some
+    file), leaves the rest to this process."""
+    try:
+        pool = ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=multiprocessing.get_context('spawn'),
+            initializer=_start_worker, initargs=(*opening, modules))
+    except Exception as exc:
+        logger.warning("Analysis stays in one process: %s", exc)
+        pool = None
+
+    pending = collections.deque()
+    pieces = _chunks(listed)
+    rows = []
+
+    def in_process(offset, entries):
+        fs_info = image_handler.get_fs_info(offset)
+        return [_analyse_one(fs_info, offset, entry, modules, magic)
+                if fs_info is not None else None for entry in entries]
+
+    def written(offset, entries, result):
+        counter[0] += len(entries)
+        rows.extend(row for row in result if row is not None)
+        if len(rows) >= 200:
+            case.add_analysis_batch(evidence_id, rows)
+            rows.clear()
+        if progress:
+            progress(counter[0], total, entries[-1][2])
+
+    def wait(future):
+        while True:
+            if should_stop and should_stop():
+                raise AnalysisCancelled()
+            try:
+                return future.result(timeout=0.25)
+            except FutureTimeout:
+                continue
+
+    def drain_one():
+        nonlocal pool, pending
+        offset, entries, future = pending.popleft()
+        result = None
+        if future is not None:
+            try:
+                result = wait(future)
+            except BrokenProcessPool as exc:
+                logger.warning("An analysis worker stopped (%s); going on "
+                               "in one process", exc)
+                pool.shutdown(wait=False, cancel_futures=True)
+                pool = None
+                # Everything handed out is done here instead.
+                pending = collections.deque(
+                    (o, e, None) for o, e, _f in pending)
+            except AnalysisCancelled:
+                raise
+            except Exception as exc:
+                # The worker could not read this piece (its image would not
+                # open the volume, say): this process reads it instead.
+                logger.debug("A worker failed on a piece: %s", exc)
+        if result is None:
+            result = in_process(offset, entries)
+        written(offset, entries, result)
+
+    cancelled = False
+    try:
+        for offset, entries in pieces:
+            if should_stop and should_stop():
+                raise AnalysisCancelled()
+            future = None
+            if pool is not None:
+                try:
+                    future = pool.submit(_analyse_chunk, offset, entries)
+                except (BrokenProcessPool, RuntimeError, OSError) as exc:
+                    logger.warning("Analysis pool stopped (%s); going on in "
+                                   "one process", exc)
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    pool = None
+            pending.append((offset, entries, future))
+            while pending and (pool is None or len(pending) >=
+                               workers * IN_FLIGHT_PER_WORKER):
+                drain_one()
+        while pending:
+            drain_one()
+    except AnalysisCancelled:
+        cancelled = True
+        raise
+    finally:
+        if rows:
+            case.add_analysis_batch(evidence_id, rows)
+        if pool is not None:
+            pool.shutdown(wait=not cancelled, cancel_futures=cancelled)

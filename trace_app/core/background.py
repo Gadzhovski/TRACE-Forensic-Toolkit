@@ -207,10 +207,14 @@ def job_analysis(params, progress, item, should_stop):
     try:
         case = Case.open(params['case_folder'])
         handler = _open_image(params['image_path'], params.get('unlock'))
+        from trace_app.core.text_pool import default_workers
         return analyse_evidence(
             handler, case, params['evidence_id'], params['modules'],
             progress=lambda done, total, path: progress(done, total, path),
-            should_stop=should_stop, scope=_scope(params))
+            should_stop=should_stop, scope=_scope(params),
+            workers=default_workers(), image_path=params['image_path'],
+            unlock=params.get('unlock'),
+            case_folder=params['case_folder'])
     finally:
         _close(case, handler)
 
