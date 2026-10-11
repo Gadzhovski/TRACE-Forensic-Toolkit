@@ -6782,7 +6782,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def clear_ui(self):
         self.listing_table.clearContents()
-        self.listing_table.setRowCount(0)
+        self._clear_listing()
         self.clear_evidence_views()
         self.set_status_context("No evidence loaded")
         self.current_image_path = None
@@ -8851,7 +8851,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """Display all volumes/partitions in the listing table when disk image root is clicked."""
         self._listing_image = self.current_image_path
         # Clear existing content
-        self.listing_table.setRowCount(0)
+        self._clear_listing()
         self.listing_table.setSortingEnabled(False)
 
         # Show columns with volume information, hide file-specific columns
@@ -8979,11 +8979,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         finally:
             self.listing_table.setSortingEnabled(True)
 
+    def _clear_listing(self):
+        """Empty the Listing for a new fill: a new generation, so a batched
+        fill still running (populate_listing_table yields to the event loop
+        between batches) stops rather than adding to this one."""
+        self._listing_generation = getattr(self, '_listing_generation', 0) + 1
+        self.listing_table.setRowCount(0)
+
     def populate_listing_table(self, entries: List[Dict[str, Any]], offset: int) -> None:
         """Populate the listing table with directory entries in batches for better performance."""
         self._listing_image = self.current_image_path
         # Clear existing content
-        self.listing_table.setRowCount(0)
+        self._clear_listing()
 
         # Restore original column headers for file/folder view
         self.listing_table.setHorizontalHeaderLabels([
@@ -9020,8 +9027,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.listing_table.setSortingEnabled(False)
         self.listing_table.setUpdatesEnabled(False)
 
+        generation = self._listing_generation
+        interrupted = False
+        total_entries = len(entries)
         try:
-            total_entries = len(entries)
 
             # Process in batches to keep UI responsive
             for batch_start in range(0, total_entries, TABLE_BATCH_SIZE):
@@ -9033,9 +9042,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     row_position = self.listing_table.rowCount()
                     self._populate_table_entry(row_position, entry, offset)
 
-                # Process events periodically to keep UI responsive
+                # Process events periodically to keep UI responsive. A click
+                # handled meanwhile can start another listing: this one then
+                # stops, or its rows would be added to the new folder's.
                 if batch_end < total_entries:
+                    self.set_status(f"Listing {batch_end:,} of "
+                                    f"{total_entries:,}…")
                     QApplication.processEvents()
+                    if generation != self._listing_generation:
+                        interrupted = True
+                        return
 
         finally:
             # What the case already knows about these files. Filled before
@@ -9043,9 +9059,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # can move its row out from under the loop. Until now this ran
             # only when an analysis finished, so every folder opened later
             # showed empty analysis columns.
+            if total_entries > TABLE_BATCH_SIZE and not interrupted:
+                self.clear_status()
             try:
-                self.mark_analysis_rows()
-                self.mark_vt_rows()
+                if not interrupted:
+                    self.mark_analysis_rows()
+                    self.mark_vt_rows()
             except Exception as exc:
                 logger.error("Could not mark listing rows: %s", exc)
             # Re-enable updates and sorting
@@ -9977,7 +9996,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # opened after another image became active (a Triage or
             # Search-tab preview) must still read this one.
             self._listing_image = self.current_image_path
-            self.listing_table.setRowCount(0)
+            self._clear_listing()
             self.listing_table.setSortingEnabled(False)
 
             # Show columns relevant for search results
