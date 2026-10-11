@@ -9393,6 +9393,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 menu.addSeparator()
 
             self.add_bookmark_action(menu, data)
+            # A document's embedded files (pictures, packaged files,
+            # attachments, a photo's EXIF thumbnail), listed like an
+            # archive's members (core/embedded).
+            from trace_app.core.embedded import DOCUMENT_SUFFIXES
+            if data and data.get('type') in ('file', 'archive-member') and \
+                    (data.get('name') or '').lower().endswith(
+                        DOCUMENT_SUFFIXES):
+                embedded_action = menu.addAction(
+                    icons.icon(icons.FILE_ARCHIVE), "Show Embedded Files")
+                embedded_action.triggered.connect(
+                    lambda: self.show_embedded_files(data))
             # Every selected row, not just the first: a batch lookup starts
             # from a multi-selection.
             rows = sorted({index.row() for index in indexes})
@@ -9416,6 +9427,35 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     case_settings.export_dir())))
 
             show_menu(menu, self.listing_table.viewport().mapToGlobal(position))
+
+    def show_embedded_files(self, data):
+        """List what a document embeds (core/embedded) in the Listing, as
+        an archive's members are listed: opened, previewed and exported
+        the same way. Returns whether anything was listed."""
+        from trace_app.core import embedded
+        name = data.get('name') or ''
+        content = None
+        try:
+            if data.get('type') == 'archive-member' and self._archive_stack:
+                # A document inside an archive: read out of the one listed.
+                _top, archive, _source = self._archive_stack[-1]
+                content = archives.read_member(archive, name)
+                parent = list(self._archive_stack)
+            else:
+                content, _meta = self.image_handler.get_file_content(
+                    data['inode_number'], data['start_offset'])
+                parent = []
+        except Exception as exc:
+            logger.debug("Could not read %s: %s", name, exc)
+        if not content:
+            self.set_status(f"{name} could not be read.", 5000)
+            return False
+        view = embedded.EmbeddedView(content)
+        if not embedded.list_members(view):
+            self.set_status(f"{name} embeds no files TRACE can list.", 5000)
+            return False
+        self._archive_stack = parent + [(name, view, dict(data))]
+        return self.show_archive_level()
 
     def handle_export(self, data, dest_dir):
         """Export files or folders (one data dict or a list) from the

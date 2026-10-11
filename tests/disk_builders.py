@@ -157,3 +157,93 @@ def fat16_volume(files, total_sectors=2048 * 16, free=()):
         image[offset:offset + len(data)] = data
     return bytes(image), placed, \
         (data_start + (cluster - 2) * per_cluster) * sector
+
+
+def compound_file(streams):
+    """A Compound File Binary (OLE) file, version 3, 512-byte sectors,
+    holding `streams` -- {('Storage', 'Stream'): bytes} -- each at least
+    4,096 bytes (so in regular sectors: this writer has no mini stream).
+    Storages are made from the paths."""
+    import struct
+    sector = 512
+    end, free, fat_mark = 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFD
+    nostream = 0xFFFFFFFF
+    # Directory: root, then every storage and stream.
+    entries = [{'name': 'Root Entry', 'type': 5, 'children': []}]
+    index_of = {(): 0}
+    for path in sorted(streams):
+        for depth in range(1, len(path) + 1):
+            key = path[:depth]
+            if key in index_of:
+                continue
+            is_stream = depth == len(path)
+            assert not is_stream or len(streams[path]) >= 4096, path
+            index_of[key] = len(entries)
+            entries.append({'name': key[-1], 'type': 2 if is_stream else 1,
+                            'children': [], 'data': streams.get(key)})
+            entries[index_of[key[:-1]]]['children'].append(index_of[key])
+    # Stream data first, then the directory, then the FAT.
+    chains, sectors = {}, []
+    for number, entry in enumerate(entries):
+        if entry['type'] != 2:
+            continue
+        data = entry['data']
+        count = -(-len(data) // sector)
+        chains[number] = (len(sectors), count)
+        for k in range(count):
+            sectors.append(data[k * sector:(k + 1) * sector].ljust(sector,
+                                                                    b'\0'))
+    directory = bytearray()
+
+    def sibling_tree(children):
+        """Children as a binary tree in CFB order (length, then name in
+        upper case), linked through right siblings."""
+        ordered = sorted(children, key=lambda i: (
+            len(entries[i]['name']), entries[i]['name'].upper()))
+        for left, right in zip(ordered, ordered[1:]):
+            entries[left]['right'] = right
+        return ordered[0] if ordered else nostream
+    for entry in entries:
+        entry['child'] = sibling_tree(entry['children'])
+    for number, entry in enumerate(entries):
+        name = entry['name'].encode('utf-16-le') + b'\0\0'
+        start, size = (chains[number][0], len(entry['data'])) \
+            if number in chains else (end, 0)
+        record = bytearray(128)
+        record[0:len(name)] = name
+        struct.pack_into('<HBBIII', record, 64, len(name), entry['type'], 1,
+                         nostream, entry.get('right', nostream),
+                         entry['child'])
+        struct.pack_into('<IQ', record, 116, start, size)
+        directory += record
+    directory = bytes(directory.ljust(-(-len(directory) // sector) * sector,
+                                      b'\0'))
+    first_directory = len(sectors)
+    directory_sectors = len(directory) // sector
+    for k in range(directory_sectors):
+        sectors.append(directory[k * sector:(k + 1) * sector])
+    total = len(sectors)
+    fat_sectors = 1
+    while (total + fat_sectors) > fat_sectors * (sector // 4):
+        fat_sectors += 1
+    fat = [free] * (fat_sectors * (sector // 4))
+    for start, count in chains.values():
+        for k in range(count):
+            fat[start + k] = start + k + 1 if k < count - 1 else end
+    for k in range(directory_sectors):
+        fat[first_directory + k] = first_directory + k + 1 \
+            if k < directory_sectors - 1 else end
+    first_fat = total
+    for k in range(fat_sectors):
+        fat[first_fat + k] = fat_mark
+    assert fat_sectors <= 109
+    header = bytearray(sector)
+    header[0:8] = bytes.fromhex('D0CF11E0A1B11AE1')
+    struct.pack_into('<HHHHH', header, 24, 0x3E, 3, 0xFFFE, 9, 6)
+    struct.pack_into('<IIIIIIIII', header, 40, 0, fat_sectors,
+                     first_directory, 0, 4096, end, 0, end, 0)
+    difat = [first_fat + k for k in range(fat_sectors)]
+    difat += [free] * (109 - len(difat))
+    struct.pack_into('<109I', header, 76, *difat)
+    body = b''.join(sectors) + struct.pack(f'<{len(fat)}I', *fat)
+    return bytes(header) + body

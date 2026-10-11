@@ -72,6 +72,9 @@ def detect_archive(data):
     Reads only the header, so it is cheap enough to call on every file in a
     listing.
     """
+    from trace_app.core.embedded import EmbeddedView
+    if isinstance(data, EmbeddedView):
+        return 'embedded'            # a document browsed for what it embeds
     if hasattr(data, 'read'):
         # A file object (a large mailbox read lazily from the image): its
         # header, and back to the start for whoever reads it next.
@@ -165,6 +168,9 @@ def list_members(data, kind=None, password=None):
     if kind is None:
         raise ArchiveError("Not a recognised archive format.")
 
+    if kind == 'embedded':
+        from trace_app.core import embedded
+        return embedded.list_members(data)
     if kind == 'zip':
         return _list_zip(data)
     if kind == 'tar':
@@ -296,6 +302,10 @@ def iter_members(data, kind=None, limit=None):
     kind = kind or detect_archive(data)
     if kind is None:
         raise ArchiveError("Not a recognised archive format.")
+    if kind == 'embedded':
+        from trace_app.core import embedded
+        yield from embedded.iter_members(data)
+        return
     if kind == 'zip':
         yield from _iter_zip(data, limit)
         return
@@ -397,6 +407,12 @@ def read_member(data, member_name=None, kind=None, password=None,
     """
     if limit is None:
         limit = MAX_MEMBER_BYTES
+    from trace_app.core import embedded
+    if kind == 'embedded' or (member_name or '').startswith(embedded.PREFIX):
+        # A file inside a document (core/embedded): its name says so, so a
+        # chain 'report.docx!/[embedded]/x.png' is read wherever it is
+        # read, whatever else the document is.
+        return embedded.read_member(data, member_name)
     kind = kind or detect_archive(data)
     if kind is None:
         raise ArchiveError("Not a recognised archive format.")

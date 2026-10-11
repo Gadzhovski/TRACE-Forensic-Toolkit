@@ -15,6 +15,7 @@ import pytsk3
 
 from trace_app.core.archives import (STREAMED_KINDS, ArchiveError,
                                      detect_archive, iter_members)
+from trace_app.core import embedded
 from trace_app.core import scope as scope_module
 from trace_app.core.case import make_artifact_ref
 from trace_app.core.search_index import (INDEX_CANCELLED, INDEX_DONE,
@@ -34,6 +35,12 @@ MAX_DEPTH = 64
 #: constructed archive dominate the run.
 ARCHIVE_DEPTH = 2
 
+
+#: Index the files documents embed (core/embedded): pictures in PDFs and
+#: Office files, packaged files, attachments. EXIF thumbnails have no
+#: text, so photos are not opened for them here.
+INDEX_EMBEDDED = True
+EMBEDDING_KINDS = ('pdf', 'ole', 'rtf')
 
 #: Index the text in unallocated space (case setting 'index_unallocated').
 INDEX_UNALLOCATED = True
@@ -497,6 +504,8 @@ def _index_content(index, evidence_id, ref, content, name, path, payload,
     texts.submit(content, name, MAX_TEXT_PER_FILE, payload)
     if detect_archive(content):
         _index_archive(index, evidence_id, ref, content, path, depth, texts)
+    elif INDEX_EMBEDDED and embedded.kind_of(content) in EMBEDDING_KINDS:
+        _index_embedded(index, evidence_id, ref, content, path, depth, texts)
 
 
 def _index_archive(index, evidence_id, parent_ref, content, parent_path,
@@ -519,6 +528,21 @@ def _index_archive(index, evidence_id, parent_ref, content, parent_path,
     except ArchiveError as exc:
         logger.debug("Could not list %s: %s", parent_path, exc)
     return opened
+
+
+def _index_embedded(index, evidence_id, parent_ref, content, parent_path,
+                    depth, texts):
+    """The files a document embeds (core/embedded), as archive members
+    under '[embedded]/'."""
+    if depth <= 0:
+        return
+    try:
+        for member, member_bytes in embedded.iter_members(
+                content, pictures=False):
+            _index_member(index, evidence_id, parent_ref, parent_path,
+                          member, member_bytes, depth, texts)
+    except Exception as exc:
+        logger.debug("Embedded files of %s not read: %s", parent_path, exc)
 
 
 def _index_member(index, evidence_id, parent_ref, parent_path, member,
