@@ -8,7 +8,6 @@ Landing on a file previews it; double-click goes to its folder.
 """
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView,
                                QLabel, QMenu, QPushButton, QTreeWidget,
                                QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -19,17 +18,10 @@ from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 COLUMNS = ('File', 'Evidence', 'Tagged', 'By', 'Path')
 
 
-def tag_icon(colour, size=12):
-    """A filled dot in the tag's colour."""
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor(colour or '#8B949E'))
-    painter.drawEllipse(1, 1, size - 2, size - 2)
-    painter.end()
-    return QIcon(pixmap)
+def tag_icon(colour):
+    """A filled dot in the tag's colour, drawn as a shape (icons.dot_icon)
+    so it is sharp at any display scale."""
+    return icons.dot_icon(colour or '#8B949E')
 
 
 class TagsPanel(QWidget):

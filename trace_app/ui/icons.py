@@ -15,7 +15,7 @@ Two practical consequences:
 import logging
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import (QAction, QColor, QIcon, QIconEngine, QImage,
                            QPainter, QPixmap)
 from PySide6.QtSvg import QSvgRenderer
@@ -590,3 +590,53 @@ def recoloured(base_path, colour, size):
 def clear_cache():
     """Drop cached icons, e.g. after a theme change alters the tint."""
     _cache.clear()
+
+
+class DotEngine(QIconEngine):
+    """A filled dot drawn as a shape at whatever size and pixel ratio is
+    asked for. Never draw a coloured dot into a small QPixmap: a 125%
+    or 150% display stretches it into the jagged, blurred dots the
+    Timeline and then the tags once had. Use dot_icon()."""
+
+    #: The dot's share of the icon's box: a little smaller than the box,
+    #: as the line icons beside it are.
+    SHARE = 0.62
+
+    def __init__(self, colour):
+        super().__init__()
+        self._colour = QColor(colour)
+
+    def clone(self):
+        return DotEngine(self._colour)
+
+    def paint(self, painter, rect, mode, state):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        colour = QColor(self._colour)
+        if mode == QIcon.Disabled:
+            colour.setAlphaF(0.4)
+        painter.setBrush(colour)
+        side = min(rect.width(), rect.height()) * self.SHARE
+        centre = QRectF(rect).center()
+        painter.drawEllipse(centre, side / 2, side / 2)
+        painter.restore()
+
+    def pixmap(self, size, mode, state):
+        return self.scaledPixmap(size, mode, state, 1.0)
+
+    def scaledPixmap(self, size, mode, state, scale):
+        pixmap = QPixmap(max(1, round(size.width() * scale)),
+                         max(1, round(size.height() * scale)))
+        pixmap.setDevicePixelRatio(scale)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        self.paint(painter, QRect(0, 0, size.width(), size.height()), mode,
+                   state)
+        painter.end()
+        return pixmap
+
+
+def dot_icon(colour):
+    """A filled dot in `colour`, sharp at any size and display scale."""
+    return QIcon(DotEngine(colour))

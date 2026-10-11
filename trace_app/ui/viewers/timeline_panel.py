@@ -27,12 +27,9 @@ import os
 import sqlite3
 
 from PySide6.QtCore import (QAbstractTableModel, QDateTime, QModelIndex,
-                            QPointF, QRect, QRectF, Qt, QThread, QTimer,
-                            QTimeZone,
+                            QPointF, QRectF, Qt, QThread, QTimer, QTimeZone,
                             Signal)
-from PySide6.QtGui import (QColor, QFont, QGuiApplication, QIcon,
-                           QIconEngine, QPainter,
-                           QPixmap)
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit,
@@ -84,54 +81,9 @@ _PIVOTS = (('± 1 minute', 60), ('± 5 minutes', 300), ('± 1 hour', 3600),
            ('± 1 day', 86400), ('± 1 week', 7 * 86400))
 
 
-class _DotEngine(QIconEngine):
-    """A filled dot drawn as a shape at whatever size and pixel ratio is
-    asked for. It used to be a 12-pixel bitmap, which a 125% or 150%
-    display stretched -- the jagged, blurred dots beside every row."""
-
-    #: The dot's share of the icon's box: a little smaller than the box,
-    #: as the line icons beside it are.
-    SHARE = 0.62
-
-    def __init__(self, colour):
-        super().__init__()
-        self._colour = QColor(colour)
-
-    def clone(self):
-        return _DotEngine(self._colour)
-
-    def paint(self, painter, rect, mode, state):
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-        colour = QColor(self._colour)
-        if mode == QIcon.Disabled:
-            colour.setAlphaF(0.4)
-        painter.setBrush(colour)
-        side = min(rect.width(), rect.height()) * self.SHARE
-        centre = QRectF(rect).center()
-        painter.drawEllipse(centre, side / 2, side / 2)
-        painter.restore()
-
-    def pixmap(self, size, mode, state):
-        return self.scaledPixmap(size, mode, state, 1.0)
-
-    def scaledPixmap(self, size, mode, state, scale):
-        pixmap = QPixmap(max(1, round(size.width() * scale)),
-                         max(1, round(size.height() * scale)))
-        pixmap.setDevicePixelRatio(scale)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        self.paint(painter, QRect(0, 0, size.width(), size.height()), mode,
-                   state)
-        painter.end()
-        return pixmap
-
-
 def source_icon(source):
     """A dot in the source's colour, sharp at any size and display scale."""
-    return QIcon(_DotEngine(timeline.SOURCE_COLOURS.get(source,
-                                                        '#888888')))
+    return icons.dot_icon(timeline.SOURCE_COLOURS.get(source, '#888888'))
 
 
 def _description(row):

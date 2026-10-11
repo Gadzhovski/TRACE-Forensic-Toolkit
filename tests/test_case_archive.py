@@ -56,7 +56,7 @@ def test_an_archive_opens_elsewhere_as_the_same_case(case, tmp_path):
     os.makedirs(os.path.dirname(archive))
     seen = []
     made = export_case(case, archive, progress=lambda d, t, w: seen.append(d))
-    assert made['path'].endswith('handover.tracecase')
+    assert made['path'].endswith('handover.trace')
     assert seen and seen[-1] > 0
     assert open(made['path'] + '.sha256').read().split()[0] == made['sha256']
     archived = [a for a in case.activity(20) if a['action'] == 'case archived']
@@ -103,8 +103,8 @@ def _rewrite(source, target, change):
 
 def test_an_altered_archive_is_refused_before_anything_is_written(
         case, tmp_path):
-    made = export_case(case, str(tmp_path / 'good.tracecase'))
-    bad = str(tmp_path / 'bad.tracecase')
+    made = export_case(case, str(tmp_path / 'good.trace'))
+    bad = str(tmp_path / 'bad.trace')
     _rewrite(made['path'], bad, lambda name, data: b'pay double'
              if name == 'case/exports/note.txt' else data)
     _manifest, problems = check_archive(bad)
@@ -131,7 +131,7 @@ def test_an_altered_archive_is_refused_before_anything_is_written(
 
 
 def test_an_archive_needs_an_empty_folder(case, tmp_path):
-    made = export_case(case, str(tmp_path / 'a.tracecase'))
+    made = export_case(case, str(tmp_path / 'a.trace'))
     busy = tmp_path / 'busy'
     busy.mkdir()
     (busy / 'something').write_text('x')
@@ -139,7 +139,7 @@ def test_an_archive_needs_an_empty_folder(case, tmp_path):
         import_case(made['path'], str(busy))
     assert (busy / 'something').read_text() == 'x'
     with pytest.raises(ArchiveError, match='outside the case folder'):
-        export_case(case, os.path.join(case.folder, 'inside.tracecase'))
+        export_case(case, os.path.join(case.folder, 'inside.trace'))
 
 
 def test_moved_evidence_is_relocated_only_when_its_hashes_match(
@@ -253,7 +253,7 @@ def test_the_archive_dialogs_write_and_open_a_case(qapp, case, tmp_path,
     monkeypatch.setattr(message, 'question', lambda *a, **k: False)
     monkeypatch.setattr(message, 'critical',
                         lambda *a, **k: told.append(('failed',) + a[2:]))
-    target = str(tmp_path / 'handed' / 'over.tracecase')
+    target = str(tmp_path / 'handed' / 'over.trace')
     os.makedirs(os.path.dirname(target))
     monkeypatch.setattr(QFileDialog, 'getSaveFileName',
                         lambda *a, **k: (target, ''))

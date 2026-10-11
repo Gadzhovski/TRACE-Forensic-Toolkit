@@ -1,6 +1,6 @@
 """A whole case in one file, for handing over or keeping (no Qt).
 
-A `.tracecase` is a ZIP of the case folder: its database taken with
+A `.trace` is a ZIP of the case folder: its database taken with
 SQLite's backup API (consistent while the case is open and a job writes
 it), the search index when asked for (large, and rebuilt by indexing), and
 every other file the folder holds -- exports, carved copies, reports,
@@ -29,7 +29,7 @@ import zipfile
 
 logger = logging.getLogger('TRACE.CaseArchive')
 
-SUFFIX = '.tracecase'
+SUFFIX = '.trace'
 MANIFEST = 'MANIFEST.json'
 FORMAT = 1
 #: Members live under this folder in the ZIP, so an archive opened by hand

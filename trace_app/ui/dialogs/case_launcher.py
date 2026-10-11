@@ -177,7 +177,7 @@ class CaseLauncher(QDialog):
                  icons.CASE_PROPERTIES, self._new_case),
                 ('open', "Open Case…", "A case folder on disk",
                  icons.OPEN_FOLDER, self._open_case),
-                ('archive', "Open Case Archive…", "A .tracecase handed over",
+                ('archive', "Open Case Archive…", "A .trace handed over",
                  icons.ARCHIVE, self._open_archive),
                 ('triage', "Quick Triage", "Look inside an image; nothing "
                  "saved", icons.TRIAGE, self._triage)):

@@ -257,3 +257,20 @@ def test_a_tagged_listing_row_shows_its_tag(qapp, case):
     finally:
         handler.close_resources()
         window.cleanup_resources()
+
+
+def test_tag_dots_are_drawn_sharp_at_any_display_scale(qapp):
+    """A tag's dot is a shape drawn at the size and pixel ratio asked for
+    (icons.dot_icon), never a small bitmap stretched -- which a 125% or
+    150% display showed jagged."""
+    from PySide6.QtCore import QSize
+    from trace_app.ui.viewers.tags_panel import tag_icon
+    icon = tag_icon('#2F81F7')
+    for scale in (1.0, 1.5, 2.0):
+        pixmap = icon.pixmap(QSize(16, 16), scale)
+        assert pixmap.width() == round(16 * scale), scale
+        assert pixmap.devicePixelRatio() == scale
+    # Anti-aliased: the edge has partly covered pixels, not a hard step.
+    image = icon.pixmap(QSize(32, 32), 2.0).toImage()
+    alphas = {image.pixelColor(x, 32).alpha() for x in range(64)}
+    assert any(0 < a < 255 for a in alphas)
