@@ -1329,6 +1329,16 @@ def run_evidence(image_handler, case, evidence_id, progress=None,
     case.set_user_activity_state(evidence_id, 'running')
     try:
         records = collect(image_handler, progress, should_stop, carved)
+        # Carved event logs and chunks, shortcuts and hive bins
+        # (core/carved_artifacts), read from the image where they lie.
+        from trace_app.core import carved_artifacts
+        artifacts = [row for kind in carved_artifacts.ACTIVITY_TYPES
+                     for row in case.carved_files(evidence_id, kind,
+                                                  limit=10 ** 6)]
+        records += carved_artifacts.activity_records(
+            artifacts, lambda row: read_carved(
+                image_handler.read, row['offset'], row['size'],
+                row.get('fragments')))
     except ActivityCancelled:
         case.set_user_activity_state(evidence_id, 'cancelled')
         return 0

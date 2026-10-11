@@ -416,27 +416,34 @@ def records(data):
     while position + 512 <= len(data):
         block = data[position:position + CHUNK_SIZE]
         position += CHUNK_SIZE
-        if block[:8] != CHUNK_MAGIC:
-            continue
+        yield from chunk_records(block)
+
+
+def chunk_records(block):
+    """The readable events of one 64 KB chunk -- a log's, or one carved
+    alone from free space (its templates live in the chunk, so a chunk is
+    readable without the file it came from)."""
+    if block[:8] != CHUNK_MAGIC:
+        return
+    try:
+        chunk = Chunk(block)
+    except EvtxError:
+        return
+    free = struct.unpack_from('<I', block, 48)[0]
+    at = 512
+    limit = min(free or len(block), len(block))
+    while at + 24 <= limit:
+        if block[at:at + 4] != b'\x2a\x2a\x00\x00':
+            break
+        size = struct.unpack_from('<I', block, at + 4)[0]
+        if size < 28 or at + size > len(block):
+            break
+        record_id, written = struct.unpack_from('<QQ', block, at + 8)
+        root = Element('')
         try:
-            chunk = Chunk(block)
-        except EvtxError:
-            continue
-        free = struct.unpack_from('<I', block, 48)[0]
-        at = 512
-        limit = min(free or len(block), len(block))
-        while at + 24 <= limit:
-            if block[at:at + 4] != b'\x2a\x2a\x00\x00':
-                break
-            size = struct.unpack_from('<I', block, at + 4)[0]
-            if size < 28 or at + size > len(block):
-                break
-            record_id, written = struct.unpack_from('<QQ', block, at + 8)
-            root = Element('')
-            try:
-                chunk.parse(at + 24, root, at + size - 4)
-                yield summarise(record_id, times.filetime(written), root)
-            except (EvtxError, struct.error, IndexError, KeyError,
-                    UnicodeDecodeError, RecursionError):
-                pass
-            at += size
+            chunk.parse(at + 24, root, at + size - 4)
+            yield summarise(record_id, times.filetime(written), root)
+        except (EvtxError, struct.error, IndexError, KeyError,
+                UnicodeDecodeError, RecursionError):
+            pass
+        at += size

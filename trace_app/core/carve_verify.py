@@ -524,7 +524,30 @@ def _wal(content):
     return checks, _passed(checks)
 
 
-_CHECKERS = {'jpg': _jpeg, 'jpeg': _jpeg, 'png': _png, 'gif': _gif,
+def _evtx_chunk(content):
+    from trace_app.core.carving_formats import evtx_chunk_ok
+    ok = evtx_chunk_ok(content)
+    return [[ok, "Header and event-record CRC-32s match"]], ok
+
+
+def _multi_sector(content):
+    from trace_app.core.carving_formats import fixups_ok
+    ok = fixups_ok(content)
+    return [[ok, "Every sector carries the record's update sequence "
+                 "number (no torn or foreign sector)"]], ok
+
+
+def _hbin(content):
+    from trace_app.core.carving_formats import measure_hbin_run, Source
+    found = measure_hbin_run(Source(content, 0), 0)
+    ok = bool(found) and found[0] == len(content)
+    return [[ok, "Each bin's cells add up to its size, and the bins' "
+                 "offsets follow on"]], False
+
+
+_CHECKERS = {'evtxchunk': _evtx_chunk, 'mftrecord': _multi_sector,
+             'indx': _multi_sector, 'hbin': _hbin,
+             'jpg': _jpeg, 'jpeg': _jpeg, 'png': _png, 'gif': _gif,
              'bmp': _bmp, 'pdf': _pdf, 'zip': _zip, 'gz': _gzip,
              'sqlite': _sqlite, 'wal': _wal, 'pe': _pe, 'exe': _pe, 'dll': _pe,
              'sys': _pe, 'ole': _ole, 'html': _html}

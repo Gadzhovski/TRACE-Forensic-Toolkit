@@ -63,6 +63,10 @@ CARVE_CATEGORIES = {
     "Email": ["PST", "OST", "MBOX", "EML"],
     "Databases & logs": ["SQLITE", "WAL", "EVTX", "REGF"],
     "Windows artifacts": ["LNK"],
+    # What survives of a deleted log, MFT, folder index or hive: records
+    # checked by their own CRCs and fixups (core/carved_artifacts reads
+    # them into the activity and NTFS views).
+    "System records": ["EVTXCHUNK", "MFTRECORD", "INDX", "HBIN"],
     "Executables": ["EXE", "DLL", "SYS", "ELF", "MACHO", "APK", "JAR"],
     "Archives": ["ZIP", "GZ", "BZ2", "XZ", "TAR", "RAR", "7Z"],
     "Audio": ["WAV", "MP3", "OGG", "OPUS", "M4A"],
@@ -97,6 +101,8 @@ EXTENSION_CARVER = {
                                   'm4a', 'cr3')},
     **{ext: 'riff' for ext in ('wav', 'webp', 'avi')},
     'sqlite': 'sqlite', 'wal': 'wal', 'regf': 'regf', 'evtx': 'evtx',
+    'evtxchunk': 'evtxchunk', 'mftrecord': 'mftrecord', 'indx': 'indx',
+    'hbin': 'hbin',
     'pst': 'pst', 'ost': 'pst',
     'exe': 'pe', 'dll': 'pe', 'sys': 'pe',
     'lnk': 'lnk', 'mp3': 'mp3', 'ogg': 'ogg', 'opus': 'ogg', 'flv': 'flv',
@@ -1089,7 +1095,10 @@ class Carver:
     #: every family: its frame sync is weak enough to occur in any audio or
     #: video stream, and an MPEG's or an AVI's audio is that file's, not an
     #: MP3 of its own.
-    _MEASURE_FAMILY = {}
+    _MEASURE_FAMILY = {'measure_evtx_chunk': 'evtxchunk',
+                       'measure_mft_record': 'mftrecord',
+                       'measure_indx': 'indx',
+                       'measure_hbin_run': 'hbin'}
 
     def _family(self, measure):
         if measure is formats.measure_mp3:
@@ -1114,6 +1123,43 @@ class Carver:
     def carve_evtx_files(self, chunk, base_offset):
         self._carve_sized(chunk, base_offset, (b'ElfFile\x00',),
                           formats.measure_evtx)
+
+    def _carve_records(self, chunk, base_offset, signature, measure,
+                       within=None):
+        """System records at sector starts (anywhere in memory), unless
+        inside a whole file of family `within` already carved -- a log's
+        chunks are part of the log."""
+        source = formats.Source(chunk, base_offset, self._reader,
+                                self._end(base_offset))
+        cursor = 0
+        while True:
+            hit = chunk.find(signature, cursor)
+            if hit == -1:
+                break
+            cursor = hit + 1
+            offset = base_offset + hit
+            if not self._starts_a_file(offset):
+                continue
+            if within and self.inside_carved(offset, family=within):
+                continue
+            self._try_carve(source, offset, measure, (),
+                            self._family(measure))
+
+    def carve_evtx_chunks(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'ElfChnk\x00',
+                            formats.measure_evtx_chunk, within='evtx')
+
+    def carve_mft_records(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'FILE',
+                            formats.measure_mft_record)
+
+    def carve_indx_records(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'INDX',
+                            formats.measure_indx)
+
+    def carve_hbin_runs(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'hbin',
+                            formats.measure_hbin_run, within='regf')
 
     def carve_pst_files(self, chunk, base_offset):
         self._carve_sized(chunk, base_offset, (b'!BDN',), formats.measure_pst)
@@ -1223,6 +1269,10 @@ class Carver:
         'wal': carve_wal_files,
         'regf': carve_regf_files,
         'evtx': carve_evtx_files,
+        'evtxchunk': carve_evtx_chunks,
+        'mftrecord': carve_mft_records,
+        'indx': carve_indx_records,
+        'hbin': carve_hbin_runs,
         'pst': carve_pst_files,
         'pe': carve_pe_files,
         'lnk': carve_lnk_files,
@@ -1250,7 +1300,8 @@ class Carver:
 #: then recognised as inside a file already carved, rather than carved again
 #: as files of their own. MP3 last -- its frame sync is the weakest signature.
 _CARVE_ORDER = [
-    'pst', 'sqlite', 'wal', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
+    'pst', 'sqlite', 'wal', 'regf', 'evtx', 'evtxchunk', 'hbin', 'mftrecord',
+    'indx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
     'ogg', 'wmv', 'zip', 'tar', 'tar_v7', 'gz', 'bz2', 'xz', '7z', 'rar',
     'ole', 'pdf',
     'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'raf',
@@ -1965,7 +2016,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     it found. `progress(position, size, found)` as in carve_image;
     `on_file(record)` hears of each file as it is written.
     """
-    from trace_app.core import carve_origin
+    from trace_app.core import carve_origin, carved_artifacts
+    from trace_app.core.case import make_span_ref
     types = [t.lower() for t in file_types]
     source = source or ('unallocated' if unallocated_only else 'image')
     # Slack is the image's own; the other sources also walk the volumes
@@ -2071,6 +2123,12 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             record = describe_carved(content, file_type, offset, fragments,
                                      source=source, origin=origin)
         case.add_carved(evidence_id, record)
+        if file_type in carved_artifacts.FS_TYPES:
+            # An MFT or index record: the names and times it holds, as
+            # file-system events (removed with the carve).
+            case.add_fs_events(evidence_id, carved_artifacts.fs_rows(
+                file_type, content,
+                make_span_ref(0, offset, offset + len(content)), offset))
         # Judged like a file on disk, while its bytes are in hand: a carved
         # executable, encrypted blob or located photo becomes a finding.
         if analyse_carves:

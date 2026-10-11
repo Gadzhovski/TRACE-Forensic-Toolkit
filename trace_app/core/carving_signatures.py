@@ -731,7 +731,34 @@ def _valid_wal(data):
     return _remeasure(measure_sqlite_wal, data)
 
 
+def _valid_evtx_chunk(data):
+    from trace_app.core.carving_formats import measure_evtx_chunk
+    return _remeasure(measure_evtx_chunk, data)
+
+
+def _valid_mft_record(data):
+    from trace_app.core.carving_formats import measure_mft_record
+    from trace_app.core.ntfs import parse_record
+    if not _remeasure(measure_mft_record, data):
+        return False
+    entry = parse_record(data, 0)
+    # A record that names nothing says nothing: kept only with a name.
+    return entry is not None and bool(entry.names)
+
+
+def _valid_indx(data):
+    from trace_app.core.carving_formats import measure_indx
+    return _remeasure(measure_indx, data)
+
+
+def _valid_hbin(data):
+    from trace_app.core.carving_formats import measure_hbin_run
+    return _remeasure(measure_hbin_run, data)
+
+
 _VALIDATORS = {
+    'evtxchunk': _valid_evtx_chunk, 'mftrecord': _valid_mft_record,
+    'indx': _valid_indx, 'hbin': _valid_hbin,
     'sqlite': _valid_sqlite, 'wal': _valid_wal, 'regf': _valid_regf,
     'evtx': _valid_evtx,
     'pst': _valid_pst, 'ost': _valid_pst,

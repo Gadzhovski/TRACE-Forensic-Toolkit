@@ -2045,6 +2045,13 @@ class Case:
         for table in ('file_analysis', 'file_findings'):
             self._db.execute(f"DELETE FROM {table} WHERE evidence_id = ? AND "
                              f"path LIKE '{CARVED_PATHS}'", (evidence_id,))
+        # And the file-system events its MFT and index records gave
+        # (core/carved_artifacts).
+        from trace_app.core.carved_artifacts import FS_SOURCES
+        self._db.execute(
+            f"DELETE FROM fs_events WHERE evidence_id = ? AND source IN "
+            f"({','.join('?' * len(FS_SOURCES))})",
+            (evidence_id,) + FS_SOURCES)
         self._db.commit()
 
     def add_carved(self, evidence_id, record):
