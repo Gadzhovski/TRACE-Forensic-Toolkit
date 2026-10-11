@@ -232,6 +232,13 @@ jobs:
           sudo python3 tools/testdata/build/make_veracrypt.py
           sudo python3 tools/testdata/build/make_f2fs.py
           sudo chown -R "$USER" test_images/built
+          # Chromium's own Local/Session Storage and IndexedDB, written by
+          # Playwright's pinned Chromium (make_chromium_storage.py).
+          python3 -m venv /tmp/playwright
+          /tmp/playwright/bin/pip install -q playwright==1.55.0
+          /tmp/playwright/bin/playwright install --with-deps chromium \
+            >/dev/null
+          /tmp/playwright/bin/python tools/testdata/build/make_chromium_storage.py
 
       # Real artifacts -- hives, logs, databases, small images -- pinned by
       # SHA-256 (tools/testdata/samples.py).

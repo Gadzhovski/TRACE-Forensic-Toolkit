@@ -1207,6 +1207,7 @@ def _homes(volume):
 
 
 def _browsers(volume, step):
+    from trace_app.core.activity import chromium_storage
     out = []
     for user, home in _homes(volume):
         base = _split(home.path)
@@ -1216,6 +1217,13 @@ def _browsers(volume, step):
                 continue
             profiles = [folder] + volume.children(folder, dirs=True)
             for profile in profiles:
+                # What sites kept: Local and Session Storage, IndexedDB.
+                if chromium_storage.has_storage(volume,
+                                                _split(profile.path)):
+                    out += chromium_storage.profile_records(
+                        volume, _split(profile.path),
+                        browsers.browser_name(profile.path + '\\') or
+                        'Chromium', user, step)
                 history = volume.find(*_split(profile.path), 'History')
                 if history is None or history.is_dir:
                     continue
@@ -1237,6 +1245,12 @@ def _browsers(volume, step):
                                     volume.read(wal) if wal else None, user,
                                     entry.path, volume.ref(entry), 'Firefox',
                                     profile=profile.name)
+        # Electron apps: each a Chromium profile of its own.
+        for app, places in chromium_storage.ELECTRON_APPS.items():
+            for parts in places:
+                if chromium_storage.has_storage(volume, base + list(parts)):
+                    out += chromium_storage.profile_records(
+                        volume, base + list(parts), app, user, step)
         safari = volume.find(*base, 'Library', 'Safari', 'History.db')
         if safari is not None:
             step(safari.path)
