@@ -452,6 +452,8 @@ class _Load(QThread):
                     if s in (filters.get('sources') or ()))
                 result['rows'] = timeline.events(connection, filters,
                                                  SHOWN_LIMIT)
+                result['fs_kinds'] = timeline.fs_kinds(
+                    connection, filters.get('evidence_id'))
             finally:
                 connection.close()
         except sqlite3.Error as exc:
@@ -621,12 +623,12 @@ class TimelinePanel(QWidget):
             QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.fs_combo.setMinimumContentsLength(18)
         self.fs_combo.setObjectName("timelineFsCombo")
-        for label, value in (("$SI and $FN times", 'both'),
-                             ("$STANDARD_INFORMATION only", 'SI'),
-                             ("$FILE_NAME only", 'FN')):
-            self.fs_combo.addItem(label, value)
-        self.fs_combo.setToolTip("Which NTFS times the File system source "
-                                 "shows")
+        # Filled from what the case holds (_fill_fs_combo): NTFS's
+        # $SI / $FN / index-slack times, other file systems' own times.
+        self.fs_combo.addItem("All file-system times", 'both')
+        self.fs_combo.setToolTip("Which file-system times the File system "
+                                 "source shows")
+        self.fs_combo.setVisible(False)
         self.fs_combo.currentIndexChanged.connect(self._fs_changed)
         row.addWidget(self.fs_combo)
         self.text_input = QLineEdit()
@@ -987,6 +989,8 @@ class TimelinePanel(QWidget):
                 filters['start'], filters['end']
         if result.get('bounds') and result['bounds'][0]:
             self._case_bounds = result['bounds']
+        if self._fill_fs_combo(result.get('fs_kinds') or []):
+            return                  # the narrowing chosen is gone: re-read
         self.counts = result['counts']
         self.total = result['total']
         self.model.set_rows(result['rows'], self._names)
@@ -1000,6 +1004,35 @@ class TimelinePanel(QWidget):
                            f"({self.counts.get(key, 0):,})")
         self.back_button.setEnabled(bool(self._history))
         self.status_label.setText(self._status(result))
+
+    def _fill_fs_combo(self, kinds):
+        """Offer the file-system time kinds the case (or image) holds --
+        nothing to choose, nothing shown. Returns True when the chosen kind
+        is no longer there and the timeline is read again without it."""
+        labels = {key: label for key, label, _s in timeline.FS_KINDS}
+        wanted = ['both'] + list(kinds)
+        present = [self.fs_combo.itemData(i)
+                   for i in range(self.fs_combo.count())]
+        if present != wanted:
+            self.fs_combo.blockSignals(True)
+            self.fs_combo.clear()
+            self.fs_combo.addItem("All file-system times", 'both')
+            for key in kinds:
+                self.fs_combo.addItem(labels[key], key)
+            self.fs_combo.blockSignals(False)
+        self.fs_combo.setVisible(len(kinds) > 1)
+        chosen = self.filters.get('fs_attributes') or 'both'
+        if chosen not in wanted:
+            self.filters['fs_attributes'] = 'both'
+            self.fs_combo.blockSignals(True)
+            self.fs_combo.setCurrentIndex(0)
+            self.fs_combo.blockSignals(False)
+            self.refresh()
+            return True
+        self.fs_combo.blockSignals(True)
+        self.fs_combo.setCurrentIndex(max(0, self.fs_combo.findData(chosen)))
+        self.fs_combo.blockSignals(False)
+        return False
 
     def _status(self, result):
         if result.get('error'):

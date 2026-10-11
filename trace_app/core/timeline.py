@@ -100,7 +100,35 @@ def describe_kind(row):
 
 #: What each file-system time source is, in the Type column.
 FS_ATTRIBUTES = {'SI': '$SI', 'FN': '$FN', 'I30': '$I30 slack',
-                 'FS': 'file system', 'FS-local': 'file system, local time'}
+                 'FS': 'file system', 'FS-local': 'file system, local time',
+                 'SI (carved)': '$SI, carved', 'FN (carved)': '$FN, carved',
+                 'I30 (carved)': '$I30, carved'}
+
+#: The kinds of file-system time the File system source can be narrowed
+#: to: (key, label, fs_events sources). NTFS keeps two sets of times per
+#: file and index-slack copies; every other file system (ext, Btrfs, XFS,
+#: F2FS, APFS, FAT, exFAT, HFS+) its own one set. Only the kinds a case
+#: holds are offered (fs_kinds).
+FS_KINDS = (
+    ('SI', '$STANDARD_INFORMATION (NTFS)', ('SI', 'SI (carved)')),
+    ('FN', '$FILE_NAME (NTFS)', ('FN', 'FN (carved)')),
+    ('I30', '$I30 index slack (NTFS)', ('I30', 'I30 (carved)')),
+    ('FS', 'File system times (non-NTFS)', ('FS', 'FS-local')),
+)
+_FS_KIND_SOURCES = {key: sources for key, _label, sources in FS_KINDS}
+
+
+def fs_kinds(connection, evidence_id=None):
+    """The FS_KINDS keys the case's file-system events hold (for one
+    image, or all)."""
+    query = "SELECT DISTINCT source FROM fs_events"
+    params = []
+    if evidence_id is not None:
+        query += " WHERE evidence_id = ?"
+        params.append(evidence_id)
+    present = {row[0] for row in connection.execute(query, params)}
+    return [key for key, _label, sources in FS_KINDS
+            if present & set(sources)]
 
 
 # --- the query -------------------------------------------------------------------
@@ -174,9 +202,10 @@ def _branches(filters):
         if where is not None:
             sql, params = where
             attribute = filters.get('fs_attributes') or 'both'
-            if attribute in ('SI', 'FN'):
-                sql += " AND e.source = ?"
-                params.append(attribute)
+            if attribute in _FS_KIND_SOURCES:
+                sources = _FS_KIND_SOURCES[attribute]
+                sql += f" AND e.source IN ({','.join('?' * len(sources))})"
+                params.extend(sources)
             if deleted_only:
                 sql += " AND e.deleted = 1"
             out.append((

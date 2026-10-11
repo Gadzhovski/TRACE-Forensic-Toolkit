@@ -271,3 +271,86 @@ def test_zoom_in_keeps_the_pointer_and_a_minimum_span():
     assert timeline.clamp_range('2008-10-21 00:00:00',
                                 '2008-10-21 00:00:00') == \
         ('2008-10-20 23:59:55', '2008-10-21 00:00:05')
+
+
+def _fs_case(tmp_path, name, sources):
+    """A case whose only events are file-system times of `sources`."""
+    from trace_app.core.case import Case
+    case = Case.create(str(tmp_path / name), name)
+    evidence = case.add_evidence(str(tmp_path / f'{name}.dd'))
+    rows = []
+    for number, source in enumerate(sources):
+        rows.append((f'p0:i{number}:s0', f'/file{number}',
+                     f'2024-01-0{number % 9 + 1} 10:00:00', 'M', source, 0))
+    case.add_fs_events(evidence, rows)
+    case.commit()
+    return case, evidence
+
+
+def test_file_system_time_kinds_follow_what_the_case_holds(tmp_path):
+    """A Linux image has only its file system's own times: no $SI/$FN to
+    narrow to. NTFS has $SI, $FN and index slack (carved ones too)."""
+    from trace_app.core import timeline
+    linux, _ = _fs_case(tmp_path, 'linux', ['FS', 'FS', 'FS-local'])
+    windows, _ = _fs_case(tmp_path, 'windows',
+                          ['SI', 'FN', 'I30', 'SI (carved)'])
+    mixed, _ = _fs_case(tmp_path, 'mixed', ['SI', 'FN', 'FS'])
+    try:
+        with _connection(linux) as connection:
+            assert timeline.fs_kinds(connection) == ['FS']
+            # Every kind narrows to its own sources only.
+            assert timeline.count(connection, _filters(
+                sources=['fs'], fs_attributes='FS')) == 3
+            assert timeline.count(connection, _filters(
+                sources=['fs'], fs_attributes='SI')) == 0
+        with _connection(windows) as connection:
+            assert timeline.fs_kinds(connection) == ['SI', 'FN', 'I30']
+            si = timeline.events(connection, _filters(
+                sources=['fs'], fs_attributes='SI'))
+            # The carved $SI time counts as $SI.
+            assert sorted(r['kind'].split(' ', 1)[1] for r in si) == \
+                ['SI', 'SI (carved)']
+        with _connection(mixed) as connection:
+            assert timeline.fs_kinds(connection) == ['SI', 'FN', 'FS']
+    finally:
+        for case in (linux, windows, mixed):
+            case.close()
+
+
+def test_the_panel_offers_only_kinds_there_are(qapp, tmp_path):
+    """Nothing to choose -- a Linux-only case -- and the choice is hidden;
+    an NTFS case offers its kinds; a choice gone with the case is
+    dropped."""
+    import time
+    from tests.conftest import pump
+    from trace_app.ui.viewers.timeline_panel import TimelinePanel
+    linux, _ = _fs_case(tmp_path, 'linux', ['FS', 'FS'])
+    windows, _ = _fs_case(tmp_path, 'windows', ['SI', 'FN', 'I30'])
+    panel = TimelinePanel()
+
+    def load(case):
+        panel.set_case(case)
+        panel.refresh(find_bounds=True)
+        deadline = time.monotonic() + 10
+        while (panel._loads or panel._dirty) and \
+                time.monotonic() < deadline:
+            pump(qapp, 0.05)
+    try:
+        load(windows)
+        items = [panel.fs_combo.itemText(i)
+                 for i in range(panel.fs_combo.count())]
+        assert items == ['All file-system times',
+                         '$STANDARD_INFORMATION (NTFS)', '$FILE_NAME (NTFS)',
+                         '$I30 index slack (NTFS)']
+        assert not panel.fs_combo.isHidden()
+        panel.fs_combo.setCurrentIndex(1)             # $SI only
+        pump(qapp, 0.3)
+        assert panel.filters['fs_attributes'] == 'SI'
+        load(linux)
+        assert panel.fs_combo.isHidden()
+        assert panel.filters['fs_attributes'] == 'both'
+        assert panel.counts.get('fs') == 2
+    finally:
+        panel.deleteLater()
+        linux.close()
+        windows.close()
