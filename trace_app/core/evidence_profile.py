@@ -154,4 +154,6 @@ def not_applicable(found):
     if found['logical']:
         out['carve'] = ("Logical evidence holds files, not disk space: "
                         "there is nothing between them to carve.")
+        out['index_free'] = ("Logical evidence holds files, not disk "
+                             "space: it has no free space to search.")
     return out

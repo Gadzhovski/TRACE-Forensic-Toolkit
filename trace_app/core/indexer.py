@@ -56,18 +56,43 @@ class IndexerCancelled(Exception):
     """The caller asked the run to stop."""
 
 
+def _scope_signature(scope):
+    """The scope a run was made with, as index_state keeps it."""
+    import json
+    return '' if scope is None else json.dumps(scope.to_dict(),
+                                               sort_keys=True)
+
+
 def index_evidence(image_handler, index, evidence_id, progress=None,
-                   should_stop=None, scope=None):
+                   should_stop=None, scope=None, resume=False):
     """Index every file in one piece of evidence -- every file in `scope`
-    (core/scope.Scope; None: every file, and the free space).
+    (core/scope.Scope; None: every file). Free space and memory files are
+    `index_free_space`'s, a job of their own.
 
     `progress(done, total, path)` is called as the walk proceeds, and
     `should_stop()` is consulted often enough that Cancel feels immediate.
 
-    Returns the number of items indexed.
+    `resume`: a run that stopped (cancelled, failed, or cut off by TRACE
+    closing) with the same scope continues -- files already indexed are
+    skipped (`SearchIndex.resume_point`) -- rather than starting over.
+
+    Returns the number of files indexed.
     """
-    index.clear_evidence(evidence_id)
-    index.set_state(evidence_id, INDEX_RUNNING, files_done=0)
+    signature = _scope_signature(scope)
+    state = index.state(evidence_id) or {}
+    resuming = bool(resume and state.get('status') in (
+        INDEX_RUNNING, INDEX_CANCELLED, INDEX_FAILED)
+        and (state.get('scope') or '') == signature
+        and state.get('files_done'))
+    if resuming:
+        indexed = index.resume_point(evidence_id)
+        logger.info("Resuming the index of evidence %s: %d file(s) already "
+                    "indexed", evidence_id, len(indexed))
+    else:
+        indexed = set()
+        index.clear_evidence(evidence_id, keep_free=True)
+    index.set_state(evidence_id, INDEX_RUNNING, files_done=0,
+                    scope=signature)
 
     from trace_app.core.walk import volume_offsets
     offsets = volume_offsets(image_handler)
@@ -116,20 +141,14 @@ def index_evidence(image_handler, index, evidence_id, progress=None,
                 done = _index_partition(
                     image_handler, index, evidence_id, offset,
                     done, total, progress, should_stop, matchers[offset],
-                    scope is None or scope.covers_free_space, texts)
+                    scope is None or scope.covers_free_space, texts,
+                    indexed)
                 if done == before:
                     logger.debug("Volume at %s contributed nothing", offset)
             texts.close()
         except BaseException:
             texts.close(cancel=True)
             raise
-        if INDEX_UNALLOCATED and (scope is None or scope.covers_free_space):
-            _index_unallocated(image_handler, index, evidence_id, progress,
-                               should_stop)
-        if INDEX_MEMORY_FILES and (scope is None or scope.covers_free_space):
-            _index_memory_files(image_handler, index, evidence_id, progress,
-                                should_stop)
-
         index.commit()
         index.set_state(evidence_id, INDEX_DONE, files_done=done,
                         files_total=total)
@@ -243,7 +262,7 @@ def _count_files(image_handler, offset, should_stop, matcher=None):
 
 def _index_partition(image_handler, index, evidence_id, offset, done, total,
                      progress, should_stop, matcher=None, slack=True,
-                     texts=None):
+                     texts=None, indexed=frozenset()):
     fs_info = image_handler.get_fs_info(offset)
     if fs_info is None:
         logger.debug("No filesystem to index at offset %s", offset)
@@ -292,14 +311,19 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
             done += 1
             if progress:
                 progress(done, total, child_path)
+            sequence = getattr(meta, 'seq', None)
+            if indexed and make_artifact_ref(offset, inode,
+                                             sequence) in indexed:
+                continue            # read by the run this one resumes
 
             _index_file(image_handler, index, evidence_id, offset, inode,
-                        getattr(meta, 'seq', None), name, child_path,
+                        sequence, name, child_path,
                         meta.size, _entry_times(image_handler, offset,
                                                 meta), texts)
             if slack and int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
                 _index_slack(image_handler, index, evidence_id, fs_info,
-                             offset, inode, name, child_path, meta.size)
+                             offset, inode, name, child_path, meta.size,
+                             texts)
 
             # Committing periodically means a cancel or a crash keeps most of
             # the work rather than none of it.
@@ -312,8 +336,70 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
     return done
 
 
+#: Free space indexed between checkpoints (bytes): what a resumed run
+#: reads again at most.
+FREE_CHECKPOINT = 64 * 1024 * 1024
+
+
+def index_free_space(image_handler, index, evidence_id, progress=None,
+                     should_stop=None, scope=None, resume=True):
+    """The text in an image's free space and its page, swap and
+    hibernation files -- the slow part of indexing, a job of its own so
+    the file index is searchable first. Resumable: a stopped run continues
+    from its last checkpoint (`FREE_CHECKPOINT`). Returns the items
+    written; 0 when the case setting or `scope` leaves free space out."""
+    if scope is not None and not scope.covers_free_space:
+        logger.info("Free space is outside the scope: not indexed")
+        return 0
+    from trace_app.core.search_index import INDEX_DONE as DONE
+    state = index.state(evidence_id) or {}
+    start = (state.get('free_done') or 0) if resume and \
+        index.free_unfinished(evidence_id) else 0
+    if start:
+        logger.info("Resuming free-space indexing of evidence %s at %.1f MB",
+                    evidence_id, start / 1048576)
+        index.clear_free(evidence_id, ('memory',))   # that step restarts
+    else:
+        index.clear_free(evidence_id)
+    position = [start, 0]           # bytes of free space done, of total
+
+    def checkpoint(read, total):
+        position[:] = [read, total]
+        index.commit()
+        index.set_free_state(evidence_id, INDEX_RUNNING, read, total)
+
+    index.set_free_state(evidence_id, INDEX_RUNNING, start, 0)
+    count = 0
+    try:
+        if INDEX_UNALLOCATED:
+            count += _index_unallocated(image_handler, index, evidence_id,
+                                        progress, should_stop, skip=start,
+                                        checkpoint=checkpoint)
+        if INDEX_MEMORY_FILES:
+            count += _index_memory_files(image_handler, index, evidence_id,
+                                         progress, should_stop)
+    except IndexerCancelled:
+        # The unallocated step checkpointed where it stopped; a stop in
+        # the memory files restarts that step (its rows are cleared).
+        index.set_free_state(evidence_id, INDEX_CANCELLED, *position)
+        logger.info("Free-space indexing cancelled at %.1f MB",
+                    position[0] / 1048576)
+        return count
+    except Exception as exc:
+        # Back to the last checkpoint: rows after it would be read again
+        # by the resume, and counted twice.
+        index.rollback()
+        index.set_free_state(evidence_id, INDEX_FAILED, *position)
+        logger.error("Free-space indexing failed: %s", exc)
+        raise
+    index.commit()
+    index.set_free_state(evidence_id, DONE, position[1] or position[0],
+                         position[1] or position[0])
+    return count
+
+
 def _index_unallocated(image_handler, index, evidence_id, progress=None,
-                       should_stop=None):
+                       should_stop=None, skip=0, checkpoint=None):
     """The text in free space -- outside every partition and in clusters no
     live file holds -- as items of kind 'unallocated', one per piece with
     text, referenced by byte span so a hit previews from the image. Text in
@@ -325,21 +411,40 @@ def _index_unallocated(image_handler, index, evidence_id, progress=None,
     size = image_handler.get_size()
     if not size:
         return 0                    # logical evidence: no free space
+    if progress:
+        progress(0, 0, "Finding unallocated space")
     free = free_ranges(0, size, allocation_map(image_handler))
     total = sum(end - begin for begin, end in free)
     sector = image_handler.sector_size or 512
     count = read = 0
+    since = 0                       # bytes since the last checkpoint
+    if checkpoint:
+        checkpoint(min(skip, total), total)
     for begin, end in free:
         for at in range(begin, end, UNALLOCATED_PIECE):
             if should_stop and should_stop():
+                if checkpoint:
+                    # Exactly here: the rows written so far are kept, and
+                    # a resume starts after them, never among them.
+                    checkpoint(read, total)
                 raise IndexerCancelled()
             length = min(UNALLOCATED_PIECE, end - at)
+            if read + length <= skip:
+                read += length      # indexed by the run this resumes
+                continue
+            if checkpoint and since >= FREE_CHECKPOINT:
+                checkpoint(read, total)
+                since = 0
             try:
-                text = slack.text_of(image_handler.read(at, length))
+                data = image_handler.read(at, length)
+                # Most free space is zeros: nothing to extract, and
+                # extracting from them was most of this step's time.
+                text = slack.text_of(data) if data.strip(b'\0') else ''
             except Exception as exc:
                 logger.debug("Free space at %d unreadable: %s", at, exc)
-                continue
+                text = ''
             read += length
+            since += length
             if progress:
                 progress(read, total, "Unallocated space")
             if not text:
@@ -351,6 +456,8 @@ def _index_unallocated(image_handler, index, evidence_id, progress=None,
                            f"[unallocated]/sectors {first}-{last}", text,
                            length)
             count += 1
+    if checkpoint:
+        checkpoint(read, total)
     logger.info("Unallocated space: %d piece(s) with text in %.1f MB",
                 count, total / (1024 * 1024))
     return count
@@ -399,7 +506,7 @@ def _index_memory_files(image_handler, index, evidence_id, progress=None,
 
 
 def _index_slack(image_handler, index, evidence_id, fs_info, offset, inode,
-                 name, path, size):
+                 name, path, size, texts=None):
     """The text in a live file's slack, as an item of its own: whatever
     was in its last cluster before it (core/slack.py). Referenced by its
     byte span, so it previews from the image."""
@@ -416,11 +523,19 @@ def _index_slack(image_handler, index, evidence_id, fs_info, offset, inode,
     except Exception as exc:
         logger.debug("Slack of %s unreadable: %s", path, exc)
         return
-    if text:
-        index.add_item(evidence_id,
-                       make_span_ref(0, region[0], region[0] + region[1]),
-                       'slack', f"{name} (slack)", f"{path} [slack]", text,
-                       region[1])
+    if not text:
+        return
+    ref = make_span_ref(0, region[0], region[0] + region[1])
+    if texts is not None:
+        # In the walk's order, behind its file's row: a resumed run trusts
+        # that order (SearchIndex.resume_point).
+        from trace_app.core.search_index import entities_of
+        texts.put((evidence_id, ref, 'slack', f"{name} (slack)",
+                   f"{path} [slack]", region[1], {}),
+                  text, entities_of(text))
+    else:
+        index.add_item(evidence_id, ref, 'slack', f"{name} (slack)",
+                       f"{path} [slack]", text, region[1])
 
 
 def _entry_times(image_handler, offset, meta):

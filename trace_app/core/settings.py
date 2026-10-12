@@ -141,8 +141,10 @@ CASE = {
                           "The text in free space -- between partitions, "
                           "and the clusters no live file holds -- is indexed "
                           "too, as items named by sector, so a search finds "
-                          "what is in no file. Off: files, slack and carves "
-                          "only (faster on a large, mostly empty disk)."),
+                          "what is in no file -- by the module Search free "
+                          "space and memory files (Recovery), a job of its "
+                          "own after the file index. Off: that module "
+                          "indexes the memory files only."),
     'indicators': (list(INDICATORS), "Indicators extracted",
                    "Which kinds indexing extracts. Phone numbers, for one, "
                    "can be noise in some cases."),

@@ -62,7 +62,9 @@ class ProcessWorker(QThread):
             logger.error("%s job could not run: %s", self.kind, exc)
             error = str(exc)
         finally:
-            if process is not None:
+            # Only a started process can be joined: when start() itself
+            # failed, joining raised a second error over the first.
+            if process is not None and self._process is process:
                 process.join(CLOSE_GRACE_SECONDS if self._stop.is_set()
                              else None)
                 if process.is_alive():

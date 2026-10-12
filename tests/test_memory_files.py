@@ -80,12 +80,13 @@ def test_memory_files_are_found_with_their_runs(volume):
 
 def test_search_finds_what_was_in_memory(volume, tmp_path):
     from trace_app.core.case import parse_artifact_ref
-    from trace_app.core.indexer import index_evidence
+    from trace_app.core.indexer import index_evidence, index_free_space
     from trace_app.core.search_index import SearchIndex
     handler = _handler(volume['path'])
     index = SearchIndex(str(tmp_path))
     try:
         index_evidence(handler, index, 1)
+        index_free_space(handler, index, 1)
         index.commit()
         hits = index.search('"Correct-Horse-Battery-Staple-77"')
         memory = [h for h in hits if h.get('kind') == 'memory']
@@ -150,6 +151,7 @@ def test_the_setting_turns_memory_indexing_off(volume, tmp_path,
     index = SearchIndex(str(tmp_path))
     try:
         indexer.index_evidence(handler, index, 1)
+        indexer.index_free_space(handler, index, 1)
         index.commit()
         assert not [h for h in index.search('"Correct-Horse-Battery-Staple-77"')
                     if h.get('kind') == 'memory']

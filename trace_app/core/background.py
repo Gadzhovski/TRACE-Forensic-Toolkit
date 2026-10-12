@@ -177,11 +177,30 @@ def job_index(params, progress, item, should_stop):
         done = index_evidence(
             handler, index, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
-            should_stop=should_stop, scope=_scope(params))
+            should_stop=should_stop, scope=_scope(params),
+            resume=params.get('resume', True))
         # The image's carved files too: a re-index cleared them with the
         # rest of the image's items.
         _index_carved(handler, index, params, should_stop)
         return done
+    finally:
+        _close(index, handler)
+
+
+def job_index_free(params, progress, item, should_stop):
+    """Free space and memory files into the index (indexer.index_free_
+    space): the slow, optional part, after the file index."""
+    from trace_app.core.indexer import index_free_space
+    from trace_app.core.search_index import SearchIndex
+    index = handler = None
+    try:
+        index = SearchIndex(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        return index_free_space(
+            handler, index, params['evidence_id'],
+            progress=lambda done, total, what: progress(done, total, what),
+            should_stop=should_stop, scope=_scope(params),
+            resume=params.get('resume', True))
     finally:
         _close(index, handler)
 
@@ -666,6 +685,7 @@ def job_ping(params, progress, item, should_stop):
 
 JOBS = {
     'index': job_index,
+    'index_free': job_index_free,
     'analysis': job_analysis,
     'activity': job_activity,
     'ntfs': job_ntfs,
