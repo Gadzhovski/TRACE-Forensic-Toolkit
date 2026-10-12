@@ -10,7 +10,7 @@ A forensic tool has to be right, not just work. TRACE is tested the way its resu
 
 <Stats
 	items={[
-		{ value: '~900', label: 'automated tests' },
+		{ value: '~1,300', label: 'automated tests' },
 		{ value: '4', label: 'platforms in CI' },
 		{ value: '3', label: 'Python versions' },
 		{ value: '16', label: 'images with a full manifest' },
@@ -83,6 +83,29 @@ Where another trusted tool reads the same thing, TRACE's output is compared with
 | deleted registry keys and values | NIST's cfreds-2017-winreg hives as they were before the deletion |
 | file systems, partition tables, E01 hashes | The Sleuth Kit's own test images, file by file against fiwalk's DFXML |
 | Sigma | SigmaHQ's 2,547 Windows rules over EVTX-ATTACK-SAMPLES |
+| SquashFS, EROFS, UDF, HFS, JFFS2, F2FS, UBIFS, ZFS | images written by each file system's own tools -- and, for F2FS, UBIFS, UDF and ZFS, by the Linux kernel or OpenZFS in a virtual machine -- compared file by file with what those tools list and extract |
+| ReFS | Nordvik's ReFS 3.2 image: the installer on it equals its publisher's SHA-256 |
+| VeraCrypt and TrueCrypt | volumes made by the official VeraCrypt console, one per encryption and cascade, each decrypting to its file system byte for byte |
+| Android sparse/super, VDI, AFF, compressed disks | each container written and read back by its own tool (lpmake/lpunpack built from AOSP, VBoxManage, AFFLIB) |
+| Notepad tabs | notepad_parser's output on ogmini's real Notepad files, and Notepad's own SHA-256 of each saved file |
+| Chromium cookies, autofill, logins | plaso's Chrome files and Chromium's own test fixtures; a planted password and cookie value must appear nowhere |
+| Chromium Local/Session Storage, IndexedDB | databases written by Chromium itself (Playwright's Chromium 140) |
+
+## Tested less: read before relying on these
+
+Some readers have been checked on few, or only synthetic, samples, because no public evidence exists for them. They work on everything they have been tested with, but confirm important results with a second tool:
+
+- **ReFS** -- one real image (ReFS 3.2). Newer versions (Windows 11's Dev Drive) have not been read from a real volume; deleted files are not listed.
+- **ZFS** -- pools built by OpenZFS 2.2 in a virtual machine. Native encryption, deleted files and raidz expansion are not read; a pool missing two raidz disks cannot be rebuilt.
+- **UBIFS** -- deleted files are not listed.
+- **Cellebrite UFDR** -- no complete public report exists; tested with real `report.xml` fragments in the published layout.
+- **Android `adb backup`** -- tested with backups from an independent writer that follows Android's source, not with backups taken from a phone.
+- **Windows.old** -- tested on a generated folder holding a real registry hive, not on an image of an upgraded PC.
+- **Windows Wi-Fi profiles and Windows Error Reporting** -- tested with Microsoft's published samples.
+- **Chromium cookies, logins, top sites and favicons** -- tested with plaso's files (Chrome 68) and Chromium's fixtures, not a current Chrome profile.
+- **Electron apps** -- their storage is read; no app-specific message parser is included.
+- **Windows dynamic disks, hardware RAID** and some lost-partition cases -- tested only on private training images, so CI does not run those tests.
+- **Not supported yet**: Windows Storage Spaces, VMware VMFS, VeraCrypt's Whirlpool and Streebog hashes and keyfiles, encrypted AFF and AD1, and the compressed parts of `hiberfil.sys`.
 
 ## The packages test themselves
 

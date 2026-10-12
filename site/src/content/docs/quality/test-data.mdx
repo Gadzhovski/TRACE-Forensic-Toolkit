@@ -92,6 +92,11 @@ Real files from the projects that publish them, pinned by commit and SHA-256. Wh
 | [fq](https://github.com/wader/fq) | 2 | macOS shared file lists (`.sfl2`) | recent documents and applications |
 | [Python](https://github.com/python/cpython) | 5 | the standard library's test e-mails | EML reading |
 | [zstd](https://github.com/facebook/zstd) | 7 | golden decompression files, valid and must-fail | TRACE's own zstd decoder (Linux journals) |
+| [Notepad-State-Library (ogmini)](https://github.com/ogmini/Notepad-State-Library), [notepad_parser](https://github.com/AbdulRhmanAlfaifi/notepad_parser) | 38 | Windows 11 Notepad TabState files, old and new layouts | Notepad tabs: fields equal notepad_parser's output, and Notepad's own SHA-256 of each saved file must match |
+| [Chromium](https://chromium.googlesource.com/chromium/src) | 4 | the SQL fixtures Chromium's own migration tests load (Login Data, Favicons, Top Sites) | saved logins, favicons and top sites; a planted password must appear nowhere |
+| [Microsoft Learn](https://github.com/MicrosoftDocs/win32) | 5 | the published WLAN profile samples (personal, enterprise, hidden networks) | Wi-Fi profiles; the key material is never copied |
+| [R. Nordvik's ReFS containers](https://doi.org/10.17632/9d7p6mbhpz.1) (CC BY 4.0) | 2 | ReFS 3.2 and 1.2 volumes Windows wrote | ReFS: the VeraCrypt installer on it must equal VeraCrypt's published SHA-256; ReFS 1.x refused by name |
+| [IPED](https://github.com/sepinf-inc/IPED) | 2 | real Cellebrite `report.xml` fragments | UFDR reading (no complete public UFDR exists) |
 | PuTTY's `pageant.exe`, [bat](https://github.com/sharkdp/bat), [ripgrep](https://github.com/BurntSushi/ripgrep) | 3 | Windows, Linux and macOS (Apple Silicon) executables | PE, ELF and Mach-O parsing compared with **pefile** and **pyelftools**; the Authenticode signer |
 
 ## The carving corpus

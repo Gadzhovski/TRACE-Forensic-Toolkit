@@ -21,12 +21,18 @@ TRACE's [user activity](/features/activity/) module reads these into one record 
 | **LNK** shortcuts, **Jump Lists**, **RecentDocs**, Office recent files | files opened |
 | **USBSTOR**, **DeviceClasses**, **MountPoints2**, **setupapi** logs | USB devices: what, when first and last, which user |
 | **Event logs** (EVTX, and XP `.evt`) | logons and sessions, with service and machine accounts left out |
-| **PowerShell** history and script-block logging (4104) | commands typed and scripts run, blocks joined |
+| **PowerShell** history, transcripts and script-block logging (4104) | commands typed and scripts run, blocks joined; transcripts in any language, with each command's output |
+| **Open/Save dialogs** (ComDlg32) | files opened or saved per extension, each program's last folder |
+| **Notepad tabs** (Windows 11 TabState) | the text of unsaved and closed tabs, unsaved edits replayed |
+| **Wi-Fi profiles** (WLAN AutoConfig) | networks saved: SSID, hidden or not, authentication, encryption (the key never copied) |
+| **Windows Firewall** log (`pfirewall.log`) | connections allowed and dropped |
+| **Windows Error Reporting** (`Report.wer`) | programs that crashed or hung, and when |
 | **SRUM** | application, network and energy use; connectivity |
 | **Windows Timeline** (ActivitiesCache.db) | activity history |
 | **WebCache**, **index.dat** | Internet Explorer and legacy Edge history and downloads |
 | **NetworkList**, **TimeZoneInformation**, **Uninstall**, **CurrentVersion** | networks joined, time zone, installed programs, Windows version |
 | **Recycle Bin** (`$I`/`$R`, INFO2, deleted `$I` records) | what was deleted, from where, when |
+| **Windows.old** | all of the above from the install an upgrade replaced, marked *(Windows.old)* |
 | **Microsoft Defender** MPLog, detection history, quarantine | detections and quarantined files |
 | **thumbcache**, **Thumbs.db**, **Windows Search** index, **RDP bitmap cache** | pictures seen, including of files now gone |
 | **NTFS** `$MFT`, `$UsnJrnl`, `$I30` slack, `$LogFile` | file events, timestomping, traces of deleted files |
@@ -36,12 +42,12 @@ TRACE's [user activity](/features/activity/) module reads these into one record 
 
 | Browser | Read |
 |:--|:--|
-| **Chrome, Edge, Brave, Vivaldi** and other Chromium browsers | history, downloads, searches; deleted history recovered |
+| **Chrome, Edge, Brave, Vivaldi** and other Chromium browsers | history, downloads (with their danger rating), searches; deleted history recovered; cookies (names, never values), form autofill, saved logins (site and user name, never the password), top sites, favicons; Local Storage, Session Storage and IndexedDB with overwritten and deleted values |
 | **Firefox** | history, downloads and searches (`places.sqlite`, older `downloads.sqlite`); deleted history recovered |
 | **Safari** | history |
 | **Internet Explorer** | WebCache and `index.dat` |
 
-Browser profiles are found in Windows, macOS and Linux home folders, and on Android.
+Browser profiles are found in Windows, macOS and Linux home folders, and on Android. Electron apps (Teams, Slack, Discord, Signal, WhatsApp Desktop, Skype, Element) have their Local Storage and IndexedDB read the same way.
 
 </TabItem>
 <TabItem label="macOS" icon="apple">
@@ -73,6 +79,7 @@ Browser profiles are found in Windows, macOS and Linux home folders, and on Andr
 |:--|:--|
 | **iOS backups** | call history, contacts, Messages and iMessage, WhatsApp, accounts, Wi-Fi networks |
 | **Android** (a data partition or `/data/data`) | call log, contacts, SMS, WhatsApp, Chrome, accounts, Wi-Fi (including Android's binary XML), build information |
+| **Cellebrite UFDR** | chats, SMS and MMS, calls, e-mail, contacts, accounts, web history and bookmarks, searches, locations |
 | **Skype** | messages, calls and file transfers |
 | **OneDrive**, **Google Drive** | synced files |
 
