@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from tests.conftest import image_path, pump
+from tests.conftest import close_window, data_path, image_path, pump
 from tools import testdata
 
 pytestmark = [pytest.mark.ui, pytest.mark.images]
@@ -72,7 +72,7 @@ def window(qapp, case_folder, stubbed_dialogs):
     pump(qapp, 0.5)
     win.refresh_analysis_views()        # what app.py does once it is shown
     yield win
-    win.cleanup_resources()
+    close_window(win)
 
 
 @pytest.fixture(scope='module')
@@ -250,7 +250,7 @@ def test_partitions_search_and_empty_files_on_any_file_system(
                     if r.levelno >= logging.WARNING], \
             [r.getMessage() for r in caplog.records]
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_a_finding_from_the_other_image_shows_that_images_bytes(
@@ -470,7 +470,7 @@ def test_menus_toolbar_and_views_are_consistent(qapp):
                 assert view.horizontalHeader().stretchLastSection(), \
                     view.objectName()
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_listing_views_share_the_table(qapp, monkeypatch):
@@ -517,7 +517,7 @@ def test_listing_views_share_the_table(qapp, monkeypatch):
         view.sync_hidden()
         assert view.isRowHidden(1) and not view.isRowHidden(0)
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_icon_views_draw_pictures_as_thumbnails(qapp):
@@ -860,7 +860,7 @@ def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs,
         manifest = (out / 'manifest.csv').read_text(encoding='utf-8')
         assert manifest.count(',yes') == 3
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_carving_an_image_added_to_a_case_carves_only_that_image(
@@ -912,7 +912,7 @@ def test_carving_an_image_added_to_a_case_carves_only_that_image(
             main_window.choose_modules = saved
         assert seen['evidence_ids'] == [new_id]
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_a_carved_archive_is_browsed_like_a_folder(qapp, stubbed_dialogs):
@@ -947,7 +947,7 @@ def test_a_carved_archive_is_browsed_like_a_folder(qapp, stubbed_dialogs):
         assert window.result_viewer.currentWidget() is window.triage_panel
         assert window.triage_panel.tabs.currentWidget() is window.carved_panel
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 # --- indexing and indicators ----------------------------------------------------
@@ -1337,7 +1337,7 @@ def test_bitlocker_and_shadow_copies_in_the_tree(qapp, stubbed_dialogs,
         pump(qapp, 5, lambda: bool(captured))
         assert captured and captured[-1] == expected
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_a_mailbox_browses_like_an_archive(qapp, window):
@@ -1572,21 +1572,110 @@ def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
     panel.report_requested.emit([row])
     assert len(window.case.report_items('timeline')) == before + 1
 
-    # Through the button, as an examiner does it (the save dialog answered).
+    # Through the button's menu, as an examiner does it (the save dialog
+    # answered): TRACE's CSV, then Timesketch JSONL.
     from trace_app.ui.viewers import timeline_panel as module
+    actions = {a.text(): a for a in panel.export_button.menu().actions()}
+    assert set(actions) == {label + '…' for label, _e, _p in
+                            module.timeline_export.FORMATS.values()}
     out = str(tmp_path / 'timeline.csv')
     original = module.QFileDialog.getSaveFileName
     module.QFileDialog.getSaveFileName = staticmethod(
         lambda *a, **k: (out, 'CSV (*.csv)'))
     try:
-        panel.export_button.click()
+        actions['TRACE CSV…'].trigger()
+        assert pump(qapp, 60, lambda: panel._export is None)
+        with open(out, encoding='utf-8-sig', newline='') as handle:
+            rows = list(csv.reader(handle))
+        assert len(rows) - 1 == panel.total
+        assert window.case.activity()[0]['action'] == 'timeline exported'
+        out = str(tmp_path / 'timeline.jsonl')
+        actions['Timesketch JSONL…'].trigger()
+        assert pump(qapp, 60, lambda: panel._export is None)
     finally:
         module.QFileDialog.getSaveFileName = original
-    assert pump(qapp, 60, lambda: panel._export is None)
-    with open(out, encoding='utf-8-sig', newline='') as handle:
-        rows = list(csv.reader(handle))
-    assert len(rows) - 1 == panel.total
-    assert window.case.activity()[0]['action'] == 'timeline exported'
+    with open(out, encoding='utf-8') as handle:
+        assert sum(1 for _line in handle) == panel.total
+    assert 'timeline.jsonl' in window.case.activity()[0]['detail']
+
+
+def test_case_menu_exports_for_other_tools(qapp, window, tmp_path,
+                                           monkeypatch):
+    """Case > Export for Other Tools: CASE/UCO for the whole case, DFXML
+    for one image (the examiner picks which), each audited with its
+    SHA-256 -- or said plainly when the analysis has not run."""
+    import json
+    from trace_app.ui.dialogs import interchange_export as module
+    told = []
+    monkeypatch.setattr(module.message, 'information',
+                        lambda *a, **k: told.append(a[2]))
+    monkeypatch.setattr(module.message, 'warning',
+                        lambda *a, **k: told.append(a[2]))
+    texts = {a.text() for a in window.interchange_actions}
+    assert texts == {text for text, *_rest in module.KINDS.values()}
+    assert all(a.isEnabled() for a in window.interchange_actions)
+    analysed = window.case._db.execute(
+        "SELECT COUNT(*) FROM file_analysis").fetchone()[0]
+    out = str(tmp_path / 'case.jsonld')
+    monkeypatch.setattr(module.QFileDialog, 'getSaveFileName',
+                        staticmethod(lambda *a, **k: (out, '')))
+    written = window.export_for_tools('case')
+    if not analysed:
+        assert written is None and 'file analysis' in told[-1]
+        return
+    assert written == out
+    with open(out, encoding='utf-8') as handle:
+        assert json.load(handle)['@graph']
+    assert window.case.activity()[0]['action'] == 'exported as CASE/UCO'
+    first = window.case.evidence()[0]
+    out = str(tmp_path / 'files.xml')
+    monkeypatch.setattr(module.QInputDialog, 'getItem', staticmethod(
+        lambda *a, **k: (a[3][0], True)))
+    window.export_for_tools('dfxml')
+    assert os.path.exists(out) or 'file analysis' in told[-1]
+    if os.path.exists(out):
+        detail = window.case.activity()[0]['detail']
+        assert f"evidence id={first['id']}" in detail and 'sha256=' in detail
+
+
+def test_an_encrypted_member_opens_with_the_password(qapp, window,
+                                                     monkeypatch):
+    """Opening a WinZip AES member asks for the password -- a wrong one
+    asks again, saying so -- then shows the member; the audit says a
+    password opened it and never which; the password is the session's."""
+    import binascii
+    from PySide6.QtWidgets import QInputDialog
+    from trace_app.core import archives
+    archives.forget_passwords()
+    data = bytearray()
+    with open(data_path('samples', 'libarchive-zip_winzip_aes256.zip.uu'),
+              'rb') as handle:
+        for line in handle:
+            if line.startswith(b'begin') or line.strip() in (b'end', b''):
+                continue
+            count = (line[0] - 32) & 63
+            data += binascii.a2b_uu(line[:(count * 4 + 5) // 3 + 1].rstrip()
+                                    or b' ')
+    answers = iter([('wrong', True), ('password', True)])
+    prompts = []
+
+    def ask(parent, title, label, *rest, **kw):
+        prompts.append(label)
+        return next(answers)
+    monkeypatch.setattr(QInputDialog, 'getText', staticmethod(ask))
+    window._archive_stack = [('secret.zip', bytes(data), {})]
+    try:
+        window.open_archive_member_row({'archive_member': 'README',
+                                        'name': 'README'})
+    finally:
+        window._archive_stack = []
+        archives.forget_passwords()
+    assert len(prompts) == 2 and 'did not open' in prompts[1]
+    assert window.current_selected_data['size'] == 6818
+    entry = window.case.activity()[0]
+    assert entry['action'] == 'archive opened with a password'
+    assert 'password' not in entry['detail'].replace(
+        'the password is not recorded', '')
 
 
 def test_report_is_a_job_and_lands_in_exports(qapp, window):
@@ -1823,7 +1912,7 @@ def test_luks_lvm_and_apfs_volumes_in_the_tree(qapp, stubbed_dialogs,
         window.on_item_expanded(node)
         assert 'passwords.txt' in [t for t, _d in _children(node)]
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_encrypted_ios_backup_unlocks_in_the_tree(qapp, stubbed_dialogs,
@@ -1869,7 +1958,7 @@ def test_encrypted_ios_backup_unlocks_in_the_tree(qapp, stubbed_dialogs,
         window.on_item_expanded(node)
         assert [t for t, _d in _children(node)] == ['Backup', 'private']
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_keyword_lists_are_a_job_a_triage_tab_and_findings(qapp, window,
@@ -2150,7 +2239,7 @@ def test_an_ad1_opens_as_a_tree_of_files(qapp, stubbed_dialogs):
         assert hashlib.md5(content).hexdigest() == node.facts['md5']
         assert window.start_carving(None, ['jpg'], True) == 0
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_sigma_detections_are_a_triage_tab_and_findings(qapp, window):
@@ -2638,4 +2727,4 @@ def test_every_triage_tab_with_rows_has_its_group_in_the_tree(
             pump(qapp, 0.2)
             assert tabs.tabText(tabs.currentIndex()).startswith(tab), label
     finally:
-        win.cleanup_resources()
+        close_window(win)

@@ -45,6 +45,9 @@ SHA-256 before it is kept:
 * Chromium profile databases: plaso's Cookies (Chrome 68 and 2011) and
   Web Data, and the SQL dumps Chromium's own migration tests load for
   Login Data, Favicons and Top Sites (components/test/data), pinned
+* libarchive's encrypted archives (BSD-2-Clause test files): WinZip
+  AES-128/256 ZIPs in every compression, a ZipCrypto ZIP and 7z AES with
+  data or names encrypted -- passwords and contents from its tests
 * Microsoft's documented WLAN profile samples (MicrosoftDocs/win32,
   NativeWiFi), the schema Wlansvc/Profiles files are written in
 * Windows 11 Notepad tab state files (TabState/*.bin) Notepad wrote:
@@ -79,6 +82,8 @@ _CHROMIUM = ('https://raw.githubusercontent.com/chromium/chromium/'
 _WIN32_DOCS = ('https://raw.githubusercontent.com/MicrosoftDocs/win32/'
                'f18cd183e3c2691df8fe4d3c7ab81bc226d2ab85/desktop-src/'
                'NativeWiFi/')
+_LIBARCHIVE = ('https://raw.githubusercontent.com/libarchive/libarchive/'
+               '7197234b80b9983bbcaea86776555ecca66d968b/libarchive/test/')
 _NSL = ('https://raw.githubusercontent.com/ogmini/Notepad-State-Library/'
         'ce53f9d66de4551fa78f3cb19df90d7820f08d94/')
 _NOTEPAD_RS = ('https://raw.githubusercontent.com/AbdulRhmanAlfaifi/'
@@ -196,6 +201,44 @@ SAMPLES = {
     'chromium-TopSites.v5.sql': (
         _CHROMIUM + 'history/TopSites.v5.sql',
         '6586038a90ad2fdb052f91c1b2edae687f8c24f2c84fa3c2bc92689635a1bcf2'),
+    # Encrypted archives libarchive's own tests read (uuencoded, as
+    # libarchive keeps them; tests/test_encrypted_archives.py).
+    'libarchive-7zip_encryption.7z.uu': (
+        _LIBARCHIVE + 'test_read_format_7zip_encryption.7z.uu',
+        '6ffca867af12df7bb62ccbdc2bd37677cb4c690aefb266247abc54687e34efb9'),
+    'libarchive-7zip_encryption_header.7z.uu': (
+        _LIBARCHIVE + 'test_read_format_7zip_encryption_header.7z.uu',
+        'afff7c927a529d4b0ce6d0ad42971510d7f37540d84f0fcf033499956b0826b6'),
+    'libarchive-zip_traditional_encryption_data.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_traditional_encryption_data.zip.uu',
+        '4a8fe1121b5122459885ffebdf916725f8687209c8f8918598b72f82f40c9365'),
+    'libarchive-zip_winzip_aes128.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes128.zip.uu',
+        'e83ce7cf406e049592e0efeea59be74bf2dacba61ff58d1db8d2b42b04a2ca8e'),
+    'libarchive-zip_winzip_aes256.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256.zip.uu',
+        '3cf66443e8a3585d3f740342fc59a8c9c9d99ee4663c7b3cee0b915350ab3d4a'),
+    'libarchive-zip_winzip_aes256_large.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_large.zip.uu',
+        '481fc4b718af0f01d4f3676c05a36a1a9acbba40eede609a38a6329a4a2b814b'),
+    'libarchive-zip_winzip_aes256_large_bzip2.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_large_bzip2.zip.uu',
+        '84115d7b8102c366a0896f86414ee88dfbaa2df18ad0694918bd096d040ca5df'),
+    'libarchive-zip_winzip_aes256_large_lzma.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_large_lzma.zip.uu',
+        '32ecdceab7e4168006a89c2689e9581e0cb02c29b5a9b808c493ea72af913fbd'),
+    'libarchive-zip_winzip_aes256_large_ppmd.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_large_ppmd.zip.uu',
+        '023b076c8c0586f398902df1167935cb75dc316ed79497d4b2bd5175a2982d26'),
+    'libarchive-zip_winzip_aes256_large_xz.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_large_xz.zip.uu',
+        '34dc18353d99c514f32383bfc561c8f60cc47cea8f4af1c017c1e7deca85e8d2'),
+    'libarchive-zip_winzip_aes256_large_zstd.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_large_zstd.zip.uu',
+        '58f51d56893b534a85adfe22c78857e0e2be172564749c9c1acd4ecd719c93cb'),
+    'libarchive-zip_winzip_aes256_stored.zip.uu': (
+        _LIBARCHIVE + 'test_read_format_zip_winzip_aes256_stored.zip.uu',
+        '0c710f925aeda0a4e51bfee6007b83af47a2235001397bd18c83d9dfd384685e'),
     # Windows 11 Notepad's TabState files (tests/test_notepad.py).
     'notepad-x-00bc8eb6-b8bb-459b-973a-a998b734b47c.0.bin': (
         _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/00bc8eb6-b8bb-459b-973a-a998b734b47c.0.bin',

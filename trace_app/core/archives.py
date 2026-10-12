@@ -66,6 +66,26 @@ class EncryptedArchive(ArchiveError):
 _LEGACY = ('cab', 'lzh', 'alz', 'uue', 'compress')
 
 
+#: Passwords the examiner gave this session, newest first: an encrypted
+#: ZIP or 7z member tries each. Memory only -- never written to the case,
+#: a log or the audit trail (which says a password was given, not which).
+_PASSWORDS = []
+
+
+def remember_password(password):
+    """Keep `password` for this session's encrypted archives."""
+    if password and password not in _PASSWORDS:
+        _PASSWORDS.insert(0, password)
+
+
+def forget_passwords():
+    _PASSWORDS.clear()
+
+
+def _candidates(password):
+    return [password] if password else list(_PASSWORDS)
+
+
 def detect_archive(data):
     """What kind of archive `data` is, or None.
 
@@ -495,12 +515,14 @@ def _read_zip_member(data, name, password, limit):
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             info = archive.getinfo(name)
-            if info.flag_bits & 0x1 and not password:
-                raise EncryptedArchive(
-                    f"{name} is encrypted and needs a password.")
             _guard_bomb(info.compress_size, info.file_size, name)
-            with archive.open(info, pwd=password.encode() if password else None) as handle:
+            if info.flag_bits & 0x1:
+                return _read_encrypted_zip(data, archive, info, password,
+                                           limit)
+            with archive.open(info) as handle:
                 return handle.read(limit)
+    except EncryptedArchive:
+        raise
     except RuntimeError as exc:
         # zipfile raises RuntimeError for a bad or missing password.
         if 'password' in str(exc).lower():
@@ -510,6 +532,45 @@ def _read_zip_member(data, name, password, limit):
         raise ArchiveError(f"No member named {name}.") from exc
     except zipfile.BadZipFile as exc:
         raise ArchiveError(f"Damaged ZIP archive: {exc}") from exc
+
+
+def _read_encrypted_zip(data, archive, info, password, limit):
+    """ZipCrypto through zipfile, WinZip AES through core/zip_aes, with
+    the password given or each one remembered this session."""
+    from trace_app.core import zip_aes
+    name = info.filename
+    candidates = _candidates(password)
+    if not candidates:
+        raise EncryptedArchive(f"{name} is encrypted and needs a password.")
+    aes = info.compress_type == zip_aes.AES_METHOD
+    for candidate in candidates:
+        try:
+            if aes:
+                return zip_aes.read(data, info, candidate, limit)
+            for encoding in ('utf-8', 'cp437'):
+                try:
+                    secret = candidate.encode(encoding)
+                except UnicodeEncodeError:
+                    continue
+                try:
+                    with archive.open(info, pwd=secret) as handle:
+                        return handle.read(limit)
+                except RuntimeError as exc:
+                    if 'password' not in str(exc).lower():
+                        raise
+                except zipfile.BadZipFile as exc:
+                    # ZipCrypto's check byte lets a wrong password through
+                    # once in 256 tries; the CRC-32 then fails.
+                    if 'crc' not in str(exc).lower():
+                        raise
+        except zip_aes.WrongPassword:
+            continue
+        except zip_aes.ZipAesError as exc:
+            raise ArchiveError(f"{name}: {exc}") from exc
+    raise EncryptedArchive(f"{name} is encrypted; the password given does "
+                           f"not open it." if password else
+                           f"{name} is encrypted; no password given this "
+                           f"session opens it.")
 
 
 def _zip_time(info):
@@ -757,9 +818,30 @@ def _open_7z(data, password):
             "even to list.") from exc
 
 
+def _open_7z_any(data, password):
+    """_open_7z with the password given, else each one remembered; the
+    names-encrypted kind needs one even to list."""
+    try:
+        return _open_7z(data, password)
+    except EncryptedArchive:
+        if password:
+            raise
+    py7zr = _import_7z()
+    for candidate in _PASSWORDS:
+        try:
+            archive = py7zr.SevenZipFile(io.BytesIO(data), password=candidate)
+            archive.list()
+            return archive
+        except Exception:
+            continue
+    raise EncryptedArchive(
+        "This 7z archive encrypts its file names; it needs a password "
+        "even to list.")
+
+
 def _list_7z(data, password):
     try:
-        with _open_7z(data, password) as archive:
+        with _open_7z_any(data, password) as archive:
             # Names are readable but contents are not: list the members and
             # say they are encrypted, as a ZIP is -- the names are evidence
             # even when the bytes are locked.
@@ -780,10 +862,24 @@ def _list_7z(data, password):
 
 
 def _read_7z_member(data, name, password, limit):
+    if password is None and _PASSWORDS:
+        try:
+            return _read_7z_member(data, name, '', limit)
+        except EncryptedArchive as exc:
+            last = exc
+        for candidate in _PASSWORDS:
+            try:
+                return _read_7z_member(data, name, candidate, limit)
+            except ArchiveError as exc:
+                # EncryptedArchive, or -- 7z has no password verifier -- a
+                # wrong password read as damaged data.
+                last = exc
+        raise EncryptedArchive(f"{name} is encrypted; no password given "
+                               f"this session opens it.") from last
     py7zr = _import_7z()
     from py7zr.io import BytesIOFactory
     try:
-        with _open_7z(data, password) as archive:
+        with _open_7z(data, password or None) as archive:
             if archive.needs_password() and not password:
                 raise EncryptedArchive(
                     f"{name} is encrypted and needs a password.")

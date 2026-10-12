@@ -3439,15 +3439,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         name, content, source = self._archive_stack[-1]
         try:
             members = archives.list_members(content)
-        except archives.EncryptedArchive as exc:
-            message.information(
-                self, "Encrypted archive",
-                f"{name} is encrypted.\n\n{exc}\n\n"
-                "Its presence and size are still evidence; its contents "
-                "cannot be listed without the password.")
-            self._archive_stack.pop()
-            self.clear_status()
-            return False
+        except archives.EncryptedArchive:
+            # Its names are encrypted too (7z): nothing lists without the
+            # password.
+            members = self._read_with_password(
+                name, lambda: archives.list_members(content))
+            if members is None:
+                self._archive_stack.pop()
+                self.clear_status()
+                return False
         except archives.ArchiveError as exc:
             message.warning(self, "Could not read the archive",
                             f"{name} could not be read.\n\n{exc}")
@@ -3466,6 +3466,38 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self.set_status(f"{self.archive_trail()} — {len(entries)} item(s)")
         return True
+
+    def _read_with_password(self, name, read):
+        """`read()`, asking for a password while an archive says it needs
+        one. The password is kept for the session (core/archives), in
+        memory only; the audit says one opened `name`, never which.
+        Returns what `read` returned, or None (cancelled or unreadable)."""
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+        asked = False
+        prompt = "is encrypted"
+        while True:
+            try:
+                result = read()
+            except archives.EncryptedArchive:
+                password, ok = QInputDialog.getText(
+                    self, "Encrypted archive",
+                    f"{name} {prompt}.\n\nPassword (kept in memory for this "
+                    f"session, never saved):", QLineEdit.Password)
+                if not ok or not password:
+                    return None
+                archives.remember_password(password)
+                asked = True
+                prompt = "did not open with that password -- try another"
+                continue
+            except archives.ArchiveError as exc:
+                message.warning(self, "Could not read the archive",
+                                f"{name}: {exc}")
+                return None
+            if asked and self.case is not None:
+                self.case.record_event("archive opened with a password",
+                                       f"name={name} (the password is not "
+                                       f"recorded)")
+            return result
 
     def _archive_entries(self, members, source):
         """Turn archive members into listing rows.
@@ -3518,17 +3550,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # flat listing already shows their contents by full name.
             return
 
-        if data.get('archive_encrypted'):
-            message.information(
-                self, "Encrypted member",
-                f"{member_name} is encrypted. Its name and size are readable; "
-                f"its contents are not.")
-            return
-
-        try:
-            member_bytes = archives.read_member(content, member_name)
-        except archives.ArchiveError as exc:
-            message.warning(self, "Could not read member", str(exc))
+        member_bytes = self._read_with_password(
+            member_name, lambda: archives.read_member(content, member_name))
+        if member_bytes is None:
             return
 
         # An archive inside an archive is another folder to step into.
@@ -6665,8 +6689,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             for member in chain[1:]:
                 content = archives.read_member(content or b'', member)
         except archives.EncryptedArchive:
-            self.set_status(f"{name} is in an encrypted archive; it needs a "
-                            f"password to read.", 6000)
+            self.set_status(f"{name} is in an encrypted archive: open it in "
+                            f"the Listing to give its password.", 6000)
             return
         except Exception as exc:
             logger.error("Could not read %s from its archive: %s", key, exc)
