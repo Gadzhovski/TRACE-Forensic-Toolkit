@@ -81,6 +81,9 @@ def default_filters():
         'hide_known_good': False,
         'timestomped_only': False,
         'focus_ref': None,                       # (evidence_id, ref)
+        # [(evidence_id, volume key)]: events on the volumes holding these
+        # operating systems (Case.systems); None = every volume.
+        'systems': None,
         'user': None,
         'folder': None,
         'fs_attributes': 'both',                 # both | SI | FN
@@ -145,6 +148,7 @@ def _branches(filters):
     user = filters.get('user')
     folder = filters.get('folder')
     hide_good = filters.get('hide_known_good')
+    systems = [tuple(pair) for pair in filters.get('systems') or ()]
     out = []
 
     def common(alias, time_sql, evidence_sql, ref_sql=None, path_sql=None,
@@ -167,6 +171,17 @@ def _branches(filters):
                 return None
             clauses.append(f"{evidence_sql} = ? AND {ref_sql} = ?")
             params.extend(focus)
+        if systems:
+            # A volume's events by their reference's volume (p<key>:...);
+            # what refers to no file on one -- the audit trail, a carve --
+            # belongs to no system.
+            if ref_sql is None:
+                return None
+            clauses.append('(' + ' OR '.join(
+                f"({evidence_sql} = ? AND {ref_sql} LIKE ?)"
+                for _pair in systems) + ')')
+            for evidence, key in systems:
+                params.extend([evidence, f"p{int(key)}:%"])
         if user:
             if user_sql is None:
                 return None
@@ -308,7 +323,7 @@ def _branches(filters):
                 f"WHERE c.embedded_date != 'Unknown' AND {sql}", params))
 
     if 'case' in wanted and not deleted_only and not stomped_only \
-            and not focus and not user and not folder:
+            and not focus and not user and not folder and not systems:
         audit_time = "replace(substr(x.utc, 1, 19), 'T', ' ')"
         where = common('x', audit_time, 'NULL', None, None,
                        ('x.action', 'x.detail'))

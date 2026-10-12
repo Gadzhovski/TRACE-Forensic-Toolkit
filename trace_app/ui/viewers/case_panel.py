@@ -65,7 +65,19 @@ STATUS_ICON = {STATUS_VERIFIED: icons.VERIFY_OK, STATUS_MISSING: icons.ERROR,
                STATUS_LIVE: icons.ALERT, STATUS_BASELINE: icons.VERIFY}
 #: Evidence table columns.
 EVIDENCE_COLUMNS = ['Name', 'Exhibit', 'Status', 'Last checked', 'Size',
-                    'Contains', 'MD5', 'SHA-256', 'Path']
+                    'Contains', 'Operating system', 'MD5', 'SHA-256', 'Path']
+
+
+def system_text(systems):
+    """'Windows 10 Pro (22H2, build 19045)' -- each system once, a dual
+    boot's joined by ' + '."""
+    seen = []
+    for system in systems:
+        text = system['name'] + (f" ({system['detail']})"
+                                 if system.get('detail') else '')
+        if text not in seen:
+            seen.append(text)
+    return ' + '.join(seen)
 
 
 def format_utc(text, seconds=False):
@@ -439,6 +451,7 @@ class CasePanel(QWidget):
         table.setSortingEnabled(False)
         table.setRowCount(len(evidence))
         self.tabs.setTabText(0, f"Evidence ({len(evidence)})")
+        systems = self.case.systems() if self.case is not None else {}
         for row, item in enumerate(evidence):
             status = item.get('last_status') or STATUS_PENDING
             size = item.get('size')
@@ -454,6 +467,7 @@ class CasePanel(QWidget):
                 QTableWidgetItem(FileSystemUtils.get_readable_size(size)
                                  if size is not None else '—'),
                 QTableWidgetItem(contents or '—'),
+                self._system_cell(systems.get(item['id'], [])),
                 QTableWidgetItem(short_hash(item.get('md5'))),
                 QTableWidgetItem(short_hash(item.get('sha256'))),
                 QTableWidgetItem(item['path']),
@@ -465,12 +479,28 @@ class CasePanel(QWidget):
                 cells[4].setToolTip(f"{size:,} bytes")
             cells[5].setToolTip(contents or "Not read yet: the image is not "
                                             "open")
-            cells[6].setToolTip(item.get('md5') or '')
-            cells[7].setToolTip(item.get('sha256') or '')
-            cells[8].setToolTip(item['path'])
+            cells[7].setToolTip(item.get('md5') or '')
+            cells[8].setToolTip(item.get('sha256') or '')
+            cells[9].setToolTip(item['path'])
             for column, cell in enumerate(cells):
                 table.setItem(row, column, cell)
-        fit_columns(table, {5: 260, 8: 360})
+        fit_columns(table, {5: 260, 6: 280, 9: 360})
+
+    @staticmethod
+    def _system_cell(systems):
+        """The systems found on the image, with the first one's logo; each
+        volume's in the tooltip."""
+        cell = QTableWidgetItem(system_text(systems) or '—')
+        if systems:
+            cell.setIcon(icons.os_logo(systems[0]['logo']))
+            cell.setToolTip('\n'.join(
+                f"{s.get('volume') or 'Volume'}: {s['name']}"
+                + (f" ({s['detail']})" if s.get('detail') else '')
+                for s in systems))
+        else:
+            cell.setToolTip("No operating system found on this image "
+                            "(or it has not been opened yet)")
+        return cell
 
     def _contents(self, item):
         """What the image holds -- 'GPT · NTFS, Ext4 · Windows + Linux'

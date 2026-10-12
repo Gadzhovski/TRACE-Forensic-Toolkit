@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -551,6 +551,7 @@ class Case:
         ('artifact_tags', 'tags'),
         ('report_items', 'report picks'),
         ('verifications', 'verification records'),
+        ('evidence_systems', 'operating systems found'),
     )
 
     def evidence_footprint(self, evidence_id):
@@ -567,6 +568,39 @@ class Case:
                 continue
             if count:
                 out.append((description, count))
+        return out
+
+    def set_systems(self, evidence_id, systems):
+        """Record the operating systems found on an image's volumes:
+        [{'volume_key', 'volume', 'family', 'logo', 'name', 'detail'}].
+        Replaces what was recorded; writes nothing when it is unchanged
+        (an image is opened every time the case is)."""
+        keys = ('volume_key', 'volume', 'family', 'logo', 'name', 'detail')
+        new = sorted(tuple(s.get(k) for k in keys) for s in systems)
+        old = sorted(tuple(s.get(k) for k in keys)
+                     for s in self.systems(evidence_id).get(evidence_id, []))
+        if new == old:
+            return False
+        now = _utc_now()
+        with self._db:
+            self._db.execute("DELETE FROM evidence_systems WHERE "
+                             "evidence_id = ?", (evidence_id,))
+            self._db.executemany(
+                "INSERT INTO evidence_systems (evidence_id, volume_key, "
+                "volume, family, logo, name, detail, recorded_utc) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(evidence_id, *row, now) for row in new])
+        return True
+
+    def systems(self, evidence_id=None):
+        """{evidence id: [system, ...]} in volume order."""
+        where, params = ('WHERE evidence_id = ?', (evidence_id,)) \
+            if evidence_id is not None else ('', ())
+        out = {}
+        for row in self._db.execute(
+                f"SELECT * FROM evidence_systems {where} ORDER BY "
+                f"evidence_id, volume_key", params):
+            out.setdefault(row['evidence_id'], []).append(dict(row))
         return out
 
     def notes_for_evidence(self, evidence_id):
@@ -2598,6 +2632,22 @@ class Case:
                 label         TEXT,
                 colour        TEXT,
                 created_utc   TEXT
+            );
+
+            -- The operating system found on each volume (schema 20;
+            -- core/os_identity), for the Case tab, the report and the
+            -- timeline's filter. Recorded when the image is opened.
+            CREATE TABLE IF NOT EXISTS evidence_systems (
+                evidence_id   INTEGER NOT NULL REFERENCES evidence(id)
+                              ON DELETE CASCADE,
+                volume_key    INTEGER NOT NULL,
+                volume        TEXT,
+                family        TEXT,
+                logo          TEXT,
+                name          TEXT,
+                detail        TEXT,
+                recorded_utc  TEXT,
+                PRIMARY KEY (evidence_id, volume_key)
             );
 
             CREATE TABLE IF NOT EXISTS tags (

@@ -354,3 +354,58 @@ def test_the_panel_offers_only_kinds_there_are(qapp, tmp_path):
         panel.deleteLater()
         linux.close()
         windows.close()
+
+
+def test_a_system_narrows_the_timeline_to_its_volumes(qapp, tmp_path):
+    """On a dual-boot disk the timeline can show the Windows volume's
+    events or the Linux one's (Case.systems, filter 'systems'); events
+    that refer to no file -- the audit trail -- belong to neither."""
+    from trace_app.core import timeline
+    from trace_app.core.activity import record
+    from trace_app.core.case import Case
+    from trace_app.ui.viewers.timeline_panel import TimelinePanel
+    case = Case.create(str(tmp_path / 'dual'), 'Dual boot')
+    evidence = case.add_evidence(str(tmp_path / 'dual.dd'))
+    case.add_fs_events(evidence, [
+        ('p2048:i5:s1', '/Windows/win.ini', '2024-01-01 10:00:00', 'M', 'FS',
+         0),
+        ('p4198400:i9:s0', '/etc/hostname', '2024-01-02 10:00:00', 'M', 'FS',
+         0)])
+    case.add_user_activity(evidence, [record(
+        'programs', 'Prefetch', datetime.datetime(
+            2024, 1, 3, tzinfo=datetime.timezone.utc), 'Program run',
+        'CALC.EXE', ref='p2048:i77:s1')])
+    case.set_systems(evidence, [
+        {'volume_key': 2048, 'volume': 'Basic data @ 2048',
+         'family': 'windows', 'logo': 'windows', 'name': 'Windows 10 Pro',
+         'detail': ''},
+        {'volume_key': 4198400, 'volume': 'Linux @ 4198400',
+         'family': 'linux', 'logo': 'fedora', 'name': 'Fedora Linux 44',
+         'detail': ''}])
+    case.commit()
+    every = [k for k, _l, _c in timeline.SOURCES]
+    try:
+        with _connection(case) as connection:
+            def subjects(systems):
+                return sorted(row['subject'] or row['title'] for row in
+                              timeline.events(connection, _filters(
+                                  sources=every, systems=systems)))
+            assert subjects([(evidence, 2048)]) == ['/Windows/win.ini',
+                                                    'CALC.EXE']
+            assert subjects([(evidence, 4198400)]) == ['/etc/hostname']
+            both = subjects([(evidence, 2048), (evidence, 4198400)])
+            assert len(both) == 3
+            assert len(subjects(None)) > 3          # the audit trail too
+
+        panel = TimelinePanel()
+        panel.set_case(case)
+        labels = [panel.system_filter.itemText(i)
+                  for i in range(panel.system_filter.count())]
+        assert labels == ['All systems', 'Windows 10 Pro — dual.dd',
+                          'Fedora Linux 44 — dual.dd']
+        assert panel.system_filter.isVisibleTo(panel)
+        panel.system_filter.setCurrentIndex(2)
+        assert panel.filters['systems'] == [[evidence, 4198400]]
+        panel.shutdown()
+    finally:
+        case.close()

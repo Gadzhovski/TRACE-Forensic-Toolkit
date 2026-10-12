@@ -215,6 +215,11 @@ class _Builder:
                       or os.path.basename(r['path']) for r in evidence}
         self.toc = []                  # (level, id, title)
         self.pictures = 0
+        #: The systems found on each image (Case.systems, schema 20).
+        try:
+            self.systems = case.systems()
+        except Exception:
+            self.systems = {}
 
     def scope(self, rows):
         ids = {r['id'] for r in self.evidence}
@@ -351,6 +356,12 @@ class _Builder:
                 ("Acquired on", e(row.get('acquired_on'))),
                 ("File", _mono(row['path'])),
                 ("Size", e(_size(row.get('size')))),
+                # What TRACE found installed, per volume (core/os_identity)
+                ("Operating system", '<br>'.join(
+                    e(f"{s['name']}" + (f" ({s['detail']})"
+                                        if s.get('detail') else '')
+                      + (f" -- {s['volume']}" if s.get('volume') else ''))
+                    for s in self.systems.get(row['id'], []))),
                 ("Added to the case", e(row.get('added_utc'))),
                 ("MD5 (first hashed in full)", _mono(row.get('md5'))),
                 ("SHA-1 (first hashed in full)", _mono(row.get('sha1'))),

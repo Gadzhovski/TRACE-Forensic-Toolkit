@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
 
 from trace_app.core import timeline
 from trace_app.core.case import CASE_DB_NAME
-from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.ui import icons
 from trace_app.ui.widgets.flow_layout import FlowLayout
 from trace_app.ui.widgets.elided_label import ElidedLabel
@@ -54,7 +54,7 @@ class FsTimesWorker(ProcessWorker):
     """One image's file-system times (core/fs_times) in a child
     process."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_fstimes = Signal(int, str)
 
     kind = 'fstimes'
@@ -522,14 +522,6 @@ class TimelinePanel(QWidget):
 
         self.toolbar = QToolBar()
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel()
-        icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(icon_label, icons.TIMELINE, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(icon_label)
-        title = QLabel("Timeline")
-        title.setObjectName("panelTitle")
-        self.toolbar.addWidget(title)
         self.status_label = ElidedLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setSizePolicy(QSizePolicy.Expanding,
@@ -541,6 +533,15 @@ class TimelinePanel(QWidget):
         self.evidence_filter.currentIndexChanged.connect(
             self._evidence_changed)
         self.toolbar.addWidget(self.evidence_filter)
+        # Per operating system (Case.systems): a dual-boot disk's Windows
+        # or its Linux, or every Windows in the case.
+        self.system_filter = QComboBox()
+        self.system_filter.setObjectName("triageEvidenceFilter")
+        self.system_filter.setToolTip(
+            "Every system, or the events on the volumes of one operating "
+            "system (or of every system of one kind)")
+        self.system_filter.currentIndexChanged.connect(self._system_changed)
+        self.toolbar.addWidget(self.system_filter)
         self.views_button = QPushButton("Views")
         self.views_button.setObjectName("triageRunButton")
         self.views_button.setToolTip("Save these filters as a named view, "
@@ -558,8 +559,8 @@ class TimelinePanel(QWidget):
         outer.addWidget(self.toolbar)
 
         body = QVBoxLayout()
-        body.setContentsMargins(6, 4, 6, 4)
-        body.setSpacing(4)
+        body.setContentsMargins(2, 2, 2, 0)
+        body.setSpacing(2)
         outer.addLayout(body, 1)
 
         # Range and text. Groups that wrap as wholes, so the panel never
@@ -784,6 +785,7 @@ class TimelinePanel(QWidget):
         self.filters['evidence_id'] = self.evidence_filter.currentData()
         self.evidence_filter.blockSignals(False)
         self.evidence_filter.setVisible(len(self._names) > 1)
+        self._fill_systems()
         options = self._hash_options()
         self.known_good_box.blockSignals(True)
         self.known_good_box.setEnabled(bool(options.get('enabled')))
@@ -820,6 +822,51 @@ class TimelinePanel(QWidget):
     def _set_filter(self, key, value, keep_range=True):
         self.filters[key] = value
         self.refresh(find_bounds=not keep_range)
+
+    def _fill_systems(self):
+        """The system filter's entries: all, each kind found more than
+        once (every Windows), then each system with its image."""
+        from trace_app.ui import icons
+        combo = self.system_filter
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("All systems", None)
+        found = self.case.systems() if self.case is not None else {}
+        entries = [(evidence_id, system) for evidence_id, systems in
+                   found.items() for system in systems
+                   if evidence_id in self._names]
+        kinds = {}
+        for evidence_id, system in entries:
+            kinds.setdefault(system['family'], []).append(
+                [evidence_id, system['volume_key']])
+        labels = {'windows': 'Windows', 'linux': 'Linux', 'macos': 'macOS',
+                  'android': 'Android'}
+        for family, pairs in sorted(kinds.items()):
+            if len(pairs) > 1:
+                logo = next(s['logo'] for _e, s in entries
+                            if s['family'] == family)
+                combo.addItem(icons.os_logo(logo),
+                              f"Every {labels.get(family, family)} "
+                              f"({len(pairs)})", pairs)
+        for evidence_id, system in entries:
+            combo.addItem(icons.os_logo(system['logo']),
+                          f"{system['name']} — {self._names[evidence_id]}",
+                          [[evidence_id, system['volume_key']]])
+            combo.setItemData(combo.count() - 1,
+                              f"{system.get('volume') or ''} on "
+                              f"{self._names[evidence_id]}",
+                              Qt.ToolTipRole)
+        wanted = self.filters.get('systems')
+        index = next((i for i in range(combo.count())
+                      if combo.itemData(i) == wanted), 0)
+        combo.setCurrentIndex(index)
+        self.filters['systems'] = combo.currentData()
+        combo.blockSignals(False)
+        combo.setVisible(bool(entries))
+
+    def _system_changed(self, _index):
+        self.filters['systems'] = self.system_filter.currentData()
+        self.refresh()
 
     def _evidence_changed(self, _index):
         self.filters['evidence_id'] = self.evidence_filter.currentData()
@@ -1315,6 +1362,12 @@ class TimelinePanel(QWidget):
         self.evidence_filter.setCurrentIndex(max(0, self.evidence_filter
                                                  .findData(self.filters.get(
                                                      'evidence_id'))))
+        self.system_filter.blockSignals(True)
+        self.system_filter.setCurrentIndex(next(
+            (i for i in range(self.system_filter.count())
+             if self.system_filter.itemData(i) ==
+             self.filters.get('systems')), 0))
+        self.system_filter.blockSignals(False)
         for key, button in self.source_buttons.items():
             button.setChecked(key in (self.filters.get('sources') or ()))
         for widget in (self.deleted_box, self.stomped_box,

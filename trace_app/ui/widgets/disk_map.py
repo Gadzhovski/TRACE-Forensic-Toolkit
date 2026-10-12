@@ -294,7 +294,7 @@ class DiskBar(_RegionView):
     wide as anything else on screen."""
 
     #: (first sector, end sector) shown, or the whole disk.
-    window_changed = Signal(int, int)
+    window_changed = Signal(object, object)
     #: The fewest sectors the bar zooms to.
     MIN_SPAN = 8
 
