@@ -1477,7 +1477,11 @@ class HexViewer(QWidget):
             table.blockSignals(False)
             self._result_activated()
         else:
-            message.information(self, "Search", "No matches found.")
+            # Said in the results' header, not by a dialog: a dialog
+            # stopped the examiner for an answer the empty list gives, and
+            # a modal one from a search finishing mid-test hung CI.
+            self.results_table.setHorizontalHeaderItem(
+                1, QTableWidgetItem("No matches"))
 
     def _update_find_buttons(self):
         has = bool(self.matches)

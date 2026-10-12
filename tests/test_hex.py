@@ -427,6 +427,12 @@ def test_searches_stopped_mid_run_and_a_close_never_crash(qapp):
     viewer.trigger_search()
     assert pump(qapp, 60, lambda: not viewer._searches)
     assert viewer.matches == [1000, len(block) - 2000]
+    # Nothing found is said in the results' header -- no dialog to wait on.
+    viewer.search_bar.setText('absent!')
+    viewer.trigger_search()
+    assert pump(qapp, 60, lambda: not viewer._searches)
+    assert viewer.matches == []
+    assert viewer.results_table.horizontalHeaderItem(1).text() ==         'No matches'
     # Closing with searches running waits for them, frees nothing early.
     viewer.search_bar.setText('absent!')
     viewer.trigger_search()
