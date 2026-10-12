@@ -190,6 +190,54 @@ CAPABILITIES = (
     Capability('btrfs', 'Volumes and encryption', "Btrfs file systems "
                "(Fedora, openSUSE: subvolumes, snapshots, zlib/LZO/zstd)",
                'TRACE (Python)', lambda: 'built in'),
+    Capability('f2fs', 'Volumes and encryption', "F2FS file systems "
+               "(Android /data, some Linux installs: inline data and "
+               "folders, LZ4/LZO/zstd compression)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('squashfs', 'Volumes and encryption', "SquashFS images "
+               "(live media, firmware, snaps: gzip/LZMA/LZO/XZ/LZ4/zstd)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('erofs', 'Volumes and encryption', "EROFS images (Android "
+               "system partitions: LZ4, MicroLZMA, DEFLATE, zstd)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('udf', 'Volumes and encryption', "UDF volumes (DVD, "
+               "Blu-ray, Windows install media, packet-written discs)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('hfs', 'Volumes and encryption', "Classic HFS volumes "
+               "(Mac OS Standard, before HFS+)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('refs', 'Volumes and encryption', "ReFS 3.x volumes "
+               "(Windows Server 2016 on, Windows 10/11 Dev Drives; live "
+               "files -- ReFS 1.x is named, not read)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('zfs', 'Volumes and encryption', "ZFS pools (TrueNAS, "
+               "Proxmox, FreeBSD, Ubuntu: datasets and snapshots, mirror and "
+               "raidz, every compressor; native encryption not read)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('ubifs', 'Volumes and encryption', "UBI flash images "
+               "and UBIFS volumes (routers, cameras, embedded Linux: "
+               "LZO/zlib/zstd, the journal replayed)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('jffs2', 'Volumes and encryption', "JFFS2 flash images "
+               "(routers, cameras, embedded devices)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('android_sparse', 'Evidence images', "Android sparse images "
+               "(firmware and partition dumps)", 'TRACE (Python)',
+               lambda: 'built in'),
+    Capability('android_super', 'Volumes and encryption', "Android dynamic "
+               "partitions (super: system, vendor, product)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('vdi', 'Evidence images', "VirtualBox disks (VDI), snapshots on their "
+               "parents", 'TRACE (Python)', lambda: 'built in'),
+    Capability('aff', 'Evidence images', "AFF images (AFFLIB v1-v3: zlib, bzip2, "
+               "LZMA pages; stored hashes)", 'TRACE (Python)',
+               lambda: 'built in'),
+    Capability('compressed_raw', 'Evidence images', "Compressed raw images (.gz, "
+               ".xz, .zst, .bz2, .lz4), read in place", 'TRACE (Python)',
+               lambda: 'built in'),
+    Capability('crc32c', 'Volumes and encryption', "Btrfs deleted files "
+               "proved by their CRC-32C checksums", 'crc32c',
+               lambda: 'crc32c ' + _dist_version('crc32c')),
     Capability('luks', 'Volumes and encryption', "LUKS1-encrypted Linux "
                "volumes (LVM inside them too)", 'libluksde',
                _module_version('pyluksde')),
@@ -197,6 +245,11 @@ CAPABILITIES = (
                "volumes (PBKDF2, Argon2i/Argon2id; LVM inside them too)",
                'cryptography', _module_version('cryptography',
                                                '__version__')),
+    Capability('veracrypt', 'Volumes and encryption', "VeraCrypt and "
+               "TrueCrypt volumes and containers, hidden volumes and PIMs "
+               "(AES, Serpent, Twofish, Camellia, Kuznyechik and their "
+               "cascades; SHA-512, SHA-256, BLAKE2s)", 'cryptography',
+               _module_version('cryptography', '__version__')),
     Capability('mdraid', 'Volumes and encryption', "Linux software RAID "
                "(md) arrays and multi-disk Btrfs, assembled from the "
                "member disks' images", 'TRACE (Python)',
@@ -245,6 +298,17 @@ CAPABILITIES = (
                'python-registry',
                lambda: _dist_version('python-registry')
                or __import__('Registry') and ''),
+    Capability('notepad_tabs', 'Windows and browser evidence', "Windows 11 "
+               "Notepad tabs (unsaved text, edits replayed)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('windows_logs', 'Windows and browser evidence', "PowerShell "
+               "transcripts, Windows Firewall log, Error Reporting, Wi-Fi "
+               "profiles, Open/Save dialog history, Windows.old",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('chromium_extras', 'Windows and browser evidence',
+               "Chromium cookies, form entries, saved logins (no "
+               "passwords), top sites, favicons", 'sqlite3',
+               lambda: __import__('sqlite3').sqlite_version),
     Capability('thumbsdb', 'Windows and browser evidence', "Thumbs.db "
                "thumbnail caches (OLE)", 'olefile',
                lambda: importlib.import_module('olefile').__version__),

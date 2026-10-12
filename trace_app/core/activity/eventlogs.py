@@ -207,8 +207,17 @@ def describe(event):
 
 def from_evtx(data):
     """[(time, what, subject, detail, event)] for the events listed."""
+    return _described(evtx.records(data))
+
+
+def from_chunk(block):
+    """The same, from one EVTX chunk on its own (carved)."""
+    return _described(evtx.chunk_records(block))
+
+
+def _described(events):
     out = []
-    for event in evtx.records(data):
+    for event in events:
         if event['event_id'] is None:
             continue
         described = describe(event)

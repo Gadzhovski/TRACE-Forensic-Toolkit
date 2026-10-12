@@ -15,10 +15,10 @@ The report itself is made by a background job (core/report.py).
 import logging
 import os
 
-from PySide6.QtCore import QDateTime, Qt, QTimeZone, QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QDateTimeEdit, QDialog, QDialogButtonBox,
+                               QDialog, QDialogButtonBox,
                                QFileDialog, QFormLayout, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QPlainTextEdit, QPushButton,
@@ -47,15 +47,8 @@ def _spin(value, low=1, high=100000, suffix=''):
 
 
 def _utc_edit(text):
-    edit = QDateTimeEdit()
-    edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-    edit.setTimeZone(QTimeZone.utc())
-    edit.setCalendarPopup(True)
-    if text:
-        moment = QDateTime.fromString(text[:19], "yyyy-MM-dd HH:mm:ss")
-        moment.setTimeZone(QTimeZone.utc())
-        edit.setDateTime(moment)
-    return edit
+    from trace_app.ui.widgets.date_fields import utc_edit
+    return utc_edit(text=text)
 
 
 class ReportDialog(QDialog):
@@ -508,7 +501,7 @@ class ReportDialog(QDialog):
 class ReportWorker(ProcessWorker):
     """Writes the report in a child process (core/background.py)."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     item_written = Signal(dict)
     finished_report = Signal(int, str)
 

@@ -34,7 +34,7 @@ LEVEL_LABELS = {'informational': 'Informational and above',
 class SigmaWorker(ProcessWorker):
     """Runs the rules over one image's event logs in a child process."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_scan = Signal(int, str)
 
     kind = 'sigma'

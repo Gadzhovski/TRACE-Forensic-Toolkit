@@ -151,6 +151,14 @@ QDockWidget > QFrame:not(QTreeWidget) {
 }
 
 /* List and Table Widget Styles */
+/* Every results table framed alike: Qt's QTableView (Activity,
+   NTFS, Timeline...) and Triage's trees had no frame where the
+   QTableWidgets beside them had one. */
+QTableView#activityTable, QTreeWidget#triageTable {
+    border: 1px solid #E5E5E5;
+    border-radius: 4px;
+}
+
 QListWidget, QTableWidget {
     border: 1px solid #E5E5E5;
     border-radius: 4px;
@@ -264,7 +272,7 @@ QTabBar::tab {
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
     min-width: 8ex;
-    padding: 5px;
+    padding: 5px 10px;
     color: #333333;
 }
 
@@ -279,6 +287,16 @@ QTabBar::tab:selected {
 
 QTabBar::tab:!selected {
     margin-top: 2px; /* Unselected tabs are slightly raised */
+}
+
+/* Grouped tabs' lower row (ui/widgets/section_nav): slimmer than the
+   groups above, so the two rows read as heading and contents. */
+QTabBar[row="pages"]::tab {
+    padding: 2px 10px;
+    font-size: 12px;
+}
+QTabBar[row="pages"]::tab:!selected {
+    margin-top: 1px;
 }
 
 
@@ -327,10 +345,11 @@ QTabBar::tear {
 QToolBar {
     background-color: #FFFFFF;
     border-bottom: 1px solid #E5E5E5;
-    /* Symmetric vertical padding so controls sit centred rather than
-       pushed against the top edge. TOOLBAR_HEIGHT in constants.py is
-       derived from these numbers -- change one and change the other. */
-    padding: 5px 8px;
+    /* One value for every side: Qt takes padding-left as the frame on all
+       four, so "5px 8px" put 8px above the controls. The sides get the
+       rest of their inset from prepare_toolbar (TOOLBAR_SIDE_MARGIN);
+       TOOLBAR_HEIGHT in constants.py follows from this number. */
+    padding: 3px;
     spacing: 6px;
 }
 QToolBar::item:hover {
@@ -444,7 +463,7 @@ QTableView#activityTable::item:selected {
 QHeaderView::section {
     background-color: #F5F5F5;  /* Light gray header background */
     color: #000000;  /* Dark text color */
-    padding: 5px;
+    padding: 3px 6px;
     border-style: none;
     border-bottom: 1px solid #E5E5E5;
     border-right: 1px solid #E5E5E5;
@@ -454,11 +473,9 @@ QHeaderView::section:horizontal {
     border-top: 1px solid #E5E5E5;
 }
 
-/* Specific styles for listingTable's header to remove extra space */
 #listingTable QHeaderView::section:horizontal {
     border-top: 1px solid #E5E5E5;
     margin-top: 0px;
-    padding-top: 2px;
 }
 
 QHeaderView::section:vertical {
@@ -732,19 +749,6 @@ QChartView#volumeInfoChartView {
 /* These were setStyleSheet() calls in Python, so the widgets could not
    respond to a theme change at all. Object names let both themes style them. */
 
-/* Panel titles: File System Browser / File Carving / Registry Browser.
-   Previously three copies of the same inline rule using a teal (#37c6d0)
-   that clashed with the blue used for selection. Headings are plain
-   foreground text now -- blue is reserved for selection and progress,
-   where it means something. */
-QLabel#panelTitle {
-    font-size: 13px;
-    font-weight: 600;
-    color: #212529;
-    margin-left: 6px;
-    padding: 2px 0;
-}
-
 QTableWidget#hexTable {
     gridline-color: transparent;
     border: none;   /* see QTextEdit#textContentView */
@@ -775,14 +779,8 @@ QTableWidget#hexInspector::item {
    byte lies on the image. */
 QLabel#hexStatus {
     color: #6c757d;
-    font-size: 11px;
-    padding: 3px 6px;
-    border-top: 1px solid #E5E5E5;
-}
-
-QHeaderView#listingTableHeader::section {
-    margin-top: 0px;
-    padding-top: 2px;
+    font-size: 12px;
+    padding: 0 8px;
 }
 
 QTextEdit#hashResultBox {
@@ -790,6 +788,21 @@ QTextEdit#hashResultBox {
     border: 1px solid #ced4da;
     color: #212529;
     font-family: 'Courier New', Courier, monospace;
+}
+
+/* Every progress bar is the same blue. Unstyled ones (the image
+   loading, export and archive dialogs) used to take the system's
+   accent colour -- purple on one machine, blue beside it. */
+QProgressBar {
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #f5f5f5;
+    color: #212529;
+}
+QProgressBar::chunk {
+    background-color: #2F6FD0;
+    border-radius: 4px;
 }
 
 QProgressBar#verifyProgress {
@@ -801,11 +814,7 @@ QProgressBar#verifyProgress {
 }
 
 QProgressBar#verifyProgress::chunk {
-    /* Green because the bar reports a hash verification completing, and the
-       theme's amber [state="warning"] already establishes that colour carries
-       meaning in this app. The previous #2F81F7 was a blue used nowhere else
-       and said nothing about the outcome. */
-    background-color: #2DA44E;
+    background-color: #2F6FD0;
     border-radius: 4px;
 }
 
@@ -863,10 +872,6 @@ QTableWidget#propertyTable::item[state="warning"] {
 }
 
 
-
-QLabel#panelIcon {
-    padding: 0 4px 0 8px;
-}
 
 /* ==================== VirusTotal ==================== */
 /* The verdict is a tinted badge rather than coloured text alone: it is the
@@ -1095,7 +1100,7 @@ QLabel#aboutMetaQuiet {
 
 QLineEdit#universalSearchBar {
     font-size: 13px;
-    padding: 3px 8px;
+    padding: 0 6px;
 }
 
 QLabel#searchStatus {
@@ -1442,6 +1447,17 @@ QTreeWidget#evidenceTree {
 
 /* Section heading inside the image-information card ("Acquisition"), and the
    scroll area that card now sits in. */
+/* Image Information: an installed system's mark and name at the
+   head of its section (core/os_identity). */
+QWidget#volumeInfoSystem, QWidget#volumeInfoSystem QLabel {
+    background: transparent;
+}
+QLabel#volumeInfoSystemName {
+    font-size: 15px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
 QLabel#volumeInfoSectionHeading {
     font-size: 13px;
     font-weight: 600;
@@ -1477,6 +1493,13 @@ QStatusBar QLabel, QStatusBar QSizeGrip, QStatusBar QWidget {
     background-color: transparent;
     border: none;
 }
+/* ...but not a menu a status-bar button opens (the job bar's list):
+   it is a QWidget inside the bar too, and drawn transparent it showed
+   the window under it through its text. */
+QStatusBar QMenu {
+    background-color: #FFFFFF;
+    border: 1px solid #C0C0C0;
+}
 
 QLabel#statusContext {
     background-color: transparent;
@@ -1485,6 +1508,13 @@ QLabel#statusContext {
 }
 
 /* --- Background jobs, in the status bar ------------------------------- */
+
+/* "about 14 min left" beside the job's Cancel. */
+QLabel#jobBarEta {
+    color: #6c757d;
+    font-size: 11px;
+    padding-left: 2px;
+}
 
 QLabel#jobBarLabel {
     color: #495057;
@@ -1501,15 +1531,43 @@ QProgressBar#jobBarProgress {
 }
 
 QProgressBar#jobBarProgress::chunk {
-    /* Blue, not the verification green: this bar reports work in progress,
-       and green here would read as an outcome that has not happened yet. */
     background-color: #2F6FD0;
     border-radius: 3px;
 }
 
-QPushButton#jobBarCancel {
-    padding: 1px 10px;
+/* Cancel: a stop icon and the word, beside the bar it stops. */
+QToolButton#jobBarCancel {
+    color: #495057;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    padding: 0px 6px 0px 4px;
+    background-color: transparent;
     font-size: 11px;
+}
+QToolButton#jobBarCancel:hover {
+    background-color: #f8d7da;
+    color: #842029;
+}
+
+/* "Job 2 of 5": opens the list of this run's jobs. */
+QToolButton#jobBarSteps {
+    color: #495057;
+    border: 1px solid #ced4da;
+    border-radius: 3px;
+    padding: 0px 18px 0px 6px;
+    background-color: transparent;
+    font-size: 11px;
+}
+QToolButton#jobBarSteps:hover {
+    background-color: #e9ecef;
+}
+QToolButton#jobBarSteps::menu-indicator {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    width: 10px;
+    height: 10px;
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    right: 4px;
 }
 
 /* --- Analysis modules dialog ------------------------------------------ */
@@ -1537,9 +1595,13 @@ QLabel#analysisModulesFooter {
 
 /* --- Triage panel ----------------------------------------------------- */
 
+/* Every Triage page's summary line: off the dock's edge, as Carved
+   files' is. */
 QLabel#triageStatus,
-QLabel#ntfsStatus {
+QLabel#ntfsStatus,
+QLabel#indicatorStatus {
     color: #495057;
+    padding: 2px 6px;
 }
 
 QTableWidget#triageTable {
@@ -2215,4 +2277,217 @@ QLabel#diskBarCaption {
     color: #6c757d;
     font-size: 11px;
     background: transparent;
+}
+
+/* ============ Date and time fields, and their calendar ============ */
+/* A date-time field with a calendar has a drop-down button, not spin
+   arrows; drawn like the combo boxes' (it was the platform's own). */
+QDateTimeEdit::drop-down,
+QDateEdit::drop-down {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 22px;
+    border: none;
+    border-left: 1px solid #ced4da;
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    background-color: #F1F3F5;
+}
+QDateTimeEdit::drop-down:hover,
+QDateEdit::drop-down:hover {
+    background-color: #E2E6EA;
+}
+/* The spin boxes' ':disabled' rule hides the arrow; a date field at its
+   earliest date counts as 'disabled' to step down, and lost its button. */
+QDateTimeEdit::down-arrow,
+QDateEdit::down-arrow,
+QDateTimeEdit::down-arrow:disabled,
+QDateEdit::down-arrow:disabled {
+    image: url('Icons/tabler/themed/chevron-down-light.svg');
+    width: 12px;
+    height: 12px;
+}
+
+/* The calendar it opens: the month bar above, the days below. Qt names
+   its parts (qt_calendar_*); unstyled, the whole popup was the platform's. */
+QCalendarWidget {
+    background-color: #FFFFFF;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+}
+QCalendarWidget QWidget#qt_calendar_navigationbar {
+    background-color: #F8F9FA;
+    border-bottom: 1px solid #ced4da;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    min-height: 32px;
+}
+QCalendarWidget QToolButton {
+    color: #202124;
+    background-color: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 3px 8px;
+    margin: 2px;
+    font-weight: 600;
+}
+QCalendarWidget QToolButton:hover {
+    background-color: #E2E6EA;
+}
+QCalendarWidget QToolButton:pressed {
+    background-color: #1a73e8;
+    color: #FFFFFF;
+}
+QCalendarWidget QToolButton::menu-indicator {
+    image: none;
+    width: 0px;
+}
+QCalendarWidget QToolButton#qt_calendar_prevmonth {
+    qproperty-icon: url('Icons/tabler/themed/chevron-left-light.svg');
+    qproperty-iconSize: 16px;
+}
+QCalendarWidget QToolButton#qt_calendar_nextmonth {
+    qproperty-icon: url('Icons/tabler/themed/chevron-right-light.svg');
+    qproperty-iconSize: 16px;
+}
+QCalendarWidget QSpinBox#qt_calendar_yearedit {
+    min-width: 64px;
+    min-height: 22px;
+    max-height: 22px;
+}
+QCalendarWidget QAbstractItemView {
+    /* The weekday row is painted in the alternate colour -- in every
+       state: under ':enabled' only, a disabled calendar's row was white. */
+    alternate-background-color: #F8F9FA;
+    background-color: #FFFFFF;
+    color: #202124;
+    selection-background-color: #1a73e8;
+    selection-color: #FFFFFF;
+    border: none;
+    outline: none;
+}
+QCalendarWidget QAbstractItemView:disabled {
+    color: #9AA0A6;
+}
+
+/* ============ What a run covers (Scope) ============ */
+/* The editor's help and notes read like the modules dialog's; its summary
+   is the rules in words, ruled off above like the modules' summary. */
+QLabel#scopeNote {
+    color: #6c757d;
+}
+QLabel#scopeSummary {
+    padding-top: 6px;
+    border-top: 1px solid #E5E5E5;
+}
+QPlainTextEdit#scopeRules {
+    font-family: "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+    padding: 2px 4px;
+}
+/* How many files the rules leave: the line that answers "how much will
+   this run read?", so it reads first. */
+QLabel#scopeEstimate {
+    color: #212529;
+    font-weight: 600;
+}
+QScrollArea#scopeScroll, QWidget#scopeFields {
+    background: transparent;
+}
+
+/* ============ Find a Command (Ctrl+K) ============ */
+QDialog#commandSearch {
+    background-color: #FFFFFF;
+    border: 1px solid #ced4da;
+    border-radius: 8px;
+}
+QLineEdit#commandSearchBox {
+    min-height: 30px;
+    max-height: 30px;
+    font-size: 14px;
+    padding: 0px 8px;
+}
+QListWidget#commandSearchList {
+    border: none;
+    background-color: #FFFFFF;
+}
+QListWidget#commandSearchList::item {
+    padding: 5px 6px;
+    border-radius: 4px;
+}
+QLabel#commandSearchHint {
+    color: #6c757d;
+    font-size: 11px;
+    background: transparent;
+}
+
+/* About: Check for Updates' answer -- quiet while asking and when
+   current, green when a newer release exists, amber when it could not
+   ask. */
+QLabel#aboutUpdateStatus {
+    color: #6c757d;
+    font-size: 12px;
+    background: transparent;
+}
+QLabel#aboutUpdateStatus[state="newer"] {
+    color: #1E7E34;
+    font-weight: 600;
+}
+QLabel#aboutUpdateStatus[state="error"] {
+    color: #B26A00;
+}
+
+/* About: the website and source links. */
+QLabel#aboutLinks {
+    font-size: 12px;
+    background: transparent;
+}
+
+/* ============ Text zoom (ui/widgets/text_zoom.py) ============ */
+/* One list's or viewer's text larger or smaller: Ctrl + wheel, or
+   Ctrl+= / Ctrl+- / Ctrl+0. A property, not a font set in code: the
+   QWidget font-size above would override that. Views with a
+   font-size rule of their own (#listingTable...) are named too:
+   name + property outranks name alone. Step 0 = no property. */
+QAbstractItemView[textZoom="-2"], QPlainTextEdit[textZoom="-2"], QTextEdit[textZoom="-2"],
+#listingTable[textZoom="-2"], QTableView#activityTable[textZoom="-2"],
+QPlainTextEdit#monoDetailView[textZoom="-2"] {
+    font-size: 11px;
+}
+QAbstractItemView[textZoom="-1"], QPlainTextEdit[textZoom="-1"], QTextEdit[textZoom="-1"],
+#listingTable[textZoom="-1"], QTableView#activityTable[textZoom="-1"],
+QPlainTextEdit#monoDetailView[textZoom="-1"] {
+    font-size: 12px;
+}
+QAbstractItemView[textZoom="1"], QPlainTextEdit[textZoom="1"], QTextEdit[textZoom="1"],
+#listingTable[textZoom="1"], QTableView#activityTable[textZoom="1"],
+QPlainTextEdit#monoDetailView[textZoom="1"] {
+    font-size: 14px;
+}
+QAbstractItemView[textZoom="2"], QPlainTextEdit[textZoom="2"], QTextEdit[textZoom="2"],
+#listingTable[textZoom="2"], QTableView#activityTable[textZoom="2"],
+QPlainTextEdit#monoDetailView[textZoom="2"] {
+    font-size: 16px;
+}
+QAbstractItemView[textZoom="3"], QPlainTextEdit[textZoom="3"], QTextEdit[textZoom="3"],
+#listingTable[textZoom="3"], QTableView#activityTable[textZoom="3"],
+QPlainTextEdit#monoDetailView[textZoom="3"] {
+    font-size: 18px;
+}
+QAbstractItemView[textZoom="4"], QPlainTextEdit[textZoom="4"], QTextEdit[textZoom="4"],
+#listingTable[textZoom="4"], QTableView#activityTable[textZoom="4"],
+QPlainTextEdit#monoDetailView[textZoom="4"] {
+    font-size: 20px;
+}
+QAbstractItemView[textZoom="5"], QPlainTextEdit[textZoom="5"], QTextEdit[textZoom="5"],
+#listingTable[textZoom="5"], QTableView#activityTable[textZoom="5"],
+QPlainTextEdit#monoDetailView[textZoom="5"] {
+    font-size: 24px;
+}
+QAbstractItemView[textZoom="6"], QPlainTextEdit[textZoom="6"], QTextEdit[textZoom="6"],
+#listingTable[textZoom="6"], QTableView#activityTable[textZoom="6"],
+QPlainTextEdit#monoDetailView[textZoom="6"] {
+    font-size: 28px;
 }

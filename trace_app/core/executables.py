@@ -17,9 +17,7 @@ itself, imports that together inject into another process, a PE checksum
 that does not match. Each indicator says what it is; none is a verdict.
 """
 
-import collections
 import logging
-import math
 import struct
 from datetime import datetime, timezone
 
@@ -108,13 +106,15 @@ def kind_of(head):
 
 
 def entropy(data):
-    """Bits per byte of (at most ENTROPY_SAMPLE of) `data`."""
+    """Bits per byte of (at most ENTROPY_SAMPLE of) `data`. Counted by
+    analysis.byte_counts (in C): collections.Counter here was a quarter of
+    an analysis run on a Linux image, one Python step per byte of every
+    ELF section."""
     data = data[:ENTROPY_SAMPLE]
     if not data:
         return 0.0
-    length = len(data)
-    return -sum(c / length * math.log2(c / length)
-                for c in collections.Counter(data).values())
+    from trace_app.core.analysis import byte_counts, shannon
+    return shannon(data, byte_counts(data))
 
 
 def analyse(data):

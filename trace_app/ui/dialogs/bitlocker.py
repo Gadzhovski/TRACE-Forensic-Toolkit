@@ -48,6 +48,17 @@ _KEYS = {
         ('recovery_password', "Recovery key",
          "The volume's recovery key.", ''),
     ),
+    'veracrypt': (
+        ('password', "Password",
+         "The volume's password. A hidden volume opens with its own "
+         "password instead of the outer one's. Each hash VeraCrypt offers "
+         "is tried, so checking can take a few seconds.", ''),
+    ),
+    'android_backup': (
+        ('password', "Backup password",
+         "The password typed on the phone when the backup was made "
+         "(adb backup). Checking it takes a moment.", ''),
+    ),
     'ios_backup': (
         ('password', "Backup password",
          "The password set for encrypted backups in Finder or iTunes (not "
@@ -133,6 +144,16 @@ class UnlockVolumeDialog(QDialog):
             self.tabs.addTab(page, label)
             self._fields.append((secret_name, field))
         layout.addWidget(self.tabs)
+        self.pim = None
+        if kind == 'veracrypt':
+            # VeraCrypt's Personal Iterations Multiplier: empty or 0 when
+            # none was set (the default).
+            pim_row = QFormLayout()
+            self.pim = QLineEdit()
+            self.pim.setPlaceholderText("Empty unless one was set")
+            self.pim.setObjectName("veracryptPim")
+            pim_row.addRow("PIM:", self.pim)
+            layout.addLayout(pim_row)
         # Names kept for BitLocker's callers and tests.
         fields = dict(self._fields)
         self.recovery = fields.get('recovery_password')
@@ -167,20 +188,26 @@ class UnlockVolumeDialog(QDialog):
         if not value:
             self._show("Enter a key first.")
             return
+        secret = {secret_name: value}
+        if self.pim is not None and self.pim.text().strip():
+            try:
+                secret['pim'] = int(self.pim.text().strip())
+            except ValueError:
+                self._show("The PIM is a whole number.")
+                return
         try:
             if self.encryption == 'apfs':
-                self.handler.unlock_apfs(self.start_sector,
-                                         **{secret_name: value})
+                self.handler.unlock_apfs(self.start_sector, **secret)
             else:
                 self.handler.unlock_volume(self.start_sector, self.encryption,
-                                           **{secret_name: value})
+                                           **secret)
         except ContainerError as exc:
             self._show(str(exc))
             return
         except Exception as exc:                    # an unexpected library error
             self._show(f"The volume did not unlock: {exc}")
             return
-        self.secret = {secret_name: value}
+        self.secret = secret
         self.kind = _KIND_NAMES.get(secret_name, secret_name)
         self.accept()
 

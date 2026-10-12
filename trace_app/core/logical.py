@@ -275,6 +275,30 @@ _UNIX_MARKERS = ({'etc', 'home', 'var', 'usr', 'root', 'opt'},
                  {'data', 'system_ce', 'system_de', 'user_de', 'misc'})
 
 
+def _child(fs, node, name):
+    """The folder `name` in `node`, ignoring case, or None."""
+    for child, inode in node.children.items():
+        if child.lower() == name and fs.nodes[inode].is_dir:
+            return fs.nodes[inode]
+    return None
+
+
+def _phone_root(fs, node):
+    """A folder that is the top of a phone's file system as extraction
+    tools lay it out: iOS's private/var/mobile, or Android's data/data or
+    data/user (often alone, under the tool's own 'filesystem1', 'Dump'
+    or 'fs' folder)."""
+    path = node
+    for name in ('private', 'var', 'mobile'):
+        path = _child(fs, path, name) if path is not None else None
+    if path is not None:
+        return True
+    data = _child(fs, node, 'data')
+    return data is not None and any(
+        _child(fs, data, name) is not None
+        for name in ('data', 'user', 'user_de', 'system_ce'))
+
+
 def system_roots(fs, depth=4):
     """Folders of a collection that are the top of a system's file system
     -- 'C' in a KAPE output, 'uploads/auto/C%3A' in a Velociraptor one,
@@ -288,7 +312,8 @@ def system_roots(fs, depth=4):
             node = fs.nodes[inode]
             names = {n.lower() for n in node.children}
             if names & _WINDOWS_MARKERS or any(len(names & markers) >= 2
-                                               for markers in _UNIX_MARKERS):
+                                               for markers in _UNIX_MARKERS) \
+                    or _phone_root(fs, node):
                 found.append(fs.path_of(inode))
                 continue                    # not inside a system's own tree
             following += [i for i in node.children.values()

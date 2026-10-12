@@ -343,7 +343,7 @@ def _plain(value):
 # --- one image ---------------------------------------------------------------------
 
 def scan_evidence(image_handler, case, evidence_id, library, options=None,
-                  progress=None, should_stop=None):
+                  progress=None, should_stop=None, scope=None):
     """Scan every file (and carved file) of one image with the rules the
     case uses; replaces earlier YARA findings for it. Returns the number of
     files with a match."""
@@ -364,7 +364,7 @@ def scan_evidence(image_handler, case, evidence_id, library, options=None,
     case.clear_findings(evidence_id, MODULE_YARA)
     case.record_event('yara scan started', f"evidence id={evidence_id} sets="
                       + ', '.join(f"{e['name']}" for e in entries))
-    total = walk.count_files(image_handler, should_stop)
+    total = walk.count_files(image_handler, should_stop, scope=scope)
     carved = case.carved_files(evidence_id) if options.get(
         'include_carved', True) else []
     total += len(carved)
@@ -391,7 +391,8 @@ def scan_evidence(image_handler, case, evidence_id, library, options=None,
                               json.dumps(detail, default=str)))
 
     try:
-        for entry in walk.iter_files(image_handler, should_stop):
+        for entry in walk.iter_files(image_handler, should_stop,
+                                     scope=scope):
             done += 1
             if progress:
                 progress(done, total, entry.path)

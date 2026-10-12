@@ -23,13 +23,17 @@ logger = logging.getLogger('TRACE.Theme')
 #: what the desktop happens to be set to.
 THEMES = ('light', 'dark')
 DEFAULT_THEME = 'light'
+#: Not a theme of its own: light or dark, as the system is set (and kept
+#: in step when it changes -- MainWindow follows colorSchemeChanged).
+SYSTEM = 'system'
+CHOICES = THEMES + (SYSTEM,)
 
 _SECTION = 'UI'
 _KEY = 'theme'
 
 
-def read_theme():
-    """The theme the user last chose, or the default."""
+def read_choice():
+    """What the user last chose: 'light', 'dark' or 'system'."""
     parser = configparser.ConfigParser()
     try:
         parser.read([config_file(), 'config.ini'])
@@ -37,12 +41,38 @@ def read_theme():
     except (configparser.Error, OSError) as exc:
         logger.debug("Could not read the saved theme: %s", exc)
         return DEFAULT_THEME
-    return theme if theme in THEMES else DEFAULT_THEME
+    return theme if theme in CHOICES else DEFAULT_THEME
+
+
+def read_theme():
+    """The theme to draw: the user's choice, 'system' resolved."""
+    return resolve(read_choice())
+
+
+def resolve(choice):
+    """'light' or 'dark' for a choice ('system': as the system is set)."""
+    return system_theme() if choice == SYSTEM else (
+        choice if choice in THEMES else DEFAULT_THEME)
+
+
+def system_theme():
+    """'dark' when the system says it is in dark mode, else 'light' (also
+    when it does not say: some Linux desktops)."""
+    try:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+        app = QGuiApplication.instance()
+        if app is not None and \
+                app.styleHints().colorScheme() == Qt.ColorScheme.Dark:
+            return 'dark'
+    except Exception as exc:            # an older Qt: no colour scheme
+        logger.debug("No system colour scheme: %s", exc)
+    return 'light'
 
 
 def save_theme(theme):
     """Remember the choice, without disturbing anything else in the file."""
-    if theme not in THEMES:
+    if theme not in CHOICES:
         return
 
     parser = configparser.ConfigParser()

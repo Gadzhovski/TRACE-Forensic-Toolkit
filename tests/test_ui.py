@@ -327,6 +327,7 @@ def test_tree_findings_are_split_by_image(window):
                 .get('is_analysis_root'))
     mismatches = next(root.child(i) for i in range(root.childCount())
                       if root.child(i).text(0).startswith('Type mismatches'))
+    tree.expandItem(mismatches)         # its files are fetched when opened
     images = [mismatches.child(i).text(0).split(' (')[0]
               for i in range(mismatches.childCount())
               if (mismatches.child(i).data(0, Qt.UserRole) or {})
@@ -348,7 +349,7 @@ def test_clicking_a_finding_previews_without_leaving_triage(qapp, window):
     item = triage.mismatch_table.item(0, 0)
     triage.mismatch_table.itemDoubleClicked.emit(item)
     pump(qapp, 1.0)
-    assert window.result_viewer.currentIndex() == window.LISTING_TAB
+    assert window.result_viewer.currentWidget() is window.listing_widget
     assert item.data(Qt.UserRole)['name'] in _listed(window)
 
 
@@ -745,6 +746,8 @@ def _findings_group(window, prefix):
         if (root.data(0, Qt.UserRole) or {}).get('is_analysis_root'):
             for j in range(root.childCount()):
                 if root.child(j).text(0).startswith(prefix):
+                    # A group's files are fetched when it is opened.
+                    window.tree_viewer.expandItem(root.child(j))
                     return root.child(j)
     return None
 
@@ -927,7 +930,7 @@ def test_a_carved_archive_is_browsed_like_a_folder(qapp, stubbed_dialogs):
         row = next(r for r in window.carved_panel._rows if r['type'] == 'zip')
 
         window.open_carved(row)
-        assert window.result_viewer.currentIndex() == window.LISTING_TAB
+        assert window.result_viewer.currentWidget() is window.listing_widget
         content = window.image_handler.read(row['offset'], row['size'])
         members = [m['name'] for m in archives.list_members(content)
                    if not m['is_dir']]
@@ -995,6 +998,7 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
     assert {panel.values_table.item(r, 1).text()
             for r in range(panel.values_table.rowCount())} == {'URL'}
 
+
     # Triage's image filter narrows the values to that image's.
     second = next(r['id'] for r in window.case.evidence()
                   if r['path'].endswith(SECOND))
@@ -1027,6 +1031,88 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
     window.triage_panel.set_evidence_filter(None)
     panel.set_kind(None)
     assert pump(qapp, 30, lambda: not panel.loading)
+
+
+def test_the_listing_filters_its_folder_and_searches_the_index(
+        qapp, window, truth):
+    """The Listing's box filters the folder shown as you type; the scope
+    dropdown's "Whole image" searches every file from the search index,
+    and is offered only for an indexed image (it used to walk the image on the window's
+    thread). Indexes the image itself if nothing has yet."""
+    import fnmatch
+    from PySide6.QtCore import Qt
+    from trace_app.core.search_index import INDEX_DONE
+    # Indexed here when the indexing test has not run first (a subset).
+    row = next(r for r in window.case.evidence()
+               if r['path'].endswith(SECOND))
+    index = window.search_panel.index
+    if index is None or not index.is_indexed(row['id']):
+        assert window.queue_indexing([row]) == 1
+        assert pump(qapp, 300, lambda: not window.job_bar.busy)
+    window.activate_image(image_path(SECOND))
+    root = _root(window, SECOND)
+    volume = _first_volume(root)
+    window.on_item_clicked(volume, 0)
+    pump(qapp, 0.5)
+    table = window.listing_table
+    names = [table.item(r, 0).text() for r in range(table.rowCount())]
+    assert len(names) > 2
+
+    # This folder, as you type: the rows stay, the others are hidden.
+    scope, box = window.listing_scope, window.listing_search_bar
+    whole = scope.model().item(window.LISTING_WHOLE_IMAGE)
+    assert whole.isEnabled() and scope.currentIndex() == \
+        window.LISTING_THIS_FOLDER
+    probe = names[0][:3]
+    box.setText(probe)
+    pump(qapp, 0.4)
+    shown = {table.item(r, 0).text() for r in range(table.rowCount())
+             if not table.isRowHidden(r)}
+    assert shown == {n for n in names if probe.casefold() in n.casefold()}
+    assert table.rowCount() == len(names)       # filtered, not refilled
+    box.clear()
+    pump(qapp, 0.4)
+    assert not any(table.isRowHidden(r) for r in range(table.rowCount()))
+
+    # The whole image, from the index: every hit is a file of the image
+    # the walk also finds, and its bytes are that file's.
+    scope.setCurrentIndex(window.LISTING_WHOLE_IMAGE)
+    box.setText('*.jpg')
+    window.trigger_listing_search()
+    pump(qapp, 0.4)
+    found = [table.item(r, 0).data(Qt.UserRole)
+             for r in range(table.rowCount())]
+    handler = truth[SECOND]
+    walked = {(f['start_offset'], f['inode_number'])
+              for f in handler.search_files(None)
+              if fnmatch.fnmatch(f['name'].lower(), '*.jpg')}
+    assert found and all(fnmatch.fnmatch(f['name'].lower(), '*.jpg')
+                         for f in found)
+    assert {(f['start_offset'], f['inode_number']) for f in found} <= walked
+    content, _meta = handler.get_file_content(found[0]['inode_number'],
+                                              found[0]['start_offset'])
+    assert content[:2] == b'\xff\xd8'
+    box.clear()
+    pump(qapp, 0.4)
+    scope.setCurrentIndex(window.LISTING_THIS_FOLDER)
+
+    # Not finished: "Whole image" is listed, greyed, and says why.
+    index = window.search_panel.index
+    evidence_id = window.evidence_id_for_path(window.current_image_path)
+    index.set_state(evidence_id, 'running')
+    try:
+        window._update_listing_scope()
+        assert not whole.isEnabled()
+        # A run left 'running' with no job: stopped part-way, said so.
+        assert whole.text() == 'Whole image (index incomplete)'
+        assert 'indexing stopped at' in whole.toolTip()
+        window.search_panel._update_summary()
+        assert 'Incomplete:' in window.search_panel.summary_label.text()
+    finally:
+        index.set_state(evidence_id, INDEX_DONE)
+        window._update_listing_scope()
+    assert whole.isEnabled() and whole.text() == 'Whole image'
+
 
 
 def test_the_window_stays_responsive_while_a_job_runs(qapp, window):
@@ -1601,7 +1687,9 @@ def test_no_tab_squeezes_the_tree(window):
     for index in range(tabs.count()):
         width = tabs.widget(index).minimumSizeHint().width()
         assert width <= 700, (tabs.tabText(index), width)
-    assert tabs.minimumSizeHint().width() <= 720
+    for dock in tabs.docks():
+        width = dock.minimumSizeHint().width()
+        assert width <= 720, (dock.windowTitle(), width)
     assert window.tree_viewer.minimumWidth() >= window._TREE_MIN
 
 
@@ -1635,6 +1723,7 @@ def test_yara_is_a_job_a_triage_tab_and_findings(qapp, window, tmp_path):
     found = window.case.findings(None, 'yara', limit=1000)
     assert found and {f['detail']['rule'] for f in found} == {'JPEG_JFIF'}
     triage = window.triage_panel
+    triage.show_group('yara')           # a tab is filled when opened
     assert triage.yara_table.rowCount() == len(found)
     assert triage.tabs.tabText(triage._tab_for['yara']).startswith('YARA (')
     group = _findings_group(window, 'YARA matches')
@@ -2020,6 +2109,7 @@ def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
         triage = window.triage_panel
         index = triage._tab_for['executables']
         assert triage.tabs.tabText(index) == 'Executables (2)'
+        triage.show_group('executables')    # filled when opened
         table = triage.executable_table
         cells = [[table.item(r, c).text() for c in range(table.columnCount())]
                  for r in range(table.rowCount())]
@@ -2084,6 +2174,7 @@ def test_sigma_detections_are_a_triage_tab_and_findings(qapp, window):
     try:
         triage = window.triage_panel
         assert triage.tabs.tabText(triage._tab_for['sigma']) == 'Sigma (3)'
+        triage.show_group('sigma')          # filled when opened
         table = triage.sigma_table
         assert [table.item(r, 3).text() for r in range(3)] == [
             'Mimikatz DC Sync', 'Whoami Execution', 'Process Creation']

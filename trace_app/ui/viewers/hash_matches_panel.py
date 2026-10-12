@@ -36,7 +36,7 @@ _TONE = {KNOWN_BAD: 'malicious', NOTABLE: 'suspicious', KNOWN_GOOD: 'clean'}
 class HashMatchWorker(ProcessWorker):
     """Matches a case against its hash sets in a child process."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_matching = Signal(int, str)
 
     kind = 'hashsets'
@@ -267,6 +267,8 @@ class HashMatchesPanel(QWidget):
         self._loads.pop(generation, None)
         if generation != self._generation:
             return
+        if self.case is None or not getattr(self.case, 'is_open', True):
+            return                  # the case closed while it loaded
         self.model.set_rows(rows, self._names)
         self.table.sortByColumn(-1, Qt.AscendingOrder)
         from trace_app.core import hashsets

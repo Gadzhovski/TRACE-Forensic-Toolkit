@@ -344,7 +344,7 @@ def test_every_menu_section_is_found_by_search(tmp_path):
     """Eight sections in UTF-16BE: in files, a deleted file, the FAT of an
     older volume, slack and unallocated space -- four of them in no file
     at all. The headings as NIST's source files spell them."""
-    from trace_app.core.indexer import index_evidence
+    from trace_app.core.indexer import index_evidence, index_free_space
     from trace_app.core.search_index import SearchIndex
     with zipfile.ZipFile(nist('russian', 'russian-utf-16.zip')) as source:
         headings = sorted(
@@ -358,6 +358,7 @@ def test_every_menu_section_is_found_by_search(tmp_path):
     index = SearchIndex(str(tmp_path))
     try:
         index_evidence(handler, index, 1)
+        index_free_space(handler, index, 1)
         for heading in headings:
             assert index.search(f'"{heading}"'), heading
     finally:

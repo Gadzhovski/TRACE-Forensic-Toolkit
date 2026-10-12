@@ -216,7 +216,11 @@ def _run(report, images, sandbox):
         assert 'done' in seen, "no answer from the child process"
         assert seen['done'][2] == '', seen['done'][2]
         assert seen.get('item', (None, {}))[1].get('pong') == 42, seen
-        return f"started, imported the engines, answered ({process.name})"
+        pool = seen['item'][1].get('pool')
+        assert pool and ['email', 'ping@example.org'] in [
+            list(e) for e in pool[0]], pool
+        return (f"started, imported the engines, ran a text pool, "
+                f"answered ({process.name})")
 
     @check('bundled resources')
     def _():

@@ -19,6 +19,7 @@ Dictionaries are not supported (journals do not use them); a frame that
 needs one raises ZstdError rather than producing wrong bytes.
 """
 
+import functools
 import struct
 
 MAGIC = 0xFD2FB528
@@ -29,6 +30,7 @@ class ZstdError(Exception):
     """The data is not valid Zstandard, or needs what is not supported."""
 
 
+@functools.lru_cache(maxsize=None)
 def standard_library():
     try:
         from compression import zstd   # Python 3.14+

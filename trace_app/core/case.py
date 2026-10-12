@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 20
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -119,6 +119,8 @@ REPORTED_MISMATCHES = ('suspicious', 'notable')
 #: The content-check grades worth showing; benign ones (a motion photo's
 #: clip, an owner-password PDF) are recorded but not put in front of anyone.
 REPORTED_FINDING_GRADES = ('suspicious', 'notable')
+#: Sigma matches Triage lists (and counts) at most.
+SIGMA_SHOWN = 50000
 
 #: Finding modules written by jobs of their own, not the file analysis.
 OWN_JOB_MODULES = ('ntfs', 'yara', 'sigma', 'persistence', 'keywords',
@@ -196,6 +198,18 @@ def parse_artifact_ref(ref):
     return {'kind': 'unknown', 'ref': ref}
 
 
+#: The tags a case starts with: (name, colour).
+DEFAULT_TAGS = (('Relevant', '#E5534B'), ('Needs review', '#E3A008'),
+                ('Ignore', '#8B949E'))
+
+
+def _tag_detail(tag, paths):
+    """An audit line's detail: the tag and the files, the first ten named."""
+    shown = '; '.join(paths[:10])
+    more = f" and {len(paths) - 10} more" if len(paths) > 10 else ''
+    return f"{tag}: {len(paths)} file(s): {shown}{more}"
+
+
 class CaseError(Exception):
     """A case could not be created, opened or written."""
 
@@ -231,6 +245,7 @@ class Case:
 
         case = cls(folder, cls._connect(db_path))
         case._create_schema()
+        case._seed_tags()
         case._custody_guards()
         now = _utc_now()
         case._set_many({
@@ -264,6 +279,13 @@ class Case:
         case._set('opened_utc', _utc_now())
         case._record_activity('case opened', case.name)
         return case
+
+    @property
+    def is_open(self):
+        """Whether the database is still open: a signal arriving after the
+        window closed the case (a panel's load finishing) asks this
+        first."""
+        return self._db is not None
 
     def close(self):
         """Close the database. Safe to call more than once."""
@@ -529,6 +551,7 @@ class Case:
         ('artifact_tags', 'tags'),
         ('report_items', 'report picks'),
         ('verifications', 'verification records'),
+        ('evidence_systems', 'operating systems found'),
     )
 
     def evidence_footprint(self, evidence_id):
@@ -545,6 +568,39 @@ class Case:
                 continue
             if count:
                 out.append((description, count))
+        return out
+
+    def set_systems(self, evidence_id, systems):
+        """Record the operating systems found on an image's volumes:
+        [{'volume_key', 'volume', 'family', 'logo', 'name', 'detail'}].
+        Replaces what was recorded; writes nothing when it is unchanged
+        (an image is opened every time the case is)."""
+        keys = ('volume_key', 'volume', 'family', 'logo', 'name', 'detail')
+        new = sorted(tuple(s.get(k) for k in keys) for s in systems)
+        old = sorted(tuple(s.get(k) for k in keys)
+                     for s in self.systems(evidence_id).get(evidence_id, []))
+        if new == old:
+            return False
+        now = _utc_now()
+        with self._db:
+            self._db.execute("DELETE FROM evidence_systems WHERE "
+                             "evidence_id = ?", (evidence_id,))
+            self._db.executemany(
+                "INSERT INTO evidence_systems (evidence_id, volume_key, "
+                "volume, family, logo, name, detail, recorded_utc) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [(evidence_id, *row, now) for row in new])
+        return True
+
+    def systems(self, evidence_id=None):
+        """{evidence id: [system, ...]} in volume order."""
+        where, params = ('WHERE evidence_id = ?', (evidence_id,)) \
+            if evidence_id is not None else ('', ())
+        out = {}
+        for row in self._db.execute(
+                f"SELECT * FROM evidence_systems {where} ORDER BY "
+                f"evidence_id, volume_key", params):
+            out.setdefault(row['evidence_id'], []).append(dict(row))
         return out
 
     def notes_for_evidence(self, evidence_id):
@@ -637,6 +693,45 @@ class Case:
             'evidence relocated',
             f"id={evidence_id} {old['path'] if old else '?'} -> {new_path}"
             f"; recorded hashes kept, to be checked")
+
+    def relocate_checked(self, evidence_id, new_path, results,
+                         accept_unverified=False):
+        """Point evidence at `new_path` only if the file there is the same
+        evidence: `results` (a hashing run of that file) must match every
+        hash the case recorded and every acquisition hash. A file with
+        nothing to compare against is taken only with `accept_unverified`
+        (the examiner's say-so, audited as such). Returns the outcome with
+        'relocated' True or False; a refusal is audited too, with what the
+        file there hashed to."""
+        row = self._db.execute("SELECT * FROM evidence WHERE id = ?",
+                               (evidence_id,)).fetchone()
+        if row is None:
+            raise CaseError(f"No evidence {evidence_id} in this case")
+        row = dict(row)
+        recorded = {name: row.get(name) for name in HASH_NAMES
+                    if row.get(name)}
+        outcome = verdict(results, recorded, acquisition_hashes(row, results))
+        status = outcome['status']
+        if status == STATUS_VERIFIED or (status == STATUS_BASELINE
+                                         and accept_unverified):
+            self.relocate_evidence(evidence_id, new_path)
+            applied = self.apply_verification(evidence_id, results)
+            if status == STATUS_BASELINE:
+                self._record_activity(
+                    'evidence relocated unverified',
+                    f"id={evidence_id}: nothing recorded to compare "
+                    f"{os.path.abspath(new_path)} with; accepted by the "
+                    f"examiner")
+            return dict(applied, relocated=True)
+        computed = ' '.join(
+            f"{n.upper()}={results.get(f'computed_{n}')}"
+            for n in HASH_NAMES if results.get(f'computed_{n}'))
+        self._record_activity(
+            'evidence relocation refused',
+            f"id={evidence_id} {row['path']} -> "
+            f"{os.path.abspath(new_path)}: {outcome['detail']}"
+            + (f" ({computed})" if computed else ''))
+        return dict(outcome, relocated=False)
 
     def record_hashes(self, evidence_id, results, status=None, detail=None):
         """Judge a hashing run (ImageHandler.calculate_hashes) and record
@@ -994,6 +1089,170 @@ class Case:
                 'bookmark removed',
                 f"id={bookmark_id} {row['label'] or ''!r} on "
                 f"{row['artifact_path'] or row['artifact_ref']}")
+
+    # --- tags ---------------------------------------------------------------
+    #
+    # A tag is the examiner's own verdict on a file -- Relevant, Ignore, a
+    # name of their choosing -- kept by artifact_ref with the evidence id,
+    # like a bookmark, so it survives a reopen. Who tagged what, and when,
+    # is custody: every change is an audit line.
+
+    def _seed_tags(self):
+        """The tags a case starts with, unless it has any."""
+        if self._db.execute("SELECT COUNT(*) FROM tags").fetchone()[0]:
+            return
+        self._db.executemany("INSERT INTO tags (name, colour) VALUES (?, ?)",
+                             DEFAULT_TAGS)
+        self._db.commit()
+
+    def tags(self):
+        """Every tag, in the order made, with how many files carry it."""
+        return [dict(row) for row in self._db.execute(
+            "SELECT t.id, t.name, t.colour, COUNT(a.artifact_ref) AS files "
+            "FROM tags t LEFT JOIN artifact_tags a ON a.tag_id = t.id "
+            "GROUP BY t.id ORDER BY t.id")]
+
+    def add_tag(self, name, colour=''):
+        """A new tag; returns its id (an existing tag of that name's id)."""
+        name = (name or '').strip()
+        if not name:
+            raise CaseError("A tag needs a name.")
+        row = self._db.execute("SELECT id FROM tags WHERE name = ?",
+                               (name,)).fetchone()
+        if row:
+            return row['id']
+        cursor = self._db.execute(
+            "INSERT INTO tags (name, colour) VALUES (?, ?)", (name, colour))
+        self._db.commit()
+        self._record_activity('tag created', f"{name!r} {colour}".strip())
+        return cursor.lastrowid
+
+    def update_tag(self, tag_id, name=None, colour=None):
+        old = self._db.execute("SELECT name, colour FROM tags WHERE id = ?",
+                               (tag_id,)).fetchone()
+        if old is None:
+            return
+        if name is not None and name.strip():
+            self._db.execute("UPDATE tags SET name = ? WHERE id = ?",
+                             (name.strip(), tag_id))
+        if colour is not None:
+            self._db.execute("UPDATE tags SET colour = ? WHERE id = ?",
+                             (colour, tag_id))
+        self._db.commit()
+        changes = [f"{what} {old[what]!r} -> {new!r}"
+                   for what, new in (('name', name), ('colour', colour))
+                   if new is not None and new != old[what]]
+        if changes:
+            self._record_activity('tag edited', f"id={tag_id}: "
+                                  + '; '.join(changes))
+
+    def remove_tag(self, tag_id):
+        """Delete a tag, and its marks on files."""
+        row = self._db.execute("SELECT name FROM tags WHERE id = ?",
+                               (tag_id,)).fetchone()
+        if row is None:
+            return
+        files = self._db.execute(
+            "SELECT COUNT(*) FROM artifact_tags WHERE tag_id = ?",
+            (tag_id,)).fetchone()[0]
+        self._db.execute("DELETE FROM artifact_tags WHERE tag_id = ?",
+                         (tag_id,))
+        self._db.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+        self._db.commit()
+        self._record_activity('tag removed', f"{row['name']!r}, taken off "
+                              f"{files} file(s)")
+
+    def tag_artifacts(self, tag_id, rows):
+        """Put tag `tag_id` on files: rows of {'evidence_id', 'artifact_ref',
+        'name', 'path'}. Returns how many were newly tagged."""
+        tag = self._db.execute("SELECT name FROM tags WHERE id = ?",
+                               (tag_id,)).fetchone()
+        if tag is None:
+            raise CaseError("No such tag.")
+        now, who = _utc_now(), self.examiner
+        added = []
+        for row in rows:
+            evidence_id = row.get('evidence_id')
+            if evidence_id is not None and \
+                    not self._evidence_exists(evidence_id):
+                evidence_id = None
+            # Asked first: NULLs are distinct in the primary key, so a file
+            # with no evidence id would otherwise be tagged twice.
+            if self._db.execute(
+                    "SELECT 1 FROM artifact_tags WHERE tag_id = ? AND "
+                    "evidence_id IS ? AND artifact_ref = ?",
+                    (tag_id, evidence_id, row['artifact_ref'])).fetchone():
+                continue
+            cursor = self._db.execute(
+                "INSERT OR IGNORE INTO artifact_tags (tag_id, evidence_id, "
+                "artifact_ref, name, path, tagged_utc, examiner) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (tag_id, evidence_id, row['artifact_ref'],
+                 row.get('name') or '', row.get('path') or '', now, who))
+            if cursor.rowcount:
+                added.append(row.get('path') or row.get('name')
+                             or row['artifact_ref'])
+        self._db.commit()
+        if added:
+            self._record_activity('files tagged', _tag_detail(
+                tag['name'], added))
+        return len(added)
+
+    def untag(self, rows, tag_id=None):
+        """Take tag `tag_id` (None: every tag) off files. Returns how many
+        marks went."""
+        removed = []
+        for row in rows:
+            query = ("DELETE FROM artifact_tags WHERE evidence_id IS ? AND "
+                     "artifact_ref = ?")
+            args = [row.get('evidence_id'), row['artifact_ref']]
+            if tag_id is not None:
+                query += " AND tag_id = ?"
+                args.append(tag_id)
+            if self._db.execute(query, args).rowcount:
+                removed.append(row.get('path') or row.get('name')
+                               or row['artifact_ref'])
+        self._db.commit()
+        if removed:
+            name = 'every tag' if tag_id is None else repr(
+                (self._db.execute("SELECT name FROM tags WHERE id = ?",
+                                  (tag_id,)).fetchone() or {'name': '?'})
+                ['name'])
+            self._record_activity('files untagged', _tag_detail(name,
+                                                                removed))
+        return len(removed)
+
+    def tags_for(self, evidence_id, refs):
+        """{artifact_ref: [{'id', 'name', 'colour'}]} for the refs given."""
+        refs = list(refs)
+        found = {}
+        for start in range(0, len(refs), 500):
+            chunk = refs[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for row in self._db.execute(
+                    f"SELECT a.artifact_ref, t.id, t.name, t.colour "
+                    f"FROM artifact_tags a JOIN tags t ON t.id = a.tag_id "
+                    f"WHERE a.evidence_id IS ? AND a.artifact_ref IN "
+                    f"({marks}) ORDER BY t.id", [evidence_id] + chunk):
+                found.setdefault(row['artifact_ref'], []).append(
+                    {'id': row['id'], 'name': row['name'],
+                     'colour': row['colour']})
+        return found
+
+    def tagged(self, tag_id=None, evidence_id=None, limit=100000):
+        """Tagged files, with their tag: newest first."""
+        query = ("SELECT a.*, t.name AS tag, t.colour FROM artifact_tags a "
+                 "JOIN tags t ON t.id = a.tag_id WHERE 1 = 1")
+        args = []
+        if tag_id is not None:
+            query += " AND a.tag_id = ?"
+            args.append(tag_id)
+        if evidence_id is not None:
+            query += " AND a.evidence_id = ?"
+            args.append(evidence_id)
+        query += " ORDER BY t.id, a.tagged_utc DESC, a.path LIMIT ?"
+        args.append(limit)
+        return [dict(row) for row in self._db.execute(query, args)]
 
     # --- notes ------------------------------------------------------------
 
@@ -1377,6 +1636,19 @@ class Case:
         """Activity rows, newest first, `detail` parsed."""
         return query_user_activity(self._db, evidence_id, category,
                                    limit=limit)
+
+    def _communication(self, evidence_id=None):
+        return query_user_activity(self._db, evidence_id, 'communication')
+
+    def conversations(self, evidence_id=None):
+        """Messages and calls grouped into threads (core/conversations)."""
+        from trace_app.core import conversations
+        return conversations.threads(self._communication(evidence_id))
+
+    def conversation(self, key, evidence_id=None):
+        """One thread's rows, oldest first (core/conversations.messages)."""
+        from trace_app.core import conversations
+        return conversations.messages(self._communication(evidence_id), key)
 
     def located_activity(self, evidence_id=None):
         """Activity rows whose detail holds a latitude and longitude, for
@@ -1807,6 +2079,13 @@ class Case:
         for table in ('file_analysis', 'file_findings'):
             self._db.execute(f"DELETE FROM {table} WHERE evidence_id = ? AND "
                              f"path LIKE '{CARVED_PATHS}'", (evidence_id,))
+        # And the file-system events its MFT and index records gave
+        # (core/carved_artifacts).
+        from trace_app.core.carved_artifacts import FS_SOURCES
+        self._db.execute(
+            f"DELETE FROM fs_events WHERE evidence_id = ? AND source IN "
+            f"({','.join('?' * len(FS_SOURCES))})",
+            (evidence_id,) + FS_SOURCES)
         self._db.commit()
 
     def add_carved(self, evidence_id, record):
@@ -2272,8 +2551,20 @@ class Case:
 
         carved = self._db.execute(
             f"SELECT COUNT(*) FROM carved_files{where}", params).fetchone()[0]
+        # Counted here, not from the rows Triage lists, so its tabs can be
+        # labelled without filling them. YARA: files (a file matching three
+        # rules is one); Sigma: events, as its table lists them.
+        scope = " AND evidence_id = ?" if evidence_id is not None else ""
+        yara = self._db.execute(
+            "SELECT COUNT(*) FROM (SELECT DISTINCT evidence_id, artifact_ref "
+            "FROM file_findings WHERE module = 'yara'" + scope + ")",
+            params).fetchone()[0]
+        sigma = self._db.execute(
+            "SELECT COUNT(*) FROM file_findings WHERE module = 'sigma'"
+            + scope, params).fetchone()[0]
 
         return {'analysed': analysed, 'mismatches': mismatches,
+                'yara': yara, 'sigma': min(sigma, SIGMA_SHOWN),
                 'carved': carved,
                 'high_entropy': entropy, 'duplicate_groups': duplicates,
                 'hidden': count('hidden', REPORTED_FINDING_GRADES),
@@ -2343,6 +2634,22 @@ class Case:
                 created_utc   TEXT
             );
 
+            -- The operating system found on each volume (schema 20;
+            -- core/os_identity), for the Case tab, the report and the
+            -- timeline's filter. Recorded when the image is opened.
+            CREATE TABLE IF NOT EXISTS evidence_systems (
+                evidence_id   INTEGER NOT NULL REFERENCES evidence(id)
+                              ON DELETE CASCADE,
+                volume_key    INTEGER NOT NULL,
+                volume        TEXT,
+                family        TEXT,
+                logo          TEXT,
+                name          TEXT,
+                detail        TEXT,
+                recorded_utc  TEXT,
+                PRIMARY KEY (evidence_id, volume_key)
+            );
+
             CREATE TABLE IF NOT EXISTS tags (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 name          TEXT NOT NULL UNIQUE,
@@ -2353,6 +2660,10 @@ class Case:
                 tag_id        INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
                 evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
                 artifact_ref  TEXT NOT NULL,
+                name          TEXT,
+                path          TEXT,
+                tagged_utc    TEXT,
+                examiner      TEXT,
                 PRIMARY KEY (tag_id, evidence_id, artifact_ref)
             );
 
@@ -2839,6 +3150,19 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 19:
+            # Tags in use (schema 19): which file, by whom, when -- the
+            # table was there unused; it gains what a list of tagged files
+            # shows, and the three tags every case starts with.
+            for column in ('name', 'path', 'tagged_utc', 'examiner'):
+                try:
+                    self._db.execute(
+                        f"ALTER TABLE artifact_tags ADD COLUMN {column} TEXT")
+                except sqlite3.OperationalError:
+                    pass        # already present (created above at v19)
+            self._db.commit()
+            self._seed_tags()
 
         if version < 18:
             self._migrate_custody()

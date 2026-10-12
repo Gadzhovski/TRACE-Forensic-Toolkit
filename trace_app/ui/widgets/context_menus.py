@@ -37,21 +37,38 @@ def _verb_icons():
     """Leading words of a menu entry -> icon name, first match wins."""
     icons = _icons()
     return (
+        # Copying: what is copied decides the icon.
+        (r'copy (rows?|row\(s\))\b', icons.COPY_ROWS),
+        (r'copy column', icons.COPY_COLUMN),
+        (r'copy (full )?path', icons.COPY_PATH),
+        (r'copy (md5|sha|hash)', icons.FIND_HASH),
+        (r'copy (as )?hex|copy bytes', icons.COPY_HEX),
+        (r'copy coordinates', icons.COPY_LOCATION),
+        (r'copy \S', icons.COPY_TEXT),
         (r'copy', icons.COPY), (r'select all', icons.SELECT_ALL),
-        (r'export|save', icons.EXPORT), (r'(add |remove )?bookmark',
-                                         icons.BOOKMARK),
+        # Exporting: a table, many files, raw bytes, a picture, a file.
+        (r'export table|export .*csv', icons.EXPORT_CSV),
+        (r'export all', icons.EXPORT_MANY),
+        (r'export (selection|bytes)', icons.EXPORT_BYTES),
+        (r'save (image|frame|picture|current view)', icons.SAVE_PICTURE),
+        (r'export|save', icons.EXPORT_FILE),
+        (r'(add |remove )?bookmark', icons.BOOKMARK),
         (r'edit|rename', icons.EDIT),
         (r'delete|remove|forget|clear', icons.DELETE),
+        (r'show (\w+ )*in listing', icons.SHOW_IN_LISTING),
+        (r'show in (folder|directory)', icons.SHOW_IN_FOLDER),
+        (r'open the (earlier|later) version', icons.VERSIONS),
         (r'show (in|file|content|in listing)|go to|reveal|open (in|file)',
          icons.EXTERNAL_LINK),
         (r'open (containing )?folder|open log folder', icons.OPEN_FOLDER),
+        (r'(view )?image information', icons.IMAGE_INFO),
         (r'preview|view', icons.DISPLAY),
         (r'verify', icons.VERIFY),
         (r'look up|upload|virustotal', icons.VIRUSTOTAL_MENU),
         (r'decode', icons.CODE),
         (r'find|search', icons.SEARCH),
         (r'unlock', icons.VOLUME_UNLOCKED),
-        (r'image information|properties|details', icons.INFO),
+        (r'properties|details', icons.PROPERTIES),
         (r'browse archive|open archive', icons.OPEN_FOLDER),
         (r'play', icons.PLAY),
     )
@@ -236,11 +253,30 @@ def view_at(global_pos):
 #: the evidence should offer wherever it is listed (Export File, Add
 #: Bookmark) when the menu has not already.
 _row_hook = None
+#: key_hook(view, key) -> handled: the window's keys on a list's selection
+#: (tags: 1, 2, 3, 0).
+_key_hook = None
 
 
 def set_row_hook(hook):
     global _row_hook
     _row_hook = hook
+
+
+def set_key_hook(hook):
+    global _key_hook
+    _key_hook = hook
+
+
+def selected_payloads(view, row=None):
+    """Column 0's UserRole data of a list's selected rows -- or of `row`
+    alone, when the row clicked is not among them."""
+    out = [index.data(Qt.UserRole) for index in selected_rows(view)]
+    out = [data for data in out if isinstance(data, dict)]
+    if row is not None and not any(data is row or data == row
+                                   for data in out):
+        return [row]
+    return out
 
 
 def row_at(view, global_pos):
@@ -262,7 +298,7 @@ def show_menu(menu, global_pos, view=None):
         row = row_at(view, global_pos)
         if row is not None and _row_hook is not None:
             try:
-                _row_hook(menu, row)
+                _row_hook(menu, row, view)
             except Exception as exc:
                 logger.debug("Menu extras failed: %s", exc)
         add_view_actions(menu, view, global_pos)
@@ -275,6 +311,15 @@ def show_menu(menu, global_pos, view=None):
 class _Copier(QObject):
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind == QEvent.KeyPress and _key_hook is not None and \
+                isinstance(watched, QAbstractItemView) and \
+                not event.modifiers() & ~Qt.KeypadModifier and \
+                event.key() in (Qt.Key_0, Qt.Key_1, Qt.Key_2, Qt.Key_3):
+            try:
+                if _key_hook(watched, event.key()):
+                    return True
+            except Exception as exc:
+                logger.debug("Key hook failed: %s", exc)
         if kind == QEvent.KeyPress and event.matches(QKeySequence.Copy):
             view = watched if isinstance(watched, QAbstractItemView) else None
             if view is not None and not view.property(OWN_COPY) and \

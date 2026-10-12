@@ -64,7 +64,6 @@ class PictureViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         # Disable right click

@@ -42,7 +42,7 @@ SYNTAX_HELP = (
 class KeywordWorker(ProcessWorker):
     """Searches the case's index in a child process (core/background.py)."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_search = Signal(int, str)
 
     kind = 'keywords'

@@ -57,7 +57,7 @@ DFTT_TERMS = [
 def indexed_case(tmp_path):
     from trace_app.core.case import Case
     from trace_app.core.image_handler import ImageHandler
-    from trace_app.core.indexer import index_evidence
+    from trace_app.core.indexer import index_evidence, index_free_space
     from trace_app.core.search_index import SearchIndex
     path = image_path('fat-img-kw.dd')
     case = Case.create(str(tmp_path / 'case'), 'Keywords')
@@ -66,6 +66,7 @@ def indexed_case(tmp_path):
     assert handler.load_image()
     index = SearchIndex(case.folder)
     index_evidence(handler, index, evidence_id)
+    index_free_space(handler, index, evidence_id)
     index.close()
     handler.close_resources()
     yield case, evidence_id

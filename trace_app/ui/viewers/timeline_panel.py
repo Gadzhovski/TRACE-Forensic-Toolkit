@@ -27,14 +27,11 @@ import os
 import sqlite3
 
 from PySide6.QtCore import (QAbstractTableModel, QDateTime, QModelIndex,
-                            QPointF, QRect, QRectF, Qt, QThread, QTimer,
-                            QTimeZone,
+                            QPointF, QRectF, Qt, QThread, QTimer, QTimeZone,
                             Signal)
-from PySide6.QtGui import (QColor, QFont, QGuiApplication, QIcon,
-                           QIconEngine, QPainter,
-                           QPixmap)
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QDateTimeEdit, QFileDialog, QHBoxLayout,
+                               QFileDialog, QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit,
                                QMenu, QPushButton, QSizePolicy, QSplitter,
                                QTableView, QTextBrowser, QToolBar,
@@ -42,7 +39,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
 
 from trace_app.core import timeline
 from trace_app.core.case import CASE_DB_NAME
-from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.ui import icons
 from trace_app.ui.widgets.flow_layout import FlowLayout
 from trace_app.ui.widgets.elided_label import ElidedLabel
@@ -57,7 +54,7 @@ class FsTimesWorker(ProcessWorker):
     """One image's file-system times (core/fs_times) in a child
     process."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_fstimes = Signal(int, str)
 
     kind = 'fstimes'
@@ -84,54 +81,9 @@ _PIVOTS = (('± 1 minute', 60), ('± 5 minutes', 300), ('± 1 hour', 3600),
            ('± 1 day', 86400), ('± 1 week', 7 * 86400))
 
 
-class _DotEngine(QIconEngine):
-    """A filled dot drawn as a shape at whatever size and pixel ratio is
-    asked for. It used to be a 12-pixel bitmap, which a 125% or 150%
-    display stretched -- the jagged, blurred dots beside every row."""
-
-    #: The dot's share of the icon's box: a little smaller than the box,
-    #: as the line icons beside it are.
-    SHARE = 0.62
-
-    def __init__(self, colour):
-        super().__init__()
-        self._colour = QColor(colour)
-
-    def clone(self):
-        return _DotEngine(self._colour)
-
-    def paint(self, painter, rect, mode, state):
-        painter.save()
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-        colour = QColor(self._colour)
-        if mode == QIcon.Disabled:
-            colour.setAlphaF(0.4)
-        painter.setBrush(colour)
-        side = min(rect.width(), rect.height()) * self.SHARE
-        centre = QRectF(rect).center()
-        painter.drawEllipse(centre, side / 2, side / 2)
-        painter.restore()
-
-    def pixmap(self, size, mode, state):
-        return self.scaledPixmap(size, mode, state, 1.0)
-
-    def scaledPixmap(self, size, mode, state, scale):
-        pixmap = QPixmap(max(1, round(size.width() * scale)),
-                         max(1, round(size.height() * scale)))
-        pixmap.setDevicePixelRatio(scale)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        self.paint(painter, QRect(0, 0, size.width(), size.height()), mode,
-                   state)
-        painter.end()
-        return pixmap
-
-
 def source_icon(source):
     """A dot in the source's colour, sharp at any size and display scale."""
-    return QIcon(_DotEngine(timeline.SOURCE_COLOURS.get(source,
-                                                        '#888888')))
+    return icons.dot_icon(timeline.SOURCE_COLOURS.get(source, '#888888'))
 
 
 def _description(row):
@@ -500,6 +452,8 @@ class _Load(QThread):
                     if s in (filters.get('sources') or ()))
                 result['rows'] = timeline.events(connection, filters,
                                                  SHOWN_LIMIT)
+                result['fs_kinds'] = timeline.fs_kinds(
+                    connection, filters.get('evidence_id'))
             finally:
                 connection.close()
         except sqlite3.Error as exc:
@@ -568,14 +522,6 @@ class TimelinePanel(QWidget):
 
         self.toolbar = QToolBar()
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel()
-        icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(icon_label, icons.TIMELINE, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(icon_label)
-        title = QLabel("Timeline")
-        title.setObjectName("panelTitle")
-        self.toolbar.addWidget(title)
         self.status_label = ElidedLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setSizePolicy(QSizePolicy.Expanding,
@@ -587,6 +533,15 @@ class TimelinePanel(QWidget):
         self.evidence_filter.currentIndexChanged.connect(
             self._evidence_changed)
         self.toolbar.addWidget(self.evidence_filter)
+        # Per operating system (Case.systems): a dual-boot disk's Windows
+        # or its Linux, or every Windows in the case.
+        self.system_filter = QComboBox()
+        self.system_filter.setObjectName("triageEvidenceFilter")
+        self.system_filter.setToolTip(
+            "Every system, or the events on the volumes of one operating "
+            "system (or of every system of one kind)")
+        self.system_filter.currentIndexChanged.connect(self._system_changed)
+        self.toolbar.addWidget(self.system_filter)
         self.views_button = QPushButton("Views")
         self.views_button.setObjectName("triageRunButton")
         self.views_button.setToolTip("Save these filters as a named view, "
@@ -604,8 +559,8 @@ class TimelinePanel(QWidget):
         outer.addWidget(self.toolbar)
 
         body = QVBoxLayout()
-        body.setContentsMargins(6, 4, 6, 4)
-        body.setSpacing(4)
+        body.setContentsMargins(2, 2, 2, 0)
+        body.setSpacing(2)
         outer.addLayout(body, 1)
 
         # Range and text. Groups that wrap as wholes, so the panel never
@@ -669,12 +624,12 @@ class TimelinePanel(QWidget):
             QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.fs_combo.setMinimumContentsLength(18)
         self.fs_combo.setObjectName("timelineFsCombo")
-        for label, value in (("$SI and $FN times", 'both'),
-                             ("$STANDARD_INFORMATION only", 'SI'),
-                             ("$FILE_NAME only", 'FN')):
-            self.fs_combo.addItem(label, value)
-        self.fs_combo.setToolTip("Which NTFS times the File system source "
-                                 "shows")
+        # Filled from what the case holds (_fill_fs_combo): NTFS's
+        # $SI / $FN / index-slack times, other file systems' own times.
+        self.fs_combo.addItem("All file-system times", 'both')
+        self.fs_combo.setToolTip("Which file-system times the File system "
+                                 "source shows")
+        self.fs_combo.setVisible(False)
         self.fs_combo.currentIndexChanged.connect(self._fs_changed)
         row.addWidget(self.fs_combo)
         self.text_input = QLineEdit()
@@ -800,17 +755,10 @@ class TimelinePanel(QWidget):
 
     @staticmethod
     def _time_edit():
-        edit = QDateTimeEdit()
-        # As wide as a time and its buttons, not the style's default.
-        edit.setFixedWidth(edit.fontMetrics().horizontalAdvance(
-            '8888-88-88 88:88:88') + 52)
-        edit.setObjectName("timelineTimeEdit")
-        edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
-        edit.setTimeZone(QTimeZone.utc())
-        edit.setCalendarPopup(True)
-        edit.setMinimumDateTime(QDateTime.fromString(
-            "1601-01-01 00:00:00", "yyyy-MM-dd HH:mm:ss"))
-        return edit
+        # As wide as a whole time and its button; the calendar in TRACE's
+        # style (ui/widgets/date_fields.py).
+        from trace_app.ui.widgets.date_fields import utc_edit
+        return utc_edit("timelineTimeEdit")
 
     # --- the case ------------------------------------------------------------
 
@@ -837,6 +785,7 @@ class TimelinePanel(QWidget):
         self.filters['evidence_id'] = self.evidence_filter.currentData()
         self.evidence_filter.blockSignals(False)
         self.evidence_filter.setVisible(len(self._names) > 1)
+        self._fill_systems()
         options = self._hash_options()
         self.known_good_box.blockSignals(True)
         self.known_good_box.setEnabled(bool(options.get('enabled')))
@@ -873,6 +822,51 @@ class TimelinePanel(QWidget):
     def _set_filter(self, key, value, keep_range=True):
         self.filters[key] = value
         self.refresh(find_bounds=not keep_range)
+
+    def _fill_systems(self):
+        """The system filter's entries: all, each kind found more than
+        once (every Windows), then each system with its image."""
+        from trace_app.ui import icons
+        combo = self.system_filter
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("All systems", None)
+        found = self.case.systems() if self.case is not None else {}
+        entries = [(evidence_id, system) for evidence_id, systems in
+                   found.items() for system in systems
+                   if evidence_id in self._names]
+        kinds = {}
+        for evidence_id, system in entries:
+            kinds.setdefault(system['family'], []).append(
+                [evidence_id, system['volume_key']])
+        labels = {'windows': 'Windows', 'linux': 'Linux', 'macos': 'macOS',
+                  'android': 'Android'}
+        for family, pairs in sorted(kinds.items()):
+            if len(pairs) > 1:
+                logo = next(s['logo'] for _e, s in entries
+                            if s['family'] == family)
+                combo.addItem(icons.os_logo(logo),
+                              f"Every {labels.get(family, family)} "
+                              f"({len(pairs)})", pairs)
+        for evidence_id, system in entries:
+            combo.addItem(icons.os_logo(system['logo']),
+                          f"{system['name']} — {self._names[evidence_id]}",
+                          [[evidence_id, system['volume_key']]])
+            combo.setItemData(combo.count() - 1,
+                              f"{system.get('volume') or ''} on "
+                              f"{self._names[evidence_id]}",
+                              Qt.ToolTipRole)
+        wanted = self.filters.get('systems')
+        index = next((i for i in range(combo.count())
+                      if combo.itemData(i) == wanted), 0)
+        combo.setCurrentIndex(index)
+        self.filters['systems'] = combo.currentData()
+        combo.blockSignals(False)
+        combo.setVisible(bool(entries))
+
+    def _system_changed(self, _index):
+        self.filters['systems'] = self.system_filter.currentData()
+        self.refresh()
 
     def _evidence_changed(self, _index):
         self.filters['evidence_id'] = self.evidence_filter.currentData()
@@ -1042,6 +1036,8 @@ class TimelinePanel(QWidget):
                 filters['start'], filters['end']
         if result.get('bounds') and result['bounds'][0]:
             self._case_bounds = result['bounds']
+        if self._fill_fs_combo(result.get('fs_kinds') or []):
+            return                  # the narrowing chosen is gone: re-read
         self.counts = result['counts']
         self.total = result['total']
         self.model.set_rows(result['rows'], self._names)
@@ -1055,6 +1051,35 @@ class TimelinePanel(QWidget):
                            f"({self.counts.get(key, 0):,})")
         self.back_button.setEnabled(bool(self._history))
         self.status_label.setText(self._status(result))
+
+    def _fill_fs_combo(self, kinds):
+        """Offer the file-system time kinds the case (or image) holds --
+        nothing to choose, nothing shown. Returns True when the chosen kind
+        is no longer there and the timeline is read again without it."""
+        labels = {key: label for key, label, _s in timeline.FS_KINDS}
+        wanted = ['both'] + list(kinds)
+        present = [self.fs_combo.itemData(i)
+                   for i in range(self.fs_combo.count())]
+        if present != wanted:
+            self.fs_combo.blockSignals(True)
+            self.fs_combo.clear()
+            self.fs_combo.addItem("All file-system times", 'both')
+            for key in kinds:
+                self.fs_combo.addItem(labels[key], key)
+            self.fs_combo.blockSignals(False)
+        self.fs_combo.setVisible(len(kinds) > 1)
+        chosen = self.filters.get('fs_attributes') or 'both'
+        if chosen not in wanted:
+            self.filters['fs_attributes'] = 'both'
+            self.fs_combo.blockSignals(True)
+            self.fs_combo.setCurrentIndex(0)
+            self.fs_combo.blockSignals(False)
+            self.refresh()
+            return True
+        self.fs_combo.blockSignals(True)
+        self.fs_combo.setCurrentIndex(max(0, self.fs_combo.findData(chosen)))
+        self.fs_combo.blockSignals(False)
+        return False
 
     def _status(self, result):
         if result.get('error'):
@@ -1337,6 +1362,12 @@ class TimelinePanel(QWidget):
         self.evidence_filter.setCurrentIndex(max(0, self.evidence_filter
                                                  .findData(self.filters.get(
                                                      'evidence_id'))))
+        self.system_filter.blockSignals(True)
+        self.system_filter.setCurrentIndex(next(
+            (i for i in range(self.system_filter.count())
+             if self.system_filter.itemData(i) ==
+             self.filters.get('systems')), 0))
+        self.system_filter.blockSignals(False)
         for key, button in self.source_buttons.items():
             button.setChecked(key in (self.filters.get('sources') or ()))
         for widget in (self.deleted_box, self.stomped_box,

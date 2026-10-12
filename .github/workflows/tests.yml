@@ -92,7 +92,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -215,16 +215,54 @@ jobs:
       # (so root, and Linux only; the tests reading them skip elsewhere),
       # into test_images/built (tools/testdata/build/): a Btrfs volume with
       # known deleted files, md RAID arrays of every level and superblock,
-      # and GPT -> LUKS1/LUKS2 -> LVM -> ext4 disks.
+      # GPT -> LUKS1/LUKS2 -> LVM -> ext4 disks, and VeraCrypt volumes made
+      # by the official VeraCrypt console (downloaded, SHA-256 pinned), and
+      # F2FS volumes from f2fs-tools built with LZ4/LZO (and by the kernel
+      # where it mounts F2FS), and SquashFS, EROFS, UDF, classic HFS and
+      # JFFS2 images from their own tools (UDF written by the kernel too),
+      # and a disk in Android sparse/super (lpmake built from AOSP), VDI,
+      # AFF and compressed containers, each read back by its own tool, and
+      # a VirtualBox snapshot chain made and read by VBoxManage, UBI /
+      # UBIFS images from mtd-utils and from Ubuntu's kernel booted under
+      # QEMU in a container (nandsim), and ZFS pools from OpenZFS in the
+      # same kind of guest -- no module is loaded on the runner.
       - name: Build the Linux images
         if: runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
         run: |
           sudo apt-get install -y -qq --no-install-recommends btrfs-progs \
-            mdadm cryptsetup-bin lvm2 >/dev/null
+            mdadm cryptsetup-bin lvm2 dosfstools mtools build-essential \
+            autoconf automake libtool pkg-config uuid-dev liblz4-dev \
+            liblzo2-dev squashfs-tools erofs-utils udftools genisoimage \
+            hfsutils mtd-utils android-sdk-libsparse-utils qemu-utils \
+            afflib-tools xz-utils zstd bzip2 pbzip2 lz4 curl \
+            android-libbase-dev android-liblog-dev android-libsparse-dev \
+            android-libext4-utils-dev android-libcutils-dev \
+            android-libboringssl-dev zlib1g-dev virtualbox >/dev/null
           sudo python3 tools/testdata/build/make_btrfs_deleted.py
           sudo python3 tools/testdata/build/make_md_raid.py
           sudo python3 tools/testdata/build/make_luks_lvm.py
+          sudo python3 tools/testdata/build/make_veracrypt.py
+          sudo python3 tools/testdata/build/make_f2fs.py
+          sudo python3 tools/testdata/build/make_fs_images.py
+          sudo python3 tools/testdata/build/make_container_images.py
+          sudo python3 tools/testdata/build/make_vdi_snapshots.py
+          docker run --rm -v "$PWD:/src" -w /src ubuntu:24.04 sh -c \
+            "apt-get update -qq && DEBIAN_FRONTEND=noninteractive \
+             apt-get install -y -qq --no-install-recommends python3 \
+             mtd-utils qemu-system-x86 linux-image-generic busybox-static \
+             zstd cpio kmod zfsutils-linux gdisk >/dev/null && \
+             apt-get install -y -qq --no-install-recommends \
+             linux-modules-extra-\$(ls /lib/modules) >/dev/null && \
+             python3 tools/testdata/build/make_ubifs.py && \
+             python3 tools/testdata/build/make_zfs.py"
           sudo chown -R "$USER" test_images/built
+          # Chromium's own Local/Session Storage and IndexedDB, written by
+          # Playwright's pinned Chromium (make_chromium_storage.py).
+          python3 -m venv /tmp/playwright
+          /tmp/playwright/bin/pip install -q playwright==1.55.0
+          /tmp/playwright/bin/playwright install --with-deps chromium \
+            >/dev/null
+          /tmp/playwright/bin/python tools/testdata/build/make_chromium_storage.py
 
       # Real artifacts -- hives, logs, databases, small images -- pinned by
       # SHA-256 (tools/testdata/samples.py).

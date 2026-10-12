@@ -15,25 +15,24 @@ browse state was saved and restored, and returning from a search was a mode
 change. A separate tab leaves the listing alone.
 """
 
+import html
 import logging
 import os
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
-                               QSizePolicy, QToolBar,
-                               QHeaderView, QLabel, QLineEdit,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox,
+                               QHeaderView, QSizePolicy, QToolBar, QLabel, QLineEdit,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.search_index import SearchError, SearchIndex
-from trace_app.infra.constants import (CONTROL_HEIGHT, PANEL_ICON_SIZE,
-                                      TABLE_ROW_HEIGHT)
+from trace_app.core.search_index import (SearchError, SearchIndex,
+                                         unfinished_note)
+from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
-from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
-from trace_app.ui.widgets.toolbars import prepare_toolbar
+from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 
 logger = logging.getLogger('TRACE.SearchPanel')
 
@@ -95,7 +94,7 @@ class IndexWorker(ProcessWorker):
     (core/background.py), as a job on the window's queue
     (MainWindow.queue_indexing)."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_indexing = Signal(int, str)
 
     kind = 'index'
@@ -110,6 +109,14 @@ class IndexWorker(ProcessWorker):
 
     def on_done(self, count, error):
         self.finished_indexing.emit(count, error)
+
+
+class IndexFreeWorker(IndexWorker):
+    """Indexes one image's free space and memory files
+    (indexer.index_free_space), after its files
+    (MainWindow.queue_free_indexing)."""
+
+    kind = 'index_free'
 
 
 class SearchPanel(QWidget):
@@ -138,32 +145,21 @@ class SearchPanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # The same bar as Listing, Registry and Deleted Files: logo, title,
-        # then the tab's main action on the right. Without it this tab was the
-        # only one in the row that opened straight onto controls.
-        self.toolbar = QToolBar()
-        prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel()
-        icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(icon_label, icons.SEARCH_CONTENT, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(icon_label)
-        title = QLabel("Universal Search")
-        title.setObjectName("panelTitle")
-        self.toolbar.addWidget(title)
-        spacer = QLabel()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.toolbar.addWidget(spacer)
-        outer.addWidget(self.toolbar)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(2, 2, 2, 0)
+        layout.setSpacing(2)
         outer.addLayout(layout)
 
-        # --- query row ---
-        query_row = QHBoxLayout()
-        query_row.setSpacing(6)
+        # --- query row: a toolbar like every other panel's, so the box,
+        # dropdown and button have the shared control height
+        # (align_controls) rather than heights of their own ---
+        self.query_bar = QToolBar()
+        prepare_toolbar(self.query_bar)
+        # On the right, as the other panels keep their search and actions.
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.query_bar.addWidget(spacer)
 
         self.query_input = QLineEdit()
         self.query_input.setObjectName("universalSearchBar")
@@ -171,11 +167,16 @@ class SearchPanel(QWidget):
             "Search the whole case — text, names, paths, emails, URLs, IPs, "
             "hashes")
         self.query_input.returnPressed.connect(self.run_search)
-        query_row.addWidget(self.query_input, 1)
+        self.query_input.setClearButtonEnabled(True)
+        # Room for a long query, without running the width of the window.
+        self.query_input.setMinimumWidth(360)
+        self.query_input.setMaximumWidth(640)
+        self.query_input.setSizePolicy(QSizePolicy.Expanding,
+                                       QSizePolicy.Fixed)
+        self.query_bar.addWidget(self.query_input)
 
         self.examples = QComboBox()
         self.examples.setObjectName("searchExamples")
-        self.examples.setFixedHeight(CONTROL_HEIGHT)
         self.examples.setSizeAdjustPolicy(
             QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.examples.setMinimumContentsLength(14)
@@ -190,13 +191,13 @@ class SearchPanel(QWidget):
             else:
                 self.examples.addItem(f"   {label}", example)
         self.examples.activated.connect(self._use_example)
-        query_row.addWidget(self.examples)
+        self.query_bar.addWidget(self.examples)
 
         self.search_button = QPushButton("Search")
-        self.search_button.setFixedHeight(CONTROL_HEIGHT)
         self.search_button.clicked.connect(self.run_search)
-        query_row.addWidget(self.search_button)
-        layout.addLayout(query_row)
+        self.query_bar.addWidget(self.search_button)
+        align_controls(self.query_bar)
+        layout.addWidget(self.query_bar)
 
         # What the index covers -- or, before anything is indexed, how to
         # index it. The indicators themselves are Triage's (Indicators).
@@ -204,6 +205,8 @@ class SearchPanel(QWidget):
         self.summary_label.setObjectName("searchSummary")
         self.summary_label.setWordWrap(True)
         self.summary_label.setTextFormat(Qt.RichText)
+        # Hidden while empty: it stood as a blank strip under the box.
+        self.summary_label.hide()
         layout.addWidget(self.summary_label)
 
         # The result count. Below the summary rather than beside it, because
@@ -267,7 +270,7 @@ class SearchPanel(QWidget):
             self._set_status(
                 "Quick triage — universal search needs a case, because the "
                 "index is kept with it. File ▸ New Case starts one.")
-            self.summary_label.clear()
+            self._set_summary('')
             return
 
         self._set_status()
@@ -282,15 +285,19 @@ class SearchPanel(QWidget):
         self.status_label.setText(text)
         self.status_label.setVisible(bool(text))
 
+    def _set_summary(self, text):
+        self.summary_label.setText(text)
+        self.summary_label.setVisible(bool(text))
+
     def _update_summary(self):
         """Write what the index holds. Survives every search."""
         if self.index is None:
-            self.summary_label.clear()
+            self._set_summary('')
             return
 
         stats = self.index.statistics()
         if not stats['items']:
-            self.summary_label.setText(
+            self._set_summary(
                 "Nothing indexed yet. To search inside file contents, "
                 "registry values and archives, run <b>Search index and "
                 "indicators</b> from Analysis ▸ Run Analysis Modules.")
@@ -299,10 +306,30 @@ class SearchPanel(QWidget):
         images = len(self.case.evidence()) if self.case else 0
         scope = (f" from {stats['images']} of {images} images"
                  if images > 1 else '')
-        self.summary_label.setText(
-            f"<b>{stats['items']:,}</b> item(s) indexed{scope}. The emails, "
-            f"URLs, numbers and other indicators found are listed in "
-            f"Triage ▸ Indicators.")
+        text = (f"<b>{stats['items']:,}</b> item(s) indexed{scope}. The "
+                f"emails, URLs, numbers and other indicators found are "
+                f"listed in Triage ▸ Indicators.")
+        # An image whose run did not finish holds part of its files only:
+        # say so, or every result list reads as complete.
+        names = {row['id']: row['display_name'] or os.path.basename(row['path'])
+                 for row in self.case.evidence()} if self.case else {}
+        for evidence_id, state in self.index.states().items():
+            note = unfinished_note(state)
+            if note and evidence_id in names:
+                text += (f"<br><b>Incomplete:</b> {html.escape(names[evidence_id])}"
+                         f" -- {html.escape(note)}. Results miss its other "
+                         f"files; run Search index and indicators again to "
+                         f"finish it.")
+            if evidence_id in names and self.index.free_unfinished(
+                    evidence_id):
+                done = state.get('free_done') or 0
+                total = state.get('free_total') or 0
+                share = f" at {done * 100 // total}%" if total else ''
+                text += (f"<br><b>Free space incomplete:</b> "
+                         f"{html.escape(names[evidence_id])} -- stopped"
+                         f"{share}; run Search free space and memory files "
+                         f"again to continue where it stopped.")
+        self._set_summary(text)
 
     # --- searching --------------------------------------------------------
 
@@ -351,6 +378,10 @@ class SearchPanel(QWidget):
                 type_text = 'Carved file'
             elif kind == 'slack':
                 type_text = 'File slack'
+            elif kind == 'memory':
+                type_text = 'Memory file'
+            elif kind == 'unallocated':
+                type_text = 'Unallocated'
             elif row.get('is_deleted'):
                 type_text = 'Deleted File'
             else:

@@ -52,7 +52,7 @@ _STATE_NOTES = {'absent': 'file gone', 'deleted': 'file deleted',
 
 
 class ThumbnailsWorker(ProcessWorker):
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_thumbnails = Signal(int, str)
 
     kind = 'thumbnails'

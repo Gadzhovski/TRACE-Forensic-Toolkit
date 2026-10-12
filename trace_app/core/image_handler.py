@@ -6,6 +6,7 @@ traversal, file content reads, and the allocation map used by file carving.
 """
 
 import queue
+import struct
 import threading
 import logging
 import os
@@ -112,6 +113,31 @@ def is_split_raw(path):
     return path.lower().endswith(SPLIT_RAW_FIRST)
 
 
+#: Partitions holding volumes of their own, read as LVM's logical volumes
+#: are: LVM, and Android's super (dynamic partitions).
+POOL_KINDS = ('lvm', 'android_super', 'ubi')
+
+
+class _SuperGroup:
+    """What logical_volumes asks of an LVM volume group, for a super
+    partition: its group's name."""
+
+    def __init__(self, image):
+        groups = [name for name, _maximum in image.groups
+                  if name != 'default']
+        self.name = '/'.join(groups) or 'super'
+        self.image = image
+
+
+class _UbiGroup:
+    """What logical_volumes asks of a volume group, for a UBI image."""
+
+    name = 'ubi'
+
+    def __init__(self, image):
+        self.image = image
+
+
 class UnsupportedEvidence(ValueError):
     """A format TRACE recognises but cannot read; the message says what
     it is and what to do instead."""
@@ -130,7 +156,13 @@ def _starts_with(path, magic):
 # ImageHandler class with optimizations
 #: Filesystems that store a local wall-clock time with no timezone recorded.
 #: Reporting one of these as UTC claims knowledge the evidence does not carry.
-_TIMEZONE_NAIVE = frozenset({'FAT12', 'FAT16', 'FAT32', 'ExFAT', 'ZIP'})
+_TIMEZONE_NAIVE = frozenset({'FAT12', 'FAT16', 'FAT32', 'ExFAT', 'ZIP',
+                             'HFS (classic)'})
+
+#: File systems read by TRACE's own readers on core/libyal_fs, named by
+#: their KIND.
+_OWN_READERS = frozenset({'SquashFS', 'EROFS', 'UDF', 'HFS (classic)',
+                          'JFFS2', 'ReFS', 'UBIFS', 'ZFS'})
 
 
 class _NoMedia:
@@ -168,6 +200,10 @@ class _OrphanMeta:
         self.ctime = getattr(meta, 'ctime', 0)
 
 
+#: Logical evidence that is encrypted as a whole and opened with a password
+#: (an iOS backup, an adb backup): volume kind at 0 while locked.
+LOCKED_LOGICAL = ('ios_backup', 'android_backup')
+
 class ImageHandler:
     def __init__(self, image_path):
         # Normalise here so every consumer gets a well-formed path: libewf's
@@ -204,6 +240,7 @@ class ImageHandler:
         self._md_member = {}        # start sector -> mdraid.Member
         self._lvm = {}              # start sector -> (handle, group, [lv])
         self._apfs = {}             # start sector -> (container, [volume])
+        self._zfs = {}              # start sector -> (ZfsPool | None, why)
         #: Logical evidence (core/logical.py): an AD1 or L01 image, a
         #: folder, a ZIP or TAR -- one file system at 0, no sectors.
         self.logical_fs = None
@@ -248,6 +285,7 @@ class ImageHandler:
             self._shadows.clear()
             self._lvm.clear()
             self._apfs.clear()
+            self._zfs.clear()
 
         # Close the image
         if self.img_info:
@@ -313,7 +351,7 @@ class ImageHandler:
                             self._unlocked_kind.get(start), 'encrypted')
                         entries = [(0, start, f"decrypted {name} volume at "
                                               f"sector {start}")]
-                elif self.volume_kind(start) == 'lvm':
+                elif self.volume_kind(start) in POOL_KINDS:
                     entries = self._lv_entries(start)
                 elif self.volume_kind(start) == 'ldm':
                     entries = [(1 + v['index'], v['key'],
@@ -345,8 +383,11 @@ class ImageHandler:
         return out
 
     def _lv_entries(self, start):
+        what = {'android_super': 'Android logical partition',
+                'ubi': 'UBI volume'}.get(self.volume_kind(start),
+                                         'LVM volume')
         return [(1 + v['index'], v['key'],
-                 f"LVM volume {v['group']}/{v['name']}")
+                 f"{what} {v['group']}/{v['name']}")
                 for v in self.logical_volumes(start)]
 
     def _read_volume_space(self, offset, size):
@@ -493,7 +534,11 @@ class ImageHandler:
     #: Volumes whose free space TRACE cannot tell from used space: their
     #: data is not where the partition's bytes are (LVM maps extents,
     #: LUKS and FileVault encrypt them).
-    _UNMAPPED_KINDS = {'lvm': 'an LVM volume group', 'luks': 'a LUKS volume',
+    _UNMAPPED_KINDS = {'lvm': 'an LVM volume group',
+                       'android_super': 'Android dynamic partitions',
+                       'ubi': 'UBI volumes (raw flash)',
+                       'zfs': 'a ZFS pool',
+                       'luks': 'a LUKS volume',
                        'fvde': 'a FileVault volume',
                        'mdraid': 'a Linux RAID member whose other disks '
                                  'are not in this image'}
@@ -505,7 +550,7 @@ class ImageHandler:
         kind = self.volume_kind(start_sector)
         if kind == 'ldm':
             return self._ldm_allocation(start_sector), None
-        if start_sector in self._bitlocker or kind == 'lvm':
+        if start_sector in self._bitlocker or kind in POOL_KINDS:
             # Encrypted bytes, or extents mapped elsewhere: the decrypted
             # volume and the logical volumes are carved in their own
             # ranges (carve_volumes), so the raw bytes are skipped.
@@ -701,8 +746,15 @@ class ImageHandler:
         extension = extension.lower()
 
         ewf = [".e01", ".s01", ".ex01"]
+        # .hc / .tc: VeraCrypt / TrueCrypt containers, read raw until
+        # unlocked (unlock_volume, kind 'veracrypt').
+        # .sqfs/.squashfs/.erofs/.jffs2/.udf/.hfs/.ubi/.ubifs: file
+        # system and flash images (firmware, Android partitions, discs),
+        # read as raw.
         raw = [".raw", ".img", ".dd", ".iso",
-               ".000", ".001", ".sparse", ".bin", ""]
+               ".000", ".001", ".sparse", ".bin", ".hc", ".tc",
+               ".sqfs", ".squashfs", ".erofs", ".jffs2", ".udf", ".hfs",
+               ".ubi", ".ubifs", ""]
         if extension == '.ctr' or _starts_with(self.image_path, b'XWFS'):
             raise UnsupportedEvidence(
                 "This is an X-Ways evidence file container (.ctr), a "
@@ -712,6 +764,15 @@ class ImageHandler:
 
         if extension == '.aff4':
             return "aff4"
+        # Android sparse, VDI, AFF, compressed raw: by name, or by content
+        # for a raw-named file (an Android sparse image or AFF is often
+        # .img).
+        from trace_app.core import disk_containers
+        if extension in disk_containers.EXTENSIONS or (
+                extension in raw and extension != '.iso' and
+                disk_containers.sniff(self.image_path)) or \
+                disk_containers.kind_of(self.image_path) == 'aff':
+            return "container"
         if extension in ewf:
             return "ewf"
         elif extension in raw:
@@ -870,6 +931,11 @@ class ImageHandler:
             logger.error("Could not hash %s: %s", self.image_path, exc)
             result.update({'computed_md5': None, 'computed_sha1': None,
                            'computed_sha256': None, 'error': str(exc)})
+        stored = getattr(self.img_info, 'stored_hashes', None) or {}
+        for key in ('stored_md5', 'stored_sha1'):
+            if stored.get(key):
+                # What the image says it was (an AFF's md5/sha1 segments).
+                result[key] = stored[key]
         if image_type == "aff4":
             # The container's own check of what it stores: it stands
             # whether or not the disk could be hashed.
@@ -1091,6 +1157,33 @@ class ImageHandler:
                 from trace_app.core.live_disk import open_live_disk
                 self.img_info, self.container_note = open_live_disk(
                     self.image_path)
+            elif image_type == "container":
+                # Android sparse, VDI, AFF, compressed raw -- read in
+                # Python (core/disk_containers.py).
+                from trace_app.core import disk_containers
+                try:
+                    self.img_info, self.container_note = \
+                        disk_containers.open_container(self.image_path)
+                except Exception as exc:
+                    # Named as a raw image and taken for a container by its
+                    # first bytes alone: three to eight bytes that random
+                    # data -- an encrypted volume -- holds by chance (one
+                    # VeraCrypt container in ~16 million starts 1f 8b 08).
+                    # What does not read as one is the raw image it is named.
+                    extension = os.path.splitext(self.image_path)[1].lower()
+                    if extension in disk_containers.EXTENSIONS or \
+                            disk_containers.kind_of(self.image_path) == 'aff' \
+                            and not os.path.isfile(self.image_path):
+                        raise
+                    kind = disk_containers.sniff(self.image_path)
+                    logger.info("%s: not a %s after all (%s); read as raw",
+                                self.image_path, kind, exc)
+                    self.img_info = pytsk3.Img_Info(self.image_path)
+                    name = disk_containers.NAMES.get(kind, str(kind))
+                    article = 'an' if name[:1] in 'AEIOU' else 'a'
+                    self.container_note = (
+                        f"Its first bytes look like {article} {name}, but it "
+                        f"does not read as one ({exc}); read as a raw image.")
             elif image_type == "aff4":
                 # Read in Python (core/aff4.py): pyaff4 cannot be installed
                 # without a compiler.
@@ -1132,7 +1225,9 @@ class ImageHandler:
                 self.volume_info = None
                 # Attempt to detect a filesystem directly if no volume info
                 try:
-                    self.fs_info = pytsk3.FS_Info(self.img_info)
+                    # A UDF bridge disc: read its UDF, not its ISO 9660.
+                    self.fs_info = self._udf_first(0) or \
+                        pytsk3.FS_Info(self.img_info)
                 except Exception:
                     # What TSK cannot read, TRACE may: XFS, Btrfs.
                     self.fs_info = self.get_fs_info(0)
@@ -1201,6 +1296,16 @@ class ImageHandler:
         (4096, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
         (0, b'\xfc\x4e\x2b\xa9', 'Linux RAID member'),
         (0x10040, b'_BHRfS_M', 'Btrfs'),
+        (0x400, b'\x10\x20\xf5\xf2', 'F2FS'),
+        (0, b'hsqs', 'SquashFS'),
+        (3, b'ReFS\0\0\0\0', 'ReFS'),
+        # A UBIFS node header (the superblock starts the volume) and a UBI
+        # erase-counter header (a raw NAND dump).
+        (0, b'\x31\x18\x10\x06', 'UBIFS'),
+        (0, b'UBI#', 'UBI'),
+        (0x400, b'\xe2\xe1\xf5\xe0', 'EROFS'),
+        # Classic HFS's Master Directory Block (an HFS+ wrapper too).
+        (0x400, b'BD', 'HFS'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
         # accepted. UFS1 and UFS2 differ only in where the block sits.
@@ -1290,6 +1395,11 @@ class ImageHandler:
         for offset, magic, name in self._FS_SIGNATURES:
             if header[offset:offset + len(magic)] == magic and name not in found:
                 found.append(name)
+        # UDF: NSR02/NSR03 in the volume recognition sequence, wherever it
+        # follows ISO 9660's descriptors.
+        from trace_app.core.udf import is_udf
+        if is_udf(header):
+            found.append('UDF')
         return found
 
 
@@ -1461,6 +1571,9 @@ class ImageHandler:
             apfs = containers.split_apfs_key(start_offset)
             if apfs is not None:
                 return self._apfs_file_system(start_offset, *apfs)
+            pool = containers.split_zfs_key(start_offset)
+            if pool is not None:
+                return self._zfs_file_system(start_offset, *pool)
             if logical is not None and start_offset not in self._volumes:
                 return None
             if start_offset < containers.SHADOW_KEY_BASE and \
@@ -1468,15 +1581,27 @@ class ImageHandler:
                 # A Linux RAID member: what is inside the array, as the
                 # kernel presents /dev/mdN (md_array).
                 self.md_array(start_offset)
+            udf = self._udf_first(start_offset)
+            if udf is not None:
+                self.fs_info_cache[start_offset] = udf
+                return udf
             try:
                 if start_offset in self._volumes:
-                    fs_info = pytsk3.FS_Info(self._volumes[start_offset],
-                                             offset=0)
+                    source, base = self._volumes[start_offset], 0
+                    fs_info = pytsk3.FS_Info(source, offset=0)
                 elif shadow is not None:
                     return None
                 else:
-                    fs_info = pytsk3.FS_Info(
-                        self.img_info, offset=start_offset * self.sector_size)
+                    source = self.img_info
+                    base = start_offset * self.sector_size
+                    fs_info = pytsk3.FS_Info(source, offset=base)
+                # ext: heavily fragmented block-mapped files are opened
+                # from their own block maps (core/ext_blockmap.py) -- TSK
+                # takes 40 s to open one of 132,000 runs, every time.
+                from trace_app.core.ext_blockmap import ExtFileSystem
+                fs_info = ExtFileSystem.wrap(
+                    fs_info, lambda offset, length, source=source,
+                    base=base: source.read(base + offset, length))
                 self.fs_info_cache[start_offset] = fs_info
             except Exception:
                 # What TSK cannot read, TRACE may: XFS (core/xfs.py,
@@ -1488,7 +1613,8 @@ class ImageHandler:
         return self.fs_info_cache[start_offset]
 
     def _other_file_system(self, start_offset):
-        """An XFS (libfsxfs) or Btrfs (core/btrfs.py) volume at a partition
+        """An XFS (libfsxfs), Btrfs (core/btrfs.py), F2FS (core/f2fs.py),
+        SquashFS, EROFS, UDF, classic HFS or JFFS2 volume at a partition
         (or an unpartitioned image), or inside a volume TRACE opened there
         -- an md array, an unlocked LUKS volume, an LVM logical volume
         (RHEL's default install is XFS on LVM) -- or None."""
@@ -1503,11 +1629,48 @@ class ImageHandler:
             except KeyError:
                 return None
         from trace_app.core.btrfs import open_btrfs
+        from trace_app.core.erofs import open_erofs
+        from trace_app.core.f2fs import open_f2fs
+        from trace_app.core.hfs import open_hfs
+        from trace_app.core.jffs2 import open_jffs2
+        from trace_app.core.refs import open_refs
+        from trace_app.core.squashfs import open_squashfs
+        from trace_app.core.udf import open_udf
+        from trace_app.core.ubifs import open_ubifs
         from trace_app.core.xfs import open_xfs
         # An assembled Btrfs file system: the other devices, by device.
         others = getattr(self, '_btrfs_others', ()) \
             if start_offset == 0 else ()
-        return open_xfs(window) or open_btrfs(window, others)
+        # Each checks its own signature first; JFFS2, a scan for nodes with
+        # no fixed place, goes last.
+        return open_xfs(window) or open_btrfs(window, others) or \
+            open_f2fs(window) or open_squashfs(window) or \
+            open_erofs(window) or open_udf(window) or open_hfs(window) or \
+            open_refs(window) or open_ubifs(window) or open_jffs2(window)
+
+    def _udf_first(self, start_offset):
+        """A UDF volume to read instead of the ISO 9660 one The Sleuth Kit
+        would open -- a UDF bridge disc (DVDs, Windows install media) keeps
+        everything in UDF, and files over 4 GB only there; or None."""
+        if start_offset in self._volumes or \
+                start_offset >= containers.SHADOW_KEY_BASE:
+            return None
+        names = self.detect_filesystems(start_offset)
+        if 'UDF' not in names:
+            return None
+        from trace_app.core.udf import open_udf
+        try:
+            fs = open_udf(self._partition_window(start_offset))
+        except KeyError:
+            return None
+        if fs is None:
+            return None
+        try:
+            if not fs.volume.get_root_directory().number_of_sub_file_entries:
+                return None          # a stub: the files are elsewhere
+        except Exception:
+            return None
+        return fs
 
     # --- one file, read lazily --------------------------------------------------
 
@@ -1634,7 +1797,11 @@ class ImageHandler:
                 fs = pytsk3.FS_Info(self.img_info,
                                     offset=start * self.sector_size)
             except IOError:
-                return None
+                # TRACE's own readers (SquashFS, EROFS, classic HFS): a
+                # window to the end of the disk, each sized by itself.
+                fs = self._lost_own_reader(start)
+                if fs is None:
+                    return None
             self.fs_info_cache.setdefault(start, fs)
             return (self.get_fs_type(start),
                     fs.info.block_count * fs.info.block_size)
@@ -1645,6 +1812,24 @@ class ImageHandler:
         except Exception as exc:
             logger.warning("Lost partition scan failed: %s", exc)
         return self._lost
+
+    def _lost_own_reader(self, start):
+        """A lost SquashFS, EROFS or classic HFS volume at `start`,
+        opened by TRACE's own reader, or None."""
+        from trace_app.core.erofs import open_erofs
+        from trace_app.core.hfs import open_hfs
+        from trace_app.core.squashfs import open_squashfs
+        offset = start * self.sector_size
+        window = containers.ByteWindow(self.read, offset,
+                                       self.get_size() - offset)
+        for opener in (open_squashfs, open_erofs, open_hfs):
+            try:
+                fs = opener(window)
+            except Exception:
+                fs = None
+            if fs is not None:
+                return fs
+        return None
 
     # --- Windows dynamic disks (core/ldm.py) -------------------------------
 
@@ -1859,21 +2044,54 @@ class ImageHandler:
     def encryption(self, start_sector):
         """The kind of an encrypted volume at a partition, or None."""
         kind = self.volume_kind(start_sector)
-        return kind if kind in ('bitlocker', 'fvde', 'luks', 'ios_backup') \
-            else None
+        if kind in ('bitlocker', 'fvde', 'luks') or kind in LOCKED_LOGICAL:
+            return kind
+        # VeraCrypt has no signature: known only once the examiner unlocked
+        # it as such.
+        if self._unlocked_kind.get(start_sector) == 'veracrypt':
+            return 'veracrypt'
+        return None
+
+    def may_be_veracrypt(self, start_sector):
+        """Whether a volume could be VeraCrypt: a real partition (or a
+        partition-less image at 0) that no file system or known volume
+        format opens. Nothing proves it is -- the password will."""
+        if start_sector >= containers.SHADOW_KEY_BASE or \
+                self.is_logical or start_sector in self._bitlocker:
+            return False
+        partitions = self.get_partitions()
+        if partitions:
+            from trace_app.core.partition_names import bookkeeping
+            starts = set()
+            for _addr, desc, start, _length in partitions:
+                text = desc.decode('utf-8', 'replace') \
+                    if isinstance(desc, bytes) else str(desc or '')
+                if bookkeeping(text) is None and 'Unallocated' not in text:
+                    starts.add(start)
+            if start_sector not in starts:
+                return False
+        elif start_sector != 0:
+            return False
+        if self.volume_kind(start_sector) is not None:
+            return False
+        try:
+            return self.get_fs_info(start_sector) is None
+        except Exception:
+            return True
 
     def unlocked_kind(self, start_sector):
         return self._unlocked_kind.get(start_sector)
 
     @containers.holding_libyal
     def unlock_volume(self, start_sector, kind, **secret):
-        """Unlock a BitLocker, FileVault 2 or LUKS volume at a partition;
-        its decrypted file system then replaces the partition's, at the same
-        key. Raises containers.ContainerError with the reason."""
+        """Unlock a BitLocker, FileVault 2, LUKS or VeraCrypt volume at a
+        partition; its decrypted file system then replaces the partition's,
+        at the same key. Raises containers.ContainerError with the
+        reason."""
         if start_sector in self._bitlocker:
             return True
-        if kind == 'ios_backup' and self.logical_fs is not None:
-            return self._unlock_backup(secret.get('password'))
+        if kind in LOCKED_LOGICAL and self.logical_fs is not None:
+            return self._unlock_backup(secret.get('password'), kind)
         window = self._partition_window(start_sector)
         keep = []
         if kind == 'bitlocker':
@@ -1886,6 +2104,12 @@ class ImageHandler:
                 secret.get('recovery_password'))
         elif kind == 'luks':
             volume = containers.unlock_luks(window, secret.get('password'))
+        elif kind == 'veracrypt':
+            # No signature says a volume is VeraCrypt: the examiner does,
+            # by giving its password here.
+            volume = containers.unlock_veracrypt(
+                window, secret.get('password'), secret.get('pim'),
+                secret.get('hidden'))
         else:
             raise containers.ContainerError(f"Cannot unlock {kind} here")
         self._bitlocker[start_sector] = volume
@@ -1899,9 +2123,10 @@ class ImageHandler:
                     containers.ENCRYPTION_NAMES.get(kind, kind), start_sector)
         return True
 
-    def _unlock_backup(self, password):
-        """An encrypted iOS backup's files, listed and decrypted as read."""
-        from trace_app.core import ios_backup
+    def _unlock_backup(self, password, kind='ios_backup'):
+        """An encrypted phone backup's files (iOS, or adb's), listed and
+        decrypted as read."""
+        from trace_app.core import android_backup, ios_backup
         unlock = self.logical_fs.facts.get('_unlock')
         if unlock is None:
             raise containers.ContainerError("This evidence has no password")
@@ -1913,20 +2138,28 @@ class ImageHandler:
                 capabilities.reason('ios_encrypted'))
         try:
             unlock(password)
-        except ios_backup.BackupError as exc:
+        except (ios_backup.BackupError, android_backup.BackupError) as exc:
             raise containers.ContainerError(str(exc)) from exc
-        self._unlocked_kind[0] = 'ios_backup'
+        self._unlocked_kind[0] = kind
         self._directory_cache.clear()
         self.get_fs_type.cache_clear()
-        logger.info("iOS backup unlocked")
+        logger.info("%s unlocked", containers.ENCRYPTION_NAMES.get(kind,
+                                                                   kind))
         return True
 
     # --- LVM and APFS: several volumes in one partition -------------------
 
     @containers.holding_libyal
     def logical_volumes(self, start_sector):
-        """An LVM partition's logical volumes: [{'key', 'index', 'name',
-        'size', 'group'}]."""
+        """An LVM partition's logical volumes, or a super partition's
+        Android logical partitions: [{'key', 'index', 'name', 'size',
+        'group'}]."""
+        if start_sector not in self._lvm and \
+                self.volume_kind(start_sector) == 'android_super':
+            self._open_super(start_sector)
+        if start_sector not in self._lvm and \
+                self.volume_kind(start_sector) == 'ubi':
+            self._open_ubi(start_sector)
         if start_sector not in self._lvm:
             try:
                 # Decrypted, when LVM is inside an unlocked LUKS volume.
@@ -1946,6 +2179,106 @@ class ImageHandler:
                  'index': index, 'name': volume.name, 'size': volume.size,
                  'group': group.name if group is not None else ''}
                 for index, volume in enumerate(volumes) if volume is not None]
+
+    def _open_super(self, start_sector):
+        """Android dynamic partitions (core/android_super.py), registered
+        as LVM's logical volumes are: same keys, same readers."""
+        from trace_app.core.android_super import SuperError, open_super
+        try:
+            image = open_super(self._volume_stream(start_sector))
+        except (SuperError, OSError) as exc:
+            logger.warning("Super partition at %s unreadable: %s",
+                           start_sector, exc)
+            self._lvm[start_sector] = (_Closed(), None, [])
+            return
+        volumes = []
+        for index, partition in enumerate(image.partitions):
+            if not partition.size or not partition.readable:
+                # Empty (product_b before an update), or on another block
+                # device: listed in the note, nothing to read.
+                volumes.append(None)
+                continue
+            volumes.append(partition)
+            self._volumes[containers.lvm_key(start_sector, index)] = \
+                containers.LibyalImgInfo(partition, partition.size, keep=[])
+        self._lvm[start_sector] = (_Closed(), _SuperGroup(image), volumes)
+        logger.info("Sector %s: %s", start_sector, image.describe())
+
+    def _open_ubi(self, start_sector):
+        """A UBI image's volumes (core/ubi.py), registered as LVM's
+        logical volumes are; a UBIFS volume then opens as its file system
+        (core/ubifs.py, through _other_file_system)."""
+        from trace_app.core.ubi import UbiError, open_ubi
+        try:
+            image = open_ubi(self._volume_stream(start_sector))
+        except (UbiError, OSError) as exc:
+            logger.warning("UBI image at %s unreadable: %s", start_sector,
+                           exc)
+            self._lvm[start_sector] = (_Closed(), None, [])
+            return
+        volumes = []
+        for index, volume in enumerate(image.volumes):
+            if not volume.size:
+                volumes.append(None)
+                continue
+            volumes.append(volume)
+            self._volumes[containers.lvm_key(start_sector, index)] = \
+                containers.LibyalImgInfo(volume, volume.size, keep=[])
+        self._lvm[start_sector] = (_Closed(), _UbiGroup(image), volumes)
+        logger.info("Sector %s: %s", start_sector, image.describe())
+
+    # --- ZFS: a pool's datasets ---------------------------------------------
+
+    def zfs_pool(self, start_sector):
+        """The ZFS pool at a partition (an assembled pool: with its other
+        devices), or None -- `zfs_problem` says why."""
+        if start_sector not in self._zfs:
+            from trace_app.core import zfs
+            sources = [self._partition_window(start_sector)]
+            if start_sector == 0:
+                # An assembled pool's other devices (core/assembly.py).
+                sources += list(getattr(self, '_btrfs_others', ()))
+            try:
+                pool = zfs.ZfsPool(sources)
+                self._zfs[start_sector] = (pool, None)
+                logger.info("Sector %s: %s", start_sector, pool.describe())
+            except (zfs.ZfsError, struct.error, OSError, KeyError) as exc:
+                logger.warning("ZFS pool at sector %s unreadable: %s",
+                               start_sector, exc)
+                self._zfs[start_sector] = (None, str(exc))
+        return self._zfs[start_sector][0]
+
+    def zfs_problem(self, start_sector):
+        self.zfs_pool(start_sector)
+        return self._zfs[start_sector][1]
+
+    def zfs_datasets(self, start_sector):
+        """A pool's datasets and snapshots: [{'key', 'index', 'name',
+        'kind' (filesystem | snapshot), 'encrypted', 'creation'}]."""
+        pool = self.zfs_pool(start_sector)
+        if pool is None:
+            return []
+        return [{'key': containers.zfs_key(start_sector, index),
+                 'index': index, 'name': dataset['name'],
+                 'kind': dataset['kind'], 'encrypted': dataset['encrypted'],
+                 'creation': dataset['creation']}
+                for index, dataset in enumerate(pool.datasets)]
+
+    def _zfs_file_system(self, key, start, index):
+        from trace_app.core import zfs
+        if key in self.fs_info_cache:
+            return self.fs_info_cache[key]
+        pool = self.zfs_pool(start)
+        if pool is None or index >= len(pool.datasets):
+            return None
+        try:
+            fs = zfs.open_dataset(pool, pool.datasets[index])
+        except (zfs.ZfsError, struct.error) as exc:
+            logger.warning("ZFS %s not opened: %s",
+                           pool.datasets[index]['name'], exc)
+            return None
+        self.fs_info_cache[key] = fs
+        return fs
 
     @containers.holding_libyal
     def apfs_volumes(self, start_sector):
@@ -2017,7 +2350,7 @@ class ImageHandler:
         out = []
         for start in dict.fromkeys(starts):
             kind = self.volume_kind(start)
-            if kind == 'lvm' or self.inner_kind(start) == 'lvm':
+            if kind in POOL_KINDS or self.inner_kind(start) == 'lvm':
                 out += [v['key'] for v in self.logical_volumes(start)]
             elif kind == 'ldm':
                 out += [v['key'] for v in self.dynamic_volumes(start)
@@ -2027,6 +2360,11 @@ class ImageHandler:
             elif kind == 'apfs':
                 out += [v['key'] for v in self.apfs_volumes(start)
                         if not v['locked']]
+            elif kind == 'zfs':
+                # Datasets, not their snapshots: those are older copies of
+                # the same files, browsed in the tree.
+                out += [d['key'] for d in self.zfs_datasets(start)
+                        if d['kind'] == 'filesystem' and not d['encrypted']]
             else:
                 out.append(start)
         return out
@@ -2054,7 +2392,8 @@ class ImageHandler:
 
     def is_unlocked(self, start_sector):
         return start_sector in self._bitlocker or \
-            self._unlocked_kind.get(start_sector) in ('apfs', 'ios_backup')
+            self._unlocked_kind.get(start_sector) in \
+            ('apfs',) + LOCKED_LOGICAL
 
     def bitlocker_facts(self, start_sector):
         return containers.bitlocker_facts(self._partition_window(start_sector))
@@ -2140,6 +2479,8 @@ class ImageHandler:
             fs = self.get_fs_info(start_offset)
             from trace_app.core.apfs import is_apfs
             from trace_app.core.btrfs import is_btrfs
+            from trace_app.core.f2fs import is_f2fs_fs
+            from trace_app.core.libyal_fs import is_libyal
             from trace_app.core.logical import is_logical
             from trace_app.core.xfs import is_xfs
             if is_apfs(fs):
@@ -2148,6 +2489,11 @@ class ImageHandler:
                 return "XFS"
             if is_btrfs(fs):
                 return "Btrfs"
+            if is_f2fs_fs(fs):
+                return "F2FS"
+            if is_libyal(fs) and fs.KIND in _OWN_READERS:
+                # SquashFS, EROFS, UDF, HFS (classic), JFFS2.
+                return fs.KIND
             if is_logical(fs):
                 return fs.label
             fs_type = fs.info.ftype
@@ -2592,6 +2938,15 @@ class ImageHandler:
                     if value_name == "InstallDate":
                         value = safe_datetime(value)
                     fields[label] = str(value)
+                # Before Vista CurrentBuild is a placeholder ("1.511.1 ()
+                # (Obsolete data - do not use)"); the number is here.
+                if not fields.get("Build", "").isdigit():
+                    try:
+                        number = str(key.value("CurrentBuildNumber").value())
+                        if number.isdigit():
+                            fields["Build"] = number
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.debug("Could not read the SOFTWARE hive: %s", e)
         return fields
@@ -2946,6 +3301,15 @@ class ImageHandler:
             return content, metadata
 
         except Exception as e:
+            # A deleted HFS+ file: no longer in the catalog TSK reads, but
+            # its old record still says where its data is
+            # (core/hfs_deleted.py).
+            if self.get_fs_type(offset) == 'HFS':
+                from trace_app.core import hfs_deleted
+                recovered = hfs_deleted.read_deleted(self, offset,
+                                                     int(inode_number))
+                if recovered is not None:
+                    return recovered, None
             # TSK reports a failed image read in its own words; an
             # incomplete image's reason is the one worth showing.
             self.last_read_error = self.incomplete() or str(e)

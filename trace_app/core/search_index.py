@@ -58,7 +58,18 @@ def use_wal(connection):
 #: 3: phone, card and IBAN indicators. 4: entities carry their evidence id,
 #: so counting indicators per image needs no join to the items (and their
 #: text): the Indicators tab's refresh took up to 3 s against a growing index.
-INDEX_VERSION = 4
+INDEX_VERSION = 5
+#: Versions upgraded in place rather than discarded: 4 -> 5 added
+#: index_state's scope and free-space columns (resumable runs).
+_MIGRATIONS = {4: (
+    "ALTER TABLE index_state ADD COLUMN scope TEXT",
+    "ALTER TABLE index_state ADD COLUMN free_status TEXT",
+    "ALTER TABLE index_state ADD COLUMN free_done INTEGER DEFAULT 0",
+    "ALTER TABLE index_state ADD COLUMN free_total INTEGER DEFAULT 0",
+    "ALTER TABLE index_state ADD COLUMN free_updated_utc TEXT",
+)}
+#: Kinds of row free-space indexing writes (`index_free_space`).
+FREE_KINDS = ('unallocated', 'memory')
 
 #: Largest amount of text taken from one file. A 20 MB log is worth indexing;
 #: taking all of a 2 GB one costs more than it returns.
@@ -76,6 +87,29 @@ INDEX_DONE = 'done'
 SEARCH_DB_NAME = 'search.db'
 INDEX_CANCELLED = 'cancelled'
 INDEX_FAILED = 'failed'
+
+
+def unfinished_note(state, active=False):
+    """Why an image's index is not whole, in words -- None when it is
+    done or was never started. `active`: a job is indexing it now. A
+    state left 'running' with no job is a run that ended without saying
+    so (TRACE closed, or the job died): its rows are a fraction of the
+    image, and a search over them silently misses the rest."""
+    if not state or state['status'] in (INDEX_DONE, INDEX_PENDING):
+        return None
+    done, total = state.get('files_done') or 0, state.get('files_total') or 0
+    reached = (f"{done:,} of {total:,} files" if total
+               else f"{done:,} files")
+    if active:
+        return f"being indexed ({reached} so far)"
+    when = (state.get('updated_utc') or '').replace('T', ' ')[:16]
+    how = {INDEX_CANCELLED: 'cancelled',
+           INDEX_FAILED: 'failed' + (f": {state['last_error']}"
+                                     if state.get('last_error') else '')
+           }.get(state['status'], 'ended without finishing -- TRACE was '
+                                  'closed or the job stopped')
+    return (f"indexing stopped at {reached}"
+            + (f" on {when} UTC" if when else '') + f" ({how})")
 
 # --- entity patterns ------------------------------------------------------
 #
@@ -112,6 +146,9 @@ _ENTITY_PATTERNS = {
     'iban': re.compile(
         r'\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b'),
 }
+
+#: A character each match must contain: no such character, no match.
+_ENTITY_NEEDS = {'email': '@', 'url': '://', 'ipv6': ':', 'phone': '+'}
 
 #: IBAN length by country (ISO 13616 registry). A code not listed here is not
 #: an IBAN country, which rules out most upper-case words followed by digits.
@@ -219,6 +256,40 @@ INDICATOR_KINDS = {
 _DOMAIN_FROM_URL = re.compile(r'^https?://([^/:\s]+)', re.IGNORECASE)
 
 
+def entities_of(text):
+    """{(kind, value)} of the indicators in `text`, of the kinds turned on
+    (ENABLED_INDICATORS). A pure function, so a worker process can run it
+    (core/text_pool)."""
+    found = set()
+    for kind, pattern in _ENTITY_PATTERNS.items():
+        # Patterns for kinds turned off are not run (a URL's or an
+        # address's domain still needs them), nor those whose one
+        # necessary character is absent: an unanchored pattern over a
+        # binary's strings tries at every position, and these scans were a
+        # sixth of indexing a Linux image.
+        if kind not in ENABLED_INDICATORS and not (
+                kind in ('url', 'email') and 'domain' in ENABLED_INDICATORS):
+            continue
+        needed = _ENTITY_NEEDS.get(kind)
+        if needed is not None and needed not in text:
+            continue
+        check = _ENTITY_CHECKS.get(kind)
+        for match in pattern.findall(text):
+            value = match.strip().rstrip('.,;:)')
+            if value and check is not None:
+                value = check(value)
+            if value:
+                found.add((kind, value))
+                if kind == 'url':
+                    domain = _DOMAIN_FROM_URL.match(value)
+                    if domain:
+                        found.add(('domain', domain.group(1).lower()))
+                elif kind == 'email' and '@' in value:
+                    found.add(('domain', value.rsplit('@', 1)[1].lower()))
+    return {(kind, value) for kind, value in found
+            if kind in ENABLED_INDICATORS}
+
+
 class SearchIndex:
     """The per-case full-text index.
 
@@ -246,6 +317,16 @@ class SearchIndex:
             # Already made. Opening must not write: the window opens the
             # index to read it while a job holds the write lock, and a
             # CREATE ... IF NOT EXISTS here waited out the busy timeout.
+            return
+        if version in _MIGRATIONS and version + 1 == INDEX_VERSION:
+            # Hours of indexing are not thrown away for two columns.
+            for statement in _MIGRATIONS[version]:
+                try:
+                    self._db.execute(statement)
+                except sqlite3.OperationalError as exc:
+                    logger.debug("Index migration: %s", exc)
+            self._db.execute(f"PRAGMA user_version = {INDEX_VERSION}")
+            self._db.commit()
             return
         if version and version != INDEX_VERSION:
             # The index is derived data. Discarding is honest and cheap;
@@ -307,7 +388,16 @@ class SearchIndex:
                 files_total   INTEGER DEFAULT 0,
                 last_path     TEXT,
                 last_error    TEXT,
-                updated_utc   TEXT
+                updated_utc   TEXT,
+                -- The scope the run was made with (JSON): a resume needs
+                -- the same one, or it would mix two selections.
+                scope         TEXT,
+                -- Free space and memory files: their own job, with its own
+                -- progress (bytes), so the file index finishes first.
+                free_status   TEXT,
+                free_done     INTEGER DEFAULT 0,
+                free_total    INTEGER DEFAULT 0,
+                free_updated_utc TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_entities_value
@@ -327,7 +417,7 @@ class SearchIndex:
     def add_item(self, evidence_id, artifact_ref, kind, name, path,
                  body='', size=0, mtime_utc='', mime='', inode=None,
                  start_offset=None, created_utc='', accessed_utc='',
-                 changed_utc='', is_deleted=False):
+                 changed_utc='', is_deleted=False, entities=None):
         """Index one artifact. Returns its item id.
 
         `body` is the extracted text; an empty body still produces a row, so
@@ -358,29 +448,14 @@ class SearchIndex:
             (item_id, name or '', path or '', body or ''))
 
         if body:
-            self._store_entities(item_id, evidence_id, body)
+            self._store_entities(item_id, evidence_id, body, entities)
         return item_id
 
-    def _store_entities(self, item_id, evidence_id, text):
-        """Pull emails, URLs, IPs and hashes out of the text."""
-        found = set()
-        for kind, pattern in _ENTITY_PATTERNS.items():
-            check = _ENTITY_CHECKS.get(kind)
-            for match in pattern.findall(text):
-                value = match.strip().rstrip('.,;:)')
-                if value and check is not None:
-                    value = check(value)
-                if value:
-                    found.add((kind, value))
-                    if kind == 'url':
-                        domain = _DOMAIN_FROM_URL.match(value)
-                        if domain:
-                            found.add(('domain', domain.group(1).lower()))
-                    elif kind == 'email' and '@' in value:
-                        found.add(('domain', value.rsplit('@', 1)[1].lower()))
-
-        found = {(kind, value) for kind, value in found
-                 if kind in ENABLED_INDICATORS}
+    def _store_entities(self, item_id, evidence_id, text, found=None):
+        """Store the indicators in the text (`found`: already found, by a
+        worker process -- core/text_pool)."""
+        if found is None:
+            found = entities_of(text)
         if found:
             self._db.executemany(
                 "INSERT INTO entities (item_id, evidence_id, kind, value) "
@@ -388,12 +463,23 @@ class SearchIndex:
                 [(item_id, evidence_id, kind, value)
                  for kind, value in found])
 
+    def rollback(self):
+        """Drop what was written since the last commit."""
+        self._db.rollback()
+
     def commit(self):
         self._db.commit()
 
-    def clear_evidence(self, evidence_id):
-        """Drop everything indexed for one piece of evidence, before a re-run."""
-        self._clear("evidence_id = ?", (evidence_id,))
+    def clear_evidence(self, evidence_id, keep_free=False):
+        """Drop everything indexed for one piece of evidence, before a
+        re-run -- but its free-space rows when `keep_free` (they are their
+        own job's, `index_free_space`)."""
+        if keep_free:
+            marks = ', '.join('?' for _ in FREE_KINDS)
+            self._clear(f"evidence_id = ? AND kind NOT IN ({marks})",
+                        (evidence_id, *FREE_KINDS))
+        else:
+            self._clear("evidence_id = ?", (evidence_id,))
 
     def clear_carved(self, evidence_id):
         """Drop one image's carved files and the members found in them,
@@ -403,55 +489,113 @@ class SearchIndex:
                     "'carved')", (evidence_id, evidence_id))
 
     def _clear(self, where, params):
-        rows = self._db.execute(
-            f"SELECT id FROM indexed_items WHERE {where}", params).fetchall()
-        ids = [row['id'] for row in rows]
-        for item_id in ids:
-            # An external-content table needs the 'delete' command with the
-            # original column values; a plain DELETE corrupts its index.
-            row = self._db.execute(
-                "SELECT name, path, body FROM indexed_items WHERE id = ?",
-                (item_id,)).fetchone()
-            if row:
-                self._db.execute(
-                    "INSERT INTO search_fts (search_fts, rowid, name, path, "
-                    "body) VALUES ('delete', ?, ?, ?, ?)",
-                    (item_id, row['name'], row['path'], row['body']))
-            self._db.execute("DELETE FROM entities WHERE item_id = ?",
-                             (item_id,))
-            self._db.execute("DELETE FROM indexed_items WHERE id = ?",
-                             (item_id,))
+        """Delete the rows matching `where`, with their full-text entries
+        and indicators -- one statement per table (a row at a time took
+        minutes on an image of 150,000 files)."""
+        ids = f"SELECT id FROM indexed_items WHERE {where}"
+        # An external-content table needs the 'delete' command with the
+        # original column values; a plain DELETE corrupts its index.
+        self._db.execute(
+            "INSERT INTO search_fts (search_fts, rowid, name, path, body) "
+            f"SELECT 'delete', id, name, path, body FROM indexed_items "
+            f"WHERE {where}", params)
+        self._db.execute(f"DELETE FROM entities WHERE item_id IN ({ids})",
+                         params)
+        self._db.execute(f"DELETE FROM indexed_items WHERE {where}", params)
         self._db.commit()
 
     # --- progress ---------------------------------------------------------
 
     def set_state(self, evidence_id, status, files_done=None, files_total=None,
-                  last_path=None, last_error=None):
+                  last_path=None, last_error=None, scope=None):
+        """The file index's state; `scope` (JSON) is kept from before when
+        not given."""
         import datetime
         now = datetime.datetime.now(datetime.timezone.utc).replace(
             microsecond=0).isoformat()
-        existing = self.state(evidence_id)
+        existing = self.state(evidence_id) or {}
         self._db.execute(
             "INSERT INTO index_state (evidence_id, status, files_done,"
-            " files_total, last_path, last_error, updated_utc) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            " files_total, last_path, last_error, updated_utc, scope) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(evidence_id) DO UPDATE SET status = excluded.status,"
             " files_done = excluded.files_done,"
             " files_total = excluded.files_total,"
             " last_path = excluded.last_path,"
             " last_error = excluded.last_error,"
-            " updated_utc = excluded.updated_utc",
+            " updated_utc = excluded.updated_utc,"
+            " scope = excluded.scope",
             (evidence_id, status,
-             files_done if files_done is not None else (existing or {}).get('files_done', 0),
-             files_total if files_total is not None else (existing or {}).get('files_total', 0),
-             last_path, last_error, now))
+             files_done if files_done is not None else existing.get('files_done', 0),
+             files_total if files_total is not None else existing.get('files_total', 0),
+             last_path, last_error, now,
+             scope if scope is not None else existing.get('scope')))
         self._db.commit()
+
+    def set_free_state(self, evidence_id, status, done=0, total=0):
+        """Free-space indexing's state (`index_free_space`), beside the
+        file index's: bytes done of the free space."""
+        import datetime
+        now = datetime.datetime.now(datetime.timezone.utc).replace(
+            microsecond=0).isoformat()
+        self._db.execute(
+            "INSERT INTO index_state (evidence_id, status, free_status,"
+            " free_done, free_total, free_updated_utc) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(evidence_id) DO UPDATE SET"
+            " free_status = excluded.free_status,"
+            " free_done = excluded.free_done,"
+            " free_total = excluded.free_total,"
+            " free_updated_utc = excluded.free_updated_utc",
+            (evidence_id, INDEX_PENDING, status, done, total, now))
+        self._db.commit()
+
+    def resume_point(self, evidence_id):
+        """Make an unfinished run's rows safe to continue from, and return
+        the artifact refs of the files already indexed.
+
+        Rows are written in walk order (core/text_pool keeps it; slack goes
+        through the same queue), so everything from the last file's own
+        row on belongs to the file being read when the run stopped -- some
+        of its members or slack may be missing. Those rows go, and that
+        file is read again. Carved and free-space rows are their own
+        steps' and are left alone."""
+        last = self._db.execute(
+            "SELECT max(id) FROM indexed_items WHERE evidence_id = ? AND "
+            "kind = 'file'", (evidence_id,)).fetchone()[0]
+        if last is not None:
+            self._clear(
+                "evidence_id = ? AND id >= ? AND kind NOT IN "
+                "('carved', 'unallocated', 'memory') AND "
+                "coalesce(path, '') NOT LIKE '[carved]/%'",
+                (evidence_id, last))
+        return {row[0] for row in self._db.execute(
+            "SELECT artifact_ref FROM indexed_items WHERE evidence_id = ? "
+            "AND kind = 'file'", (evidence_id,))}
+
+    def clear_free(self, evidence_id, kinds=FREE_KINDS):
+        """Drop an image's free-space (and memory-file) rows."""
+        marks = ', '.join('?' for _ in kinds)
+        self._clear(f"evidence_id = ? AND kind IN ({marks})",
+                    (evidence_id, *kinds))
 
     def state(self, evidence_id):
         row = self._db.execute(
             "SELECT * FROM index_state WHERE evidence_id = ?",
             (evidence_id,)).fetchone()
         return dict(row) if row else None
+
+    def states(self):
+        """{evidence id: state} for every image the index has seen."""
+        return {row['evidence_id']: dict(row) for row in self._db.execute(
+            "SELECT * FROM index_state")}
+
+    def free_unfinished(self, evidence_id):
+        """Whether free-space indexing of the image started and did not
+        finish."""
+        state = self.state(evidence_id) or {}
+        return state.get('free_status') in (INDEX_RUNNING, INDEX_CANCELLED,
+                                            INDEX_FAILED)
 
     def is_indexed(self, evidence_id):
         state = self.state(evidence_id)
@@ -572,6 +716,26 @@ class SearchIndex:
         return out
 
     # --- querying ---------------------------------------------------------
+
+    def find_files(self, evidence_id, pattern, limit=10000):
+        """The image's indexed files whose name matches `pattern`, for the
+        Listing's whole-image search: one query here instead of a walk of
+        every directory. Part of a name, any case ('report'); with * or ?
+        a whole-name wildcard ('*.pdf', 'IMG_??.jpg'); a leading '.' also
+        finds an extension. Folders are not indexed, so none are found."""
+        escaped = (pattern.replace('\\', '\\\\').replace('%', '\\%')
+                   .replace('_', '\\_'))
+        if '*' in pattern or '?' in pattern:
+            like = escaped.replace('*', '%').replace('?', '_')
+        else:
+            like = f'%{escaped}%'
+        rows = self._db.execute(
+            "SELECT artifact_ref, name, path, size, inode, start_offset, "
+            "created_utc, accessed_utc, mtime_utc, changed_utc, is_deleted "
+            "FROM indexed_items WHERE evidence_id = ? AND kind = 'file' "
+            "AND name LIKE ? ESCAPE '\\' ORDER BY path LIMIT ?",
+            (evidence_id, like, limit)).fetchall()
+        return [dict(row) for row in rows]
 
     def search(self, query, limit=500):
         """Run a query. Returns a list of result dicts.

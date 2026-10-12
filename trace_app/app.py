@@ -1,6 +1,7 @@
 """Application entry point: logging, startup checks, and the main window."""
 
 import logging
+import os
 import sys
 
 from PySide6.QtCore import QTimer
@@ -112,6 +113,10 @@ def main():
     # The examiner's own settings: size units, the log's detail.
     from trace_app.core import settings
     settings.apply_user()
+    # Interface size: Qt reads its scale factor when the application object
+    # is made, so it is set before (infra/ui_scale.py).
+    from trace_app.infra import ui_scale
+    ui_scale.apply_env()
     set_taskbar_identity()
     logging.getLogger('TRACE').info("Starting TRACE %s on %s", __version__, sys.platform)
     # A crash in C leaves no log line: say so now if the last session did,
@@ -158,7 +163,18 @@ def main():
     # handed a USB stick who wants to know what is on it should not have to
     # name an investigation first, so quick triage leads to exactly the
     # application TRACE was before cases existed.
-    case, setup = choose_case()
+    # Restarted from View > Interface Size: straight back into the case.
+    reopen = os.environ.pop('TRACE_REOPEN_CASE', '')
+    if reopen and os.path.isdir(reopen):
+        from trace_app.core.case import Case
+        try:
+            case, setup = Case.open(reopen), None
+        except Exception as exc:
+            logging.getLogger('TRACE').warning(
+                "Could not reopen %s after the restart: %s", reopen, exc)
+            case, setup = choose_case()
+    else:
+        case, setup = choose_case()
     if case is None:
         logging.getLogger('TRACE').info("Launcher dismissed; not starting")
         return 0

@@ -33,7 +33,9 @@ CACHE_MEMBER = 64 * 1024 * 1024
 CACHED_MEMBERS = 4
 
 KIND_LABELS = {'folder': 'Folder', 'zip': 'ZIP', 'tar': 'TAR', 'ad1': 'AD1',
-               'l01': 'L01', 'ios_backup': 'iOS backup'}
+               'l01': 'L01', 'ios_backup': 'iOS backup',
+               'android_backup': 'Android backup',
+               'ufdr': 'Cellebrite UFDR'}
 
 
 def kind_of(path):
@@ -43,6 +45,9 @@ def kind_of(path):
         return None
     if path.lower().rstrip('/\\').endswith('.sparsebundle'):
         return None                 # a Mac disk image that is a folder
+    from trace_app.core.aff import is_afd
+    if is_afd(path.rstrip('/\\')):
+        return None                 # an AFD: AFF split across a folder
     from trace_app.core.containers import parallels_descriptor
     if parallels_descriptor(path):
         return None                 # a Parallels disk bundle: a folder too
@@ -54,12 +59,27 @@ def kind_of(path):
         return 'ad1'
     if lowered.endswith(('.l01', '.lx01')):
         return 'l01'
-    if lowered.endswith('.zip'):
-        return 'zip'
+    if lowered.endswith('.ab') or _starts(path, b'ANDROID BACKUP\n'):
+        return 'android_backup'
+    if lowered.endswith(('.zip', '.ufdr')):
+        # A Cellebrite UFDR is a ZIP: the extracted files and report.xml
+        # (core/ufdr) -- a renamed one too.
+        from trace_app.core.ufdr import is_ufdr
+        return 'ufdr' if is_ufdr(path) else 'zip'
     if lowered.endswith(('.tar', '.tgz', '.tar.gz', '.tar.bz2', '.tbz2',
                          '.tar.xz', '.txz')):
         return 'tar'
     return None
+
+
+def _starts(path, magic):
+    """Whether the file at `path` begins with `magic` (False for a folder
+    or anything unreadable)."""
+    try:
+        with open(path, 'rb') as handle:
+            return handle.read(len(magic)) == magic
+    except OSError:
+        return False
 
 
 #: Second and later segments of a segmented image: they are read with the
@@ -115,7 +135,8 @@ def folder_images(path):
         if entry.is_dir(follow_symlinks=False):
             # A sparsebundle or a Parallels bundle is an image itself.
             if kind_of(entry.path) is None and \
-                    entry.name.lower().endswith(('.sparsebundle', '.hdd')):
+                    entry.name.lower().endswith(('.sparsebundle', '.hdd',
+                                                 '.afd')):
                 images.append(entry.path)
             else:
                 other = True
@@ -146,6 +167,12 @@ def open_logical(path):
     if kind == 'ios_backup':
         from trace_app.core.ios_backup import open_backup
         return open_backup(path)
+    if kind == 'android_backup':
+        from trace_app.core.android_backup import open_android_backup
+        return open_android_backup(path)
+    if kind == 'ufdr':
+        from trace_app.core.ufdr import open_ufdr
+        return open_ufdr(path)
     opener = {'folder': open_folder, 'zip': open_zip, 'tar': open_tar,
               'l01': open_l01}.get(kind)
     if opener is None:
@@ -250,7 +277,10 @@ def open_zip(path):
         raise
     fs = LogicalFileSystem('ZIP', path)
     members = _Members()
-    fs.facts.update({'Format': 'ZIP archive', 'Members': f"{len(archive.infolist()):,}",
+    fs.facts.update({'Format': 'Cellebrite UFDR (a ZIP: the extracted '
+                               'files and report.xml)'
+                     if path.lower().endswith('.ufdr') else 'ZIP archive',
+                     'Members': f"{len(archive.infolist()):,}",
                      'Times': 'local wall-clock time, no zone (ZIP stores no '
                               'zone)',
                      '_close': lambda: (archive.close(), handle.close())})

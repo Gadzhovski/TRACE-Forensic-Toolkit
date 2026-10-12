@@ -52,11 +52,23 @@ def zstd_available():
     return True
 
 
-def lz4_block(source, size_hint=0):
-    """Decompress one LZ4 block (no frame): literals and back-references."""
-    out = bytearray()
+def lz4_block(source, size_hint=0, stop_at=None, history=b''):
+    """Decompress one LZ4 block (no frame): literals and back-references.
+    With `stop_at`, stop once that many bytes are out: a stream followed
+    by other bytes (EROFS without zero padding) has no end of its own.
+    `history`: what came before, for a block whose matches reach back into
+    the previous ones (an LZ4 frame with linked blocks); not returned."""
+    if history:
+        out = bytearray(history)
+        if stop_at is not None:
+            stop_at += len(history)
+        return bytes(_lz4_into(source, out, stop_at))[len(history):]
+    return _lz4_into(source, bytearray(), stop_at)
+
+
+def _lz4_into(source, out, stop_at):
     position, end = 0, len(source)
-    while position < end:
+    while position < end and (stop_at is None or len(out) < stop_at):
         token = source[position]
         position += 1
         length = token >> 4
@@ -69,7 +81,7 @@ def lz4_block(source, size_hint=0):
                     break
         out += source[position:position + length]
         position += length
-        if position >= end:
+        if position >= end or (stop_at is not None and len(out) >= stop_at):
             break                       # the last sequence has no match
         offset = source[position] | (source[position + 1] << 8)
         position += 2

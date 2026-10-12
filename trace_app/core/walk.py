@@ -56,8 +56,10 @@ def volume_offsets(image_handler):
 
 
 def iter_files(image_handler, should_stop=None, offsets=None,
-               every_name=None):
-    """FileEntry for every regular file with content, on every volume.
+               every_name=None, scope=None):
+    """FileEntry for every regular file with content, on every volume
+    (every one in `scope`, core/scope.Scope, when given: an out-of-scope
+    folder is not gone into).
 
     `every_name(offset, path, deleted, ref)`, when given, is called for
     every name the walk passes -- folders and empty files too, which are
@@ -67,16 +69,18 @@ def iter_files(image_handler, should_stop=None, offsets=None,
         if fs is None:
             continue
         visited = set()
+        matcher = scope.matcher(fs) if scope is not None else None
         yield from _walk(fs, fs.open_dir(path='/'), '', 0, offset, visited,
-                         should_stop, every_name)
+                         should_stop, every_name, matcher)
 
 
-def count_files(image_handler, should_stop=None):
-    return sum(1 for _ in iter_files(image_handler, should_stop))
+def count_files(image_handler, should_stop=None, scope=None):
+    return sum(1 for _ in iter_files(image_handler, should_stop,
+                                     scope=scope))
 
 
 def _walk(fs, directory, path, depth, offset, visited, should_stop,
-          every_name=None):
+          every_name=None, matcher=None):
     if depth > MAX_DEPTH:
         return
     for entry in directory:
@@ -99,10 +103,15 @@ def _walk(fs, directory, path, depth, offset, visited, should_stop,
         if meta.addr in visited:
             continue
         visited.add(meta.addr)
+        if matcher is not None:
+            from trace_app.core.scope import entry_skipped
+            if entry_skipped(matcher, child, meta):
+                continue
         if meta.type == pytsk3.TSK_FS_META_TYPE_DIR:
             try:
                 yield from _walk(fs, entry.as_directory(), child, depth + 1,
-                                 offset, visited, should_stop, every_name)
+                                 offset, visited, should_stop, every_name,
+                                 matcher)
             except WalkCancelled:
                 raise
             except Exception as exc:

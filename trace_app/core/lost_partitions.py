@@ -54,8 +54,16 @@ def signature(head):
         return 'Ext'
     if head[1024:1026] in (b'H+', b'HX'):
         return 'HFS+'
+    if head[1024:1026] == b'BD':
+        return 'HFS'
+    if head[:4] == b'hsqs':
+        return 'SquashFS'
+    if head[1024:1028] == b'\xe2\xe1\xf5\xe0':
+        return 'EROFS'
     if head[:4] == b'XFSB':
         return 'XFS'
+    if head[1024:1028] == b'\x10\x20\xf5\xf2':
+        return 'F2FS'
     if head[32:36] == b'NXSB':
         return 'APFS'
     return None

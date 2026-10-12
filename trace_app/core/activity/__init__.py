@@ -32,6 +32,7 @@ logger = logging.getLogger('TRACE.Activity')
 CATEGORIES = (
     ('programs', 'Programs run'),
     ('files', 'Files and folders'),
+    ('notes', 'Notes and unsaved text'),
     ('usb', 'USB devices'),
     ('recycle', 'Recycle Bin'),
     ('logons', 'Logons and remote access'),
@@ -42,6 +43,7 @@ CATEGORIES = (
     ('usage', 'App and network usage (SRUM)'),
     ('system', 'System and installed programs'),
     ('communication', 'Messages and calls'),
+    ('locations', 'Locations'),
     ('cloud', 'Cloud sync'),
     ('antivirus', 'Antivirus detections'),
 )
@@ -114,15 +116,43 @@ class Volume:
         fs = image_handler.get_fs_info(offset)
         from trace_app.core.btrfs import is_btrfs, system_layouts
         from trace_app.core.logical import is_logical, system_roots
+        volumes = None
         if is_logical(fs):
-            return [cls(image_handler, offset, root)
-                    for root in system_roots(fs)]
-        if is_btrfs(fs):
+            volumes = [cls(image_handler, offset, root)
+                       for root in system_roots(fs)]
+        elif is_btrfs(fs):
             layouts = system_layouts(fs)
             if layouts:
-                return [cls(image_handler, offset, root, mounts)
-                        for root, mounts in layouts]
-        return [cls(image_handler, offset)]
+                volumes = [cls(image_handler, offset, root, mounts)
+                           for root, mounts in layouts]
+        if volumes is None:
+            volumes = [cls(image_handler, offset)]
+        return volumes + [old for volume in volumes
+                          for old in volume.previous_installs()]
+
+    #: What Windows Setup leaves of the install it replaced, at the root.
+    PREVIOUS_INSTALLS = ('Windows.old',)
+
+    def previous_installs(self):
+        """A Windows.old (the system an upgrade or reinstall replaced: its
+        Windows, Users and Program Files) as a system root of its own, so
+        its registry, event logs and profiles are read like a live
+        system's -- [] when there is none, or it holds no registry."""
+        out = []
+        for name in self.PREVIOUS_INSTALLS:
+            folder = self.find(name)
+            if folder is None or not folder.is_dir:
+                continue
+            old = type(self)(self.handler, self.offset, folder.path)
+            config = old.find('Windows', 'System32', 'config')
+            if config is None or not config.is_dir:
+                continue
+            old.previous_install = name
+            out.append(old)
+        return out
+
+    #: Set on a Windows.old volume: where the previous install is.
+    previous_install = None
 
     def listdir(self, path):
         """Entries of the directory at `path` ('/'-separated), or []."""
@@ -364,7 +394,15 @@ def collect(image_handler, progress=None, should_stop=None, carved=()):
             continue
         for reader in (_windows, _browsers, _other_systems):
             try:
-                out.extend(reader(volume, step))
+                found = reader(volume, step)
+                if volume.previous_install:
+                    # The install an upgrade replaced: said on every row.
+                    for row in found:
+                        row['source'] = (f"{row['source']} "
+                                         f"({volume.previous_install})")
+                        row['detail']['install'] = (
+                            f"previous ({volume.previous_install})")
+                out.extend(found)
             except ActivityCancelled:
                 raise
             except Exception as exc:
@@ -407,7 +445,38 @@ def _other_systems(volume, step):
     # Phones: an iPhone backup or file system, an Android extraction.
     from trace_app.core.activity import mobile
     out += mobile.collect(volume, step)
+    out += _ufdr(volume, step)
     return out
+
+
+def _ufdr(volume, step):
+    """What Physical Analyzer decoded, when the evidence is a UFDR
+    (core/ufdr): its report.xml read for chats, calls, contacts..."""
+    facts = getattr(volume.fs, 'facts', None) or {}
+    path = facts.get('_ufdr')
+    if not path:
+        return []
+    # Once per UFDR: a logical source can have several system roots.
+    from trace_app.core.logical import system_roots
+    roots = system_roots(volume.fs) or ['/']
+    if volume.root not in (roots[0], roots[0].rstrip('/') or '/'):
+        return []
+    from trace_app.core import ufdr
+    from trace_app.core.case import make_artifact_ref
+    step("Cellebrite UFDR report")
+    report = f"/{ufdr.REPORT_FOLDER}/{ufdr.REPORT}"
+    ref = ''
+    try:
+        node = volume.fs.lookup(report)
+        if node is not None:
+            ref = make_artifact_ref(volume.offset, node.inode, 0)
+    except Exception:
+        pass
+    try:
+        return ufdr.records(path, ref, report)
+    except Exception as exc:
+        logger.warning("UFDR report not read: %s", exc)
+        return []
 
 
 def _windows(volume, step):
@@ -423,16 +492,23 @@ def _windows(volume, step):
         out += _setupapi(volume, windows, step)
         out += _event_logs(volume, windows, step, sids)
         out += _srum(volume, windows, step, sids)
+        from trace_app.core.activity import windows_logs
+        out += windows_logs.firewall_records(volume, windows, step)
     out += _recycle_bin(volume, sids, step)
     for user, home in users:
         out += _user_registry(volume, user, home, step)
         out += _user_shortcuts(volume, user, home, step)
         out += _ie_history(volume, user, home, step)
         out += _windows_timeline(volume, user, home, step)
-        from trace_app.core.activity import powershell
+        from trace_app.core.activity import notepad, powershell
         out += powershell.history(volume, user, home, step)
-    from trace_app.core.activity import defender
+        out += notepad.records(volume, user, home, step)
+        from trace_app.core.activity import windows_logs
+        out += windows_logs.transcript_records(volume, user, home, step)
+    from trace_app.core.activity import defender, windows_logs, wlan
     out += defender.records(volume, step)
+    out += wlan.records(volume, step)
+    out += windows_logs.wer_records(volume, step, users)
     return out
 
 
@@ -1056,6 +1132,18 @@ def _user_registry(volume, user, home, step):
                     {'list position': item['position'],
                      'basis': 'time known for the most recent command only'
                      if not item['typed'] else None}, **common))
+            for item in registry.comdlg32(hive):
+                out.append(record(
+                    'programs' if not item['path'] else 'files',
+                    f"ComDlg32 ({item['key']})", item['time'], item['what'],
+                    item['path'] or item['program'],
+                    {'program': item['program'] if item['path'] else None,
+                     'extension': item['extension'],
+                     'list position': item['position'],
+                     'basis': "the key's last-written time: when its newest "
+                              "item was used" if item['time'] else
+                              'time known for the most recent item only'},
+                    **common))
             for item in registry.typed_paths(hive):
                 out.append(record(
                     'files', 'TypedPaths', item['typed'],
@@ -1207,6 +1295,7 @@ def _homes(volume):
 
 
 def _browsers(volume, step):
+    from trace_app.core.activity import chromium_storage
     out = []
     for user, home in _homes(volume):
         base = _split(home.path)
@@ -1216,6 +1305,20 @@ def _browsers(volume, step):
                 continue
             profiles = [folder] + volume.children(folder, dirs=True)
             for profile in profiles:
+                # What sites kept: Local and Session Storage, IndexedDB.
+                if chromium_storage.has_storage(volume,
+                                                _split(profile.path)):
+                    out += chromium_storage.profile_records(
+                        volume, _split(profile.path),
+                        browsers.browser_name(profile.path + '\\') or
+                        'Chromium', user, step)
+                # Cookies, form entries, saved logins (no passwords), top
+                # sites and favicons.
+                from trace_app.core.activity import chromium_extras
+                out += chromium_extras.profile_records(
+                    volume, _split(profile.path),
+                    browsers.browser_name(profile.path + '\\') or
+                    'Chromium', user, step, profile.name)
                 history = volume.find(*_split(profile.path), 'History')
                 if history is None or history.is_dir:
                     continue
@@ -1237,6 +1340,12 @@ def _browsers(volume, step):
                                     volume.read(wal) if wal else None, user,
                                     entry.path, volume.ref(entry), 'Firefox',
                                     profile=profile.name)
+        # Electron apps: each a Chromium profile of its own.
+        for app, places in chromium_storage.ELECTRON_APPS.items():
+            for parts in places:
+                if chromium_storage.has_storage(volume, base + list(parts)):
+                    out += chromium_storage.profile_records(
+                        volume, base + list(parts), app, user, step)
         safari = volume.find(*base, 'Library', 'Safari', 'History.db')
         if safari is not None:
             step(safari.path)
@@ -1285,6 +1394,7 @@ def _history(data, wal, user, path, ref, browser, profile='', carved=False):
                                          'finished': item['finished'],
                                          'opened': 'yes' if item['opened']
                                          else None,
+                                         'danger': item.get('danger'),
                                          'type': item['mime']}), **common))
     for item in found['searches']:
         out.append(record('searches', source, item['time'], 'Searched',
@@ -1329,6 +1439,16 @@ def run_evidence(image_handler, case, evidence_id, progress=None,
     case.set_user_activity_state(evidence_id, 'running')
     try:
         records = collect(image_handler, progress, should_stop, carved)
+        # Carved event logs and chunks, shortcuts and hive bins
+        # (core/carved_artifacts), read from the image where they lie.
+        from trace_app.core import carved_artifacts
+        artifacts = [row for kind in carved_artifacts.ACTIVITY_TYPES
+                     for row in case.carved_files(evidence_id, kind,
+                                                  limit=10 ** 6)]
+        records += carved_artifacts.activity_records(
+            artifacts, lambda row: read_carved(
+                image_handler.read, row['offset'], row['size'],
+                row.get('fragments')))
     except ActivityCancelled:
         case.set_user_activity_state(evidence_id, 'cancelled')
         return 0

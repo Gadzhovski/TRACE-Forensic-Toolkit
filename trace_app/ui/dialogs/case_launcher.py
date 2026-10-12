@@ -177,6 +177,8 @@ class CaseLauncher(QDialog):
                  icons.CASE_PROPERTIES, self._new_case),
                 ('open', "Open Case…", "A case folder on disk",
                  icons.OPEN_FOLDER, self._open_case),
+                ('archive', "Open Case Archive…", "A .trace handed over",
+                 icons.ARCHIVE, self._open_archive),
                 ('triage', "Quick Triage", "Look inside an image; nothing "
                  "saved", icons.TRIAGE, self._triage)):
             button = ActionTile(label, description, icon)
@@ -184,6 +186,8 @@ class CaseLauncher(QDialog):
                 'new': "Start an investigation with the guided setup: case "
                        "details, the evidence, and what to analyse.",
                 'open': "Reopen a case folder created earlier.",
+                'archive': "Check a case archive file by file, unpack it "
+                           "into a folder of your choosing and open it.",
                 'triage': "Look inside an image without creating a case. "
                           "Nothing is saved between sessions."}[key])
             button.clicked.connect(handler)
@@ -386,6 +390,14 @@ class CaseLauncher(QDialog):
             self, "Open a case folder", settings.user('case_folder'))
         if folder:
             self._load(os.path.normpath(folder))
+
+    def _open_archive(self):
+        from trace_app.ui.dialogs.case_archive import open_case_archive
+        case = open_case_archive(self)
+        if case is not None:
+            remember_case(case.folder, case.name)
+            self.result_case = case
+            self.accept()
 
     def _open_selected(self):
         entry = self._selected()

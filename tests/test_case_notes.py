@@ -31,7 +31,8 @@ def case(tmp_path):
 
 def test_the_case_card_and_evidence_table(qapp, case):
     from PySide6.QtCore import Qt
-    from trace_app.ui.viewers.case_panel import CasePanel, format_utc
+    from trace_app.ui.viewers.case_panel import (CasePanel, EVIDENCE_COLUMNS,
+                                                 format_utc)
     panel = CasePanel()
     # What each image holds comes from the window (core/evidence_profile);
     # an image not open has none yet.
@@ -55,7 +56,8 @@ def test_the_case_card_and_evidence_table(qapp, case):
         assert contains == {'laptop.dd': 'MBR · NTFS · Windows',
                             'phone.dd': '—'}
         # Hashes shortened, whole in the tooltip.
-        md5 = next(table.item(r, 6) for r in range(2)
+        md5_column = EVIDENCE_COLUMNS.index('MD5')
+        md5 = next(table.item(r, md5_column) for r in range(2)
                    if table.item(r, 0).text() == 'laptop.dd')
         assert md5.text() == 'abababab…abababab' and \
             md5.toolTip() == 'ab' * 16

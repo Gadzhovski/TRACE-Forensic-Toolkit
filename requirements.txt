@@ -89,6 +89,12 @@ requests>=2.31.0         # VirusTotal API
 # (core/zstd_decode.py, still the fallback) reads ~1 MB/s. Wheels for every
 # platform on 3.10-3.13; 3.14 has it built in.
 backports.zstd>=1.0.0 ; python_version < '3.14'
+# CRC-32C in C (LGPL-2.1+, like libewf): Btrfs checksums every metadata
+# node and data sector with it, and the deleted-file scan proves what is
+# left of a file by them -- in Python that was ~100 s per GB, and a
+# Fedora root never finished. Wheels for Windows (x64, ARM64), macOS
+# (Intel, Apple Silicon) and Linux on every Python from 3.10.
+crc32c>=2.7
 
 # --- libmagic (file type from content) ------------------------------------
 # python-magic is only a binding; libmagic is a C library. Windows: the -bin

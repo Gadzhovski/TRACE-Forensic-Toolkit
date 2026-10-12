@@ -63,6 +63,10 @@ CARVE_CATEGORIES = {
     "Email": ["PST", "OST", "MBOX", "EML"],
     "Databases & logs": ["SQLITE", "WAL", "EVTX", "REGF"],
     "Windows artifacts": ["LNK"],
+    # What survives of a deleted log, MFT, folder index or hive: records
+    # checked by their own CRCs and fixups (core/carved_artifacts reads
+    # them into the activity and NTFS views).
+    "System records": ["EVTXCHUNK", "MFTRECORD", "INDX", "HBIN"],
     "Executables": ["EXE", "DLL", "SYS", "ELF", "MACHO", "APK", "JAR"],
     "Archives": ["ZIP", "GZ", "BZ2", "XZ", "TAR", "RAR", "7Z"],
     "Audio": ["WAV", "MP3", "OGG", "OPUS", "M4A"],
@@ -97,6 +101,8 @@ EXTENSION_CARVER = {
                                   'm4a', 'cr3')},
     **{ext: 'riff' for ext in ('wav', 'webp', 'avi')},
     'sqlite': 'sqlite', 'wal': 'wal', 'regf': 'regf', 'evtx': 'evtx',
+    'evtxchunk': 'evtxchunk', 'mftrecord': 'mftrecord', 'indx': 'indx',
+    'hbin': 'hbin',
     'pst': 'pst', 'ost': 'pst',
     'exe': 'pe', 'dll': 'pe', 'sys': 'pe',
     'lnk': 'lnk', 'mp3': 'mp3', 'ogg': 'ogg', 'opus': 'ogg', 'flv': 'flv',
@@ -159,6 +165,10 @@ class Carver:
         #: every carve to what the chunk holds.
         self._reader = reader
         self._image_size = image_size
+        #: Where a file can begin: on a sector, as a file system stores it
+        #: (see _starts_a_file); 1 for memory, where a picture can start
+        #: anywhere in a page.
+        self.alignment = SECTOR_SIZE
         #: (begin, end) of each volume carved in its own address range
         #: (ImageHandler.carve_volumes): a read never runs past the end of
         #: the one it starts in.
@@ -423,8 +433,7 @@ class Carver:
         self._carve_sized(chunk, base_offset, (b'RIFF',), formats.measure_riff,
                           aligned=False)
 
-    @staticmethod
-    def _starts_a_file(offset):
+    def _starts_a_file(self, offset):
         """Could a file begin at this absolute offset?
 
         A filesystem allocates in sectors, so a file it stored begins on a
@@ -438,8 +447,11 @@ class Carver:
         Scanning the DFRWS 2007 image, which is dense with MP3 and MPEG data,
         this rejected most of the 193 spurious JPEGs while keeping every real
         one.
+
+        Memory (core/memory_files) is not a file system: there `alignment`
+        is 1 and any offset can start a file.
         """
-        return offset % SECTOR_SIZE == 0
+        return offset % self.alignment == 0
 
     #: Tags that a real page has and a quoted fragment in a mail body usually
     #: does not. Requiring some structure is what separates a document from
@@ -1083,7 +1095,10 @@ class Carver:
     #: every family: its frame sync is weak enough to occur in any audio or
     #: video stream, and an MPEG's or an AVI's audio is that file's, not an
     #: MP3 of its own.
-    _MEASURE_FAMILY = {}
+    _MEASURE_FAMILY = {'measure_evtx_chunk': 'evtxchunk',
+                       'measure_mft_record': 'mftrecord',
+                       'measure_indx': 'indx',
+                       'measure_hbin_run': 'hbin'}
 
     def _family(self, measure):
         if measure is formats.measure_mp3:
@@ -1108,6 +1123,43 @@ class Carver:
     def carve_evtx_files(self, chunk, base_offset):
         self._carve_sized(chunk, base_offset, (b'ElfFile\x00',),
                           formats.measure_evtx)
+
+    def _carve_records(self, chunk, base_offset, signature, measure,
+                       within=None):
+        """System records at sector starts (anywhere in memory), unless
+        inside a whole file of family `within` already carved -- a log's
+        chunks are part of the log."""
+        source = formats.Source(chunk, base_offset, self._reader,
+                                self._end(base_offset))
+        cursor = 0
+        while True:
+            hit = chunk.find(signature, cursor)
+            if hit == -1:
+                break
+            cursor = hit + 1
+            offset = base_offset + hit
+            if not self._starts_a_file(offset):
+                continue
+            if within and self.inside_carved(offset, family=within):
+                continue
+            self._try_carve(source, offset, measure, (),
+                            self._family(measure))
+
+    def carve_evtx_chunks(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'ElfChnk\x00',
+                            formats.measure_evtx_chunk, within='evtx')
+
+    def carve_mft_records(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'FILE',
+                            formats.measure_mft_record)
+
+    def carve_indx_records(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'INDX',
+                            formats.measure_indx)
+
+    def carve_hbin_runs(self, chunk, base_offset):
+        self._carve_records(chunk, base_offset, b'hbin',
+                            formats.measure_hbin_run, within='regf')
 
     def carve_pst_files(self, chunk, base_offset):
         self._carve_sized(chunk, base_offset, (b'!BDN',), formats.measure_pst)
@@ -1217,6 +1269,10 @@ class Carver:
         'wal': carve_wal_files,
         'regf': carve_regf_files,
         'evtx': carve_evtx_files,
+        'evtxchunk': carve_evtx_chunks,
+        'mftrecord': carve_mft_records,
+        'indx': carve_indx_records,
+        'hbin': carve_hbin_runs,
         'pst': carve_pst_files,
         'pe': carve_pe_files,
         'lnk': carve_lnk_files,
@@ -1244,7 +1300,8 @@ class Carver:
 #: then recognised as inside a file already carved, rather than carved again
 #: as files of their own. MP3 last -- its frame sync is the weakest signature.
 _CARVE_ORDER = [
-    'pst', 'sqlite', 'wal', 'regf', 'evtx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
+    'pst', 'sqlite', 'wal', 'regf', 'evtx', 'evtxchunk', 'hbin', 'mftrecord',
+    'indx', 'isobmff', 'riff', 'mkv', 'mpg', 'flv',
     'ogg', 'wmv', 'zip', 'tar', 'tar_v7', 'gz', 'bz2', 'xz', '7z', 'rar',
     'ole', 'pdf',
     'pe', 'elf', 'macho', 'psd', 'lnk', 'rtf', 'mbox', 'eml', 'html', 'raf',
@@ -1337,9 +1394,12 @@ def carve_extent(image_handler):
 
 #: Where a carve looks: free space between live files, the slack at the
 #: end of live files' last clusters, or every byte of the image.
-SOURCES = ('unallocated', 'slack', 'image')
+SOURCES = ('unallocated', 'slack', 'memory', 'image')
 SOURCE_LABELS = {'unallocated': 'Unallocated space', 'slack': 'File slack',
-                 'image': 'Whole image'}
+                 'memory': 'Page and swap files', 'image': 'Whole image'}
+#: Sources carved as a list of regions of the image (core/slack,
+#: core/memory_files), each with the live file it belongs to.
+REGION_SOURCES = ('slack', 'memory')
 
 #: Checkpoint a carve's progress at least this often (seconds), so an
 #: interrupted run resumes close to where it stopped.
@@ -1348,7 +1408,7 @@ CHECKPOINT_SECONDS = 20
 
 def carve_image(image_handler, file_types, sink, unallocated_only=True,
                 progress=None, should_stop=None, stats=None, ranges=None,
-                start_offset=0, seen=()):
+                start_offset=0, seen=(), alignment=SECTOR_SIZE):
     """Carve `file_types` out of the image; returns how many were found.
 
     `progress(position, size, found)` is called once per chunk, and
@@ -1358,7 +1418,8 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     type, bytes scanned and skipped as allocated.
 
     `ranges` -- [(offset, length), ...] in image order -- confines the carve
-    to those regions alone (file slack), nothing read past their ends.
+    to those regions alone (file slack, memory files), nothing read past
+    their ends; `alignment` is where a file may begin (1 for memory).
     `start_offset` resumes a carve: everything before it is skipped, and
     `seen` -- (offset, type) pairs already carved -- is not carved again.
     """
@@ -1369,7 +1430,7 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     try:
         return _carve_image(image_handler, file_types, sink,
                             unallocated_only, progress, should_stop, run,
-                            ranges, start_offset, seen)
+                            ranges, start_offset, seen, alignment)
     finally:
         _STATS = None
         if stats is not None:
@@ -1378,7 +1439,7 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
 
 def _carve_image(image_handler, file_types, sink, unallocated_only,
                  progress, should_stop, run, ranges=None, start_offset=0,
-                 seen=()):
+                 seen=(), alignment=SECTOR_SIZE):
     wanted = {t.lower() for t in file_types if t.lower() in EXTENSION_CARVER}
     families = {EXTENSION_CARVER[t] for t in wanted}
     if 'tar' in families:
@@ -1396,7 +1457,7 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
     if ranges is not None:
         return _carve_ranges(image_handler, ranges, families, wanted, sink,
                              progress, should_stop, run, start_offset, seen,
-                             size)
+                             size, alignment)
     carver = Carver(sink, wanted=wanted, reader=image_handler.read,
                     image_size=size)
     carver._seen.update(seen)
@@ -1495,10 +1556,12 @@ def _carve_span(image_handler, carver, families, allocated, run, begin_span,
 
 
 def _carve_ranges(image_handler, ranges, families, wanted, sink, progress,
-                  should_stop, run, start_offset, seen, size):
+                  should_stop, run, start_offset, seen, size,
+                  alignment=SECTOR_SIZE):
     """Carve inside each region alone: no reader past it, so a carve
     cannot run on into the live file in the next cluster."""
     carver = Carver(sink, wanted=wanted, reader=None, image_size=size)
+    carver.alignment = alignment
     carver._seen.update(seen)
     for index, (begin, length) in enumerate(ranges):
         if begin + length <= start_offset or length < 16:
@@ -1953,12 +2016,13 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     it found. `progress(position, size, found)` as in carve_image;
     `on_file(record)` hears of each file as it is written.
     """
-    from trace_app.core import carve_origin
+    from trace_app.core import carve_origin, carved_artifacts
+    from trace_app.core.case import make_span_ref
     types = [t.lower() for t in file_types]
     source = source or ('unallocated' if unallocated_only else 'image')
     # Slack is the image's own; the other sources also walk the volumes
     # carved in their own range (decrypted, LVM, RAID).
-    size = (image_handler.get_size() if source == 'slack'
+    size = (image_handler.get_size() if source in REGION_SOURCES
             else carve_extent(image_handler))
     previous = case.carving_state(evidence_id) if resume else None
     start_offset, seen, already = 0, set(), 0
@@ -1987,6 +2051,10 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     if source == 'slack':
         from trace_app.core import slack
         slack_list = slack.slack_ranges(image_handler, should_stop)
+        ranges = [(begin, length) for begin, length, _p, _r in slack_list]
+    elif source == 'memory':
+        from trace_app.core import memory_files
+        slack_list = memory_files.ranges(image_handler, should_stop)
         ranges = [(begin, length) for begin, length, _p, _r in slack_list]
     # Where deleted files began: a carve starting there was that file.
     try:
@@ -2041,11 +2109,12 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             tally['too_small'] = tally.get('too_small', 0) + 1
             return
         origin = carve_origin.match(starts, offset, len(content))
-        if source == 'slack':
+        if source in REGION_SOURCES:
             owner = slack_owner(offset)
+            where = 'the slack of the live file' if source == 'slack' \
+                else 'the memory file'
             origin = origin or ({'path': owner[0], 'ref': owner[1],
-                                 'basis': f"found in the slack of the live "
-                                          f"file {owner[0]}"}
+                                 'basis': f"found in {where} {owner[0]}"}
                                 if owner else None)
         if folder:
             record = write_carved(folder, content, file_type, offset,
@@ -2054,6 +2123,12 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
             record = describe_carved(content, file_type, offset, fragments,
                                      source=source, origin=origin)
         case.add_carved(evidence_id, record)
+        if file_type in carved_artifacts.FS_TYPES:
+            # An MFT or index record: the names and times it holds, as
+            # file-system events (removed with the carve).
+            case.add_fs_events(evidence_id, carved_artifacts.fs_rows(
+                file_type, content,
+                make_span_ref(0, offset, offset + len(content)), offset))
         # Judged like a file on disk, while its bytes are in hand: a carved
         # executable, encrypted blob or located photo becomes a finding.
         if analyse_carves:
@@ -2109,7 +2184,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     try:
         carve_image(image_handler, types, sink, source == 'unallocated',
                     progress=report, should_stop=should_stop, stats=stats,
-                    ranges=ranges, start_offset=start_offset, seen=seen)
+                    ranges=ranges, start_offset=start_offset, seen=seen,
+                    alignment=1 if source == 'memory' else SECTOR_SIZE)
     except CarvingCancelled:
         finish('cancelled')
         case.set_carving_state(evidence_id, 'cancelled', found=found[0],

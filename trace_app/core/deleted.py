@@ -56,8 +56,11 @@ logger = logging.getLogger('TRACE.Deleted')
  POSSIBLY) = ('recoverable', 'partly overwritten', 'overwritten', 'resident',
               'entry reused', 'no data recorded', 'start only',
               'possibly overwritten')
+#: Listed by name, its data not checked: outside the run's scope
+#: (core/scope.py).
+NOT_ASSESSED = 'not assessed'
 STATES = (RECOVERABLE, RESIDENT, POSSIBLY, PARTLY, OVERWRITTEN, START_ONLY,
-          NO_DATA, REUSED)
+          NO_DATA, REUSED, NOT_ASSESSED)
 #: ext: a deleted inode is emptied, and the journal may hold it as it was.
 _EXT_TYPES = ('Ext3', 'Ext4')
 
@@ -76,13 +79,15 @@ class DeletedCancelled(Exception):
 
 
 def analyse_evidence(image_handler, case, evidence_id, progress=None,
-                     should_stop=None):
+                     should_stop=None, scope=None):
     """List one image's deleted files into the case, replacing any;
-    returns how many."""
+    returns how many. Files outside `scope` (core/scope.Scope) are listed
+    by name with state 'not assessed': their data is not checked."""
     from trace_app.core.carving import allocation_map
     allocated = allocation_map(image_handler)
     rows = []
-    for record in deleted_files(image_handler, allocated, should_stop):
+    for record in deleted_files(image_handler, allocated, should_stop,
+                                progress, scope):
         rows.append(record)
         if progress and len(rows) % 200 == 0:
             progress(len(rows), 0, record['path'])
@@ -150,11 +155,13 @@ def _times(image_handler, offset, meta, zoned):
     return found
 
 
-def deleted_files(image_handler, allocated=None, should_stop=None):
+def deleted_files(image_handler, allocated=None, should_stop=None,
+                  progress=None, scope=None):
     """Every deleted file and folder on the image's file systems, as dicts
     (see the module docstring for 'state'). `allocated`: the image's merged
     allocated byte ranges (carving.allocation_map); measured against when
-    given."""
+    given. `progress(done, total, text)` hears from the long stages (a
+    Btrfs volume's scan)."""
     from trace_app.core.case import make_artifact_ref
     from trace_app.core.walk import volume_offsets
     for offset in volume_offsets(image_handler):
@@ -165,11 +172,15 @@ def deleted_files(image_handler, allocated=None, should_stop=None):
         fs = image_handler.get_fs_info(offset)
         if fs is None:
             continue
+        matcher = scope.matcher(fs) if scope is not None else None
+        in_scope = None if matcher is None else (
+            lambda path, m=matcher: not m.skips_path(path))
         from trace_app.core.btrfs import is_btrfs
         if is_btrfs(fs):
             # No deleted names in a Btrfs directory: the files survive in
             # the older leaves copy-on-write leaves (core/btrfs_recover).
-            yield from fs.deleted_scan(should_stop).records(offset, base)
+            yield from fs.deleted_scan(should_stop, progress).records(
+                offset, base, should_stop, progress, in_scope)
             continue
         block_size = fs.info.block_size
         from trace_app.core.image_handler import _TIMEZONE_NAIVE
@@ -236,6 +247,11 @@ def deleted_files(image_handler, allocated=None, should_stop=None):
                                                   record['sequence'])
                 if meta is None or not address:
                     record['state'] = REUSED
+                elif in_scope is not None and not is_dir and \
+                        not in_scope(child):
+                    # Outside the run's scope: listed, its data unread.
+                    record['state'] = NOT_ASSESSED
+                    record['size'] = int(meta.size or 0)
                 elif int(meta.flags) & pytsk3.TSK_FS_META_FLAG_ALLOC:
                     # The entry belongs to another file now.
                     record['state'] = REUSED
@@ -335,6 +351,15 @@ def deleted_files(image_handler, allocated=None, should_stop=None):
                            exc)
         if fs_type in _EXT_TYPES:
             _journal_names(found, journals.get(offset), folder_paths)
+        if fs_type == 'HFS':
+            # TSK lists no deleted HFS+ files: the catalog's old records,
+            # from the journal and node free space (core/hfs_deleted.py).
+            found.extend(_hfs_records(image_handler, offset, base))
+        if fs_type in ('Ext2',) + _EXT_TYPES:
+            # The files of deleted folders, named from the folders' own
+            # directory blocks (core/ext_folders.py).
+            found.extend(_ext_folder_files(fs, found, folder_paths, visit,
+                                           fs_type == 'Ext2'))
         if fs_type == 'ExFAT' and geometry:
             found.extend(_exfat_orphans(image_handler, offset, fs, base,
                                         geometry, found, folder_paths))
@@ -390,6 +415,147 @@ def _journal_names(records, journal, folder_paths):
         record['path'] = f"{where}/{name}" if where else \
             f"/$OrphanFiles/{name}"
         record['named_by'] = 'journal'
+
+
+def _hfs_records(image_handler, offset, base):
+    """Deleted HFS+ files as Deleted files rows (core/hfs_deleted.py)."""
+    from trace_app.core import hfs_deleted
+    from trace_app.core.case import make_artifact_ref
+    try:
+        volume = hfs_deleted.hfs_volume(image_handler, offset)
+        if volume is None:
+            return []
+        out = []
+        for found in hfs_deleted.deleted(volume):
+            state, lost = hfs_deleted.state_of(volume, found)
+            record = {
+                'volume': offset, 'name': found['name'],
+                'path': f"{found['folder']}/{found['name']}",
+                'inode': found['file_id'], 'is_dir': False,
+                'sequence': None, 'size': found['size'],
+                'runs': [(base + start * volume.block, count * volume.block)
+                         for start, count in found['extents']],
+                'overwritten': lost, 'state': state,
+                'source': ('$journal' if found['source'] == 'journal'
+                           else 'catalog'),
+                'times_local': False,
+                'ref': make_artifact_ref(offset, found['file_id'], None)}
+            for key, field in (('modified', 'modified'),
+                               ('accessed', 'accessed'),
+                               ('created', 'created'),
+                               ('changed', 'changed')):
+                record[key] = times.iso(times.unix(
+                    hfs_deleted.unix(found[field])))
+            out.append(record)
+        return out
+    except Exception as exc:
+        logger.warning("Deleted HFS+ records at %s not read: %s", offset,
+                       exc)
+        return []
+
+
+class _Name:
+    """A directory entry's name, shaped like TSK's TSK_FS_NAME."""
+
+    def __init__(self, name, inode):
+        self.name = name.encode('utf-8')
+        self.meta_addr = inode
+        self.meta_seq = 0
+        self.flags = pytsk3.TSK_FS_NAME_FLAG_UNALLOC
+
+
+class _Info:
+    def __init__(self, name, inode):
+        self.name = _Name(name, inode)
+        self.meta = None
+
+
+class _FoundEntry:
+    """An entry read from a deleted folder's directory block, for visit():
+    no metadata, so visit opens the inode as it does for TSK's own."""
+
+    def __init__(self, name, inode):
+        self.info = _Info(name, inode)
+
+
+def _ext_folder_files(fs, records, folder_paths, visit, ext2):
+    """Files of deleted ext folders: orphans named from the folders'
+    directory blocks, and (ext2, which lists nothing there) records made
+    for the files the blocks name. A folder found inside a deleted folder
+    is searched in turn. Folders the listing could not name go under the
+    deleted entry their parent left, when there is exactly one, else
+    '/$OrphanFiles/[folder N]'."""
+    from trace_app.core import ext_folders
+    geometry = getattr(fs, 'geometry', None)
+    if geometry is None:
+        return []
+    try:
+        root = int(fs.info.root_inum)
+    except Exception:
+        root = 2
+    out, searched = [], set()
+    # Every unallocated directory inode once: a folder whose entry was
+    # overwritten (DFR-12) is reached no other way. Cheap where ext4 keeps
+    # how much of each inode table was ever used; elsewhere only up to a
+    # quarter gigabyte of inode tables (an ext3 volume of hundreds of GB
+    # would mean reading gigabytes).
+    every_inode = ext2 or geometry.itable_unused_kept or \
+        geometry.inodes_count * geometry.inode_size <= 256 * 1024 * 1024
+    for _depth in range(32):
+        everything = records + out
+        known = [r['inode'] for r in everything
+                 if r['is_dir'] and r['inode'] and r['inode'] not in searched]
+        if not known and not every_inode:
+            break
+        folders = ext_folders.deleted_folders(geometry, known,
+                                              every_inode=every_inode)
+        every_inode = False                   # the inode tables: once
+        searched.update(known)
+        folders = {f: i for f, i in folders.items() if f not in searched
+                   or f in known}
+        searched.update(folders)
+        if not folders:
+            break
+        by_inode = {}
+        for record in everything:
+            by_inode.setdefault(record['inode'], []).append(record)
+        for folder, info in sorted(folders.items()):
+            path = folder_paths.get(folder) or _unnamed_folder(
+                everything, folder_paths, info['parent'], root) or \
+                f"/$OrphanFiles/[folder {folder}]"
+            folder_paths.setdefault(folder, path)
+            fresh = []
+            for inode, name in info['entries']:
+                listed = by_inode.get(inode, [])
+                orphan = next((r for r in listed
+                               if r['name'].startswith('OrphanFile-')), None)
+                if orphan is not None:
+                    orphan['name'] = name
+                    orphan['path'] = f"{path}/{name}"
+                    orphan['named_by'] = 'directory block'
+                    if orphan['is_dir']:
+                        folder_paths[inode] = orphan['path']
+                elif not any(r['name'] == name for r in listed):
+                    fresh.append(_FoundEntry(name, inode))
+            if fresh:
+                for record in visit(fresh, path, 1):
+                    record['named_by'] = 'directory block'
+                    if record['is_dir']:
+                        folder_paths.setdefault(record['inode'],
+                                                record['path'])
+                    out.append(record)
+    return out
+
+
+def _unnamed_folder(records, folder_paths, parent, root):
+    """The path of the one deleted entry in `parent` whose inode reads 0 --
+    what ext2 leaves of a deleted folder's entry -- or None."""
+    where = '' if parent == root else folder_paths.get(parent)
+    if where is None:
+        return None
+    candidates = [r['path'] for r in records
+                  if not r['inode'] and r['path'].rsplit('/', 1)[0] == where]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def _logfile_events(fs, offset):

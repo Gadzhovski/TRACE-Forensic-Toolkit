@@ -492,6 +492,115 @@ def measure_evtx(src, start):
     return size, 'evtx'
 
 
+# --- system records: what survives of a log, an MFT, an index, a hive -----
+
+def evtx_chunk_ok(chunk):
+    """An EVTX chunk's two CRC-32s hold: its header (bytes 0-120 and
+    128-512) and its event records (512 up to the free-space offset)."""
+    if len(chunk) < 512 or chunk[:8] != b'ElfChnk\x00':
+        return False
+    if zlib.crc32(chunk[:120] + chunk[128:512]) & 0xFFFFFFFF != \
+            _u32le(chunk, 0x7C):
+        return False
+    free = _u32le(chunk, 48)
+    if not 512 <= free <= len(chunk):
+        return False
+    return zlib.crc32(chunk[512:free]) & 0xFFFFFFFF == _u32le(chunk, 52)
+
+
+def measure_evtx_chunk(src, start):
+    """One 64 KB event-log chunk on its own -- its log gone, the chunk
+    left in free space. Kept only when both its CRC-32s hold."""
+    chunk = src.get(start, EVTX_CHUNK)
+    if len(chunk) < EVTX_CHUNK or not evtx_chunk_ok(chunk):
+        return None
+    return EVTX_CHUNK, 'evtxchunk'
+
+
+def fixups_ok(record):
+    """An NTFS multi-sector record's update sequence holds: the last two
+    bytes of every 512-byte stride carry the sequence number."""
+    if len(record) < 512:
+        return False
+    usa_offset, usa_count = struct.unpack_from('<HH', record, 4)
+    if usa_count < 2 or usa_offset < 0x28 - 0x10 or \
+            usa_offset + usa_count * 2 > 1024 or \
+            (usa_count - 1) * 512 > len(record):
+        return False
+    check = record[usa_offset:usa_offset + 2]
+    return all(record[stride * 512 - 2:stride * 512] == check
+               for stride in range(1, usa_count))
+
+
+def measure_mft_record(src, start):
+    """An MFT record ('FILE'): its allocated size (1024 or 4096), when its
+    fixups hold and its fields are sane."""
+    head = src.get(start, 64)
+    if len(head) < 64 or head[:4] != b'FILE':
+        return None
+    first_attribute, flags, used, allocated = struct.unpack_from(
+        '<HHII', head, 0x14)
+    if allocated not in (1024, 4096) or not 0x38 <= first_attribute < used \
+            or used > allocated or flags > 0x0F:
+        return None
+    record = src.get(start, allocated)
+    if len(record) < allocated or not fixups_ok(record):
+        return None
+    return allocated, 'mftrecord'
+
+
+def measure_indx(src, start):
+    """A folder's index record ('INDX'): (fixup count - 1) x 512 bytes,
+    when its fixups hold and its entries fit."""
+    head = src.get(start, 0x30)
+    if len(head) < 0x30 or head[:4] != b'INDX':
+        return None
+    count = _u16le(head, 6)
+    size = (count - 1) * 512
+    if not 512 <= size <= 65536:
+        return None
+    entries, used, allocated = struct.unpack_from('<III', head, 0x18)
+    if not 0x10 <= entries < used <= allocated or allocated + 0x18 > size:
+        return None
+    record = src.get(start, size)
+    if len(record) < size or not fixups_ok(record):
+        return None
+    return size, 'indx'
+
+
+def _hbin_ok(block, size):
+    """A hive bin's cells add up to exactly its size."""
+    cell = 32
+    while cell + 4 <= size:
+        length = abs(struct.unpack_from('<i', block, cell)[0])
+        if length < 8 or length % 8 or cell + length > size:
+            return False
+        cell += length
+    return cell == size
+
+
+def measure_hbin_run(src, start, limit=64 * 1024 * 1024):
+    """Registry hive bins without their hive's base block: consecutive
+    'hbin' blocks whose recorded offsets follow on, each with cells that
+    add up to its size."""
+    position, total, expected = start, 0, None
+    while total < limit:
+        head = src.get(position, 32)
+        if len(head) < 32 or head[:4] != b'hbin':
+            break
+        offset, size = struct.unpack_from('<II', head, 4)
+        if size < 4096 or size % 4096 or offset % 4096 or \
+                (expected is not None and offset != expected):
+            break
+        block = src.get(position, size)
+        if len(block) < size or not _hbin_ok(block, size):
+            break
+        total += size
+        position += size
+        expected = offset + size
+    return (total, 'hbin') if total else None
+
+
 def measure_pst(src, start):
     """MS-PST: the file's end is recorded in its ROOT structure (ibFileEof)."""
     h = src.get(start, 0x200)

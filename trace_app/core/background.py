@@ -53,16 +53,36 @@ def start(kind, params):
     ctx = context()
     queue = ctx.Queue()
     stop = ctx.Event()
+    # Not a daemon: a daemonic process may not start processes, and
+    # indexing starts a pool (core/text_pool). It ends with the window all
+    # the same -- the window stops it, and watch_parent() ends it if the
+    # window is gone.
     process = ctx.Process(target=child_main, args=(kind, params, queue, stop),
-                          name=f'TRACE {kind}', daemon=True)
+                          name=f'TRACE {kind}')
     process.start()
     return process, queue, stop
 
 
 # --- in the child ------------------------------------------------------------
 
+def watch_parent():
+    """End this process when the one that started it is gone (killed, or
+    crashed in C): a job, or a worker of its pool, must not run on alone,
+    writing to a case nobody has open."""
+    import threading
+    parent = multiprocessing.parent_process()
+    if parent is None:
+        return
+
+    def watch():
+        parent.join()               # returns when the parent has exited
+        os._exit(1)
+    threading.Thread(target=watch, name='parent watch', daemon=True).start()
+
+
 def child_main(kind, params, queue, stop):
     """Entry point of the child process."""
+    watch_parent()
     root = logging.getLogger()
     root.handlers[:] = [logging.handlers.QueueHandler(_LogChannel(queue))]
     root.setLevel(logging.INFO)
@@ -128,6 +148,14 @@ def _open_image(path, unlock=None):
     return handler
 
 
+def _scope(params):
+    """The run's scope (core/scope.Scope) from its params, or None when it
+    covers everything."""
+    from trace_app.core.scope import from_params
+    scope = from_params(params)
+    return None if scope.everything else scope
+
+
 def _close(*things):
     for thing in things:
         if thing is None:
@@ -149,11 +177,30 @@ def job_index(params, progress, item, should_stop):
         done = index_evidence(
             handler, index, params['evidence_id'],
             progress=lambda done, total, path: progress(done, total, path),
-            should_stop=should_stop)
+            should_stop=should_stop, scope=_scope(params),
+            resume=params.get('resume', True))
         # The image's carved files too: a re-index cleared them with the
         # rest of the image's items.
         _index_carved(handler, index, params, should_stop)
         return done
+    finally:
+        _close(index, handler)
+
+
+def job_index_free(params, progress, item, should_stop):
+    """Free space and memory files into the index (indexer.index_free_
+    space): the slow, optional part, after the file index."""
+    from trace_app.core.indexer import index_free_space
+    from trace_app.core.search_index import SearchIndex
+    index = handler = None
+    try:
+        index = SearchIndex(params['case_folder'])
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        return index_free_space(
+            handler, index, params['evidence_id'],
+            progress=lambda done, total, what: progress(done, total, what),
+            should_stop=should_stop, scope=_scope(params),
+            resume=params.get('resume', True))
     finally:
         _close(index, handler)
 
@@ -179,10 +226,14 @@ def job_analysis(params, progress, item, should_stop):
     try:
         case = Case.open(params['case_folder'])
         handler = _open_image(params['image_path'], params.get('unlock'))
+        from trace_app.core.text_pool import default_workers
         return analyse_evidence(
             handler, case, params['evidence_id'], params['modules'],
             progress=lambda done, total, path: progress(done, total, path),
-            should_stop=should_stop)
+            should_stop=should_stop, scope=_scope(params),
+            workers=default_workers(), image_path=params['image_path'],
+            unlock=params.get('unlock'),
+            case_folder=params['case_folder'])
     finally:
         _close(case, handler)
 
@@ -300,7 +351,7 @@ def job_yara(params, progress, item, should_stop):
                 params.get('options'),
                 progress=lambda done, total, path: progress(done, total,
                                                             path),
-                should_stop=should_stop)
+                should_stop=should_stop, scope=_scope(params))
         except yara_rules.ScanCancelled:
             return 0
     finally:
@@ -365,7 +416,7 @@ def job_deleted(params, progress, item, should_stop):
                 handler, case, params['evidence_id'],
                 progress=lambda done, total, path: progress(done, total,
                                                             path),
-                should_stop=should_stop)
+                should_stop=should_stop, scope=_scope(params))
         except deleted.DeletedCancelled:
             return 0
     finally:
@@ -474,15 +525,140 @@ def job_carve(params, progress, item, should_stop):
             from trace_app.core import slack
             ranges = [(begin, length) for begin, length, _p, _r in
                       slack.slack_ranges(handler, should_stop)]
+        elif source == 'memory':
+            from trace_app.core import memory_files
+            ranges = [(begin, length) for begin, length, _p, _r in
+                      memory_files.ranges(handler, should_stop)]
         try:
             carve_image(handler, params['file_types'], sink,
                         source == 'unallocated', progress=report,
-                        should_stop=should_stop, ranges=ranges)
+                        should_stop=should_stop, ranges=ranges,
+                        alignment=1 if source == 'memory' else 512)
         except CarvingCancelled:
             pass
         return found[0]
     finally:
         _close(case, handler)
+
+
+def job_vss_compare(params, progress, item, should_stop):
+    """What changed between two states of a volume -- a shadow copy and a
+    later one, or the live volume (core/vss_compare.py). Read-only: each
+    difference is an item; nothing is stored."""
+    from trace_app.core import vss_compare
+    handler = None
+    try:
+        handler = _open_image(params['image_path'], params.get('unlock'))
+        handler.shadow_copies(params['volume'])     # opens the snapshots
+        progress(0, 2, 'Reading both states of the volume', force=True)
+        try:
+            rows = vss_compare.compare_volumes(
+                handler, params['before'], params['after'],
+                system=params.get('system', False), should_stop=should_stop)
+        except vss_compare.Cancelled:
+            return 0
+        progress(2, 2, 'Compared', force=True)
+        for row in rows:
+            item(row)
+        return len(rows)
+    finally:
+        _close(handler)
+
+
+def job_pictures(params, progress, item, should_stop):
+    """Similar pictures (core/phash.py): 'groups' of the case's pictures,
+    'match' them with reference pictures, or 'hash_folder' the references.
+    CPU-bound Python: on a thread in the window it held the interpreter
+    lock, and every query the window ran waited on it -- a Fedora case took
+    minutes to open. The result is the one item."""
+    from trace_app.core import phash
+    operation = params['operation']
+    threshold = params.get('threshold', phash.DEFAULT_THRESHOLD)
+    if operation == 'groups':
+        result = phash.groups(params['items'], threshold, should_stop)
+    elif operation == 'match':
+        result = phash.match(params['references'], params['items'],
+                             threshold, should_stop)
+    elif operation == 'hash_folder':
+        result = phash.hash_folder(params['folder'], should_stop)
+    else:
+        raise ValueError(f"unknown pictures operation {operation!r}")
+    if should_stop():
+        return 0
+    item({'result': result})
+    return 1
+
+
+def job_scope_count(params, progress, item, should_stop):
+    """How many files a scope keeps, per image (core/scope.count): the
+    Scope editor's estimate. An image's folders and files are listed once
+    (the walk takes a while on a big one) and kept in the user data folder
+    by path, size and time -- after that each edit of the rules is counted
+    in a second or two. One item per image: {path, in_scope, total}."""
+    from trace_app.core import scope as scope_module
+    done = 0
+    for image in params['images']:
+        if should_stop():
+            return done
+        volumes = _scope_listing(image, progress, should_stop)
+        if volumes is None:
+            continue
+        try:
+            kept, total = scope_module.count(volumes, params['scope'],
+                                             should_stop)
+        except scope_module.Cancelled:
+            return done
+        item({'path': image['path'], 'in_scope': kept, 'total': total})
+        done += 1
+    return done
+
+
+def _scope_listing(image, progress, should_stop):
+    """listing() of one image, from the kept copy when the image has not
+    changed. None when cancelled or unreadable."""
+    import hashlib
+    import pickle
+    from trace_app.core import scope as scope_module
+    from trace_app.infra.paths import user_data_dir
+    path = image['path']
+    try:
+        stat = os.stat(path)
+        stamp = f"{os.path.normcase(os.path.abspath(path))}|{stat.st_size}|" \
+                f"{stat.st_mtime_ns}"
+    except OSError:
+        stamp = path                    # a live disk or a folder
+    folder = os.path.join(user_data_dir(), 'scope_listings')
+    kept = os.path.join(folder, hashlib.sha256(stamp.encode(
+        'utf-8', 'surrogatepass')).hexdigest()[:32] + '.pickle')
+    if os.path.exists(kept):
+        try:
+            with open(kept, 'rb') as handle:
+                return pickle.load(handle)
+        except Exception as exc:        # damaged or from another version
+            logger.debug("Listing %s not reused: %s", kept, exc)
+    handler = None
+    try:
+        handler = _open_image(path, image.get('unlock'))
+        name = os.path.basename(path)
+        volumes = scope_module.listing(
+            handler, should_stop,
+            lambda folders, where: progress(
+                folders, 0, f"Listing {name}: {folders:,} folders"))
+    except scope_module.Cancelled:
+        return None
+    except Exception as exc:
+        logger.warning("Could not list %s for the scope: %s", path, exc)
+        return None
+    finally:
+        _close(handler)
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(kept + '.part', 'wb') as handle:
+            pickle.dump(volumes, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(kept + '.part', kept)
+    except OSError as exc:
+        logger.debug("Listing not kept: %s", exc)
+    return volumes
 
 
 def job_ping(params, progress, item, should_stop):
@@ -494,13 +670,22 @@ def job_ping(params, progress, item, should_stop):
                                 ntfs, persistence, report, thumbnails,
                                 timeline, yara_rules)
     import pytsk3  # noqa: F401
+    # Indexing's text pool starts processes of its own from this one: in a
+    # frozen build that is the app started again, twice over.
+    from trace_app.core.text_pool import TextPipeline
+    found = []
+    pool = TextPipeline(lambda text, entities, payload: found.append(
+        entities), workers=2)
+    pool.submit(b'write to ping@example.org', 'ping.txt', 1 << 16, 0)
+    pool.close()
     progress(1, 1, 'ping', force=True)
-    item({'pong': params.get('value')})
+    item({'pong': params.get('value'), 'pool': found})
     return 1
 
 
 JOBS = {
     'index': job_index,
+    'index_free': job_index_free,
     'analysis': job_analysis,
     'activity': job_activity,
     'ntfs': job_ntfs,
@@ -514,5 +699,8 @@ JOBS = {
     'deleted': job_deleted,
     'persistence': job_persistence,
     'carve': job_carve,
+    'vss_compare': job_vss_compare,
+    'pictures': job_pictures,
+    'scope_count': job_scope_count,
     'ping': job_ping,
 }

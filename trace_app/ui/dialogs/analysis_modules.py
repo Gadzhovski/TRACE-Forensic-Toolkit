@@ -28,8 +28,8 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QFrame, QGridLayout,
                                QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QScrollArea, QVBoxLayout,
-                               QWidget)
+                               QListWidgetItem, QPushButton, QScrollArea,
+                               QVBoxLayout, QWidget)
 
 from trace_app.core.analysis import (MODULE_AUTHORS, MODULE_ENTROPY,
                                      MODULE_EXECUTABLES, MODULE_HASH,
@@ -48,6 +48,11 @@ MODULE_CARVE = 'carve'
 #: The search index's key: its own walk (core/indexer.py), into search.db
 #: rather than case.db, so it too runs as a job of its own.
 MODULE_INDEX = 'index'
+
+#: Text in free space and in page, swap and hibernation files
+#: (indexer.index_free_space): the slow part of indexing, a job of its own
+#: after the file index, so the files are searchable first.
+MODULE_INDEX_FREE = 'index_free'
 
 #: Windows activity and browser history (core/activity): reads known
 #: locations rather than every file, so it is its own, short job.
@@ -90,7 +95,7 @@ MODULE_DELETED = 'deleted'
 
 #: The modules that are jobs of their own, each a boolean in a choice; the
 #: rest (analysis.MODULES) are listed under 'modules'.
-JOB_MODULES = (MODULE_INDEX, MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
+JOB_MODULES = (MODULE_INDEX, MODULE_INDEX_FREE, MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
                MODULE_HASHSETS,
                MODULE_YARA, MODULE_SIGMA, MODULE_PERSISTENCE,
                MODULE_KEYWORDS, MODULE_THUMBNAILS, MODULE_DELETED)
@@ -153,6 +158,14 @@ DESCRIPTIONS = {
         "and hashes found in it (Triage ▸ Indicators).",
         "Reads every file in full; replaces a previous index of the same "
         "image.", EVERY_FILE),
+    MODULE_INDEX_FREE: (
+        "Search free space and memory files",
+        "Add the text in unallocated space — deleted documents, messages and "
+        "logs no file holds any more — and in the page, swap and hibernation "
+        "files to the search index (results marked [unallocated] and "
+        "[memory]). After the file index; it can be stopped and resumed.",
+        "Reads all of the image's free space; zero-filled space is skipped.",
+        WHOLE_IMAGE),
     MODULE_ACTIVITY: (
         "User activity and browser history",
         "What the users did. Windows: programs run (Prefetch, Amcache, Shimcache, "
@@ -252,7 +265,7 @@ GROUPS = (
                              MODULE_PERSISTENCE, MODULE_THUMBNAILS)),
     ("Rules and lists", (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
                          MODULE_KEYWORDS)),
-    ("Recovery", (MODULE_DELETED, MODULE_CARVE)),
+    ("Recovery", (MODULE_DELETED, MODULE_INDEX_FREE, MODULE_CARVE)),
 )
 
 #: Profiles: what each ticks. Modules that cannot run are left unticked
@@ -264,7 +277,7 @@ _QUICK = {MODULE_MAGIC, MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
           MODULE_THUMBNAILS, MODULE_DELETED, MODULE_SIGMA}
 _STANDARD = _QUICK | {MODULE_HASH, MODULE_EXECUTABLES, MODULE_INDEX,
                       MODULE_HASHSETS, MODULE_YARA, MODULE_KEYWORDS}
-_FULL = _STANDARD | {MODULE_ENTROPY, MODULE_CARVE}
+_FULL = _STANDARD | {MODULE_ENTROPY, MODULE_INDEX_FREE, MODULE_CARVE}
 #: None first: browsing without any analysis is a first-class answer.
 PROFILES = {NONE: frozenset(), QUICK: _QUICK, STANDARD: _STANDARD,
             FULL: _FULL}
@@ -273,10 +286,11 @@ PROFILE_LABELS = {
            "Modules can be run any time from Analysis \u25b8 Run Analysis "
            "Modules."),
     QUICK: ("Quick", "Fast modules only: nothing reads every file in full."),
-    STANDARD: ("Standard", "Everything but entropy and carving: hashes, "
-               "the search index and the rules this case uses."),
-    FULL: ("Full", "Every module, including entropy and file carving of "
-           "unallocated space. The slowest."),
+    STANDARD: ("Standard", "Everything but entropy, free space and "
+               "carving: hashes, the search index of the files and the "
+               "rules this case uses."),
+    FULL: ("Full", "Every module, including entropy, searching free space "
+           "and file carving of unallocated space. The slowest."),
     CUSTOM: ("Custom", "Your own selection."),
 }
 
@@ -299,7 +313,8 @@ def remember_profile(name):
 def default_choice(modules=None):
     """What the dialog offers before the examiner has chosen anything."""
     return {'modules': list(modules or ()), 'evidence_ids': None,
-            'index': bool(modules), 'activity': bool(modules),
+            'index': bool(modules), 'index_free': False,
+            'activity': bool(modules),
             'ntfs': bool(modules), 'fstimes': bool(modules),
             'hashsets': False,
             'persistence': bool(modules), 'thumbnails': bool(modules),
@@ -408,6 +423,41 @@ class ModuleSelector(QWidget):
         self.profile_note.setWordWrap(True)
         top.addWidget(self.profile_note, 1)
         outer.addLayout(top)
+
+        # Scope row: what the file modules read (core/scope.py).
+        from trace_app.core.scope import Scope
+        from trace_app.ui.dialogs.scope_editor import preset_items
+        self._scope = Scope()
+        #: What the Scope editor counts and browses: [{'name', 'path',
+        #: 'unlock', 'handler'}] -- set by the host (the window, the wizard).
+        self.scope_evidence = []
+        scope_row = QHBoxLayout()
+        scope_row.setSpacing(8)
+        label = QLabel("Scope")
+        label.setObjectName("moduleProfileLabel")
+        scope_row.addWidget(label)
+        self.scope_combo = QComboBox()
+        self.scope_combo.setObjectName("moduleScopeCombo")
+        for key, text in preset_items():
+            self.scope_combo.addItem(text, key)
+        self.scope_combo.currentIndexChanged.connect(self._scope_chosen)
+        scope_row.addWidget(self.scope_combo)
+        self.scope_button = QPushButton("Edit…")
+        self.scope_button.setObjectName("moduleScopeEdit")
+        self.scope_button.setToolTip("Folders in or out, file types, sizes, "
+                                     "dates and deleted files")
+        self.scope_button.clicked.connect(self.edit_scope)
+        scope_row.addWidget(self.scope_button)
+        self.scope_note = QLabel()
+        self.scope_note.setObjectName("moduleProfileNote")
+        self.scope_note.setWordWrap(True)
+        scope_row.addWidget(self.scope_note, 1)
+        outer.addLayout(scope_row)
+        # Labels of the two rows the same width, so their fields line up.
+        width = max(label.sizeHint().width(),
+                    top.itemAt(0).widget().sizeHint().width())
+        label.setMinimumWidth(width)
+        top.itemAt(0).widget().setMinimumWidth(width)
 
         # The grouped list, scrolling where the screen is short.
         body = QWidget()
@@ -600,11 +650,52 @@ class ModuleSelector(QWidget):
             self.carve_types.set_selected(
                 [t.upper() for t in choice['carve_types']])
         self.unallocated_box.setChecked(choice.get('unallocated_only', True))
+        if 'scope' in choice:
+            self.set_scope(choice['scope'])
         self._set_combo(self._matching_profile())
         self._refresh()
 
     def profile(self):
         return self.profile_combo.currentData()
+
+    # --- scope ------------------------------------------------------------------
+
+    def scope(self):
+        """The run's Scope (core/scope.py)."""
+        return self._scope
+
+    def set_scope(self, value):
+        from trace_app.core.scope import CUSTOM, PRESETS, Scope
+        self._scope = Scope.from_dict(value)
+        key = self._scope.preset if self._scope.preset in PRESETS \
+            else CUSTOM
+        self.scope_combo.blockSignals(True)
+        self.scope_combo.setCurrentIndex(max(0, self.scope_combo
+                                             .findData(key)))
+        self.scope_combo.blockSignals(False)
+        self._show_scope()
+
+    def _scope_chosen(self, _index):
+        from trace_app.core.scope import PRESETS, Scope
+        key = self.scope_combo.currentData()
+        if key in PRESETS:
+            self._scope = Scope.preset_scope(key)
+            self._show_scope()
+        else:
+            self.edit_scope()
+
+    def edit_scope(self):
+        from trace_app.ui.dialogs.scope_editor import edit_scope
+        edited = edit_scope(self._scope, self, self.scope_evidence)
+        if edited is not None:
+            self.set_scope(edited.to_dict())
+        else:
+            self.set_scope(self._scope.to_dict())   # the combo back
+
+    def _show_scope(self):
+        self.scope_note.setText(self._scope.describe(short=True))
+        self.scope_note.setToolTip(self._scope.describe())
+        self.changed.emit()
 
     def choice(self):
         """{'modules', 'index', 'activity', ..., 'carve_types',
@@ -618,6 +709,7 @@ class ModuleSelector(QWidget):
                               if MODULE_CARVE in on else [])
         out['unallocated_only'] = self.unallocated_box.isChecked()
         out['profile'] = self.profile()
+        out['scope'] = self._scope.to_dict()
         return out
 
     def any_selected(self):
@@ -750,11 +842,15 @@ class AnalysisModulesDialog(QDialog):
             self.selector.apply_profile(choice['profile'])
         else:
             self.selector.set_choice(choice)
+        if 'scope' in choice:
+            self.selector.set_scope(choice['scope'])
+        self.selector.scope_evidence = list(choice.get('scope_evidence')
+                                            or [])
         # As tall as the list where the screen allows, scrolling where not.
         screen = self.screen().availableGeometry().height() \
             if self.screen() is not None else 800
         self.selector.scroll.setMinimumHeight(
-            max(260, min(620, int(screen * 0.88) - 260)))
+            max(260, min(620, int(screen * 0.88) - 300)))
 
         # Several images: the list on the left (ticked = analysed, with
         # what each holds), the modules of the one selected on the right.
@@ -805,6 +901,7 @@ class AnalysisModulesDialog(QDialog):
         # The old attribute names, which callers and tests address.
         self.boxes = self.selector.boxes
         for name, key in (('index_box', MODULE_INDEX),
+                          ('index_free_box', MODULE_INDEX_FREE),
                           ('activity_box', MODULE_ACTIVITY),
                           ('ntfs_box', MODULE_NTFS),
                           ('fstimes_box', MODULE_FSTIMES),

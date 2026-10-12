@@ -18,7 +18,7 @@ import logging
 import os
 import sqlite3
 
-from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
+from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSize,
                             QSortFilterProxyModel, Qt, QThread, QTimer, Signal)
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout,
@@ -66,7 +66,7 @@ _TONE = {'suspicious': 'malicious', 'notable': 'suspicious'}
 class NtfsWorker(ProcessWorker):
     """Reads one image's NTFS internals in a child process."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_ntfs = Signal(int, str)
 
     kind = 'ntfs'
@@ -234,13 +234,18 @@ class NtfsPanel(QWidget):
         self._loads = {}
         self.counts = {}
 
+        # Straight under Triage's tab rows, as a third of them: no gap
+        # above, and the slim style of the row it continues.
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 4, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
 
         row = QHBoxLayout()
         self.sections = QTabBar()
         self.sections.setObjectName("activityTabs")
+        self.sections.setProperty('row', 'pages')
+        self.sections.setIconSize(QSize(14, 14))
+        self.sections.setDrawBase(False)
         self.sections.setDocumentMode(True)
         self.sections.setExpanding(False)
         for _key, label, glyph in SECTIONS:

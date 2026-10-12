@@ -30,7 +30,7 @@ _TONE = {'suspicious': 'malicious', 'notable': 'suspicious'}
 
 
 class PersistenceWorker(ProcessWorker):
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_persistence = Signal(int, str)
 
     kind = 'persistence'

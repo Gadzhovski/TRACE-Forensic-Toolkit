@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QCompleter, QDialog,
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from trace_app.core import settings
+from trace_app.infra import ui_scale
 from trace_app.ui import icons
 
 #: The pages, in order: (title, icon, introduction, sections), each
@@ -28,22 +29,26 @@ PAGES = (
      "Who you are, where cases start, how sizes read. Kept for you on this "
      "computer, in every case.",
      ((None, 'user', ('examiner', 'organisation', 'case_folder')),
-      ("Working", 'user', ('size_units', 'verify_order')),
+      ("Working", 'user', ('size_units', 'verify_order',
+                           'worker_processes')),
       ("Troubleshooting", 'user', ('debug_log',)))),
     ("Display", icons.DISPLAY,
      "What the Listing shows, and the time zone shown beside UTC.",
-     (("Listing", 'user', ('show_deleted', 'show_system')),
+     (("Interface", 'user', ('ui_scale',)),
+      ("Listing", 'user', ('show_deleted', 'show_system')),
       ("Times", 'case', ('display_zone',)))),
     ("Privacy & Network", icons.VOLUME_LOCKED,
      "Whether anything from this case may leave this computer.",
-     ((None, 'case', ('offline', 'vt_uploads')),)),
+     ((None, 'case', ('offline', 'vt_uploads')),
+      ("This computer", 'user', ('check_updates',)))),
     ("Analysis", icons.TRIAGE,
      "What the analysis modules hash, read and extract.",
      (("Hashes", 'case', ('hash_md5', 'hash_sha1')),
       ("Limits", 'case', ('max_analysis_mb', 'max_inspect_mb',
                           'high_entropy')),
       ("Archives", 'case', ('archive_depth', 'archive_member_mb')),
-      ("Search index", 'case', ('index_unallocated',)),
+      ("Search index", 'case', ('index_unallocated',
+                                'index_memory_files')),
       ("Indicators", 'case', ('indicators',)))),
     ("Carving & Exports", icons.FINDING_CARVED,
      "How files are carved, and where copies and exports are written.",
@@ -64,12 +69,14 @@ RANGES = {
     'archive_depth': (0, 32, None),
     'archive_member_mb': (1, 4096, None),
     'carve_min_kb': (0, 1024 * 1024, None),
+    'worker_processes': (0, 64, None),
 }
 
 CHOICES = {
     'size_units': settings.SIZE_UNITS,
     'carve_source': settings.CARVE_SOURCES,
     'verify_order': settings.VERIFY_ORDERS,
+    'ui_scale': ui_scale.SCALES,
 }
 
 FOLDERS = ('case_folder', 'carved_folder', 'export_folder')

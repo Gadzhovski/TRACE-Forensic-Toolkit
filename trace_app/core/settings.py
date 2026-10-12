@@ -39,6 +39,19 @@ USER = {
                      "Filled into reports' headers."),
     'case_folder': ('', "Default case folder",
                     "Where New Case and Open Case start looking."),
+    'check_updates': (True, "Allow checking for new versions",
+                      "Help ▸ About ▸ Check for Updates asks GitHub for "
+                      "the newest release -- one request, carrying nothing "
+                      "but TRACE's version, made only when clicked. Never "
+                      "while a case is offline."),
+    'ui_scale': ('100%', "Interface size",
+                 "Everything larger or smaller -- text, controls, icons -- "
+                 "on top of the scaling the system already applies for the "
+                 "screen. For a large or high-resolution screen. Takes "
+                 "effect when TRACE starts again (View ▸ Interface Size "
+                 "offers to restart). The text of one list can also be "
+                 "made larger on its own: Ctrl + mouse wheel, or Ctrl+= / "
+                 "Ctrl+- / Ctrl+0."),
     'size_units': ('binary', "Sizes",
                    "binary: 1 KB = 1,024 bytes (as Windows shows them); "
                    "decimal: 1 kB = 1,000 bytes (as drive makers and macOS "
@@ -59,6 +72,12 @@ USER = {
     'debug_log': (False, "Detailed log",
                   "Write debug detail to trace.log -- for reporting a "
                   "problem; the log grows quickly."),
+    'worker_processes': (0, "Worker processes for indexing",
+                         "How many processes pull text out of files while "
+                         "an image is indexed. 0: automatic -- every core "
+                         "but two, at most 8. Fewer leaves the computer "
+                         "freer for other work; runs of under 2,000 files "
+                         "use one."),
 }
 
 #: Indicator kinds the search index can extract (search_index).
@@ -113,18 +132,25 @@ CASE = {
     'export_folder': ('', "Export to",
                       "Where exports and saved files are offered; empty: "
                       "the case's exports/ folder."),
+    'index_memory_files': (True, "Index page, swap and hibernation files",
+                           "pagefile.sys, swapfile.sys and hiberfil.sys hold "
+                           "what was in memory: they are indexed in pieces "
+                           "as free space is, each hit pointing at its bytes "
+                           "on the image."),
     'index_unallocated': (True, "Index text in unallocated space",
                           "The text in free space -- between partitions, "
                           "and the clusters no live file holds -- is indexed "
                           "too, as items named by sector, so a search finds "
-                          "what is in no file. Off: files, slack and carves "
-                          "only (faster on a large, mostly empty disk)."),
+                          "what is in no file -- by the module Search free "
+                          "space and memory files (Recovery), a job of its "
+                          "own after the file index. Off: that module "
+                          "indexes the memory files only."),
     'indicators': (list(INDICATORS), "Indicators extracted",
                    "Which kinds indexing extracts. Phone numbers, for one, "
                    "can be noise in some cases."),
 }
 
-CARVE_SOURCES = ('unallocated', 'slack', 'image')
+CARVE_SOURCES = ('unallocated', 'slack', 'memory', 'image')
 VERIFY_ORDERS = ('alongside analysis', 'after analysis', 'before analysis')
 SIZE_UNITS = ('binary', 'decimal')
 
@@ -142,7 +168,7 @@ def _config_path():
 def read_user():
     """Every user setting, the saved value or its default."""
     values = {key: spec[0] for key, spec in USER.items()}
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(_config_path())
         for key in USER:
@@ -154,7 +180,7 @@ def read_user():
 
 
 def save_user(values):
-    parser = configparser.ConfigParser()
+    parser = configparser.ConfigParser(interpolation=None)
     try:
         parser.read(_config_path())
     except (configparser.Error, OSError):
@@ -264,6 +290,7 @@ def apply_case(case):
     search_index.ENABLED_INDICATORS = frozenset(values['indicators'])
     from trace_app.core import indexer
     indexer.INDEX_UNALLOCATED = bool(values['index_unallocated'])
+    indexer.INDEX_MEMORY_FILES = bool(values['index_memory_files'])
     return values
 
 

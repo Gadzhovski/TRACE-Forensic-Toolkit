@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushB
                                QScrollArea, QSizePolicy, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
 
+from trace_app.core import containers
 from trace_app.infra.constants import BUTTON_WIDTH, TABLE_ICON_SIZE
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
@@ -113,13 +114,19 @@ class VolumeInfoMixin:
         # thing an examiner wants to know about an image and would otherwise be
         # buried in a column of the table below, off the right edge.
         systems = self._installed_systems()
-        for index, (start_offset, installed) in enumerate(systems):
+        for index, (start_offset, installed, identity) in enumerate(systems):
             # Name the volume when a disk carries more than one system, so a
             # dual-boot image says which partition each belongs to.
             title = "Installed System"
             if len(systems) > 1:
-                title = f"Installed System {index + 1}  (sector {start_offset:,})"
+                where = (f"  (sector {start_offset:,})"
+                         if start_offset < containers.SHADOW_KEY_BASE else '')
+                title = f"Installed System {index + 1}{where}"
             add_heading(title)
+            if identity:
+                # The badge names it; the row would say it again.
+                summary_layout.addWidget(self._system_badge(identity))
+                installed.pop("Operating System", None)
             for field, text in installed.items():
                 add_row(field, text)
 
@@ -619,23 +626,53 @@ class VolumeInfoMixin:
         return FileSystemUtils.get_readable_size(total) + ' formatted'
 
     def _installed_systems(self):
-        """Every volume that carries an operating system, in partition order.
+        """Every volume that carries an operating system, in volume order,
+        as (key, fields, identity).
 
         Returned as a list rather than the first match: a dual-boot disk holds
         more than one, and reporting only the first would hide the rest --
-        exactly the volumes an examiner most wants to know about.
+        exactly the volumes an examiner most wants to know about. Every
+        volume TRACE reads, not only the partitions: LVM's logical volumes
+        and Fedora's Btrfs (its system in the 'root' subvolume) hold the
+        system as often as a partition does. `identity` (core/os_identity)
+        names it -- Windows 11 by its build, which ProductName calls 10.
         """
+        from trace_app.core import os_identity
         found = []
-        for partition in self.image_handler.get_partitions():
-            start = partition[2]
+        for key in self.image_handler.volume_offsets():
             try:
-                info = self.image_handler.get_os_info(start)
+                info = dict(self.image_handler.get_os_info(key))
             except Exception as e:
-                logger.debug("Could not read OS info at %s: %s", start, e)
+                logger.debug("Could not read OS info at %s: %s", key, e)
+                info = {}
+            identity = os_identity.identify(self.image_handler, key)
+            if identity is None and not info.get("Operating System"):
                 continue
-            if info.get("Operating System"):
-                found.append((start, info))
+            if identity:
+                info["Operating System"] = identity['name']
+                if identity.get('detail') and len(info) == 1:
+                    info["Details"] = identity['detail']
+            found.append((key, info, identity))
         return found
+
+    @staticmethod
+    def _system_badge(identity):
+        """The system's mark beside its name, at the head of its section."""
+        badge = QWidget()
+        badge.setObjectName("volumeInfoSystem")
+        row = QHBoxLayout(badge)
+        row.setContentsMargins(0, 2, 0, 4)
+        row.setSpacing(10)
+        logo = QLabel()
+        logo.setObjectName("volumeInfoSystemLogo")
+        logo.setPixmap(icons.os_logo(identity['logo']).pixmap(32, 32))
+        row.addWidget(logo, 0, Qt.AlignTop)
+        name = QLabel(identity['name'])
+        name.setObjectName("volumeInfoSystemName")
+        name.setWordWrap(True)
+        name.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row.addWidget(name, 1, Qt.AlignVCenter)
+        return badge
 
 
     @staticmethod

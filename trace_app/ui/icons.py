@@ -15,7 +15,7 @@ Two practical consequences:
 import logging
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import (QAction, QColor, QIcon, QIconEngine, QImage,
                            QPainter, QPixmap)
 from PySide6.QtSvg import QSvgRenderer
@@ -39,6 +39,11 @@ ALERT = "Icons/tabler/alert-triangle.svg"
 ERROR = "Icons/tabler/alert-circle.svg"
 INFO = "Icons/tabler/info-circle.svg"
 SUCCESS = "Icons/tabler/circle-check.svg"
+# Message dialogs: filled glyphs in a colour per kind (dialogs.message).
+DIALOG_QUESTION = "Icons/tabler/help-circle-filled.svg"
+DIALOG_INFO = "Icons/tabler/info-circle-filled.svg"
+DIALOG_WARNING = "Icons/tabler/alert-triangle-filled.svg"
+DIALOG_ERROR = "Icons/tabler/alert-circle-filled.svg"
 
 # --- Evidence --------------------------------------------------------------
 EVIDENCE_ADD = "Icons/tabler/file-plus.svg"
@@ -49,7 +54,7 @@ EVIDENCE_FOLDER = "Icons/tabler/folder-plus.svg"
 DISPLAY = "Icons/tabler/eye.svg"
 LIVE_DISK = "Icons/tabler/trace/live-disk.svg"
 ASSEMBLE = "Icons/tabler/stack-2.svg"
-IMAGE_INFO = "Icons/tabler/info-circle.svg"
+IMAGE_INFO = "Icons/tabler/disc.svg"
 
 # --- Menu commands -----------------------------------------------------------
 #: Every command in the menu bar has an icon; only the checkable entries
@@ -113,11 +118,20 @@ REPORT = "Icons/tabler/trace/report.svg"
 VOLUME_LOCKED = "Icons/tabler/lock.svg"
 VOLUME_UNLOCKED = "Icons/tabler/lock-open.svg"
 SHADOW_COPY = "Icons/tabler/clock.svg"
+#: A job waiting its turn in the job bar's list.
+JOB_WAITING = "Icons/tabler/clock.svg"
+#: Tags: the examiner's own verdicts on files.
+TAG = "Icons/tabler/tag.svg"
+#: Triage > Conversations: messages and calls as threads.
+CONVERSATIONS = "Icons/tabler/trace/activity-messages.svg"
+#: A whole case in one file (Case > Export / Open Case Archive).
+ARCHIVE = "Icons/tabler/file-zip.svg"
 #: One per core.activity category, in the tree and on the Activity tab.
 ACTIVITY_CATEGORIES = {
     None: ACTIVITY,
     'programs': "Icons/tabler/trace/activity-programs.svg",
     'files': "Icons/tabler/file-text.svg",
+    'notes': "Icons/tabler/notes.svg",
     'usb': "Icons/tabler/trace/activity-usb.svg",
     'recycle': "Icons/tabler/trash.svg",
     'logons': "Icons/tabler/trace/activity-logons.svg",
@@ -128,6 +142,7 @@ ACTIVITY_CATEGORIES = {
     'usage': "Icons/tabler/trace/activity-usage.svg",
     'system': "Icons/tabler/settings.svg",
     'communication': "Icons/tabler/trace/activity-messages.svg",
+    'locations': "Icons/tabler/map-pin.svg",
     'cloud': "Icons/tabler/trace/activity-cloud.svg",
     'antivirus': "Icons/tabler/trace/activity-antivirus.svg",
 }
@@ -181,6 +196,24 @@ VIEW_OPTIONS = "Icons/tabler/adjustments-horizontal.svg"
 COPY = "Icons/tabler/copy.svg"
 SELECT_ALL = "Icons/tabler/select-all.svg"
 EXPORT = "Icons/tabler/download.svg"
+# One icon per kind of copy, export and showing, so a menu holding
+# several reads at a glance (they all used to share copy / download).
+COPY_ROWS = "Icons/tabler/table-row.svg"
+COPY_COLUMN = "Icons/tabler/table-column.svg"
+COPY_TEXT = "Icons/tabler/clipboard-text.svg"
+COPY_PATH = "Icons/tabler/route.svg"
+COPY_HEX = "Icons/tabler/binary.svg"
+COPY_LOCATION = "Icons/tabler/map-pin.svg"
+EXPORT_FILE = "Icons/tabler/file-export.svg"
+EXPORT_CSV = "Icons/tabler/file-type-csv.svg"
+EXPORT_MANY = "Icons/tabler/files.svg"
+EXPORT_BYTES = "Icons/tabler/file-download.svg"
+SAVE_PICTURE = "Icons/tabler/photo-down.svg"
+SHOW_IN_LISTING = "Icons/tabler/list-search.svg"
+SHOW_IN_FOLDER = "Icons/tabler/folder-search.svg"
+VERSIONS = "Icons/tabler/history.svg"
+PROPERTIES = "Icons/tabler/list-details.svg"
+VERIFY_IMAGE = "Icons/tabler/shield-search.svg"
 EDIT = "Icons/tabler/pencil.svg"
 DELETE = "Icons/tabler/trash.svg"
 VIRUSTOTAL_MENU = "Icons/tabler/world-search.svg"
@@ -206,6 +239,14 @@ EXTERNAL_LINK = "Icons/tabler/external-link.svg"
 CLOSE = "Icons/tabler/x.svg"
 CARVING = "Icons/tabler/file-search.svg"
 REGISTRY = "Icons/tabler/database.svg"
+# The viewer dock's tabs.
+TAB_HEX = "Icons/tabler/binary.svg"
+TAB_TEXT = "Icons/tabler/file-text.svg"
+TAB_APPLICATION = "Icons/tabler/eye.svg"
+TAB_METADATA = "Icons/tabler/info-circle.svg"
+TAB_CASE = "Icons/tabler/briefcase.svg"
+TAB_NOTES = "Icons/tabler/pencil.svg"
+TAB_VIRUSTOTAL = "Icons/tabler/world-search.svg"
 REGISTRY_HIVE = "Icons/tabler/folder.svg"
 REGISTRY_KEY = "Icons/tabler/key.svg"
 REGISTRY_VALUE = "Icons/tabler/tag.svg"
@@ -221,6 +262,24 @@ FILE_VIDEO = "Icons/mimetypes/video-x-generic.svg"
 FILE_DOC = "Icons/mimetypes/application-vnd.ms-word.svg"
 FILE_HTML = "Icons/mimetypes/text-x-html.svg"
 WEB_BROWSER = "Icons/apps/internet-web-browser.svg"
+
+# Operating systems' marks (core/os_identity: its logo keys). Simple Icons
+# (CC0) and Tabler's filled Windows mark (MIT): Icons/ATTRIBUTION.md. Each
+# in its brand's colour; None = the theme's foreground, for marks whose
+# colour is black, near-black or pale yellow, which one theme or the other
+# would lose.
+OS_LOGOS = {
+    'windows': '#0078D4', 'macos': None, 'apple': None,
+    'android': '#3DDC84', 'linux': None, 'freebsd': '#AB2B28',
+    'openbsd': None, 'kubuntu': '#0079C1', 'xubuntu': '#0044AA',
+    'popos': '#48B9C7', 'elementary': '#64BAFF', 'zorin': '#15A6F0',
+    'linuxmint': '#86BE43', 'ubuntu': '#E95420', 'kalilinux': '#557C94',
+    'raspberrypi': '#A22846', 'debian': '#A81D33', 'fedora': '#51A2DA',
+    'centos': None, 'rockylinux': '#10B981', 'almalinux': None,
+    'redhat': '#EE0000', 'opensuse': '#73BA25', 'suse': None,
+    'manjaro': '#35BFA4', 'archlinux': '#1793D1', 'gentoo': '#54487A',
+    'alpinelinux': '#0D597F', 'nixos': '#5277C3',
+}
 
 
 _cache = {}
@@ -307,13 +366,22 @@ def action(name, text, parent=None):
     return result
 
 
+def os_logo(key):
+    """The mark of an operating system (an `OS_LOGOS` key; an unknown one
+    is drawn as Linux's), in its colour or the theme's."""
+    if key not in OS_LOGOS:
+        key = 'linux'
+    return icon(f"Icons/os/{key}.svg", tint=OS_LOGOS[key])
+
+
 def _is_monochrome(name):
     """Whether `name` is line art to be tinted to the theme's foreground.
 
     Anything that carries its own colours -- logos, the file-type icons from
     the desktop theme -- is left as authored.
     """
-    return name.startswith('Icons/tabler/') and name.lower().endswith('.svg')
+    return name.startswith(('Icons/tabler/', 'Icons/os/')) and \
+        name.lower().endswith('.svg')
 
 
 def current_theme():
@@ -564,3 +632,53 @@ def recoloured(base_path, colour, size):
 def clear_cache():
     """Drop cached icons, e.g. after a theme change alters the tint."""
     _cache.clear()
+
+
+class DotEngine(QIconEngine):
+    """A filled dot drawn as a shape at whatever size and pixel ratio is
+    asked for. Never draw a coloured dot into a small QPixmap: a 125%
+    or 150% display stretches it into the jagged, blurred dots the
+    Timeline and then the tags once had. Use dot_icon()."""
+
+    #: The dot's share of the icon's box: a little smaller than the box,
+    #: as the line icons beside it are.
+    SHARE = 0.62
+
+    def __init__(self, colour):
+        super().__init__()
+        self._colour = QColor(colour)
+
+    def clone(self):
+        return DotEngine(self._colour)
+
+    def paint(self, painter, rect, mode, state):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        colour = QColor(self._colour)
+        if mode == QIcon.Disabled:
+            colour.setAlphaF(0.4)
+        painter.setBrush(colour)
+        side = min(rect.width(), rect.height()) * self.SHARE
+        centre = QRectF(rect).center()
+        painter.drawEllipse(centre, side / 2, side / 2)
+        painter.restore()
+
+    def pixmap(self, size, mode, state):
+        return self.scaledPixmap(size, mode, state, 1.0)
+
+    def scaledPixmap(self, size, mode, state, scale):
+        pixmap = QPixmap(max(1, round(size.width() * scale)),
+                         max(1, round(size.height() * scale)))
+        pixmap.setDevicePixelRatio(scale)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        self.paint(painter, QRect(0, 0, size.width(), size.height()), mode,
+                   state)
+        painter.end()
+        return pixmap
+
+
+def dot_icon(colour):
+    """A filled dot in `colour`, sharp at any size and display scale."""
+    return QIcon(DotEngine(colour))

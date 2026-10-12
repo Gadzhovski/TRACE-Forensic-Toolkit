@@ -81,6 +81,9 @@ def default_filters():
         'hide_known_good': False,
         'timestomped_only': False,
         'focus_ref': None,                       # (evidence_id, ref)
+        # [(evidence_id, volume key)]: events on the volumes holding these
+        # operating systems (Case.systems); None = every volume.
+        'systems': None,
         'user': None,
         'folder': None,
         'fs_attributes': 'both',                 # both | SI | FN
@@ -100,7 +103,35 @@ def describe_kind(row):
 
 #: What each file-system time source is, in the Type column.
 FS_ATTRIBUTES = {'SI': '$SI', 'FN': '$FN', 'I30': '$I30 slack',
-                 'FS': 'file system', 'FS-local': 'file system, local time'}
+                 'FS': 'file system', 'FS-local': 'file system, local time',
+                 'SI (carved)': '$SI, carved', 'FN (carved)': '$FN, carved',
+                 'I30 (carved)': '$I30, carved'}
+
+#: The kinds of file-system time the File system source can be narrowed
+#: to: (key, label, fs_events sources). NTFS keeps two sets of times per
+#: file and index-slack copies; every other file system (ext, Btrfs, XFS,
+#: F2FS, APFS, FAT, exFAT, HFS+) its own one set. Only the kinds a case
+#: holds are offered (fs_kinds).
+FS_KINDS = (
+    ('SI', '$STANDARD_INFORMATION (NTFS)', ('SI', 'SI (carved)')),
+    ('FN', '$FILE_NAME (NTFS)', ('FN', 'FN (carved)')),
+    ('I30', '$I30 index slack (NTFS)', ('I30', 'I30 (carved)')),
+    ('FS', 'File system times (non-NTFS)', ('FS', 'FS-local')),
+)
+_FS_KIND_SOURCES = {key: sources for key, _label, sources in FS_KINDS}
+
+
+def fs_kinds(connection, evidence_id=None):
+    """The FS_KINDS keys the case's file-system events hold (for one
+    image, or all)."""
+    query = "SELECT DISTINCT source FROM fs_events"
+    params = []
+    if evidence_id is not None:
+        query += " WHERE evidence_id = ?"
+        params.append(evidence_id)
+    present = {row[0] for row in connection.execute(query, params)}
+    return [key for key, _label, sources in FS_KINDS
+            if present & set(sources)]
 
 
 # --- the query -------------------------------------------------------------------
@@ -117,6 +148,7 @@ def _branches(filters):
     user = filters.get('user')
     folder = filters.get('folder')
     hide_good = filters.get('hide_known_good')
+    systems = [tuple(pair) for pair in filters.get('systems') or ()]
     out = []
 
     def common(alias, time_sql, evidence_sql, ref_sql=None, path_sql=None,
@@ -139,6 +171,17 @@ def _branches(filters):
                 return None
             clauses.append(f"{evidence_sql} = ? AND {ref_sql} = ?")
             params.extend(focus)
+        if systems:
+            # A volume's events by their reference's volume (p<key>:...);
+            # what refers to no file on one -- the audit trail, a carve --
+            # belongs to no system.
+            if ref_sql is None:
+                return None
+            clauses.append('(' + ' OR '.join(
+                f"({evidence_sql} = ? AND {ref_sql} LIKE ?)"
+                for _pair in systems) + ')')
+            for evidence, key in systems:
+                params.extend([evidence, f"p{int(key)}:%"])
         if user:
             if user_sql is None:
                 return None
@@ -174,9 +217,10 @@ def _branches(filters):
         if where is not None:
             sql, params = where
             attribute = filters.get('fs_attributes') or 'both'
-            if attribute in ('SI', 'FN'):
-                sql += " AND e.source = ?"
-                params.append(attribute)
+            if attribute in _FS_KIND_SOURCES:
+                sources = _FS_KIND_SOURCES[attribute]
+                sql += f" AND e.source IN ({','.join('?' * len(sources))})"
+                params.extend(sources)
             if deleted_only:
                 sql += " AND e.deleted = 1"
             out.append((
@@ -279,7 +323,7 @@ def _branches(filters):
                 f"WHERE c.embedded_date != 'Unknown' AND {sql}", params))
 
     if 'case' in wanted and not deleted_only and not stomped_only \
-            and not focus and not user and not folder:
+            and not focus and not user and not folder and not systems:
         audit_time = "replace(substr(x.utc, 1, 19), 'T', ' ')"
         where = common('x', audit_time, 'NULL', None, None,
                        ('x.action', 'x.detail'))

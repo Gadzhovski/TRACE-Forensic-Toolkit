@@ -72,6 +72,9 @@ def detect_archive(data):
     Reads only the header, so it is cheap enough to call on every file in a
     listing.
     """
+    from trace_app.core.embedded import EmbeddedView
+    if isinstance(data, EmbeddedView):
+        return 'embedded'            # a document browsed for what it embeds
     if hasattr(data, 'read'):
         # A file object (a large mailbox read lazily from the image): its
         # header, and back to the start for whoever reads it next.
@@ -165,6 +168,9 @@ def list_members(data, kind=None, password=None):
     if kind is None:
         raise ArchiveError("Not a recognised archive format.")
 
+    if kind == 'embedded':
+        from trace_app.core import embedded
+        return embedded.list_members(data)
     if kind == 'zip':
         return _list_zip(data)
     if kind == 'tar':
@@ -280,6 +286,116 @@ def _mailbox_call(name, *args):
         raise ArchiveError(str(exc)) from exc
 
 
+def iter_members(data, kind=None, limit=None):
+    """(member, content) for every member, the archive opened once:
+    `content` is the bytes (at most `limit`), None for a folder or an
+    encrypted member, or the ArchiveError reading it raised.
+
+    For reading a whole archive, as indexing does. Asking read_member for
+    each member in turn opened the archive again every time -- a ZIP's
+    central directory parsed per member, a .tar.gz decompressed from the
+    start per member -- so an archive of n members cost n times its size:
+    Firefox's omni.ja (thousands of members) alone took minutes.
+    """
+    if limit is None:
+        limit = MAX_MEMBER_BYTES
+    kind = kind or detect_archive(data)
+    if kind is None:
+        raise ArchiveError("Not a recognised archive format.")
+    if kind == 'embedded':
+        from trace_app.core import embedded
+        yield from embedded.iter_members(data)
+        return
+    if kind == 'zip':
+        yield from _iter_zip(data, limit)
+        return
+    if kind == 'tar' or (kind in SINGLE_STREAMS and kind != 'zlib'):
+        try:
+            yield from _iter_tar(data, limit)
+            return
+        except ArchiveError:
+            if kind == 'tar':
+                raise
+        # Not a tarball: a single compressed stream, decompressed once
+        # (listing it and reading it decompressed it twice -- every .ko.xz
+        # kernel module of a Linux image).
+        if kind in SINGLE_STREAMS:
+            yield _single_stream_member(data, kind, limit)
+            return
+    if kind == 'zlib':
+        yield _single_stream_member(data, kind, limit)
+        return
+    for member in list_members(data, kind):
+        if member['is_dir'] or member['encrypted']:
+            yield member, None
+            continue
+        try:
+            yield member, read_member(data, member['name'], kind,
+                                      limit=limit)
+        except ArchiveError as exc:
+            yield member, exc
+
+
+def _iter_zip(data, limit):
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as exc:
+        raise ArchiveError(f"Damaged ZIP archive: {exc}") from exc
+    with archive:
+        for info in archive.infolist():
+            member = {'name': info.filename, 'size': info.file_size,
+                      'compressed_size': info.compress_size,
+                      'is_dir': info.is_dir(), 'modified': _zip_time(info),
+                      'encrypted': bool(info.flag_bits & 0x1),
+                      'crc': f"{info.CRC:08x}" if info.CRC else ''}
+            if member['is_dir'] or member['encrypted']:
+                yield member, None
+                continue
+            try:
+                _guard_bomb(info.compress_size, info.file_size, info.filename)
+                with archive.open(info) as handle:
+                    yield member, handle.read(limit)
+            except ArchiveError as exc:
+                yield member, exc
+            except (zipfile.BadZipFile, RuntimeError, OSError, EOFError,
+                    zlib.error, NotImplementedError, ValueError) as exc:
+                yield member, ArchiveError(f"{info.filename}: {exc}")
+
+
+def _iter_tar(data, limit):
+    """A tar, compressed or not, read once from start to end."""
+    try:
+        archive = tarfile.open(fileobj=io.BytesIO(data), mode='r:*')
+    except tarfile.TarError as exc:
+        raise ArchiveError(f"Damaged TAR archive: {exc}") from exc
+    started = False
+    with archive:
+        try:
+            for info in archive:
+                started = True
+                member = {'name': info.name, 'size': info.size,
+                          'compressed_size': info.size,
+                          'is_dir': info.isdir(),
+                          'modified': _epoch_to_text(info.mtime),
+                          'encrypted': False, 'crc': ''}
+                if not info.isfile():
+                    if info.isdir():
+                        yield member, None
+                    continue
+                try:
+                    handle = archive.extractfile(info)
+                    yield member, (handle.read(limit) if handle is not None
+                                   else None)
+                except (tarfile.TarError, OSError, EOFError, zlib.error,
+                        ValueError) as exc:
+                    yield member, ArchiveError(f"{info.name}: {exc}")
+        except (tarfile.TarError, OSError, EOFError, zlib.error) as exc:
+            if not started:
+                raise ArchiveError(f"Damaged TAR archive: {exc}") from exc
+            # Damaged part-way: what came before it stands.
+            logger.debug("TAR read stopped: %s", exc)
+
+
 def read_member(data, member_name=None, kind=None, password=None,
                 limit=None):
     """The bytes of one member, without unpacking the rest.
@@ -291,6 +407,12 @@ def read_member(data, member_name=None, kind=None, password=None,
     """
     if limit is None:
         limit = MAX_MEMBER_BYTES
+    from trace_app.core import embedded
+    if kind == 'embedded' or (member_name or '').startswith(embedded.PREFIX):
+        # A file inside a document (core/embedded): its name says so, so a
+        # chain 'report.docx!/[embedded]/x.png' is read wherever it is
+        # read, whatever else the document is.
+        return embedded.read_member(data, member_name)
     kind = kind or detect_archive(data)
     if kind is None:
         raise ArchiveError("Not a recognised archive format.")
@@ -458,6 +580,24 @@ def _list_single_stream(data, kind):
         'crc': '',
         'damaged': problem,
     }]
+
+
+def _single_stream_member(data, kind, limit):
+    """(member, content) of a single compressed stream, as list_members
+    and read_member give them, decompressed once."""
+    name = _gzip_inner_name(data) if kind == 'gzip' else ''
+    content, problem = _inflate(data, kind, limit)
+    member = {'name': name or f'(decompressed {kind} stream)',
+              'size': len(content), 'compressed_size': len(data),
+              'is_dir': False, 'modified': '', 'encrypted': False,
+              'crc': '', 'damaged': problem}
+    if problem and not content:
+        return member, ArchiveError(f"Damaged {kind} stream: {problem}")
+    try:
+        _guard_bomb(len(data), len(content), kind)
+    except ArchiveError as exc:
+        return member, exc
+    return member, content
 
 
 def _read_single_stream(data, kind, limit):

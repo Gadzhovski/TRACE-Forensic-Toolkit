@@ -46,6 +46,12 @@ SECTIONS = (
     ('bookmarks', 'Bookmarks and notes',
      "What the examiner marked, with notes and a picture of each "
      "bookmarked image."),
+    ('tags', 'Tagged files',
+     "The files the examiner tagged, under each tag, with who tagged them "
+     "and when, and their hashes where analysed."),
+    ('conversations', 'Conversations',
+     "The conversations the examiner added to the report (Triage > "
+     "Conversations), each in full."),
     ('findings', 'Findings',
      "Type mismatches, high entropy, hidden data, located photos, "
      "document authors, YARA matches and thumbnails of files gone."),
@@ -209,6 +215,11 @@ class _Builder:
                       or os.path.basename(r['path']) for r in evidence}
         self.toc = []                  # (level, id, title)
         self.pictures = 0
+        #: The systems found on each image (Case.systems, schema 20).
+        try:
+            self.systems = case.systems()
+        except Exception:
+            self.systems = {}
 
     def scope(self, rows):
         ids = {r['id'] for r in self.evidence}
@@ -345,6 +356,12 @@ class _Builder:
                 ("Acquired on", e(row.get('acquired_on'))),
                 ("File", _mono(row['path'])),
                 ("Size", e(_size(row.get('size')))),
+                # What TRACE found installed, per volume (core/os_identity)
+                ("Operating system", '<br>'.join(
+                    e(f"{s['name']}" + (f" ({s['detail']})"
+                                        if s.get('detail') else '')
+                      + (f" -- {s['volume']}" if s.get('volume') else ''))
+                    for s in self.systems.get(row['id'], []))),
                 ("Added to the case", e(row.get('added_utc'))),
                 ("MD5 (first hashed in full)", _mono(row.get('md5'))),
                 ("SHA-1 (first hashed in full)", _mono(row.get('sha1'))),
@@ -442,6 +459,60 @@ class _Builder:
                 out.append(f"<div class='note'><p class='note-meta'>"
                            f"{e(note.get('created_utc'))}</p>"
                            f"{_paragraphs(note.get('body'))}</div>")
+        return ''.join(out)
+
+    def section_conversations(self):
+        out = [self.heading(1, 'conversations',
+                            SECTION_TITLES['conversations'])]
+        chosen = self.case.report_items('conversation')
+        if not chosen:
+            out.append("<p class='none'>No conversation was added to the "
+                       "report.</p>")
+            return ''.join(out)
+        for number, item in enumerate(chosen, start=1):
+            self.check()
+            key = (item.get('detail') or {}).get('key')
+            rows = [r for r in self.scope(self.case.conversation(key))]
+            out.append(self.heading(2, f"conversation-{number}",
+                                    f"{item['title']} ({len(rows):,})"))
+            out.append(_table(
+                ['Time (UTC)', 'Direction', 'Sender', 'Text', 'Record',
+                 'Evidence'],
+                [[e(r.get('time_utc')), e({'out': 'sent', 'in': 'received'}
+                                          .get(r['direction'], '')),
+                  e(r.get('sender')), e(r.get('subject')), e(r.get('what')),
+                  e(self.evidence_name(r.get('evidence_id')))]
+                 for r in rows], css='small'))
+        return ''.join(out)
+
+    def section_tags(self):
+        out = [self.heading(1, 'tags', SECTION_TITLES['tags'])]
+        rows = self.scope(self.case.tagged())
+        if not rows:
+            out.append("<p class='none'>No file is tagged.</p>")
+            return ''.join(out)
+        hashes = {}
+        for evidence_id in {r.get('evidence_id') for r in rows}:
+            refs = [r['artifact_ref'] for r in rows
+                    if r.get('evidence_id') == evidence_id]
+            for ref, facts in self.case.analysis_map(evidence_id,
+                                                     refs).items():
+                hashes[(evidence_id, ref)] = facts.get('sha256') or ''
+        for tag in self.case.tags():
+            mine = [r for r in rows if r['tag_id'] == tag['id']]
+            if not mine:
+                continue
+            self.check()
+            out.append(self.heading(2, f"tags-{tag['id']}",
+                                    f"{tag['name']} ({len(mine):,})"))
+            out.append(_table(
+                ['File', 'Evidence', 'Path', 'SHA-256', 'Tagged', 'By'],
+                [[e(r.get('name')), e(self.evidence_name(r.get('evidence_id'))),
+                  _mono(r.get('path')),
+                  _mono(hashes.get((r.get('evidence_id'),
+                                    r['artifact_ref']), '')),
+                  e(r.get('tagged_utc')), e(r.get('examiner'))]
+                 for r in mine], css='small'))
         return ''.join(out)
 
     def _grades(self):
@@ -939,10 +1010,16 @@ class _Builder:
         from trace_app.core import settings
         out.append(self.heading(2, 'methods-settings',
                                 "Settings that shaped these results"))
-        out.append('<ul>' + ''.join(
-            f"<li>{e(line)}</li>"
-            for line in settings.statement(settings.for_case(self.case)))
-            + '</ul>')
+        # What the file modules covered (core/scope.py): a run that left
+        # folders out has to say so, or a reader takes "nothing found" for
+        # "nothing there".
+        from trace_app.core import scope as scope_module
+        covered = scope_module.setting_value(self.case)
+        lines = settings.statement(settings.for_case(self.case)) + [
+            "What the file analysis, search index, YARA and deleted-file "
+            "check covered: " + covered.describe()]
+        out.append('<ul>' + ''.join(f"<li>{e(line)}</li>" for line in lines)
+                   + '</ul>')
         out.append(self.heading(2, 'methods-tools', "Software"))
         out.append(_table(['Component', 'Version'],
                           [[e(name), _mono(version)]

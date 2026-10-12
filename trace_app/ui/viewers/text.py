@@ -276,7 +276,7 @@ class TextViewerManager:
 
 class TextViewer(QWidget):
     #: (first byte, end byte, text): bookmark these bytes of the file.
-    bookmark_requested = Signal(int, int, str)
+    bookmark_requested = Signal(object, object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -303,7 +303,6 @@ class TextViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         self.toolbar.setObjectName("compactToolbar")

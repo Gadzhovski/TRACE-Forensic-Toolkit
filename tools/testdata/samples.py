@@ -31,9 +31,27 @@ SHA-256 before it is kept:
   XML it was written from
 * logical evidence: AD1 images (pyad1, dissect.evidence) and EnCase L01
   files (ggeng2/Logical_Image_DataSet)
+* ReFS 3.2 and 1.2 volumes Windows wrote (R. Nordvik's ReFS forensic
+  containers, Mendeley Data, CC BY 4.0)
+* UDF discs written by CDBurnerXP, revisions 1.50 to 2.60 (7-Zip patch
+  #389's test archive) -- real UDF 2.50/2.60 metadata partitions
+* Cellebrite Physical Analyzer report.xml fragments (a decoded WhatsApp
+  chat, an account) from sepinf-inc/IPED's test resources (GPL-3.0 test
+  data, downloaded, never committed) -- what tests/test_ufdr.py wraps into
+  a UFDR
 * macOS Background Task Management files: hewigovens/BTMParser's
   BackgroundItems-v13.btm and puffyCid/macos-loginitems' (MIT) v4 and
   pre-Ventura backgrounditems.btm, one with PoisonApple's login item
+* Chromium profile databases: plaso's Cookies (Chrome 68 and 2011) and
+  Web Data, and the SQL dumps Chromium's own migration tests load for
+  Login Data, Favicons and Top Sites (components/test/data), pinned
+* Microsoft's documented WLAN profile samples (MicrosoftDocs/win32,
+  NativeWiFi), the schema Wlansvc/Profiles files are written in
+* Windows 11 Notepad tab state files (TabState/*.bin) Notepad wrote:
+  ogmini's Notepad-State-Library (MIT) test files, Notepad 11.2402 to
+  11.2504, with the saved text files beside them, and AbdulRhmanAlfaifi's
+  notepad_parser (MIT) samples -- whose own parser's output is
+  tests/expected/notepad_parser_key.json
 
 Plaso's own tests record expected values for many of these files; the
 activity tests check TRACE against the same values. Files land in
@@ -55,6 +73,19 @@ _PLASO = ('https://raw.githubusercontent.com/log2timeline/plaso/'
           'ac6460d7350c9160bdf69161726ee0e8d4545874/test_data/')
 _EVTX = ('https://raw.githubusercontent.com/omerbenamram/evtx/'
          '47d63022caa8336ecdd0c42d335e2bb03381b00d/samples/')
+_CHROMIUM = ('https://raw.githubusercontent.com/chromium/chromium/'
+             '0b268b1263a4a94c8659b3609fa1d9990da1dee0/components/test/'
+             'data/')
+_WIN32_DOCS = ('https://raw.githubusercontent.com/MicrosoftDocs/win32/'
+               'f18cd183e3c2691df8fe4d3c7ab81bc226d2ab85/desktop-src/'
+               'NativeWiFi/')
+_NSL = ('https://raw.githubusercontent.com/ogmini/Notepad-State-Library/'
+        'ce53f9d66de4551fa78f3cb19df90d7820f08d94/')
+_NOTEPAD_RS = ('https://raw.githubusercontent.com/AbdulRhmanAlfaifi/'
+               'notepad_parser/f14171df0910e625dc2e6ec160de93ab7c8af9bd/')
+_IPED = ('https://raw.githubusercontent.com/sepinf-inc/IPED/'
+         '75bc5cafe2094e8caaa3a5c6266df50f1ae7d9eb/iped-engine/src/test/'
+         'resources/')
 _DFVFS = ('https://raw.githubusercontent.com/log2timeline/dfvfs/'
           '917cefc9426d6ded2687d2b55164ded25b44fcb7/test_data/')
 _POI = ('https://raw.githubusercontent.com/apache/poi/'
@@ -116,6 +147,195 @@ _LOGINITEMS = ('https://raw.githubusercontent.com/puffyCid/macos-loginitems/'
 
 #: local name -> (URL, SHA-256)
 SAMPLES = {
+    # PowerShell transcripts and a Windows Firewall log (plaso's).
+    'powershell_transcript.txt': (
+        _PLASO + 'powershell_transcript.txt',
+        'c17fbbedb8288c6e928192130862df847b7866991380cecb37722386b8ec8036'),
+    'powershell_transcript_ger.txt': (
+        _PLASO + 'powershell_transcript_ger.txt',
+        '775560e9b66df9a9c6f8bfbdbf903ac85a79eb2614ce823a3c1c80abaa59a3f9'),
+    'windows_firewall.log': (
+        _PLASO + 'windows_firewall.log',
+        '186f62517ea40367d77e1c7d4a8111271939123dd5592cb576f75c9241f25600'),
+    # Microsoft's WLAN profile samples (tests/test_windows_logs.py).
+    'wlan-wpa2-personal-profile-sample.md': (
+        _WIN32_DOCS + 'wpa2-personal-profile-sample.md',
+        'df3636c4ecf58ada00ef4eb778b8ceb8ae1c76cb52ce5ef78f8d477d8d3c927e'),
+    'wlan-non-broadcast-profile-sample.md': (
+        _WIN32_DOCS + 'non-broadcast-profile-sample.md',
+        '2ed96fb2c2a01abd2158b7a6c8abe02eadbeab92ad8263e01e1638ca4cf258ae'),
+    'wlan-wpa2-enterprise-with-peap-mschapv2-profile-sample.md': (
+        _WIN32_DOCS + 'wpa2-enterprise-with-peap-mschapv2-profile-sample.md',
+        'a8039737d77169e23ff0311662dc414a5937a706486406cc411cf05955eedced'),
+    'wlan-wpa3-personal-transition-profile-sample.md': (
+        _WIN32_DOCS + 'wpa3-personal-transition-profile-sample.md',
+        '0aa9a562b42e2e70dec8b624a92418fa8c347a80d79d8557c6489d9fafb4d322'),
+    'wlan-bootstrap-profile-sample.md': (
+        _WIN32_DOCS + 'bootstrap-profile-sample.md',
+        '61052eaa87accb492e5b6b8128cb548daeb0277217d70a952f3317a58e7b6a3f'),
+    # Chromium profile databases: plaso's real Cookies and Web Data, and
+    # Chromium's own SQL fixtures (tests/test_chromium_extras.py).
+    'chrome-Cookies-68.0.3440.106': (
+        _PLASO + 'chrome/Cookies-68.0.3440.106',
+        '59d1a2c835a5aba67c8e7e31ee853382fcb1b2807ffdad3b79edc53d50acc1e9'),
+    'chrome-cookies.db': (
+        _PLASO + 'chrome/cookies.db',
+        '57c81098b475576befa9e11e30b974313ff6bba4976123297d8c4815abaa805f'),
+    'chrome-Web-Data': (
+        _PLASO + 'chrome/Web Data',
+        '7779fb8b6dab0d38fd41df3dacfd9f5ca96ec1ee5ecece6b9d276a786bc23812'),
+    'chromium-login_db_v43.sql': (
+        _CHROMIUM + 'password_manager/login_db_v43.sql',
+        'e87a53b058df2db9722c4bc742f4210b5ec807ba37edf25487bd3af5cbc3e445'),
+    'chromium-login_db_v4.sql': (
+        _CHROMIUM + 'password_manager/login_db_v4.sql',
+        'b844e1c05dd90a77cc77a72eff8d8ab1d1e8941f3215d478913096c2f658a61f'),
+    'chromium-Favicons.v9.sql': (
+        _CHROMIUM + 'history/Favicons.v9.sql',
+        'a9c11da9dffb92b138ca244acee1f0c1c95f005e14694d3566f3e42abac43606'),
+    'chromium-TopSites.v5.sql': (
+        _CHROMIUM + 'history/TopSites.v5.sql',
+        '6586038a90ad2fdb052f91c1b2edae687f8c24f2c84fa3c2bc92689635a1bcf2'),
+    # Windows 11 Notepad's TabState files (tests/test_notepad.py).
+    'notepad-x-00bc8eb6-b8bb-459b-973a-a998b734b47c.0.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/00bc8eb6-b8bb-459b-973a-a998b734b47c.0.bin',
+        'c00632272bde953b9852a39436510f216dfe2c75bd2754ca7ab1f46b49f513fe'),
+    'notepad-x-00bc8eb6-b8bb-459b-973a-a998b734b47c.1.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/00bc8eb6-b8bb-459b-973a-a998b734b47c.1.bin',
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'),
+    'notepad-x-00bc8eb6-b8bb-459b-973a-a998b734b47c.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/00bc8eb6-b8bb-459b-973a-a998b734b47c.bin',
+        '2ccb974d017fd09cd92639d223c32e1e390ad7d29cca804311c5e5f1ca823052'),
+    'notepad-x-1d971dfe-9e67-4849-a7e5-a46f4100ad0b.0.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/1d971dfe-9e67-4849-a7e5-a46f4100ad0b.0.bin',
+        '7b81b5b15914e55914632e6ef0f0a6af307067dc5b9af70731f52c86b49a9901'),
+    'notepad-x-1d971dfe-9e67-4849-a7e5-a46f4100ad0b.1.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/1d971dfe-9e67-4849-a7e5-a46f4100ad0b.1.bin',
+        '988cb53bcbacbc8cedd480ae481edbe9bb22173cb043dcc157f11ef5e340fd7f'),
+    'notepad-x-1d971dfe-9e67-4849-a7e5-a46f4100ad0b.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/1d971dfe-9e67-4849-a7e5-a46f4100ad0b.bin',
+        'fbb3a67df0fcc903d838aa0f07bfb8d53f4abef33a668ade60ee4436f277c349'),
+    'notepad-x-215c7345-13c2-440a-b6bb-df737db3f327.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/215c7345-13c2-440a-b6bb-df737db3f327.bin',
+        'f8f2c60c761d8f860df4be4a83bcbadada85642dd7835ff7f482d73f81f78904'),
+    'notepad-x-3249c0ef-a5ef-4dc6-bb00-b84a1dab317f.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/3249c0ef-a5ef-4dc6-bb00-b84a1dab317f.bin',
+        '45617843a18a754b715c6574e6b289baaa17018b9afdbe4a7a7e9a0c2a5db7da'),
+    'notepad-x-8508552a-b3e8-46d6-9203-9c75dd0b24a5.0.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/8508552a-b3e8-46d6-9203-9c75dd0b24a5.0.bin',
+        'e25276a705defc56e9adb3deaf02332c5415ec990f6c3ad90424c29b3a0dc9fa'),
+    'notepad-x-8508552a-b3e8-46d6-9203-9c75dd0b24a5.1.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/8508552a-b3e8-46d6-9203-9c75dd0b24a5.1.bin',
+        'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'),
+    'notepad-x-8508552a-b3e8-46d6-9203-9c75dd0b24a5.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/8508552a-b3e8-46d6-9203-9c75dd0b24a5.bin',
+        '15a7f3a11c41f9724a59c1c45676daced87a2ff935c2e58b87ddc971ba5336da'),
+    'notepad-x-abb3d672-e5d2-4994-9bc3-483a44805b16.bin': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/11.2504.62.0/TabState/abb3d672-e5d2-4994-9bc3-483a44805b16.bin',
+        '06020b89c7e619caa83d7cd5febc5627413ceefcb07eab7b74baf26eb419a546'),
+    'notepad-text-SavedFile-Long-UnsavedChanges.txt': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/TextFiles/SavedFile-Long-UnsavedChanges.txt',
+        'f4988df6e792e119cde08ce13c987cb32ac27033cc2c3495e74db3d67449611c'),
+    'notepad-text-SavedFile-Long.txt': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/TextFiles/SavedFile-Long.txt',
+        'f4988df6e792e119cde08ce13c987cb32ac27033cc2c3495e74db3d67449611c'),
+    'notepad-text-SavedFile-Short-UnsavedChanges.txt': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/TextFiles/SavedFile-Short-UnsavedChanges.txt',
+        '580d228c3f90e24bac25a3373d720045b008347c0c1003359278272867a975be'),
+    'notepad-text-SavedFile-Short.txt': (
+        _NSL + 'NotepadStateLibrary/xUnitTests/TestFiles/TextFiles/SavedFile-Short.txt',
+        '580d228c3f90e24bac25a3373d720045b008347c0c1003359278272867a975be'),
+    'notepad-old-EncodingANSI.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/Encoding/EncodingANSI.bin',
+        'bc9cc0bafb0c9d1d9c06537be6c8b74d76727aa27c3ef8f8464700885fe16885'),
+    'notepad-old-EncodingUTF16BE.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/Encoding/EncodingUTF16BE.bin',
+        'af23617923cfbf01d25206cc4c11f9e3faf76c877be059c6aa1395cd4c5166af'),
+    'notepad-old-EncodingUTF16LE.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/Encoding/EncodingUTF16LE.bin',
+        'c7d53908f6a031c88263c1b512c7bb348678fa8537d4dd87dad6273d7f3fc7e5'),
+    'notepad-old-EncodingUTF8.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/Encoding/EncodingUTF8.bin',
+        '714ac2c156d71abacd4b5d2cd2a894f277754d05ff2fe45e201d6bdbe218de16'),
+    'notepad-old-EncodingUTF8BOM.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/Encoding/EncodingUTF8BOM.bin',
+        'be0c14f68a8f87364f847695cdde4e525d7ddc2eb268440f4b6ae9aac8f736ec'),
+    'notepad-old-MacintoshCR.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/CarriageReturn/MacintoshCR.bin',
+        'da1bb0eb101e0cf2dbc1f56ec6435895a927aec9690966ca0dec7463108a2bab'),
+    'notepad-old-UnixLF.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/CarriageReturn/UnixLF.bin',
+        '09fa397c16df8e757f995621e6465de160f446850cc4d243094e2a325f665377'),
+    'notepad-old-WindowsCRLF.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/CarriageReturn/WindowsCRLF.bin',
+        '390927503292dbfe86f505caeda125bc321b22bde5e382ff8110f8a85aca8de2'),
+    'notepad-old-SavedFile-UnsavedChanges-NotClosed.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/SavedFile/SavedFile-UnsavedChanges-NotClosed.bin',
+        '479824fcc19fb15f9587a2276ce1cc129f5f726b0553b9fe0aa8a81cdf12f198'),
+    'notepad-old-SavedFile-Selection.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/SavedFile/SavedFile-Selection.bin',
+        '93e872e7f26cc924910846cc6ad454496e9046fc610cd8363dd08496035922b8'),
+    'notepad-old-WordWrapOn.bin': (
+        _NSL + 'NotepadStateLibrary/TestApp/TestFiles/WordWrapOn.bin',
+        '3eaa681d093719994f37e5f620407e24b4974290a4cdd6c658c7305c311eccfa'),
+    'notepad-rs-not_saved-arabic-rtl_set-bc0695dd.bin': (
+        _NOTEPAD_RS + 'samples/not_saved/arabic/rtl_set/bc0695dd-4239-47fd-9ca1-5b5d5087575a.bin',
+        '378d4fe001e2a89b85dab17a204b65bc1b95f861d4bd082ee876ec0150edff89'),
+    'notepad-rs-not_saved-english-rtl_unset-9f7c2ef9.bin': (
+        _NOTEPAD_RS + 'samples/not_saved/english/rtl_unset/9f7c2ef9-5635-4629-a936-d388ca307aac.bin',
+        '83747521bce9d1fce33de6fd0050054f59c803f32e12b7fce05d18b23112b627'),
+    'notepad-rs-saved-arabic-rtl_set-big_file-9cb51381.bin': (
+        _NOTEPAD_RS + 'samples/saved/arabic/rtl_set/big_file/9cb51381-03ff-4d89-9cb7-08ff36f69ea8.bin',
+        'c58082c7af4281a19548a3093d6c91a6e940d6465fa6e10e2a216cfcff5a2d8f'),
+    'notepad-rs-saved-arabic-rtl_set-c5bf63ad.bin': (
+        _NOTEPAD_RS + 'samples/saved/arabic/rtl_set/c5bf63ad-799d-4d39-a41a-fcc280410497.bin',
+        'c0b00bec17eefa4bbfa377da96e7e49bcfaf70a99f7d354faff276d469deda6a'),
+    'notepad-rs-saved-arabic-unsaved_mod-c5bf63ad.bin': (
+        _NOTEPAD_RS + 'samples/saved/arabic/unsaved_mod/c5bf63ad-799d-4d39-a41a-fcc280410497.bin',
+        '540298af9b0424593883e740bfcdb33c00ac88158118bb9e64293f07c6a0edc6'),
+    'notepad-rs-saved-english-rtl_unset-22bb38a5.bin': (
+        _NOTEPAD_RS + 'samples/saved/english/rtl_unset/22bb38a5-0bf4-4ff5-8aec-b821a534b3e0.bin',
+        'd84f6260dc88c4a77e7a9aef2087cf3ea828e6d03a25845cc0633ce27fe428fc'),
+    'notepad-rs-saved-english-rtl_unset-big_file-370b5af2.bin': (
+        _NOTEPAD_RS + 'samples/saved/english/rtl_unset/big_file/370b5af2-8e7c-4e6b-998b-4aaa5d21931c.bin',
+        'e8d0baddc2aa2cb02a252badb358eaf842acf9f3d72ab8498b1dcb61a7f11245'),
+    'notepad-rs-saved-english-unsaved_mod-22bb38a5.bin': (
+        _NOTEPAD_RS + 'samples/saved/english/unsaved_mod/22bb38a5-0bf4-4ff5-8aec-b821a534b3e0.bin',
+        '492cb6109c2bd985b37e94ea477aa059ccc5415bfbf369633d1a8a7be896a87c'),
+    'notepad-rs-vers-26200.6584-2adb69ab.bin': (
+        _NOTEPAD_RS + 'samples/vers/26200.6584/2adb69ab-7ba0-4f17-9e09-88951912afd9.bin',
+        '5cc6306868f3fbcfefbfbe6180ddb9a069b6b344c5f1e29feed5c877fb6f63cf'),
+    'notepad-rs-vers-26200.6584-8f842aa4.bin': (
+        _NOTEPAD_RS + 'samples/vers/26200.6584/8f842aa4-044c-4044-9944-2b5de0d53548.bin',
+        '1cf4c465d631f54bc6f7e7b67f4f1db77ca6041a26674d0698bb72ba721bfd95'),
+    'notepad-rs-vers-26200.6584-9bad4cfd.bin': (
+        _NOTEPAD_RS + 'samples/vers/26200.6584/9bad4cfd-7ba4-4b42-b219-5bb0e82464fc.bin',
+        'd06a59c220b0f9237a018ab1fa86f849c2d40a0ec6b80d0f69c87e6a3d78da30'),
+    # ReFS volumes Windows wrote: R. Nordvik's "Resilient Filesystem
+    # Forensic Containers" (Mendeley Data, doi:10.17632/9d7p6mbhpz.1,
+    # CC BY 4.0) -- ReFS 3.2 (Windows 10 1703) holding the VeraCrypt 1.23
+    # installer, and ReFS 1.2.
+    'refs-v3_2.E01': (
+        'https://data.mendeley.com/public-files/datasets/9d7p6mbhpz/files/'
+        '7b101cfc-dc0e-4ee9-9b10-f6d9ed39f8b4/file_downloaded',
+        'd9d0833b01fe8f226d2f405cee0ec3f0ca9a128e29c2e1a762b17362263ac23a'),
+    'refs-v1_2-3.E01': (
+        'https://data.mendeley.com/public-files/datasets/9d7p6mbhpz/files/'
+        'c40de8de-4dc4-4ea0-815d-7c9664e505f7/file_downloaded',
+        'c9ac080984260fb09daf8a09715cd43561b6f0565e081557d909b455b98ab28c'),
+    # UDF 1.50, 2.00, 2.01, 2.50 and 2.60 discs CDBurnerXP made (2.50 and
+    # 2.60 with a metadata partition), attached to 7-Zip's patch #389.
+    'udf_tests.7z': (
+        'https://sourceforge.net/p/sevenzip/patches/389/attachment/'
+        'udf_tests.7z',
+        '31630b5b1b39dac2255741f2afd93c656290aebd01e69b184f021b2ecfef3398'),
+    # Physical Analyzer's report.xml, as IPED's tests keep it.
+    'ufed-model-chat.xml': (
+        _IPED + 'ufed-model-chat.xml',
+        'fba1e816d92405e475db137d5eb4ba2874f2546dca4917665eea5c0a720e0097'),
+    'ufed-model-useraccount.xml': (
+        _IPED + 'ufed-model-useraccount.xml',
+        '4490b72aca737faa749e093459695177d29553e6e40f07b0edd90367b8a6a24e'),
     'AM_DELTA_PATCH_1.443.990.0.EX-7037CF86.pf': (
         _PLASO + 'winprefetch/AM_DELTA_PATCH_1.443.990.0.EX-7037CF86.pf',
         '9a5ad5a3c56ec67fb2f785e1f75366a642a2ea552694f5016cc8191cf3f49861'),
@@ -315,6 +535,11 @@ SAMPLES = {
     'luks2.raw': (
         _DFVFS + 'luks2.raw',
         '500cc79ca8e95122acccec7a3c155f2a203fc32776bba57fb166662513f51e67'),
+    # Classic HFS written by the Linux kernel (mount -t hfs) -- dfvfs's
+    # utils/generate_test_data_linux.sh says what went in.
+    'hfs.raw': (
+        _DFVFS + 'hfs.raw',
+        '88f1f131409eda86b86b31bb75f11f8bda5f87968ace2cda5c9e9ab1e4c12379'),
     'apm.dmg': (
         _DFVFS + 'apm.dmg',
         '897f487f4971e72c762e00460935e3b25176cda35620b508b490f65a7e0118ff'),

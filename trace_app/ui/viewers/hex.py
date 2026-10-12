@@ -48,6 +48,7 @@ from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.context_menus import show_menu
+from trace_app.ui.widgets.elided_label import ElidedLabel
 
 logger = logging.getLogger('TRACE.Hex')
 
@@ -143,6 +144,14 @@ class _SearchWorker(QObject):
         except Exception as exc:
             logger.warning("Hex search failed: %s", exc)
             matches = []
+        # Home to the GUI thread before the search thread ends, so the
+        # worker is freed there, by Python, once the viewer lets it go --
+        # never deleted on a thread that is shutting down while Python
+        # still holds it (intermittent crashes on macOS CI).
+        from PySide6.QtCore import QCoreApplication
+        application = QCoreApplication.instance()
+        if application is not None:
+            self.moveToThread(application.thread())
         if not self.stopped:
             self.finished.emit(matches, len(self.query_bytes),
                                self.generation)
@@ -236,7 +245,7 @@ class _SidePanel(QSplitter):
 
 class HexViewer(QWidget):
     #: (image begin, image end, description): bookmark this byte range.
-    bookmark_requested = Signal(int, int, str)
+    bookmark_requested = Signal(object, object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -251,6 +260,8 @@ class HexViewer(QWidget):
         self._last_search = None
         self._search_thread = None
         self._search_worker = None
+        #: Every search thread still running, with its worker.
+        self._searches = {}
         #: Bumped by every new or stopped search: a result from an older
         #: one is dropped when it arrives.
         self._search_generation = 0
@@ -275,6 +286,13 @@ class HexViewer(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         self.setup_toolbar()
+        # Offset, selection, image offset and size: in the controls' row,
+        # where the room after the View menu was empty, rather than a line
+        # of its own under the bytes. Shortened with "…" when narrow; the
+        # whole line is its tooltip.
+        self.status_label = ElidedLabel()
+        self.status_label.setObjectName("hexStatus")
+        self.toolbar.addWidget(self.status_label)
         # The controls, then the search in a strip of its own as wide as the
         # side panel below it: inside the controls' toolbar it was sized by
         # guesswork and, on a narrow window, moved into the overflow menu.
@@ -305,10 +323,6 @@ class HexViewer(QWidget):
         column.setSpacing(0)
         self.setup_hex_table()
         column.addWidget(self.hex_table, 1)
-        self.status_label = QLabel()
-        self.status_label.setObjectName("hexStatus")
-        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        column.addWidget(self.status_label)
         self.splitter.addWidget(left)
 
         # Right: search results and the data inspector -- side by side
@@ -396,7 +410,6 @@ class HexViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         self.toolbar.setObjectName("compactToolbar")
@@ -1379,8 +1392,11 @@ class HexViewer(QWidget):
         # Before the deleteLaters, so it is posted first and sender() is
         # still the thread when it runs.
         thread.finished.connect(self._search_done)
-        thread.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
+        # Every search stays referenced until its thread has finished: a
+        # stopped search may still be running, and dropping the last
+        # reference to its worker freed the object it was running in.
+        self._searches[thread] = worker
         self._search_thread, self._search_worker = thread, worker
         thread.start()
 
@@ -1391,25 +1407,29 @@ class HexViewer(QWidget):
 
     @Slot()
     def _search_done(self):
+        thread = self.sender()
+        self._searches.pop(thread, None)
         if self._search_thread is not None and \
-                self._search_thread is self.sender():
+                self._search_thread is thread:
             self._search_thread = self._search_worker = None
 
-    def _stop_search(self):
-        worker, thread = self._search_worker, self._search_thread
+    def _stop_search(self, wait=False):
+        """Stop the current search: its result is ignored (generation),
+        its loop told to stop. It stays in `_searches` until its thread
+        has finished; `wait` (on closing) waits for every one."""
         self._search_generation += 1
-        if worker is not None:
+        for thread, worker in list(self._searches.items()):
             worker.stopped = True
-        if thread is not None:
             try:
                 thread.quit()
-                thread.wait(2000)
+                if wait:
+                    thread.wait(5000)
             except RuntimeError:
-                pass
+                self._searches.pop(thread, None)
         self._search_thread = self._search_worker = None
 
     def closeEvent(self, event):
-        self._stop_search()
+        self._stop_search(wait=True)
         super().closeEvent(event)
 
     def _set_result_count(self, count, capped=False, searching=False):
@@ -1457,7 +1477,11 @@ class HexViewer(QWidget):
             table.blockSignals(False)
             self._result_activated()
         else:
-            message.information(self, "Search", "No matches found.")
+            # Said in the results' header, not by a dialog: a dialog
+            # stopped the examiner for an answer the empty list gives, and
+            # a modal one from a search finishing mid-test hung CI.
+            self.results_table.setHorizontalHeaderItem(
+                1, QTableWidgetItem("No matches"))
 
     def _update_find_buttons(self):
         has = bool(self.matches)

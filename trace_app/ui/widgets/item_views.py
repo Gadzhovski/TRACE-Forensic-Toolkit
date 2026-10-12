@@ -14,9 +14,10 @@ A view that wants otherwise can still set it after construction; polish
 happens once, before the view is first shown.
 """
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QHeaderView,
-                               QProxyStyle, QTableView)
+                               QProxyStyle, QTableView, QTreeView)
 
 
 def configure(view):
@@ -25,6 +26,14 @@ def configure(view):
     view.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
     if isinstance(view, QTableView):
         view.horizontalHeader().setStretchLastSection(True)
+    # Column titles alike everywhere: left, and centred in the header's
+    # height. The Listing's were AlignLeft alone -- at the top, the space
+    # under them empty -- and others were centred both ways. The hex views
+    # keep theirs centred: their columns are byte values.
+    header = view.horizontalHeader() if isinstance(view, QTableView) else \
+        view.header() if isinstance(view, QTreeView) else None
+    if header is not None and not view.objectName().startswith('hex'):
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
 
 class ItemViewStyle(QProxyStyle):
@@ -49,6 +58,9 @@ def install(app=None):
     # Ctrl+C and a Copy menu for every list, table and tree.
     from trace_app.ui.widgets import context_menus
     context_menus.install(app)
+    # Ctrl + wheel (or Ctrl+= / Ctrl+- / Ctrl+0): one view's text larger.
+    from trace_app.ui.widgets import text_zoom
+    text_zoom.install(app)
     # Asked by a property, not by app.style(): with a stylesheet set, Qt
     # answers with its stylesheet wrapper rather than the style beneath.
     if app is None or app.property('traceItemViewStyle'):

@@ -28,6 +28,18 @@ _FIREFOX_VISITS = {
 }
 _CHROME_STATES = {0: 'in progress', 1: 'complete', 2: 'cancelled',
                   3: 'interrupted', 4: 'interrupted'}
+#: Chromium's download danger types (download_danger_type.h); 0 = safe.
+_CHROME_DANGER = {1: 'dangerous file', 2: 'dangerous URL',
+                  3: 'dangerous content', 4: 'maybe dangerous content',
+                  5: 'uncommon content', 6: 'user validated',
+                  7: 'dangerous host', 8: 'potentially unwanted',
+                  9: 'allowlisted by policy', 10: 'pending scan',
+                  11: 'blocked (password protected)',
+                  12: 'blocked (too large)', 13: 'sensitive content warning',
+                  14: 'sensitive content blocked', 15: 'deep scanned safe',
+                  16: 'deep scanned, opened dangerous',
+                  17: 'prompt for scanning', 18: 'blocked (unsupported type)',
+                  19: 'dangerous account compromise'}
 
 #: Search engines: host fragment -> query parameter.
 _ENGINES = (
@@ -149,6 +161,7 @@ def _chromium(connection, names):
                     'state': _CHROME_STATES.get(facts['state'],
                                                 str(facts['state'])),
                     'opened': bool(facts.get('opened')),
+                    'danger': _CHROME_DANGER.get(facts.get('danger_type')),
                     'mime': facts.get('mime_type') or ''})
         elif 'full_path' in columns:             # before Chrome 26
             for path, url, start, received, total, state in connection.execute(

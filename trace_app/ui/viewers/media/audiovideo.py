@@ -24,8 +24,9 @@ the slider changed every application's sound on the examiner's machine.
 
 import logging
 import os
+import time
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl
+from PySide6.QtCore import QEventLoop, QSize, Qt, QTimer, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QLabel,
@@ -222,9 +223,14 @@ class AudioVideoPlayer(QWidget):
         self.media_player.errorOccurred.connect(self.handle_error)
         self.media_player.positionChanged.connect(self.update_position)
         self.media_player.durationChanged.connect(self.update_duration)
-        self.media_player.playbackStateChanged.connect(self.update_play_state)
+        # Queued: the player emits these from inside stop(), setSource()
+        # and pause(), with the FFmpeg backend's lock held, and a slot
+        # that touches the widgets there could wait for ever (CI hung in
+        # _set_enabled under stop()). They run on the next turn instead.
+        self.media_player.playbackStateChanged.connect(
+            self.update_play_state, Qt.QueuedConnection)
         self.media_player.mediaStatusChanged.connect(
-            self.handle_media_status_change)
+            self.handle_media_status_change, Qt.QueuedConnection)
         self.position_slider.sliderMoved.connect(self.set_position)
         self.volume_slider.valueChanged.connect(self.set_volume)
 
@@ -556,6 +562,17 @@ class AudioVideoPlayer(QWidget):
         try:
             if hasattr(self, 'media_player') and self.media_player:
                 self._shutting_down = True
+                # Paused, and the frames already on their way delivered,
+                # before stop() joins the backend's threads: a frame step's
+                # frame still in flight to the window when stop() waited
+                # for its thread left both waiting (CI, once in a few runs,
+                # in stop() itself). Paused, the backend decodes no more.
+                if self.media_player.playbackState() == \
+                        QMediaPlayer.PlayingState:
+                    self.media_player.pause()
+                deadline = time.monotonic() + 0.15
+                while time.monotonic() < deadline:
+                    QApplication.processEvents(QEventLoop.AllEvents, 20)
                 self.media_player.stop()
                 QApplication.processEvents()
                 if hasattr(self, 'audio_output') and self.audio_output:

@@ -257,7 +257,9 @@ def open_shadow_copies(window):
 ENCRYPTION_NAMES = {'corestorage': 'Core Storage (not encrypted)',
                     'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
                     'luks': 'LUKS', 'apfs': 'APFS encryption',
-                    'ios_backup': 'iOS backup encryption'}
+                    'ios_backup': 'iOS backup encryption',
+                    'android_backup': 'Android backup encryption',
+                    'veracrypt': 'VeraCrypt / TrueCrypt'}
 
 #: Logical volumes and APFS volumes are keyed like shadow copies, each in a
 #: range of its own above any real sector offset.
@@ -315,6 +317,23 @@ def split_ldm_key(key):
     return _split(key, _LDM_BASE, 2 ** 53)
 
 
+#: A ZFS pool's datasets and snapshots (core/zfs.py), above the dynamic
+#: disks' volumes: a pool has many more datasets than a container volumes.
+_ZFS_BASE = 2 ** 53
+DATASETS_PER_POOL = 1024
+
+
+def zfs_key(start_sector, index):
+    return _ZFS_BASE + start_sector * DATASETS_PER_POOL + index
+
+
+def split_zfs_key(key):
+    """(pool partition start, dataset index) or None."""
+    if not isinstance(key, int) or not _ZFS_BASE <= key < 2 ** 63:
+        return None
+    return divmod(key - _ZFS_BASE, DATASETS_PER_POOL)
+
+
 def split_layer_key(key):
     """(partition start, layer index) or None."""
     if not isinstance(key, int) or not _LAYER_BASE <= key < 2 ** 52:
@@ -324,7 +343,23 @@ def split_layer_key(key):
 
 def volume_kind(window):
     """What a partition holds that The Sleuth Kit cannot open by itself:
-    'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', or None."""
+    'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', 'android_super', 'ubi',
+    'zfs' or None."""
+    from trace_app.core.android_super import RESERVED, is_super
+    from trace_app.core.ubi import HEADER, is_ubi
+    try:
+        window.seek(0)
+        head = window.read(RESERVED + 4)
+        if is_super(head):
+            return 'android_super'
+        if is_ubi(head[:HEADER]):
+            return 'ubi'
+        from trace_app.core.zfs import looks_like_label
+        window.seek(0)
+        if looks_like_label(window.read(256 * 1024)):
+            return 'zfs'
+    except Exception:
+        pass
     checks = (('bitlocker', 'pybde', 'check_volume_signature_file_object'),
               ('fvde', 'pyfvde', 'check_volume_signature_file_object'),
               ('luks', 'pyluksde', 'check_volume_signature_file_object'),
@@ -391,6 +426,24 @@ def unlock_fvde(window, password=None, recovery_password=None):
         _close_quietly(volume)
         raise ContainerError("That key does not unlock this volume.")
     return logical, [volume, group]
+
+
+def unlock_veracrypt(window, password=None, pim=None, hidden=None):
+    """A VeraCrypt or TrueCrypt volume, unlocked (core/veracrypt.py): the
+    decrypting volume, the hidden one when `password` is its password."""
+    from trace_app.core import veracrypt
+
+    def read(offset, length):
+        window.seek(offset)
+        return window.read(length)
+    try:
+        return veracrypt.unlock(read, window.get_size(), password,
+                                pim=pim or None, hidden=hidden)
+    except veracrypt.VeraCryptError as exc:
+        raise ContainerError(str(exc)) from exc
+    except ImportError as exc:
+        raise ContainerError(f"VeraCrypt needs the cryptography library: "
+                             f"{exc}") from exc
 
 
 def unlock_luks(window, password=None, key=None):
