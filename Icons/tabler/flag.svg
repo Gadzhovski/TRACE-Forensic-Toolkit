@@ -1,9 +1,3 @@
-<!--
-tags: [banner, pin, report, map, warning, alert]
-category: Map
-version: "1.0"
-unicode: "ebc2"
--->
 <svg
   xmlns="http://www.w3.org/2000/svg"
   width="24"
@@ -14,7 +8,9 @@ unicode: "ebc2"
   stroke-width="2"
   stroke-linecap="round"
   stroke-linejoin="round"
+  class="icon icon-tabler icons-tabler-outline icon-tabler-flag"
 >
-  <path d="M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9z" />
+  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+  <path d="M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9" />
   <path d="M5 21v-7" />
 </svg>

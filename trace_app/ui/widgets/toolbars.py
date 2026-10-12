@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QComboBox, QLabel, QLineEdit, QPushButton, QSizeP
                                QToolButton, QWidget)
 
 from trace_app.infra.constants import (CONTROL_HEIGHT, GROUP_SPACING, TOOLBAR_HEIGHT,
+                                       TOOLBAR_SIDE_MARGIN,
                                        TOOLBAR_ICON_SIZE)
 
 #: Room an icon-only dropdown button adds for its chevron (the themes'
@@ -42,6 +43,9 @@ def prepare_toolbar(toolbar):
     """
     toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
     toolbar.setFixedHeight(TOOLBAR_HEIGHT)
+    # The sides' extra inset: the stylesheet's padding is one value for
+    # all four sides (constants.TOOLBAR_SIDE_MARGIN).
+    toolbar.setContentsMargins(TOOLBAR_SIDE_MARGIN, 0, TOOLBAR_SIDE_MARGIN, 0)
     toolbar.setMovable(False)
     toolbar.setFloatable(False)
 

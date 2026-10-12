@@ -1,4 +1,3 @@
-<!-- TRACE: indicators found in the evidence (emails, URLs, numbers). Tabler's focus-2 geometry. -->
 <svg
   xmlns="http://www.w3.org/2000/svg"
   width="24"
@@ -9,11 +8,12 @@
   stroke-width="2"
   stroke-linecap="round"
   stroke-linejoin="round"
+  class="icon icon-tabler icons-tabler-outline icon-tabler-target-arrow"
 >
-  <path d="M11.5 12a.5 .5 0 1 0 1 0a.5 .5 0 1 0 -1 0" fill="currentColor" />
-  <path d="M5 12a7 7 0 1 0 14 0a7 7 0 1 0 -14 0" />
-  <path d="M12 3l0 2" />
-  <path d="M3 12l2 0" />
-  <path d="M12 19l0 2" />
-  <path d="M19 12l2 0" />
+  <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+  <path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0" />
+  <path d="M12 7a5 5 0 1 0 5 5" />
+  <path d="M13 3.055a9 9 0 1 0 7.941 7.945" />
+  <path d="M15 6v3h3l3 -3h-3v-3l-3 3" />
+  <path d="M15 9l-3 3" />
 </svg>

@@ -164,18 +164,19 @@ PROGRESS_MIN_DURATION = 1500
 #: Height of a control that sits in a toolbar (buttons, combos, line edits).
 CONTROL_HEIGHT = 24
 
-#: Vertical breathing room above and below a toolbar's controls, set as
-#: QToolBar padding in the stylesheets. Qt adds its own item margin on top of
-#: this, so the effective offset is larger -- see TOOLBAR_HEIGHT.
-TOOLBAR_PADDING_Y = 5
+#: Room above and below a toolbar's controls: the QToolBar padding in the
+#: stylesheets. The style sheet hands Qt ONE frame width for all four sides
+#: (it takes padding-left), so a "5px 8px" padding put 8px above the
+#: controls -- 44px toolbars, a band of empty space under every tab row.
+TOOLBAR_PADDING_Y = 3
 
-#: Left and right inset for a toolbar's contents.
+#: Left and right inset for a toolbar's contents: the padding, plus
+#: TOOLBAR_SIDE_MARGIN of contents margin set by `prepare_toolbar`.
 TOOLBAR_PADDING_X = 8
+TOOLBAR_SIDE_MARGIN = TOOLBAR_PADDING_X - TOOLBAR_PADDING_Y
 
-#: Qt's own inset above a toolbar item, on top of the QSS padding. Measured
-#: rather than derived: QToolBar positions items with PM_ToolBarItemMargin and
-#: PM_ToolBarFrameWidth, which the stylesheet does not override.
-TOOLBAR_ITEM_INSET = 8
+#: The inset above a toolbar item: the stylesheet's frame (= its padding).
+TOOLBAR_ITEM_INSET = TOOLBAR_PADDING_Y
 
 #: Height of a toolbar. The tallest control is a square icon button
 #: (CONTROL_HEIGHT + 4); it sits TOOLBAR_ITEM_INSET from the top, so the bar

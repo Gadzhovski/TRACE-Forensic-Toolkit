@@ -136,6 +136,14 @@ QDockWidget::close-button:pressed, QDockWidget::float-button:pressed {
 }
 
 /* List and Table Widget Styles */
+/* Every results table framed alike: Qt's QTableView (Activity,
+   NTFS, Timeline...) and Triage's trees had no frame where the
+   QTableWidgets beside them had one. */
+QTableView#activityTable, QTreeWidget#triageTable {
+    border: 1px solid #5A5A5A;
+    border-radius: 4px;
+}
+
 QListWidget, QTableWidget {
     border: 1px solid #5A5A5A;
     border-radius: 4px;
@@ -222,7 +230,7 @@ QTabBar::tab {
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
     min-width: 8ex;
-    padding: 2px;
+    padding: 2px 10px;
     color: #E0E0E0;
 }
 QTabBar::tab:selected, QTabBar::tab:hover {
@@ -234,6 +242,16 @@ QTabBar::tab:selected {
 }
 QTabBar::tab:!selected {
     margin-top: 2px; /* Unselected tabs are slightly raised */
+}
+
+/* Grouped tabs' lower row (ui/widgets/section_nav): slimmer than the
+   groups above, so the two rows read as heading and contents. */
+QTabBar[row="pages"]::tab {
+    padding: 1px 10px;
+    font-size: 12px;
+}
+QTabBar[row="pages"]::tab:!selected {
+    margin-top: 1px;
 }
 
 
@@ -284,10 +302,11 @@ QTabBar::tear {
 QToolBar {
     background-color: #2B2B2B;
     border-bottom: 1px solid #3C3C3C;
-    /* Symmetric vertical padding so controls sit centred rather than
-       pushed against the top edge. TOOLBAR_HEIGHT in constants.py is
-       derived from these numbers -- change one and change the other. */
-    padding: 5px 8px;
+    /* One value for every side: Qt takes padding-left as the frame on all
+       four, so "5px 8px" put 8px above the controls. The sides get the
+       rest of their inset from prepare_toolbar (TOOLBAR_SIDE_MARGIN);
+       TOOLBAR_HEIGHT in constants.py follows from this number. */
+    padding: 3px;
     spacing: 6px;
 }
 QToolBar::item:hover {
@@ -357,7 +376,7 @@ QGroupBox {
 QHeaderView::section {
     background-color: #3C3C3C;
     color: #E0E0E0;
-    padding: 5px;
+    padding: 3px 6px;
     border-style: none;
     border-bottom: 1px solid #5A5A5A;
     border-right: 1px solid #5A5A5A;
@@ -434,7 +453,7 @@ QLabel {
 #listingTable QHeaderView::section {
     background-color: #4C4C4C;  /* Dark header background */
     color: #E0E0E0;  /* Light text color */
-    padding: 5px;
+    padding: 3px 6px;
     border-style: none;
     border-bottom: 1px solid #3C3C3C;
     border-right: 1px solid #3C3C3C;
@@ -443,7 +462,6 @@ QLabel {
 #listingTable QHeaderView::section:horizontal {
     border-top: 1px solid #3C3C3C;
     margin-top: 0px;
-    padding-top: 2px;
 }
 
 #listingTable QHeaderView::section:vertical {
@@ -514,7 +532,7 @@ QTableView#activityTable::item:selected {
 QHeaderView::section {
     background-color: #4C4C4C;  /* Dark header background */
     color: #E0E0E0;  /* Light text color */
-    padding: 5px;
+    padding: 3px 6px;
     border-style: none;
     border-bottom: 1px solid #3C3C3C;
     border-right: 1px solid #3C3C3C;
@@ -760,19 +778,6 @@ QChartView#volumeInfoChartView {
    a light background (#f0f0f0) with dark text (#333) in Python, so it was
    unreadable here -- this is the rule that fixes it. */
 
-/* Panel titles: File System Browser / File Carving / Registry Browser.
-   Previously three copies of the same inline rule using a teal (#37c6d0)
-   that clashed with the blue used for selection. Headings are plain
-   foreground text now -- blue is reserved for selection and progress,
-   where it means something. */
-QLabel#panelTitle {
-    font-size: 13px;
-    font-weight: 600;
-    color: #E8E8E8;
-    margin-left: 6px;
-    padding: 2px 0;
-}
-
 QTableWidget#hexTable {
     gridline-color: transparent;
     border: none;   /* see QTextEdit#textContentView */
@@ -803,14 +808,8 @@ QTableWidget#hexInspector::item {
    byte lies on the image. */
 QLabel#hexStatus {
     color: #9aa4b0;
-    font-size: 11px;
-    padding: 3px 6px;
-    border-top: 1px solid #5A5A5A;
-}
-
-QHeaderView#listingTableHeader::section {
-    margin-top: 0px;
-    padding-top: 2px;
+    font-size: 12px;
+    padding: 0 8px;
 }
 
 QTextEdit#hashResultBox {
@@ -818,6 +817,21 @@ QTextEdit#hashResultBox {
     border: 1px solid #3C3C3C;
     color: #E0E0E0;
     font-family: 'Courier New', Courier, monospace;
+}
+
+/* Every progress bar is the same blue. Unstyled ones (the image
+   loading, export and archive dialogs) used to take the system's
+   accent colour -- purple on one machine, blue beside it. */
+QProgressBar {
+    border: 1px solid #3C3C3C;
+    border-radius: 4px;
+    text-align: center;
+    background-color: #262626;
+    color: #E0E0E0;
+}
+QProgressBar::chunk {
+    background-color: #3B7DD8;
+    border-radius: 4px;
 }
 
 QProgressBar#verifyProgress {
@@ -829,11 +843,7 @@ QProgressBar#verifyProgress {
 }
 
 QProgressBar#verifyProgress::chunk {
-    /* Green because the bar reports a hash verification completing, and the
-       theme's amber [state="warning"] already establishes that colour carries
-       meaning in this app. The previous #2F81F7 was a blue used nowhere else
-       and said nothing about the outcome. */
-    background-color: #3FB950;
+    background-color: #3B7DD8;
     border-radius: 4px;
 }
 
@@ -888,10 +898,6 @@ QTableWidget#propertyTable::item[state="warning"] {
 }
 
 
-
-QLabel#panelIcon {
-    padding: 0 4px 0 8px;
-}
 
 /* ==================== VirusTotal ==================== */
 /* The verdict is a tinted badge rather than coloured text alone: it is the
@@ -1120,7 +1126,7 @@ QLabel#aboutMetaQuiet {
 
 QLineEdit#universalSearchBar {
     font-size: 13px;
-    padding: 3px 8px;
+    padding: 0 6px;
 }
 
 QLabel#searchStatus {
@@ -1435,6 +1441,17 @@ QTreeWidget#evidenceTree {
 
 /* Section heading inside the image-information card ("Acquisition"), and the
    scroll area that card now sits in. */
+/* Image Information: an installed system's mark and name at the
+   head of its section (core/os_identity). */
+QWidget#volumeInfoSystem, QWidget#volumeInfoSystem QLabel {
+    background: transparent;
+}
+QLabel#volumeInfoSystemName {
+    font-size: 15px;
+    font-weight: 600;
+    color: #E8E8E8;
+}
+
 QLabel#volumeInfoSectionHeading {
     font-size: 13px;
     font-weight: 600;
@@ -1486,6 +1503,13 @@ QLabel#statusContext {
 
 /* --- Background jobs, in the status bar ------------------------------- */
 
+/* "about 14 min left" beside the job's Cancel. */
+QLabel#jobBarEta {
+    color: #9aa4b0;
+    font-size: 11px;
+    padding-left: 2px;
+}
+
 QLabel#jobBarLabel {
     color: #B0B0B0;
     padding-right: 4px;
@@ -1501,8 +1525,6 @@ QProgressBar#jobBarProgress {
 }
 
 QProgressBar#jobBarProgress::chunk {
-    /* Blue, not the verification green: this bar reports work in progress,
-       and green here would read as an outcome that has not happened yet. */
     background-color: #3B7DD8;
     border-radius: 3px;
 }
@@ -1567,9 +1589,13 @@ QLabel#analysisModulesFooter {
 
 /* --- Triage panel ----------------------------------------------------- */
 
+/* Every Triage page's summary line: off the dock's edge, as Carved
+   files' is. */
 QLabel#triageStatus,
-QLabel#ntfsStatus {
+QLabel#ntfsStatus,
+QLabel#indicatorStatus {
     color: #B0B0B0;
+    padding: 2px 6px;
 }
 
 QTableWidget#triageTable {

@@ -23,12 +23,12 @@ section below) and the files in `Icons/tabler/themed/`, which are upstream
 glyphs with their `currentColor` stroke replaced by a fixed per-theme colour,
 because Qt's SVG renderer does not resolve `currentColor` in a stylesheet.
 
-`Icons/tabler/trace/` holds glyphs drawn for TRACE where the set has no fitting
-icon -- the Findings groups (type mismatch, high entropy, duplicates) and the
-Search and Triage panel logos (`search-content.svg`, `triage.svg`). They
-follow Tabler's conventions (24×24 grid, 2px round stroke, `currentColor`) so
-they are tinted with the rest, and `duplicates.svg` reuses Tabler's `files`
-geometry. They are TRACE's own work, not upstream files.
+`Icons/tabler/trace/` names upstream glyphs by what they mean in TRACE
+(`triage.svg` is Tabler's `first-aid-kit`, `sigma.svg` its `sum`,
+`type-mismatch.svg` its `file-unknown`...). Each is an unmodified upstream
+file from the same tag: the hand-drawn glyphs that used to live here were
+replaced in October 2026, when every file in `Icons/tabler/` was compared with the
+upstream drawings. The `*-filled.svg` dialog glyphs are Tabler's filled set.
 
 The directory holds more icons than the interface currently uses. They are kept
 so that adding a control does not mean going back to the upstream repository
@@ -69,6 +69,21 @@ application's About dialog and to the README.
 ## Logos — `Icons/logo.png`, `Icons/logo_prev_ui.png`
 
 TRACE's own branding.
+
+## Operating system marks — `Icons/os/`
+
+Shown beside a volume that holds an operating system (the tree, Image
+Information; `core/os_identity.py`).
+
+- `windows.svg`: Tabler Icons' filled `brand-windows` (v3.46.0, MIT, as
+  above), unmodified -- Simple Icons no longer carries Microsoft's marks.
+- Every other file: Simple Icons v15.0.0 (<https://simpleicons.org>),
+  unmodified, **CC0 1.0** (public domain). Colours are each brand's own hex
+  from Simple Icons' data, set in `trace_app/ui/icons.py` (`OS_LOGOS`).
+- The marks are trademarks of their owners (Microsoft, Apple, Google, the
+  Linux Foundation and the distributions). They are used only to name the
+  system found on evidence -- nominative use -- and imply no endorsement;
+  see Simple Icons' DISCLAIMER.md.
 
 ## VirusTotal — `Icons/VirusTotal_logo.svg`, `Icons/tabler/virustotal-wordmark.svg`
 
