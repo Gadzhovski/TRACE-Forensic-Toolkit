@@ -26,6 +26,7 @@ import logging
 import math
 import multiprocessing
 import operator
+import threading
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from concurrent.futures.process import BrokenProcessPool
@@ -216,6 +217,32 @@ def magic_reader():
         return None
 
 
+_LOCALE_LOCK = threading.Lock()
+
+
+def _in_c_locale(call, data):
+    """`call(data)` with the C library's locale at "C", restored after.
+
+    libmagic's text tests are regular expressions, and macOS's regex
+    library refuses some bytes under a UTF-8 locale ("illegal byte
+    sequence"): the type comes back as an error. Qt sets the locale from
+    the environment when it starts, so in the window's process (and a test
+    process that made a QApplication) a text file failed to type while a
+    job's fresh process named it -- the same file typed two ways (macOS
+    CI). Only a failed answer is asked again, so nothing else changes."""
+    import locale
+    with _LOCALE_LOCK:
+        saved = {category: locale.setlocale(category)
+                 for category in (locale.LC_CTYPE, locale.LC_COLLATE)}
+        try:
+            for category in saved:
+                locale.setlocale(category, 'C')
+            return call(data)
+        finally:
+            for category, value in saved.items():
+                locale.setlocale(category, value)
+
+
 #: A ZIP's first local file header, or the end record of an empty one.
 _ZIP_STARTS = (b'PK\x03\x04', b'PK\x05\x06', b'PK\x07\x08')
 
@@ -234,7 +261,12 @@ class _ZipAwareMagic:
         self._reader = reader
 
     def from_buffer(self, data):
-        mime = self._reader.from_buffer(data)
+        try:
+            mime = self._reader.from_buffer(data)
+        except Exception:
+            mime = None
+        if not mime:
+            mime = _in_c_locale(self._reader.from_buffer, data)
         if mime in ('application/octet-stream', '') and \
                 bytes(data[:4]) in _ZIP_STARTS:
             return 'application/zip'

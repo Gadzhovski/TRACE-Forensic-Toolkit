@@ -2,6 +2,8 @@
 exactly the rows one process writes, in the same order -- whichever worker
 finished first."""
 
+import sys
+
 import pytest
 
 from tests.conftest import image_path
@@ -110,5 +112,33 @@ def test_small_runs_and_logical_evidence_stay_in_one_process():
     assert analysis._pool_size(1, many, Handler('raw'), 'x.dd') == 1
     assert analysis._pool_size(4, many, Handler('logical'), 'x') == 1
     assert analysis._pool_size(4, many, Handler('raw'), None) == 1
-    assert analysis._pool_size(4, many, Handler('raw'),
-                               r'\\.\PhysicalDrive0') == 1
+    disk = r'\\.\PhysicalDrive0' if sys.platform == 'win32' else '/dev/sda'
+    assert analysis._pool_size(4, many, Handler('raw'), disk) == 1
+
+
+def test_a_text_file_types_alike_under_a_utf8_locale(monkeypatch):
+    """Qt sets every locale category from the environment when it starts;
+    on macOS libmagic's regex text tests then failed on this file, which a
+    job's fresh process typed as text/plain (macOS CI). Typed under the
+    environment's UTF-8 locale it must still be text."""
+    import locale
+    from trace_app.core.analysis import magic_reader
+    from trace_app.core.image_handler import ImageHandler
+    handler = ImageHandler(image_path('8-jpeg-search.dd'))
+    assert handler.load_image()
+    try:
+        entry = handler.get_fs_info(0).open('/invalid/file3.jpg')
+        head = entry.read_random(0, min(4096, entry.info.meta.size))
+    finally:
+        handler.close_resources()
+    saved = locale.setlocale(locale.LC_ALL)
+    try:
+        for name in ('en_US.UTF-8', 'C.UTF-8', ''):
+            try:
+                locale.setlocale(locale.LC_ALL, name)
+                break
+            except locale.Error:
+                continue
+        assert magic_reader().from_buffer(head) == 'text/plain'
+    finally:
+        locale.setlocale(locale.LC_ALL, saved)
