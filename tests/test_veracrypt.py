@@ -5,8 +5,9 @@ Two kinds of evidence that the reader is right:
 * volumes made by VeraCrypt 1.26.29 itself (tools/testdata/build/
   make_veracrypt.py: Linux CI builds them, these tests skip elsewhere), each
   holding a FAT image written through VeraCrypt's own device -- decrypted
-  bytes and every file must equal its answer key; Serpent must be refused
-  as unreadable, not as a wrong password;
+  bytes and every file must equal its answer key -- for AES and for every
+  other encryption VeraCrypt offers (Serpent, Twofish, Camellia,
+  Kuznyechik and the ten cascades);
 * volumes written here from the format's rules (every hash, PIM and
   system iteration count, TrueCrypt's magic, hidden volumes, backup
   headers): what VeraCrypt can no longer make (TrueCrypt mode went in
@@ -140,7 +141,7 @@ def test_a_wrong_password_never_opens_and_says_what_else_it_may_be(
         few_iterations):
     image, _plain, _ = _volume('secret', iterations=500)
     with pytest.raises(veracrypt.VeraCryptError,
-                       match='Serpent.*Whirlpool.*keyfiles'):
+                       match='Whirlpool.*keyfiles'):
         veracrypt.unlock(_reader(image), len(image), 'Secret')
     with pytest.raises(veracrypt.VeraCryptError, match='whole number'):
         veracrypt.unlock(_reader(image), len(image), 'secret', pim='x')
@@ -175,9 +176,26 @@ def _key(name):
 
 BUILT_AES = ['vc-sha512.hc', 'vc-sha256-pim.hc', 'vc-blake2s.hc',
              'vc-hidden.hc', 'vc-partition.raw']
+#: One volume per other encryption, VeraCrypt's own (2 MiB each).
+BUILT_OTHERS = [f'vc-{name}.hc' for name in (
+    'serpent',
+    'twofish',
+    'camellia',
+    'kuznyechik',
+    'aes-twofish',
+    'aes-twofish-serpent',
+    'serpent-aes',
+    'serpent-twofish-aes',
+    'twofish-serpent',
+    'camellia-kuznyechik',
+    'camellia-serpent',
+    'kuznyechik-aes',
+    'kuznyechik-serpent-camellia',
+    'kuznyechik-twofish',
+    )]
 
 
-@pytest.mark.parametrize('name', BUILT_AES)
+@pytest.mark.parametrize('name', BUILT_AES + BUILT_OTHERS)
 def test_veracrypts_own_volumes_read_file_for_file(name):
     from trace_app.core.image_handler import ImageHandler
     entry = _key(name)
@@ -219,18 +237,38 @@ def test_the_outer_password_opens_the_outer_volume():
         handler.close_resources()
 
 
-def test_a_serpent_volume_is_refused_as_unreadable_not_wrong():
-    from trace_app.core import containers
-    from trace_app.core.image_handler import ImageHandler
-    entry = _key('vc-serpent.hc')
-    handler = ImageHandler(image_path('vc-serpent.hc'))
-    try:
-        with pytest.raises(containers.ContainerError,
-                           match='cipher other than AES'):
-            handler.unlock_volume(0, 'veracrypt',
-                                  password=entry['password'])
-    finally:
-        handler.close_resources()
+@pytest.mark.parametrize('name', BUILT_OTHERS)
+def test_the_encryption_found_is_the_one_veracrypt_used(name):
+    entry = _key(name)
+    path = image_path(name)
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    volume = veracrypt.unlock(lambda o, n: data[o:o + n], len(data),
+                              entry['password'])
+    assert volume.fields['encryption'] == entry['encryption']
+
+
+@pytest.mark.parametrize('encryption', [e for e, _c in
+                                        veracrypt.ENCRYPTIONS])
+def test_every_encryption_written_here_reads_back(encryption):
+    """make_header / encrypt_area for each encryption, unlocked again: the
+    writing and reading sides agree on the key layout and order."""
+    keys, salt = os.urandom(256), os.urandom(64)
+    plain = os.urandom(8192)
+    start = 131072
+    image = bytearray(os.urandom(start + len(plain) + 131072))
+    image[0:512] = veracrypt.make_header(b'pw', salt, keys, start,
+                                         len(plain), iterations=1,
+                                         encryption=encryption)
+    image[start:start + len(plain)] = veracrypt.encrypt_area(
+        keys, start, plain, encryption)
+    plan = [('test', 'sha512', 1)]
+    fields = veracrypt._try_header(bytes(image[:512]), b'pw', plan)
+    assert fields['encryption'] == encryption
+    volume = veracrypt.VeraCryptVolume(lambda o, n: bytes(image[o:o + n]),
+                                       fields, 'standard')
+    assert volume.read_buffer_at_offset(len(plain), 0) == plain
+    assert volume.read_buffer_at_offset(700, 1000) == plain[1000:1700]
 
 
 def test_a_job_unlocks_with_the_keys_it_is_handed():
