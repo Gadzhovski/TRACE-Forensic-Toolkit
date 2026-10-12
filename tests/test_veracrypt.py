@@ -20,7 +20,7 @@ import os
 
 import pytest
 
-from tests.conftest import image_path
+from tests.conftest import close_window, image_path
 from trace_app.core import veracrypt
 
 KEY = 'vc-key.json'
@@ -196,14 +196,17 @@ BUILT_OTHERS = [f'vc-{name}.hc' for name in (
 
 
 @pytest.mark.parametrize('name', BUILT_AES + BUILT_OTHERS)
-def test_veracrypts_own_volumes_read_file_for_file(name):
+def test_veracrypts_own_volumes_read_file_for_file(name, caplog):
+    import logging
     from trace_app.core.image_handler import ImageHandler
+    caplog.set_level(logging.INFO, logger='TRACE.ImageHandler')
     entry = _key(name)
     handler = ImageHandler(image_path(name))
     try:
         assert handler.load_image()
         start = entry.get('start_sector', 0)
-        assert handler.may_be_veracrypt(start)
+        # Seen once on CI and never again: the log says which check.
+        assert handler.may_be_veracrypt(start), caplog.text
         assert handler.get_fs_info(start) is None
         handler.unlock_volume(start, 'veracrypt', password=entry['password'],
                               pim=entry['pim'])
@@ -322,4 +325,4 @@ def test_the_tree_unlocks_a_container_through_the_dialog(qapp,
         keys = window._unlocks_for(path)
         assert keys[0]['_kind'] == 'veracrypt' and keys[0]['pim'] == 7
     finally:
-        window.cleanup_resources()
+        close_window(window)

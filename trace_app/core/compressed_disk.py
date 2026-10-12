@@ -101,12 +101,16 @@ class CompressedDisk:
         self.size = 0
         self.why_sequential = ''
         try:
+            # A few magic bytes are all that named the format: random data
+            # (an encrypted volume) holds them by chance. Its header and
+            # first MiB must decode before the whole file is scanned.
+            self._quick_check()
             getattr(self, '_scan_' + self.kind)()
         except CompressedError:
             self._handle.close()
             raise
         except (lzma.LZMAError, OSError, EOFError, ValueError, zlib.error,
-                struct.error) as exc:
+                struct.error, KeyError, IndexError) as exc:
             self._handle.close()
             raise CompressedError(f"{self.kind} image unreadable: {exc}") \
                 from exc
@@ -117,6 +121,40 @@ class CompressedDisk:
     def _read(self, offset, length):
         self._handle.seek(offset)
         return self._handle.read(length)
+
+    def _quick_check(self):
+        """Refuse what only starts like the format: the header's own rules
+        (gzip's method and reserved flags, xz's header CRC-32, zstd's and
+        LZ4's reserved bits), then the first FEED bytes must decompress.
+        Cheap, and it is what keeps random data from a full scan."""
+        head = self._read(0, 64)
+        if self.kind == 'gzip':
+            if len(head) < 10 or head[2] != 8 or head[3] & 0xE0:
+                raise CompressedError("not a gzip header")
+            zlib.decompressobj(31).decompress(self._read(0, FEED), STEP)
+        elif self.kind == 'xz':
+            if len(head) < 12 or zlib.crc32(head[6:8]) != \
+                    struct.unpack_from('<I', head, 8)[0]:
+                raise CompressedError("not an xz header (its CRC-32 fails)")
+            lzma.LZMADecompressor(format=lzma.FORMAT_XZ).decompress(
+                self._read(0, FEED), STEP)
+        elif self.kind == 'zstd':
+            if len(head) < 6 or head[4] & 0x08:
+                raise CompressedError("not a zstd frame header")
+            from trace_app.core.zstd_decode import standard_library
+            library = standard_library()
+            if library is not None:
+                try:
+                    library.ZstdDecompressor().decompress(
+                        self._read(0, FEED), STEP)
+                except Exception as exc:
+                    raise CompressedError(f"not zstd data ({exc})") from exc
+        elif self.kind == 'lz4':
+            if len(head) < 7 or head[4] >> 6 != 1 or head[4] & 0x02 or \
+                    head[5] & 0x8F or not 4 <= (head[5] >> 4) & 7 <= 7:
+                raise CompressedError("not an LZ4 frame header")
+        elif self.kind == 'bzip2':
+            bz2.BZ2Decompressor().decompress(self._read(0, FEED), STEP)
 
     def _chunks(self, offset, end=None):
         """The compressed file from `offset`, FEED bytes at a time."""
@@ -539,6 +577,11 @@ def _zstd_frame(disk, position):
             content += 256
     cursor = position + at + fcs
     while True:
+        # Past the end a read gives b'', which parses as an empty raw
+        # block that is not the last: random data walked here for ever.
+        if cursor + 3 > disk.file_size:
+            raise CompressedError("a zstd frame runs past the end of the "
+                                  "file")
         block = int.from_bytes(disk._read(cursor, 3), 'little')
         last, kind, size = block & 1, (block >> 1) & 3, block >> 3
         cursor += 3 + (1 if kind == 1 else size)

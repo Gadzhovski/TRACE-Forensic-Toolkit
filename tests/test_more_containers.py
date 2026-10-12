@@ -416,3 +416,56 @@ def test_a_raw_image_that_only_starts_like_a_container_reads_as_raw(tmp_path):
             assert handler.may_be_veracrypt(0)
         finally:
             handler.close_resources()
+
+
+@pytest.mark.parametrize('magic', [b'\x1f\x8b\x08\x00', b'\x28\xb5\x2f\xfd',
+                                   b'\xfd7zXZ\x00', b'\x04\x22\x4d\x18',
+                                   b'BZh91AY&SY'])
+def test_random_data_after_a_magic_is_refused_at_once(tmp_path, magic):
+    """Random bytes behind a compressor's magic once kept the zstd scan
+    walking past the end of the file (a read there parses as an empty
+    block) for minutes. The header's own rules and the first MiB decide,
+    quickly, for any bytes."""
+    import random
+    import time
+    from trace_app.core.compressed_disk import (CompressedDisk,
+                                                CompressedError)
+    path = tmp_path / 'disk.dd'
+    for seed in range(25):
+        path.write_bytes(magic + random.Random(seed).randbytes(1 << 20))
+        began = time.monotonic()
+        with pytest.raises(CompressedError):
+            CompressedDisk(str(path))
+        assert time.monotonic() - began < 2
+
+
+def test_every_compressor_still_reads_back(tmp_path):
+    """The quick check must not refuse real images: gzip, xz, bzip2, zstd
+    and a hand-made LZ4 frame of stored blocks, each read back whole."""
+    import bz2
+    import gzip
+    import lzma
+    import random
+    import struct
+    from trace_app.core.compressed_disk import CompressedDisk
+    from trace_app.core.zstd_decode import standard_library
+    raw = random.Random(1).randbytes(3 << 20) + bytes(2 << 20)
+    blobs = {'gz': gzip.compress(raw), 'xz': lzma.compress(raw),
+             'bz2': bz2.compress(raw)}
+    library = standard_library()
+    if library is not None:
+        blobs['zst'] = library.compress(raw)
+    frame = b'\x04\x22\x4d\x18\x60\x40\x82'
+    for at in range(0, len(raw), 65536):
+        piece = raw[at:at + 65536]
+        frame += struct.pack('<I', len(piece) | 0x80000000) + piece
+    blobs['lz4'] = frame + b'\0\0\0\0'
+    for extension, blob in blobs.items():
+        path = tmp_path / f'disk.{extension}'
+        path.write_bytes(blob)
+        disk = CompressedDisk(str(path))
+        try:
+            assert disk.read_buffer_at_offset(disk.get_size(), 0) == raw, \
+                extension
+        finally:
+            disk.close()

@@ -2056,9 +2056,19 @@ class ImageHandler:
         """Whether a volume could be VeraCrypt: a real partition (or a
         partition-less image at 0) that no file system or known volume
         format opens. Nothing proves it is -- the password will."""
-        if start_sector >= containers.SHADOW_KEY_BASE or \
-                self.is_logical or start_sector in self._bitlocker:
+        def refused(why):
+            # Said in the log: a volume that should be offered and is not
+            # (seen once on CI, never again) must say which check it was.
+            logger.info("Not offered as VeraCrypt at sector %s: %s",
+                        start_sector, why)
             return False
+
+        if start_sector >= containers.SHADOW_KEY_BASE:
+            return refused("a snapshot or volume key, not a partition")
+        if self.is_logical:
+            return refused("logical evidence")
+        if start_sector in self._bitlocker:
+            return refused("already unlocked")
         partitions = self.get_partitions()
         if partitions:
             from trace_app.core.partition_names import bookkeeping
@@ -2069,15 +2079,21 @@ class ImageHandler:
                 if bookkeeping(text) is None and 'Unallocated' not in text:
                     starts.add(start)
             if start_sector not in starts:
-                return False
+                return refused(f"not a partition's start (the table found: "
+                               f"{[(p[1], p[2]) for p in partitions][:6]})")
         elif start_sector != 0:
-            return False
-        if self.volume_kind(start_sector) is not None:
-            return False
+            return refused("no partition table and not sector 0")
+        kind = self.volume_kind(start_sector)
+        if kind is not None:
+            return refused(f"recognised as {kind}")
         try:
-            return self.get_fs_info(start_sector) is None
+            fs = self.get_fs_info(start_sector)
         except Exception:
             return True
+        if fs is not None:
+            return refused(f"a file system opens there "
+                           f"({self.get_fs_type(start_sector)})")
+        return True
 
     def unlocked_kind(self, start_sector):
         return self._unlocked_kind.get(start_sector)
