@@ -10,6 +10,7 @@ import zipfile
 
 import pytest
 
+from tests.conftest import close_window
 from trace_app.core.case_archive import (ArchiveError, MANIFEST,
                                          check_archive, export_case,
                                          import_case, missing_evidence)
@@ -239,7 +240,7 @@ def test_locate_in_the_window_takes_only_the_same_evidence(
         assert 'evidence relocation refused' in actions
         assert 'evidence relocated' in actions
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_the_archive_dialogs_write_and_open_a_case(qapp, case, tmp_path,

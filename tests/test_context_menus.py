@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, close_window
 from tools import testdata
 from tests.conftest import pump
 
@@ -119,7 +119,7 @@ def test_any_row_naming_a_file_offers_export_and_bookmark(qapp, monkeypatch):
         assert window._file_data_for({'artifact_ref': 'reg:SYSTEM:x'}) \
             is None
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_the_hex_tab_copies_bytes_with_ctrl_c(qapp):
@@ -187,5 +187,5 @@ def test_text_selected_in_the_text_tab_bookmarks_its_bytes(qapp, tmp_path,
         assert '“JFIF”' in mark['label']
         handler.close_resources()
     finally:
-        window.cleanup_resources()
+        close_window(window)
         case.close()

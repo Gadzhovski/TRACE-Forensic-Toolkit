@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from tests.conftest import image_path, pump
+from tests.conftest import close_window, image_path, pump
 
 pytestmark = [pytest.mark.ui, pytest.mark.images]
 
@@ -156,7 +156,7 @@ def test_removing_evidence_takes_its_data_and_keeps_its_notes(
         assert not [d for d in window.findChildren(QProgressDialog)
                     if d.isVisible()]
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
     # Gone from the case, the index and the disk; the other image intact.
     case = Case.open(folder)
@@ -189,7 +189,7 @@ def test_removing_evidence_takes_its_data_and_keeps_its_notes(
         pump(qapp, 0.3)
         assert _roots(window) == [KEEP]
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_removal_waits_for_background_work(qapp, case_folder, answered):
@@ -209,7 +209,7 @@ def test_removal_waits_for_background_work(qapp, case_folder, answered):
         assert 'Background work is running' in told[-1][-1]
         assert len(window.evidence_files) == 2
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_quick_triage_only_closes(qapp, answered):
@@ -224,4 +224,4 @@ def test_quick_triage_only_closes(qapp, answered):
         assert window.evidence_files == [] and _roots(window) == []
         assert os.path.exists(image_path(KEEP))
     finally:
-        window.cleanup_resources()
+        close_window(window)

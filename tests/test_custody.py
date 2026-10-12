@@ -23,7 +23,7 @@ import struct
 
 import pytest
 
-from tests.conftest import image_path, pump
+from tests.conftest import close_window, image_path, pump
 
 E01, RAW, FAT = 'ntfs1-gen2.E01', '8-jpeg-search.dd', '6-fat-undel.dd'
 
@@ -112,7 +112,7 @@ def test_an_altered_image_stays_changed_whatever_the_dialog_does(
                    for kind, args in quiet_dialogs)
         assert row()['last_status'] != STATUS_VERIFIED
     finally:
-        window.cleanup_resources()
+        close_window(window)
         case.close()
 
 
@@ -691,4 +691,4 @@ def test_quick_triage_verifies_without_recording(qapp, quiet_dialogs):
         assert 'MD5 | ' in text and '| match' in text
         assert window.case is None
     finally:
-        window.cleanup_resources()
+        close_window(window)

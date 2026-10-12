@@ -16,7 +16,7 @@ import zipfile
 
 import pytest
 
-from tests.conftest import pump
+from tests.conftest import close_window, pump
 from tests.disk_builders import compound_file, fat16_volume
 from trace_app.core import archives, embedded
 
@@ -261,4 +261,4 @@ def test_the_listing_shows_a_documents_embedded_files(qapp, disk,
         assert archives.read_member(window._archive_stack[-1][1],
                                     member['name']) == PAYLOAD
     finally:
-        window.cleanup_resources()
+        close_window(window)

@@ -8,6 +8,8 @@ import pytest
 import tests.conftest  # noqa: F401  (sets up isolation)
 from tools import testdata
 
+from tests.conftest import close_window
+
 EXTENDED = testdata.locate('ext-part-test-2.dd') or 'ext-part-test-2.dd'
 PLAIN = testdata.locate('8-jpeg-search.dd') or '8-jpeg-search.dd'
 
@@ -119,4 +121,4 @@ def test_the_image_information_window_draws_the_disk(qapp, monkeypatch):
         assert disk.table.rowCount() == len(disk.regions) == 13
         assert disk.platter._spans and disk.bar.regions
     finally:
-        window.cleanup_resources()
+        close_window(window)

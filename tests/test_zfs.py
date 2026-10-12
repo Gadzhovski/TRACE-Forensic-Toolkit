@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from tests.conftest import image_path
+from tests.conftest import close_window, image_path
 from tests.fs_answers import compare, walk
 from trace_app.core import zfs
 
@@ -236,4 +236,4 @@ def test_the_tree_shows_datasets_and_snapshots(qapp):
         assert any(text.startswith('ZFS pool not readable here') and
                    'needed' in text for text in texts)
     finally:
-        window.cleanup_resources()
+        close_window(window)

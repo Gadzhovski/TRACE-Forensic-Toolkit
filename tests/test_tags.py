@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from tests.conftest import pump
+from tests.conftest import close_window, pump
 from tools import testdata
 
 FILE_A = {'evidence_id': None, 'artifact_ref': 'p63:i29:s1',
@@ -205,7 +205,7 @@ def test_the_window_tags_from_a_menu_and_the_keys(qapp, case, monkeypatch):
         empty.deleteLater()
     finally:
         table.deleteLater()
-        window.cleanup_resources()
+        close_window(window)
 
 
 JPEG_IMAGE = testdata.locate('8-jpeg-search.dd') or ''
@@ -256,7 +256,7 @@ def test_a_tagged_listing_row_shows_its_tag(qapp, case):
         assert table.item(row, 14).icon().isNull()
     finally:
         handler.close_resources()
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_tag_dots_are_drawn_sharp_at_any_display_scale(qapp):

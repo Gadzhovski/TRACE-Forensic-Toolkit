@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from tests.conftest import image_path
+from tests.conftest import close_window, image_path
 from tests.fs_answers import Source, compare, walk
 from trace_app.core import ubi, ubifs
 
@@ -152,4 +152,4 @@ def test_the_tree_shows_ubi_volumes(qapp):
         assert any('ubi / data' in t and 'FS: UBIFS' in t for t in texts)
         assert any('ubi / kernel' in t for t in texts)
     finally:
-        window.cleanup_resources()
+        close_window(window)

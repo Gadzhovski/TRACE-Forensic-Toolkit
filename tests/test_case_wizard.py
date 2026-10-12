@@ -12,7 +12,7 @@ import sqlite3
 
 import pytest
 
-from tests.conftest import image_path, pump
+from tests.conftest import close_window, image_path, pump
 
 E01, RAW = 'ntfs1-gen2.E01', '8-jpeg-search.dd'
 
@@ -419,7 +419,7 @@ def test_verification_is_a_job_that_records_and_catches_a_change(
         assert any(kind == 'warning' and 'does not match' in args[1]
                    for kind, args in quiet_dialogs)
     finally:
-        window.cleanup_resources()
+        close_window(window)
         case.close()
 
 

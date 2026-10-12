@@ -11,7 +11,7 @@ import os
 import pytest
 from PySide6.QtWidgets import QDialog
 
-from tests.conftest import image_path, pump
+from tests.conftest import close_window, image_path, pump
 
 
 @pytest.fixture(autouse=True)
@@ -305,4 +305,4 @@ def test_window_refuses_virustotal_when_offline(qapp, case, monkeypatch):
         assert not asked              # refused before anything else
         pump(qapp, 0.1)
     finally:
-        window.cleanup_resources()
+        close_window(window)

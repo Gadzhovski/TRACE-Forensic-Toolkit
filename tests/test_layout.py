@@ -3,7 +3,7 @@ Triage's grouped tabs."""
 
 import pytest
 
-from tests.conftest import image_path, pump
+from tests.conftest import close_window, image_path, pump
 
 
 def _entries(prefix, count):
@@ -22,7 +22,7 @@ def window(qapp, monkeypatch):
         monkeypatch.setattr(message, name, lambda *a, **k: None)
     window = MainWindow()
     yield window
-    window.cleanup_resources()
+    close_window(window)
 
 
 def test_a_listing_interrupted_by_another_holds_only_the_second(qapp,
@@ -252,8 +252,7 @@ def test_tree_width_and_utils_height_survive_resizing_and_restarts(
             assert again.tree_dock.width() == tree
             assert again.viewer_dock.height() == utils
         finally:
-            again.cleanup_resources()
-            again.deleteLater()
+            close_window(again)
 
 
 # -- Triage's grouped tabs ------------------------------------------------

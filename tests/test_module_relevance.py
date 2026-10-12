@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-from tests.conftest import ROOT, image_path, pump
+from tests.conftest import ROOT, close_window, image_path, pump
 from tools import testdata
 
 SAMPLES = testdata.SAMPLES
@@ -133,4 +133,4 @@ def test_the_queue_runs_on_each_image_only_what_applies(qapp):
         assert 'queue_persistence' not in calls     # neither has a system
         assert sorted(calls['queue_activity']) == sorted([BTRFS, NTFS])
     finally:
-        window.cleanup_resources()
+        close_window(window)

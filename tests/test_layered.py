@@ -13,7 +13,7 @@ authors' own answer: ntfs.txt, ext2.txt, ufs1.txt).
 
 import pytest
 
-from tests.conftest import image_path
+from tests.conftest import close_window, image_path
 
 DISK = '10-ntfs-disk.dd'
 PART3 = '10-ntfs-part3.dd'
@@ -123,4 +123,4 @@ def test_the_tree_shows_both_layers(qapp):
                            'NTFS / exFAT (0x07) @ 96390 — UFS2 (layered)']]
         assert 'formatted again' in groups[0].toolTip(0)
     finally:
-        window.cleanup_resources()
+        close_window(window)

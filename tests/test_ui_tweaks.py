@@ -3,6 +3,8 @@ per screen setup, and About's links."""
 
 import pytest
 
+from tests.conftest import close_window
+
 
 # --- interface size --------------------------------------------------------
 
@@ -350,4 +352,4 @@ def test_the_reopen_offer_waits_for_the_evidence(qapp, tmp_path, monkeypatch):
         window.offer_analysis_modules()
         assert asked == []
     finally:
-        window.cleanup_resources()
+        close_window(window)

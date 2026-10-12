@@ -109,6 +109,25 @@ def pump(app, seconds=0.2, until=None):
     return until() if until is not None else True
 
 
+def close_window(window):
+    """Close a test's MainWindow and free it now. Left alive (only
+    cleaned up), every window stayed to be re-polished and re-tinted by
+    each later one: in tests/test_layout.py the tenth window took 34 s to
+    build, the first 3."""
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    try:
+        window.cleanup_resources()
+    finally:
+        # Hidden and deleted, not close()d: closeEvent asks the examiner to
+        # confirm leaving, a dialog nobody answers here.
+        window.hide()
+        window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+
+
 def pytest_runtest_logreport(report):
     """On GitHub Actions, each failure is also an annotation: the run's
     summary then says which test failed and why, without its full log."""

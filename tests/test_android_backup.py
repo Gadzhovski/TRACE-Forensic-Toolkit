@@ -21,6 +21,8 @@ import pytest
 
 from trace_app.core import android_backup
 
+from tests.conftest import close_window
+
 PASSWORD = 'pässwörd-ß'
 MSGSTORE = """
     CREATE TABLE jid (_id INTEGER PRIMARY KEY, user TEXT, server TEXT,
@@ -292,4 +294,4 @@ def test_the_tree_unlocks_a_backup_through_the_dialog(qapp, tmp_path,
         assert window._unlocks_for(str(path))[0]['_kind'] == \
             'android_backup'
     finally:
-        window.cleanup_resources()
+        close_window(window)

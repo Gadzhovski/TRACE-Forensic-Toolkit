@@ -13,7 +13,7 @@ import sqlite3
 
 import pytest
 
-from tests.conftest import data_path, pump
+from tests.conftest import close_window, data_path, pump
 from trace_app.core import conversations
 
 
@@ -250,4 +250,4 @@ def test_the_panel_lists_threads_and_shows_one(qapp, case, tmp_path,
         window.add_conversation_to_report(plans)
         assert case.report_items('conversation')
     finally:
-        window.cleanup_resources()
+        close_window(window)

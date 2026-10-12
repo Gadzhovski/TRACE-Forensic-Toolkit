@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from tests.conftest import image_path
+from tests.conftest import close_window, image_path
 
 KEY = 'luks-lvm.json'
 DISKS = ['luks1-lvm.raw', 'luks2-lvm.raw']
@@ -192,7 +192,7 @@ def test_an_unlocked_luks2_node_lists_its_logical_volumes(qapp, monkeypatch):
         window.on_item_expanded(home)
         assert 'data' in [t for t, _d in children(home)]
     finally:
-        window.cleanup_resources()
+        close_window(window)
 
 
 def test_the_profile_names_a_locked_volume_then_what_is_inside():

@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from tests.conftest import ROOT
+from tests.conftest import ROOT, close_window
 from tools import testdata
 from tests.conftest import pump
 from trace_app.ui.viewers import text as text_view
@@ -161,4 +161,4 @@ def test_listing_rows_get_their_programs_icons(qapp, tmp_path):
         assert pump(qapp, 10, lambda: bool(program.icon(0).availableSizes()))
         assert window.program_icons._cache        # read once, kept
     finally:
-        window.cleanup_resources()
+        close_window(window)

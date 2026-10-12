@@ -12,7 +12,7 @@ hold, are checked on entries built by hand.
 
 import pytest
 
-from tests.conftest import data_path, pump
+from tests.conftest import close_window, data_path, pump
 
 STORE = ('/System Volume Information/{de81cc2b-aa8b-11eb-9339-8cdcd4557abc}'
          '{3808876b-c176-4e48-b7ae-04046e6cc752}')
@@ -155,5 +155,5 @@ def test_the_tree_opens_the_comparison_on_the_image_it_belongs_to(qapp):
             shadow.data(0, Qt.UserRole)['start_offset']
         dialog.close()
     finally:
-        window.cleanup_resources()
+        close_window(window)
         pump(qapp, 0.2)
