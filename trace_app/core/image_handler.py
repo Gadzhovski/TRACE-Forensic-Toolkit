@@ -1160,9 +1160,30 @@ class ImageHandler:
             elif image_type == "container":
                 # Android sparse, VDI, AFF, compressed raw -- read in
                 # Python (core/disk_containers.py).
-                from trace_app.core.disk_containers import open_container
-                self.img_info, self.container_note = open_container(
-                    self.image_path)
+                from trace_app.core import disk_containers
+                try:
+                    self.img_info, self.container_note = \
+                        disk_containers.open_container(self.image_path)
+                except Exception as exc:
+                    # Named as a raw image and taken for a container by its
+                    # first bytes alone: three to eight bytes that random
+                    # data -- an encrypted volume -- holds by chance (one
+                    # VeraCrypt container in ~16 million starts 1f 8b 08).
+                    # What does not read as one is the raw image it is named.
+                    extension = os.path.splitext(self.image_path)[1].lower()
+                    if extension in disk_containers.EXTENSIONS or \
+                            disk_containers.kind_of(self.image_path) == 'aff' \
+                            and not os.path.isfile(self.image_path):
+                        raise
+                    kind = disk_containers.sniff(self.image_path)
+                    logger.info("%s: not a %s after all (%s); read as raw",
+                                self.image_path, kind, exc)
+                    self.img_info = pytsk3.Img_Info(self.image_path)
+                    name = disk_containers.NAMES.get(kind, str(kind))
+                    article = 'an' if name[:1] in 'AEIOU' else 'a'
+                    self.container_note = (
+                        f"Its first bytes look like {article} {name}, but it "
+                        f"does not read as one ({exc}); read as a raw image.")
             elif image_type == "aff4":
                 # Read in Python (core/aff4.py): pyaff4 cannot be installed
                 # without a compiler.

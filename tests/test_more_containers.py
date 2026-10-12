@@ -392,3 +392,27 @@ def test_the_newest_snapshot_opens_as_evidence():
         assert result['computed_sha256'] == key['disks'][newest]['sha256']
     finally:
         handler.close_resources()
+
+
+def test_a_raw_image_that_only_starts_like_a_container_reads_as_raw(tmp_path):
+    """An encrypted volume is random bytes, and one in ~16 million starts
+    as a gzip stream does (1f 8b 08): named as a raw image, it must open
+    as raw, saying why, not fail to load. Fixed bytes after each signature
+    make the header invalid (reserved gzip flags, a zstd descriptor's
+    reserved bit, sparse version 14219), so the case is the same each run."""
+    import random
+    from trace_app.core.image_handler import ImageHandler
+    noise = random.Random(2026).randbytes(1024 * 1024)
+    for start in (b'\x1f\x8b\x08\xe0', b'\x28\xb5\x2f\xfd\x08',
+                  b'\x3a\xff\x26\xed\x8b\x37'):
+        data = start + noise[len(start):]
+        path = tmp_path / 'volume.dd'
+        path.write_bytes(data)
+        handler = ImageHandler(str(path))
+        try:
+            assert handler.load_image()
+            assert handler.img_info.get_size() == len(data)
+            assert 'read as a raw image' in handler.container_note
+            assert handler.may_be_veracrypt(0)
+        finally:
+            handler.close_resources()
