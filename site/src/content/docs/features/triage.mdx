@@ -14,7 +14,7 @@ import triage from '../../../assets/repo/triage.png';
 
 ## One pass, every module
 
-The file analysis modules want the same bytes, so a run reads **each file once**, whatever you selected: the first 4 KB to identify it, the rest streamed in 64 KB blocks only if a module needs it. Anything not selected stays *not measured* -- distinguishable from *measured as nothing*. Rows are written in batches, so a 20,000-file image is a few hundred transactions, not 20,000.
+The file analysis modules want the same bytes, so a run reads **each file once**, whatever you selected: the first 4 KB to identify it, the rest streamed in 64 KB blocks only if a module needs it. Anything not selected stays *not measured* -- distinguishable from *measured as nothing*. Rows are written in batches, so a 20,000-file image is a few hundred transactions, not 20,000. On larger images the files are read by several processes at once, and the rows written in the same order whichever finishes first: a 143,769-file Fedora image takes 54 s instead of 201 s, with identical results. A **scope** can narrow a run to the folders, types or dates that matter ([Cases](/features/cases/#what-a-run-covers)).
 
 | Module | What it finds |
 |:--|:--|
@@ -64,6 +64,8 @@ The **Deleted files** module lists every file the file systems still remember de
 - **NTFS** -- files whose MFT entry now holds another file are named from `$LogFile`; of two deleted files over the same clusters, the one freed later owns them.
 - **exFAT** -- a deleted file keeps its FAT chain, which TRACE follows; on FAT, where deletion clears the chain, only the start is known and the state says so.
 - **ext3 / ext4** -- deletion empties the inode; its earlier copy in the **journal** gives back where the data was, and blocks a later file took are counted as overwritten.
+- **ext2 / ext3 folders** -- files inside a deleted folder are named from the folder's surviving directory block.
+- **HFS+** -- deleted files are read back from old catalog records in the journal and in the catalog's free space (The Sleuth Kit lists none).
 - **Btrfs** -- see [Volumes](/features/volumes/).
 
 None of it is called recoverable when it is not: NIST's Deleted File Recovery set, scored against NIST's own answer key, gives no file called recoverable that was overwritten on ext, FAT, exFAT or NTFS.

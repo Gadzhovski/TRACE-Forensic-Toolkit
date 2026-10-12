@@ -20,7 +20,11 @@ A case is a **folder**:
   - thumbnails/
 </FileTree>
 
-**Evidence is referenced by path and hash, never copied.** Moving an image breaks only the path; its recorded hashes still say whether it is the same image.
+**Evidence is referenced by path and hash, never copied.** Moving an image breaks only the path; its recorded hashes still say whether it is the same image. **Locate…** in the Case tab points the case at the moved file -- after hashing it, and only if every recorded and acquisition hash matches; a mismatch is refused and audited.
+
+## Handing a case over
+
+**Case ▸ Export Case Archive** writes the case as one `.trace` file: its databases copied consistently, every other file of the case folder, and a manifest with each member's SHA-256, the evidence and its recorded hashes, and the head of the audit trail. The archive's own SHA-256 is audited and written beside it. **Open Case Archive** checks every member against the manifest before anything is written, then checks the audit chain still reaches the archived head.
 
 <Aside type="caution" title="Copy a case only with TRACE closed">
 Both databases use write-ahead logging, so the window can read while a job writes. An open case has `-wal` and `-shm` files beside its databases; copy the folder only when TRACE is closed.
@@ -48,6 +52,10 @@ The Case tab's **Activity log** records every action that matters: case created,
 
 The trail is **chained**: each entry carries the hash of the one before, and the case database refuses to change or delete an entry -- an edited trail shows on the case card and in the report.
 
+## Tags
+
+Mark any file in any list -- **Relevant**, **Needs review**, **Ignore**, or tags of your own -- from the right-click menu or with the keys **1**, **2**, **3** (**0** clears). Tagged files are listed in Triage ▸ Tags and the tree, marked with a coloured dot in the Listing, and have their own report section with hashes. Every tag change is audited with who and when.
+
 ## Bookmarks and notes
 
 - **Bookmarks** point at a file, a byte range selected in the hex view, a text selection (mapped back to the file's bytes) or a registry key -- and still resolve after the case is reopened.
@@ -56,6 +64,10 @@ The trail is **chained**: each entry carries the hash of the one before, and the
 ## Removing evidence
 
 **File ▸ Remove Evidence** takes everything TRACE derived from an image -- findings, index entries, carved copies -- and records an audit line naming the image's hashes and what went. The confirmation shows the same list first. The image file itself is never touched.
+
+## What a run covers
+
+The Analysis Modules dialog (and the New Case wizard) has a **Scope**: everything, user data only, skip operating-system files, documents and pictures, or your own rules -- folders to include or leave out (picked from the evidence), names, types, sizes, modified dates and deleted files. A live count says how many files are in scope as you edit. The case keeps the scope, the audit trail records each run's, and the report states it.
 
 ## Settings that change results belong to the case
 

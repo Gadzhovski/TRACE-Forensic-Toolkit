@@ -16,6 +16,10 @@ description: Every disk image, logical image, file system, volume system, encryp
 | **VHD / VHDX** | Hyper-V and Virtual PC disks, differencing disks chained to their parents |
 | **QCOW / QCOW2** | QEMU disks; QCOW2 read by TRACE itself, compressed (deflate or zstd) and with backing files |
 | **Parallels** | `.hdd` bundles and `.hds` disks |
+| **VDI** | VirtualBox disks, dynamic and fixed, snapshot chains found by UUID |
+| **AFF** | AFFLIB v1-v3: single file, AFD folder or AFM; stored MD5/SHA-1 verified (encrypted AFF refused) |
+| **Android sparse / super** | `simg` sparse images; dynamic-partition `super.img`, its logical partitions as volumes |
+| **Compressed raw** | `.gz`, `.xz`, `.zst`, `.bz2`, `.lz4` disk images read in place, with random access where the compressor left any |
 
 A folder holding only an image's segments -- with the imager's log, or a report named after the image -- is added as that image.
 
@@ -28,6 +32,8 @@ A folder holding only an image's segments -- with the imager's log, or a report 
 | **ZIP / TAR** | collections as evidence |
 | **Folder** | e.g. KAPE or Velociraptor output; symbolic links never followed; a collection's system root (`C`, `uploads/auto/C%3A`) found by its folders |
 | **iOS backup** | iTunes/Finder backups, plain or encrypted, files at their phone paths |
+| **Android backup** | `adb backup` `.ab` files, every version, compressed or not, encrypted with the password |
+| **Cellebrite UFDR** | the phone's files at their paths, plus the report's decoded chats, messages, calls, e-mail, contacts, accounts, web history and locations |
 
 ## Live disks
 
@@ -35,7 +41,7 @@ An attached physical disk -- `\\.\PhysicalDriveN` on Windows, `/dev/…` on macO
 
 ## Volume systems
 
-DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels, Sun VTOC; **LVM** volume groups (inside LUKS too); **APFS** containers; **Core Storage**; **Linux md RAID**, **Windows dynamic disks** and **hardware RAID** across their member images; **lost partitions**; **Volume Shadow Copies** of NTFS volumes.
+DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels, Sun VTOC; **LVM** volume groups (inside LUKS too); **APFS** containers; **Core Storage**; **Linux md RAID**, **Windows dynamic disks** and **hardware RAID** across their member images; **ZFS** pools; **UBI** volumes on raw NAND; **lost partitions**; **Volume Shadow Copies** of NTFS volumes.
 
 ## File systems
 
@@ -50,6 +56,14 @@ DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels, Su
 | APFS (encrypted too) | libfsapfs |
 | XFS | libfsxfs |
 | Btrfs (subvolumes and snapshots; zlib, LZO, zstd) | TRACE (Python) |
+| ZFS (datasets and snapshots; mirror, raidz, stripe; lz4, gzip, zstd, lzjb, zle) | TRACE (Python) |
+| ReFS 3.x | TRACE (Python) |
+| F2FS (LZ4, LZO, zstd compression) | TRACE (Python) |
+| UBI / UBIFS (raw NAND dumps, journal replayed) | TRACE (Python) |
+| JFFS2 | TRACE (Python) |
+| SquashFS 4, EROFS | TRACE (Python) |
+| UDF 1.02-2.60 (bridge discs read as UDF) | TRACE (Python) |
+| HFS (classic Mac OS) | TRACE (Python) |
 
 Unpartitioned images -- a single file system with no partition table -- are read too.
 
@@ -61,7 +75,9 @@ Unpartitioned images -- a single file system with no partition table -- are read
 | **FileVault 2** | password or recovery key |
 | **LUKS1 / LUKS2** | passphrase |
 | **APFS** | password or recovery key |
+| **VeraCrypt / TrueCrypt** | password and PIM; AES, Serpent, Twofish, Camellia, Kuznyechik and cascades; hidden volumes |
 | **iOS backups** | backup password |
+| **Android backups** | backup password |
 
 ## Inside files
 

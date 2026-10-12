@@ -14,20 +14,24 @@ import search from '../../../assets/repo/search.png';
 
 ## An index of the evidence's text
 
-**Search index and indicators** is an analysis module: it walks each image once and stores the readable text of every file in a per-case full-text index (SQLite FTS5). Searching is then instant, and works offline on the case alone.
+**Search index and indicators** is an analysis module: it walks each image once and stores the readable text of every file in a per-case full-text index (SQLite FTS5). Searching is then instant, and works offline on the case alone. Text is extracted on several processes at once, and a run that was stopped -- cancelled, failed or TRACE closed -- **resumes** where it left off.
 
 Text is extracted from:
 
 - **Documents** -- PDF, Word, Excel, PowerPoint and OpenDocument, RTF, HTML, plain text in any common encoding.
 - **Mail** -- Outlook PST / OST, EML and mbox, messages and attachments.
 - **Archives** -- ZIP, 7z, RAR, TAR and compressed files, member by member, nested to a depth you set.
+- **Files inside files** -- what documents embed: a PDF's attachments, OLE packages and objects in Office and RTF documents, OOXML and ODF media. **Listing ▸ Show Embedded Files** lists any document's embedded files like an archive's members.
+- **Notepad tabs** -- the replayed text of Windows 11 Notepad's unsaved tabs.
 - **Registry hives** -- key names and values.
 - **Everything else** -- printable runs of ASCII *and* UTF-16 text, since Windows stores much of its text as UTF-16 -- Greek, Cyrillic, Hebrew, Arabic and other scripts too.
-- **Unallocated space**, when the case asks for it (a case setting).
+- **Free space and memory files** -- unallocated space, and `pagefile.sys`, `swapfile.sys` and `hiberfil.sys` -- by their own module, **Search free space and memory files**, run after the file index so the files are searchable first. It resumes from its last checkpoint too.
 - **File slack** of every live file, as its own item (`<file> [slack]`).
 - **Carved files**, under `[carved]/` with the name of the deleted file they came from.
 
 A hit inside an archive or mailbox opens that member directly -- read from the image, never unpacked to disk.
+
+The Listing's find box filters the folder shown as you type; switch it to **Whole image** to find a file by name anywhere on an indexed image.
 
 ## Indicators, validated
 

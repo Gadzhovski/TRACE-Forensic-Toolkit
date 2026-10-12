@@ -33,8 +33,8 @@ import Pillars from '../../components/Pillars.astro';
 <Stats
 	items={[
 		{ value: '70', label: 'file types carved' },
-		{ value: '10', label: 'file systems read' },
-		{ value: '5', label: 'kinds of encryption unlocked' },
+		{ value: '19', label: 'file systems read' },
+		{ value: '7', label: 'kinds of encryption unlocked' },
 		{ value: '4', label: 'platforms tested' },
 		{ value: 'MIT', label: 'free and open source' },
 	]}
@@ -60,7 +60,7 @@ From the first hash check to the final report, in one application that never wri
 		{ icon: 'list-format', title: 'Search', text: 'Full-text search inside documents, mail and archives, with e-mails, URLs, phone, card and IBAN numbers found automatically.', href: 'features/search/' },
 		{ icon: 'warning', title: 'Detection', text: 'YARA rules over files, Sigma rules over event logs, keyword lists, hash sets (NSRL) and persistence on Windows, Linux and macOS graded by risk.', href: 'features/detection/' },
 		{ icon: 'document', title: 'Viewers', text: 'Pictures, video, PDF, Office, mail, SQLite, registry hives, a hex editor with a data inspector, and HTML shown offline.', href: 'features/viewers/' },
-		{ icon: 'padlock', title: 'Encrypted volumes', text: 'BitLocker, FileVault 2, LUKS and encrypted APFS unlocked in place; shadow copies, LVM, XFS and Btrfs read too.', href: 'features/volumes/' },
+		{ icon: 'padlock', title: 'Encrypted volumes', text: 'BitLocker, FileVault 2, LUKS, VeraCrypt and encrypted APFS unlocked in place; shadow copies, LVM, RAID, ZFS, ReFS, Btrfs and more read too.', href: 'features/volumes/' },
 	]}
 />
 
@@ -80,11 +80,11 @@ From the first hash check to the final report, in one application that never wri
 
 | | |
 |:--|:--|
-| **Disk images** | E01 / Ex01, AFF4, raw / dd (split too), ISO, DMG, VMDK, VHD / VHDX, QCOW2 |
-| **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups |
+| **Disk images** | E01 / Ex01, AFF4, AFF, raw / dd (split or compressed too), ISO, DMG, VMDK, VHD / VHDX, QCOW2, VDI, Parallels, Android sparse and super images |
+| **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups, Android backups, Cellebrite UFDR |
 | **Live disks** | an attached disk, read-only, without imaging it first |
-| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, APFS, XFS, Btrfs, UFS, ISO 9660 |
-| **Encrypted volumes** | BitLocker, FileVault 2, LUKS, encrypted APFS and iOS backups |
+| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, HFS, APFS, XFS, Btrfs, ZFS, ReFS, F2FS, UBIFS, JFFS2, SquashFS, EROFS, UDF, UFS, ISO 9660 |
+| **Encrypted volumes** | BitLocker, FileVault 2, LUKS, VeraCrypt / TrueCrypt, encrypted APFS, iOS and Android backups |
 | **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
 
 [Everything TRACE reads →](/reference/evidence/)
