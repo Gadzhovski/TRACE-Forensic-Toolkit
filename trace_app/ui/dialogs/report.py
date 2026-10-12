@@ -212,6 +212,23 @@ class ReportDialog(QDialog):
         o = self.options
         page = QGroupBox("Options")
         form = QFormLayout(page)
+        # The examiner's own heading and standing text for the section
+        # (kept in a template with it): a methodology note, a caveat.
+        section = next((s for s in o['sections'] if s.get('key') == key),
+                       {})
+        title = QLineEdit(section.get('title') or '')
+        title.setPlaceholderText(dict((k, t) for k, t, _n in
+                                      report_core.SECTIONS).get(key, key))
+        title.setToolTip("Leave empty for the standard heading")
+        form.addRow("Heading:", title)
+        text = QPlainTextEdit(section.get('text') or '')
+        text.setPlaceholderText("Text shown at the start of this section, "
+                                "under its heading (optional)")
+        text.setFixedHeight(70)
+        form.addRow("Section text:", text)
+        if not hasattr(self, 'section_custom'):
+            self.section_custom = {}
+        self.section_custom[key] = (title, text)
         if key in ('bookmarks', 'carved'):
             box = QCheckBox("Include pictures (scaled, never cropped)")
             box.setChecked(bool(o.get('thumbnails')))
@@ -309,8 +326,6 @@ class ReportDialog(QDialog):
             limit = _spin(o.get('audit_limit') or 5000, 10, 1000000)
             limit.valueChanged.connect(lambda v: self._set('audit_limit', v))
             form.addRow("Entries, at most:", limit)
-        if form.rowCount() == 0:
-            form.addRow(QLabel("Nothing to choose for this section."))
         return page
 
     def _clear_picked(self, button):
@@ -369,8 +384,11 @@ class ReportDialog(QDialog):
         self.html_box.setChecked('html' in (o.get('formats') or ()))
         self.pdf_box = QCheckBox("PDF (A4, contents and page numbers)")
         self.pdf_box.setChecked('pdf' in (o.get('formats') or ()))
+        self.docx_box = QCheckBox("Word (.docx, to edit)")
+        self.docx_box.setChecked('docx' in (o.get('formats') or ()))
         formats.addWidget(self.html_box)
         formats.addWidget(self.pdf_box)
+        formats.addWidget(self.docx_box)
         formats.addStretch(1)
         form.addRow("Formats:", formats)
         self.scope_combo = QComboBox()
@@ -459,12 +477,11 @@ class ReportDialog(QDialog):
             logo_path=self.logo_edit.text().strip(),
             summary=self.summary_edit.toPlainText().strip(),
             conclusions=self.conclusions_edit.toPlainText().strip(),
-            sections=[{'key': self.section_list.item(i).data(Qt.UserRole),
-                       'enabled': self.section_list.item(i).checkState()
-                       == Qt.Checked}
+            sections=[self._section_entry(i)
                       for i in range(self.section_list.count())],
             formats=[f for f, box in (('html', self.html_box),
-                                      ('pdf', self.pdf_box))
+                                      ('pdf', self.pdf_box),
+                                      ('docx', self.docx_box))
                      if box.isChecked()],
             findings_grade=self.grade_combo.currentData(),
             activity_categories=[k for k, box in self.activity_boxes.items()
@@ -482,6 +499,18 @@ class ReportDialog(QDialog):
             evidence_ids=self.scope_combo.currentData(),
         )
         return options
+
+    def _section_entry(self, row):
+        item = self.section_list.item(row)
+        key = item.data(Qt.UserRole)
+        entry = {'key': key, 'enabled': item.checkState() == Qt.Checked}
+        title, text = getattr(self, 'section_custom', {}).get(key,
+                                                              (None, None))
+        if title is not None and title.text().strip():
+            entry['title'] = title.text().strip()
+        if text is not None and text.toPlainText().strip():
+            entry['text'] = text.toPlainText().strip()
+        return entry
 
     def _accept(self):
         options = self.collected()

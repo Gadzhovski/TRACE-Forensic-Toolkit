@@ -82,7 +82,7 @@ SECTIONS = (
 )
 SECTION_TITLES = {key: title for key, title, _note in SECTIONS}
 
-FORMATS = ('html', 'pdf')
+FORMATS = ('html', 'pdf', 'docx')
 
 _IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'jpe', 'png', 'gif', 'bmp', 'tif',
                      'tiff', 'webp', 'heic', 'heif', 'avif'}
@@ -215,6 +215,11 @@ class _Builder:
                       or os.path.basename(r['path']) for r in evidence}
         self.toc = []                  # (level, id, title)
         self.pictures = 0
+        #: The examiner's own heading and text for a section, kept in the
+        #: template with the section: {key: {'title', 'text'}}.
+        self.custom = {s['key']: s for s in options.get('sections') or []
+                       if isinstance(s, dict) and
+                       (s.get('title') or s.get('text'))}
         #: The systems found on each image (Case.systems, schema 20).
         try:
             self.systems = case.systems()
@@ -231,8 +236,17 @@ class _Builder:
             raise ReportCancelled()
 
     def heading(self, level, anchor, title):
+        custom = self.custom.get(anchor) if level == 1 else None
+        if custom and (custom.get('title') or '').strip():
+            title = custom['title'].strip()
         self.toc.append((level, anchor, title))
-        return f"<h{level} id='{e(anchor)}'>{e(title)}</h{level}>"
+        out = f"<h{level} id='{e(anchor)}'>{e(title)}</h{level}>"
+        if custom and (custom.get('text') or '').strip():
+            # Standing text for the section (a methodology note, a
+            # caveat), the examiner's own; escaped like everything else.
+            out += f"<div class='section-text'>" \
+                   f"{_paragraphs(custom['text'])}</div>"
+        return out
 
     def evidence_name(self, evidence_id):
         return self.names.get(evidence_id, '') if evidence_id is not None \
@@ -1446,6 +1460,16 @@ def write_report(case, options, images=None, progress=None,
         path = base + '.pdf'
         pages = write_pdf(builder, body, path)
         written.append({'format': 'pdf', 'path': path, 'pages': pages})
+    if 'docx' in formats:
+        if should_stop and should_stop():
+            raise ReportCancelled()
+        if progress:
+            progress(1, 1, 'Writing the Word document')
+        from trace_app.core.report_docx import write_docx
+        path = base + '.docx'
+        write_docx(builder, body.replace('{{TOC}}', ''), path, options,
+                   _trace_version())
+        written.append({'format': 'docx', 'path': path, 'pages': None})
     for item in written:
         digest = hashlib.sha256()
         with open(item['path'], 'rb') as handle:
@@ -1484,5 +1508,14 @@ def load_template(path, case=None):
                (key for key, _t, _n in SECTIONS)
                if k not in {s['key'] for s in sections}]
     options['sections'] = sections + missing
+    for section in options['sections']:
+        # A template's own heading and text for a section are kept; any
+        # other key it carries is not.
+        for key in list(section):
+            if key not in ('key', 'enabled', 'title', 'text'):
+                section.pop(key)
+        for key in ('title', 'text'):
+            if key in section and not isinstance(section[key], str):
+                section.pop(key)
     return options
 

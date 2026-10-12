@@ -126,7 +126,8 @@ def _platform_hint(capability):
 #: Groups in display order.
 GROUPS = ('Evidence images', 'Volumes and encryption', 'File analysis',
           'Windows and browser evidence',
-          'Linux, macOS, chat and cloud evidence', 'Viewing')
+          'Linux, macOS, chat and cloud evidence', 'Viewing',
+          'Reports and exports')
 
 
 def _zstd():
@@ -271,6 +272,16 @@ CAPABILITIES = (
                "Office documents, opened with their password",
                'msoffcrypto-tool', _module_version('msoffcrypto',
                                                    '__version__')),
+    Capability('archive_passwords', 'File analysis', "Password-protected "
+               "archives: ZIP (ZipCrypto, WinZip AES) and 7z AES, opened "
+               "with their password", 'cryptography',
+               _module_version('cryptography', '__version__')),
+    Capability('exports', 'Reports and exports', "Timeline for Timesketch "
+               "(JSONL), plaso (l2t CSV) and mactime (bodyfile); files and "
+               "findings as DFXML and CASE/UCO JSON-LD",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('report_docx', 'Reports and exports', "Reports as Word "
+               "documents (.docx)", 'TRACE (Python)', lambda: 'built in'),
     Capability('pcap', 'File analysis', "Network captures (pcap, pcapng): "
                "hosts, DNS, HTTP, TLS server names", 'dpkt',
                _module_version('dpkt', '__version__')),
