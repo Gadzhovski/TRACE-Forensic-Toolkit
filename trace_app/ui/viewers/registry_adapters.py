@@ -23,6 +23,7 @@ keeps their existing call sites (toolbars, paging, context menus) untouched.
 """
 
 from trace_app.core.filetypes import VIEW_AUDIO, VIEW_VIDEO, plan_from_name
+from trace_app.ui import icons
 
 # Audio and video are streamed from the image rather than read into memory.
 # Which extensions count comes from core/filetypes, the same table that
@@ -38,6 +39,8 @@ class ViewerAdapter:
 
     #: Tab label, used when registering with the QTabWidget.
     label = None
+    #: The tab's icon (a name from `icons`).
+    icon = None
 
     def __init__(self, widget):
         self.widget = widget
@@ -64,6 +67,7 @@ class ViewerAdapter:
 
 class HexAdapter(ViewerAdapter):
     label = 'Hex'
+    icon = icons.TAB_HEX
 
     def display(self, content, data):
         self.widget.display_hex_content(content, data)
@@ -79,6 +83,7 @@ class HexAdapter(ViewerAdapter):
 
 class TextAdapter(ViewerAdapter):
     label = 'Text'
+    icon = icons.TAB_TEXT
 
     def display(self, content, data):
         self.widget.display_text_content(content)
@@ -86,6 +91,7 @@ class TextAdapter(ViewerAdapter):
 
 class ApplicationAdapter(ViewerAdapter):
     label = 'Application'
+    icon = icons.TAB_APPLICATION
 
     def display(self, content, data):
         self.widget.display_application_content(content, data.get('name', ''),
@@ -116,6 +122,7 @@ class ApplicationAdapter(ViewerAdapter):
 
 class MetadataAdapter(ViewerAdapter):
     label = 'File Metadata'
+    icon = icons.TAB_METADATA
 
     def display(self, content, data):
         self.widget.display_metadata(data)
@@ -127,6 +134,7 @@ class MetadataAdapter(ViewerAdapter):
 
 class CaseAdapter(ViewerAdapter):
     label = 'Case'
+    icon = icons.TAB_CASE
 
     def display(self, content, data):
         self.widget.display_case(data)
@@ -143,6 +151,7 @@ class CaseAdapter(ViewerAdapter):
 
 class NotesAdapter(ViewerAdapter):
     label = 'Notes'
+    icon = icons.TAB_NOTES
 
     def display(self, content, data):
         self.widget.display_for(data)

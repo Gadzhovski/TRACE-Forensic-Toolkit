@@ -338,7 +338,7 @@ class VirusTotalPanel(QWidget):
         self._busy_text = ''
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setContentsMargins(4, 2, 4, 0)
         layout.setSpacing(4)
 
         # --- header: wordmark, status, cancel ---

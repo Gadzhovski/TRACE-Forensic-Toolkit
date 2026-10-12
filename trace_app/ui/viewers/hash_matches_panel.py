@@ -36,7 +36,7 @@ _TONE = {KNOWN_BAD: 'malicious', NOTABLE: 'suspicious', KNOWN_GOOD: 'clean'}
 class HashMatchWorker(ProcessWorker):
     """Matches a case against its hash sets in a child process."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_matching = Signal(int, str)
 
     kind = 'hashsets'

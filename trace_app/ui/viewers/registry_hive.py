@@ -6,8 +6,8 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidgetItem, QToolBar, Q
     QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
-from trace_app.infra.constants import (PANEL_ICON_SIZE, SPLITTER_HANDLE_WIDTH,
-                                       TREE_ICON_SIZE, TREE_INDENTATION)
+from trace_app.infra.constants import (SPLITTER_HANDLE_WIDTH, TREE_ICON_SIZE,
+                                       TREE_INDENTATION)
 from trace_app.ui import icons
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
@@ -146,17 +146,7 @@ class RegistryExtractor(QWidget):
         self.toolbar = QToolBar("Toolbar")
 
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.toolbar)
-
-        self.icon_label = QLabel()
-        self.icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(self.icon_label, icons.REGISTRY, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(self.icon_label)
-
-        self.label = QLabel("Registry Browser")
-        self.label.setObjectName("panelTitle")
-        self.toolbar.addWidget(self.label)
 
         spacer = QLabel()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)

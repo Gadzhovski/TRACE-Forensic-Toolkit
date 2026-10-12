@@ -39,6 +39,11 @@ ALERT = "Icons/tabler/alert-triangle.svg"
 ERROR = "Icons/tabler/alert-circle.svg"
 INFO = "Icons/tabler/info-circle.svg"
 SUCCESS = "Icons/tabler/circle-check.svg"
+# Message dialogs: filled glyphs in a colour per kind (dialogs.message).
+DIALOG_QUESTION = "Icons/tabler/help-circle-filled.svg"
+DIALOG_INFO = "Icons/tabler/info-circle-filled.svg"
+DIALOG_WARNING = "Icons/tabler/alert-triangle-filled.svg"
+DIALOG_ERROR = "Icons/tabler/alert-circle-filled.svg"
 
 # --- Evidence --------------------------------------------------------------
 EVIDENCE_ADD = "Icons/tabler/file-plus.svg"
@@ -126,6 +131,7 @@ ACTIVITY_CATEGORIES = {
     None: ACTIVITY,
     'programs': "Icons/tabler/trace/activity-programs.svg",
     'files': "Icons/tabler/file-text.svg",
+    'notes': "Icons/tabler/notes.svg",
     'usb': "Icons/tabler/trace/activity-usb.svg",
     'recycle': "Icons/tabler/trash.svg",
     'logons': "Icons/tabler/trace/activity-logons.svg",
@@ -136,6 +142,7 @@ ACTIVITY_CATEGORIES = {
     'usage': "Icons/tabler/trace/activity-usage.svg",
     'system': "Icons/tabler/settings.svg",
     'communication': "Icons/tabler/trace/activity-messages.svg",
+    'locations': "Icons/tabler/map-pin.svg",
     'cloud': "Icons/tabler/trace/activity-cloud.svg",
     'antivirus': "Icons/tabler/trace/activity-antivirus.svg",
 }
@@ -232,6 +239,14 @@ EXTERNAL_LINK = "Icons/tabler/external-link.svg"
 CLOSE = "Icons/tabler/x.svg"
 CARVING = "Icons/tabler/file-search.svg"
 REGISTRY = "Icons/tabler/database.svg"
+# The viewer dock's tabs.
+TAB_HEX = "Icons/tabler/binary.svg"
+TAB_TEXT = "Icons/tabler/file-text.svg"
+TAB_APPLICATION = "Icons/tabler/eye.svg"
+TAB_METADATA = "Icons/tabler/info-circle.svg"
+TAB_CASE = "Icons/tabler/briefcase.svg"
+TAB_NOTES = "Icons/tabler/pencil.svg"
+TAB_VIRUSTOTAL = "Icons/tabler/world-search.svg"
 REGISTRY_HIVE = "Icons/tabler/folder.svg"
 REGISTRY_KEY = "Icons/tabler/key.svg"
 REGISTRY_VALUE = "Icons/tabler/tag.svg"
@@ -247,6 +262,24 @@ FILE_VIDEO = "Icons/mimetypes/video-x-generic.svg"
 FILE_DOC = "Icons/mimetypes/application-vnd.ms-word.svg"
 FILE_HTML = "Icons/mimetypes/text-x-html.svg"
 WEB_BROWSER = "Icons/apps/internet-web-browser.svg"
+
+# Operating systems' marks (core/os_identity: its logo keys). Simple Icons
+# (CC0) and Tabler's filled Windows mark (MIT): Icons/ATTRIBUTION.md. Each
+# in its brand's colour; None = the theme's foreground, for marks whose
+# colour is black, near-black or pale yellow, which one theme or the other
+# would lose.
+OS_LOGOS = {
+    'windows': '#0078D4', 'macos': None, 'apple': None,
+    'android': '#3DDC84', 'linux': None, 'freebsd': '#AB2B28',
+    'openbsd': None, 'kubuntu': '#0079C1', 'xubuntu': '#0044AA',
+    'popos': '#48B9C7', 'elementary': '#64BAFF', 'zorin': '#15A6F0',
+    'linuxmint': '#86BE43', 'ubuntu': '#E95420', 'kalilinux': '#557C94',
+    'raspberrypi': '#A22846', 'debian': '#A81D33', 'fedora': '#51A2DA',
+    'centos': None, 'rockylinux': '#10B981', 'almalinux': None,
+    'redhat': '#EE0000', 'opensuse': '#73BA25', 'suse': None,
+    'manjaro': '#35BFA4', 'archlinux': '#1793D1', 'gentoo': '#54487A',
+    'alpinelinux': '#0D597F', 'nixos': '#5277C3',
+}
 
 
 _cache = {}
@@ -333,13 +366,22 @@ def action(name, text, parent=None):
     return result
 
 
+def os_logo(key):
+    """The mark of an operating system (an `OS_LOGOS` key; an unknown one
+    is drawn as Linux's), in its colour or the theme's."""
+    if key not in OS_LOGOS:
+        key = 'linux'
+    return icon(f"Icons/os/{key}.svg", tint=OS_LOGOS[key])
+
+
 def _is_monochrome(name):
     """Whether `name` is line art to be tinted to the theme's foreground.
 
     Anything that carries its own colours -- logos, the file-type icons from
     the desktop theme -- is left as authored.
     """
-    return name.startswith('Icons/tabler/') and name.lower().endswith('.svg')
+    return name.startswith(('Icons/tabler/', 'Icons/os/')) and \
+        name.lower().endswith('.svg')
 
 
 def current_theme():

@@ -291,3 +291,63 @@ def test_about_checks_and_shows_the_answer(qapp, monkeypatch):
     assert not dialog.update_button.isEnabled()
     assert 'offline' in dialog.update_button.toolTip()
     dialog.deleteLater()
+
+
+def test_progress_of_a_large_image_reaches_the_bar(qapp):
+    """Byte counts past a C int (62 GB of free space being indexed) cross
+    the workers' signals and fill the job bar. IndexWorker.progressed was
+    Signal(int, int, str): every report raised OverflowError and the run
+    died at its unallocated-space step."""
+    import time
+    from trace_app.ui.viewers.search_panel import IndexWorker
+    from trace_app.ui.widgets.job_bar import Job, JobBar
+    done, total = 62_344_429_568, 70_000_000_000
+    worker = IndexWorker('image', 'case', 1)
+    received = []
+    worker.progressed.connect(lambda *values: received.append(values))
+    worker.on_progress(done, total, 'Unallocated space')
+    assert received == [(done, total, 'Unallocated space')]
+
+    bar = JobBar()
+    bar.submit(Job('big', 'Indexing', lambda job: None))
+    bar.report(done, total, 'Unallocated space')
+    assert (bar.progress.value(), bar.progress.maximum()) == (8906, 10000)
+    # A time left once the step has run a while.
+    bar._current.phase_start = (time.monotonic() - 60, done // 2)
+    bar.report(done, total, 'Unallocated space')
+    assert bar.eta_label.text().startswith('about ')
+
+
+def test_the_reopen_offer_waits_for_the_evidence(qapp, tmp_path, monkeypatch):
+    """Reopening a case queues the evidence load and the "run modules?"
+    offer together (app.main). Opening an image runs a nested event loop,
+    which used to run the offer mid-load: a modal dialog over the loading
+    bar, stuck at 20% until it was answered. The offer now waits for the
+    load -- and does not come back once any module has run."""
+    from PySide6.QtCore import QTimer
+    from tests.conftest import image_path, pump
+    from trace_app.core.case import Case
+    from trace_app.ui import main_window as mw
+    asked = []
+
+    def choose(window, *args, **kwargs):
+        asked.append((getattr(window, '_loading_case_evidence', False),
+                      list(window._image_handlers)))
+        return None
+    monkeypatch.setattr(mw, 'choose_modules', choose)
+    case = Case.create(str(tmp_path / 'case'), 'Reopen')
+    evidence_id = case.add_evidence(image_path('8-jpeg-search.dd'), 'Disk')
+    window = mw.MainWindow(case=case)
+    try:
+        QTimer.singleShot(0, window.offer_analysis_modules)   # as app.main
+        pump(qapp, 60, until=lambda: asked)
+        assert len(asked) == 1
+        loading, opened = asked[0]
+        assert not loading and opened, "offered before the evidence opened"
+        # Once something has run (here: the activity module), no offer.
+        case.set_user_activity_state(evidence_id, 'done', records=0)
+        asked.clear()
+        window.offer_analysis_modules()
+        assert asked == []
+    finally:
+        window.cleanup_resources()

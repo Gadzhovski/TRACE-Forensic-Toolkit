@@ -38,7 +38,7 @@ GRADE_LABELS = {'suspicious': 'Suspicious (malware, tools)',
 class YaraWorker(ProcessWorker):
     """Scans one image in a child process (core/background.py)."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_scan = Signal(int, str)
 
     kind = 'yara'

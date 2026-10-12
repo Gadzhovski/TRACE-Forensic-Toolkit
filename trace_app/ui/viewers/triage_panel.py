@@ -14,20 +14,21 @@ import logging
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHeaderView,
-                               QLabel, QPushButton, QSizePolicy,
+                               QPushButton, QSizePolicy,
                                QTableWidget, QToolBar,
-                               QTableWidgetItem, QTabWidget, QVBoxLayout,
+                               QTableWidgetItem, QVBoxLayout,
                                QWidget)
 
 from trace_app.core.case import (REPORTED_FINDING_GRADES, REPORTED_MISMATCHES,
                                  SIGMA_SHOWN)
-from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
+from trace_app.ui.widgets.section_nav import SectionNav
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.elided_label import ElidedLabel
 from trace_app.ui.widgets.toolbars import prepare_toolbar
@@ -57,7 +58,7 @@ class AnalysisWorker(ProcessWorker):
     """Runs the analysis modules in a child process (core/background.py),
     so the window stays responsive however long the run."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_analysis = Signal(int, str)
 
     kind = 'analysis'
@@ -74,6 +75,15 @@ class AnalysisWorker(ProcessWorker):
 
     def on_done(self, count, error):
         self.finished_analysis.emit(count, error)
+
+
+#: Triage's headings, in the order the sidebar shows them.
+GROUPS = (('files', "Files"),
+          ('matches', "Matches & hits"),
+          ('system', "System & NTFS"),
+          ('deleted', "Deleted & carved"),
+          ('people', "People & communication"),
+          ('media', "Media & places"))
 
 
 class TriagePanel(QWidget):
@@ -105,19 +115,10 @@ class TriagePanel(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # The same bar as Listing, Registry and Search: logo, title,
-        # then the tab's main action on the right. Without it this tab was the
-        # only one in the row that opened straight onto controls.
+        # The panel's bar: the analysis's state, then its main action on the
+        # right. No heading -- the tab names the panel (result_docks).
         self.toolbar = QToolBar()
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel()
-        icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(icon_label, icons.TRIAGE, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(icon_label)
-        title = QLabel("Triage")
-        title.setObjectName("panelTitle")
-        self.toolbar.addWidget(title)
 
         # The state of the analysis, after the title and before the button
         # that runs it, so the bar reads as one sentence.
@@ -145,65 +146,65 @@ class TriagePanel(QWidget):
         outer.addWidget(self.toolbar)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(2, 2, 2, 0)
+        layout.setSpacing(0)
         outer.addLayout(layout)
 
-        self.tabs = QTabWidget()
-        self.tabs.setObjectName("triageTabs")
-        self.tabs.setDocumentMode(True)
-        # No base line: in document mode Qt rules one along the top of the
-        # tab row, a stray line no other tab strip in TRACE has.
-        self.tabs.tabBar().setDrawBase(False)
+        # Groups on top, then the group's pages: some 25 sub-tabs in one
+        # scrolling strip said nothing about what belonged with what.
+        self.tabs = SectionNav(GROUPS, name='triage')
+        self.tabs.setObjectName("triageSections")
         self.tabs.currentChanged.connect(self._fill_shown)
         layout.addWidget(self.tabs, 1)
 
         self.mismatch_table = self._make_table(
             ['Name', 'Claims to be', 'Actually is', 'Why', 'Size', 'Path'])
         self.tabs.addTab(self.mismatch_table, icons.icon(icons.FINDING_MISMATCH),
-                         "Type mismatches")
+                         "Type mismatches", group='files')
 
         self.entropy_table = self._make_table(
             ['Name', 'Entropy', 'Peak', 'Type', 'Size', 'Path'])
         self.tabs.addTab(self.entropy_table, icons.icon(icons.FINDING_ENTROPY),
-                         "High entropy")
+                         "High entropy", group='files')
 
         self.duplicate_table = self._make_table(
             ['Name', 'Copies', 'Size', 'Wasted', 'SHA-256', 'Path'])
         self.tabs.addTab(self.duplicate_table,
-                         icons.icon(icons.FINDING_DUPLICATES), "Duplicates")
+                         icons.icon(icons.FINDING_DUPLICATES), "Duplicates",
+                         group='files')
 
         self.hidden_table = self._make_table(
             ['Name', 'Severity', 'Finding', 'Size', 'Path'])
         self.tabs.addTab(self.hidden_table, icons.icon(icons.FINDING_HIDDEN),
-                         "Hidden data")
+                         "Hidden data", group='files')
 
         self.photo_table = self._make_table(
             ['Name', 'Taken', 'Camera', 'Location', 'Software', 'Path'])
         self.tabs.addTab(self.photo_table, icons.icon(icons.FINDING_PHOTO),
-                         "Photos")
+                         "Photos", group='media')
 
         self.author_table = self._make_table(
             ['Name', 'Author', 'Last saved by', 'Company', 'Application',
              'Created', 'Modified', 'Path'])
         self.tabs.addTab(self.author_table, icons.icon(icons.FINDING_AUTHOR),
-                         "Authors")
+                         "Authors", group='files')
 
         self.yara_table = self._make_table(
             ['Name', 'Rule', 'Rule set', 'Severity', 'Matched', 'Path'])
         self.tabs.addTab(self.yara_table, icons.icon(icons.FINDING_YARA),
-                         "YARA")
+                         "YARA", group='matches')
 
         self.executable_table = self._make_table(
             ['Name', 'Severity', 'Kind', 'Architecture', 'Linked', 'Signed',
              'Indicators', 'Path'])
         self.tabs.addTab(self.executable_table, icons.icon(icons.EXECUTABLE),
-                         "Executables")
+                         "Executables", group='files')
 
         self.sigma_table = self._make_table(
             ['Log', 'Level', 'Rule', 'Time (UTC)', 'Event', 'Computer',
              'ATT&CK', 'Details', 'Path'])
-        self.tabs.addTab(self.sigma_table, icons.icon(icons.SIGMA), "Sigma")
+        self.tabs.addTab(self.sigma_table, icons.icon(icons.SIGMA), "Sigma",
+                         group='matches')
 
         #: Widest each free-text column may grow; the full text is in the
         #: cell's tooltip. Uncapped, one long finding or an eight-author paper
@@ -258,7 +259,8 @@ class TriagePanel(QWidget):
         """
         self._carved_panel = panel
         self._tab_for['carved'] = self.tabs.addTab(
-            panel, icons.icon(icons.FINDING_CARVED), "Carved files")
+            panel, icons.icon(icons.FINDING_CARVED), "Carved files",
+            group='deleted')
         panel.count_changed.connect(self._set_carved_count)
         panel.case = self.case
         panel.set_evidence_filter(self.evidence_id)
@@ -268,7 +270,8 @@ class TriagePanel(QWidget):
         (ui/viewers/indicators_panel.py), following the same image filter."""
         self._indicators_panel = panel
         self._tab_for['indicators'] = self.tabs.addTab(
-            panel, icons.icon(icons.FINDING_INDICATORS), "Indicators")
+            panel, icons.icon(icons.FINDING_INDICATORS), "Indicators",
+            group='matches')
         panel.count_changed.connect(self._set_indicator_count)
         panel.set_case(self.case)
         panel.set_evidence_filter(self.evidence_id)
@@ -278,7 +281,7 @@ class TriagePanel(QWidget):
         and downloads, the change journal -- same image filter."""
         self._ntfs_panel = panel
         self._tab_for['ntfs'] = self.tabs.addTab(
-            panel, icons.icon(icons.NTFS), "NTFS")
+            panel, icons.icon(icons.NTFS), "NTFS", group='system')
         panel.count_changed.connect(self._set_ntfs_count)
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
@@ -288,7 +291,8 @@ class TriagePanel(QWidget):
         filter."""
         self._persistence_panel = panel
         self._tab_for['persistence'] = self.tabs.addTab(
-            panel, icons.icon(icons.PERSISTENCE), "Persistence")
+            panel, icons.icon(icons.PERSISTENCE), "Persistence",
+            group='system')
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['persistence'], f"Persistence ({count:,})"))
@@ -300,7 +304,8 @@ class TriagePanel(QWidget):
         (ui/viewers/deleted_panel.py), following the same image filter."""
         self._deleted_panel = panel
         self._tab_for['deleted'] = self.tabs.addTab(
-            panel, icons.icon(icons.DELETED_FILES), "Deleted files")
+            panel, icons.icon(icons.DELETED_FILES), "Deleted files",
+            group='deleted')
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['deleted'], f"Deleted files ({count:,})"))
@@ -312,7 +317,7 @@ class TriagePanel(QWidget):
         the same image filter."""
         self._map_panel = panel
         self._tab_for['map'] = self.tabs.addTab(
-            panel, icons.icon(icons.FINDING_LOCATION), "Map")
+            panel, icons.icon(icons.FINDING_LOCATION), "Map", group='media')
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['map'], f"Map ({count:,})"))
@@ -324,7 +329,7 @@ class TriagePanel(QWidget):
         following the same image filter."""
         self._thumbnails_panel = panel
         self._tab_for['thumbnails'] = self.tabs.addTab(
-            panel, icons.icon(icons.THUMBNAILS), "Thumbnails")
+            panel, icons.icon(icons.THUMBNAILS), "Thumbnails", group='system')
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['thumbnails'], f"Thumbnails ({count:,})"))
@@ -336,7 +341,7 @@ class TriagePanel(QWidget):
         same image filter."""
         self._keywords_panel = panel
         self._tab_for['keywords'] = self.tabs.addTab(
-            panel, icons.icon(icons.KEYWORDS), "Keywords")
+            panel, icons.icon(icons.KEYWORDS), "Keywords", group='matches')
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['keywords'], f"Keywords ({count:,})"))
@@ -348,7 +353,8 @@ class TriagePanel(QWidget):
         following the same image filter."""
         self._similar_panel = panel
         self._tab_for['similar'] = self.tabs.addTab(
-            panel, icons.icon(icons.FINDING_DUPLICATES), "Similar pictures")
+            panel, icons.icon(icons.FINDING_DUPLICATES), "Similar pictures",
+            group='media')
         panel.count_changed.connect(
             lambda count: self.tabs.setTabText(
                 self._tab_for['similar'], f"Similar pictures ({count:,})"))
@@ -360,7 +366,7 @@ class TriagePanel(QWidget):
         the same image filter."""
         self._hash_panel = panel
         self._tab_for['hashes'] = self.tabs.addTab(
-            panel, icons.icon(icons.HASH_SETS), "Hash sets")
+            panel, icons.icon(icons.HASH_SETS), "Hash sets", group='matches')
         panel.count_changed.connect(self._set_hash_count)
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
@@ -394,7 +400,7 @@ class TriagePanel(QWidget):
         """
         self._bookmarks_panel = panel
         self._tab_for['bookmarks'] = self.tabs.addTab(
-            panel, icons.icon(icons.BOOKMARK), "Bookmarks")
+            panel, icons.icon(icons.BOOKMARK), "Bookmarks", group='people')
         panel.count_changed.connect(self._set_bookmark_count)
         self._set_bookmark_count(panel.count)
 
@@ -403,7 +409,8 @@ class TriagePanel(QWidget):
         following the same image filter."""
         self._conversations_panel = panel
         self._tab_for['conversations'] = self.tabs.addTab(
-            panel, icons.icon(icons.CONVERSATIONS), "Conversations")
+            panel, icons.icon(icons.CONVERSATIONS), "Conversations",
+            group='people')
         panel.count_changed.connect(self._set_conversation_count)
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)
@@ -418,7 +425,7 @@ class TriagePanel(QWidget):
         same image filter."""
         self._tags_panel = panel
         self._tab_for['tags'] = self.tabs.addTab(
-            panel, icons.icon(icons.TAG), "Tags")
+            panel, icons.icon(icons.TAG), "Tags", group='people')
         panel.count_changed.connect(self._set_tag_count)
         panel.evidence_id = self.evidence_id
         panel.set_case(self.case)

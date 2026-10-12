@@ -50,6 +50,54 @@ PROGRESS_WIDTH = 150
 SIDE_PROGRESS_WIDTH = 100
 
 
+#: QProgressBar's range is a C int.
+_BAR_MAX = 2 ** 31 - 1
+
+
+def _show_progress(bar, done, total):
+    """Set `bar` to done of total. Byte counts of a large image pass a C
+    int (64 GB of free space being indexed): setRange raised, and the bar
+    stayed on its busy animation with no percentage. Such totals are
+    shown in ten-thousandths."""
+    if total > _BAR_MAX:
+        done, total = int(done * 10000 // total), 10000
+    bar.setRange(0, int(total))
+    bar.setValue(int(min(done, total)))
+
+
+#: Seconds of a step before a time left is guessed: the first moments'
+#: rate says little.
+_ETA_AFTER = 5
+
+
+def _duration(seconds):
+    if seconds < 60:
+        return "under a minute"
+    minutes = round(seconds / 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d} min"
+
+
+def _remaining(job, done, total, detail):
+    """'about 14 min left' for a job's step (a new detail or total is a
+    new step, timed from where it began); '' until it can tell. The bar
+    beside it shows the percentage."""
+    if not total:
+        job.phase = None
+        return ''
+    now = time.monotonic()
+    step = (total, detail.split(' — ')[0] if detail else '')
+    if getattr(job, 'phase', None) != step:
+        job.phase, job.phase_start = step, (now, done)
+    began, at = job.phase_start
+    if now - began >= _ETA_AFTER and done > at:
+        left = (total - done) * (now - began) / (done - at)
+        return f"about {_duration(left)} left"
+    return ''
+
+
+
 class Job:
     """One unit of background work the bar knows how to show.
 
@@ -122,6 +170,11 @@ class JobBar(QWidget):
         self.cancel_button = self._cancel_button()
         self.cancel_button.clicked.connect(self.cancel_current)
         layout.addWidget(self.cancel_button)
+        # How long is left, "about 14 min left", from the rate since this
+        # step began (the bar shows how far).
+        self.eta_label = QLabel()
+        self.eta_label.setObjectName("jobBarEta")
+        layout.addWidget(self.eta_label)
 
         # "Job 2 of 5": every job of this run, finished and waiting.
         self.steps_button = QToolButton()
@@ -236,6 +289,7 @@ class JobBar(QWidget):
         self._current = self._queue.pop(0)
         self.progress.setRange(0, 0)        # indeterminate until it counts
         self.progress.setValue(0)
+        self.eta_label.clear()
         self.setVisible(True)
         self._refresh_label()
         self._refresh_steps()
@@ -255,16 +309,16 @@ class JobBar(QWidget):
         if job is not None and job is self._side:
             job.reported = (done, total, detail)
             if total:
-                self.side_progress.setRange(0, total)
-                self.side_progress.setValue(done)
+                _show_progress(self.side_progress, done, total)
             self._refresh_side(detail)
             return
         if self._current is None:
             return
         self._current.reported = (done, total, detail)
         if total:
-            self.progress.setRange(0, total)
-            self.progress.setValue(done)
+            _show_progress(self.progress, done, total)
+        self.eta_label.setText(_remaining(self._current, done, total,
+                                          detail))
         self._refresh_label(detail)
 
     def job_finished(self, job=None, error=None):
@@ -385,7 +439,8 @@ class JobBar(QWidget):
             self.setVisible(True)
 
     def _show_main(self, shown):
-        for widget in (self.label, self.progress, self.cancel_button):
+        for widget in (self.label, self.progress, self.cancel_button,
+                       self.eta_label):
             widget.setVisible(shown)
         if shown:
             self.setVisible(True)

@@ -20,17 +20,18 @@ import sqlite3
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
                             QSortFilterProxyModel, Qt, QThread, QTimer, Signal)
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QMenu,
-                               QPushButton, QSizePolicy, QTabBar, QTableView,
-                               QToolBar, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHeaderView,
+                               QLineEdit, QMenu, QPushButton,
+                               QSizePolicy, QTableView, QToolBar, QVBoxLayout,
+                               QWidget)
 
 from trace_app.core.activity import CATEGORIES
 from trace_app.core.case import CASE_DB_NAME, query_user_activity
-from trace_app.infra.constants import PANEL_ICON_SIZE, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets.elided_label import ElidedLabel
+from trace_app.ui.widgets.section_nav import GroupedTabs
 from trace_app.ui.widgets.toolbars import prepare_toolbar
 from trace_app.ui.widgets.context_menus import show_menu
 
@@ -39,6 +40,26 @@ logger = logging.getLogger('TRACE.ActivityPanel')
 #: Most rows read at once; the text filter and the categories narrow it.
 SHOWN_LIMIT = 50000
 
+#: The tab rows: groups on top, their categories under them
+#: (ui/widgets/section_nav.GroupedTabs). Fourteen categories in one row ran
+#: past the window's edge.
+GROUPS = (('all', "All"),
+          ('programs', "Programs & system"),
+          ('files', "Files & devices"),
+          ('web', "Web"),
+          ('accounts', "Accounts & network"),
+          ('communication', "Communication"))
+
+#: The group each category's tab is under (None: All).
+GROUP_OF = {None: 'all',
+            'programs': 'programs', 'system': 'programs',
+            'usage': 'programs', 'antivirus': 'programs',
+            'files': 'files', 'usb': 'files', 'recycle': 'files',
+            'notes': 'files',
+            'browser': 'web', 'downloads': 'web', 'searches': 'web',
+            'logons': 'accounts', 'network': 'accounts', 'cloud': 'accounts',
+            'communication': 'communication', 'locations': 'communication'}
+
 _COLUMNS = ('Time', 'What', 'Subject', 'User', 'Details', 'Source',
             'Evidence')
 
@@ -46,7 +67,7 @@ _COLUMNS = ('Time', 'What', 'Subject', 'User', 'Details', 'Source',
 class ActivityWorker(ProcessWorker):
     """Reads one image's activity in a child process (core/background.py)."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_activity = Signal(int, str)
 
     kind = 'activity'
@@ -194,14 +215,6 @@ class ActivityPanel(QWidget):
 
         self.toolbar = QToolBar()
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel()
-        icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(icon_label, icons.ACTIVITY, PANEL_ICON_SIZE)
-        self.toolbar.addWidget(icon_label)
-        title = QLabel("Activity")
-        title.setObjectName("panelTitle")
-        self.toolbar.addWidget(title)
         self.status_label = ElidedLabel()
         self.status_label.setObjectName("triageStatus")
         self.status_label.setSizePolicy(QSizePolicy.Expanding,
@@ -222,22 +235,19 @@ class ActivityPanel(QWidget):
         outer.addWidget(self.toolbar)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(6, 4, 6, 4)
-        layout.setSpacing(4)
+        # Tabs and table edge to edge: margins here showed as wide empty
+        # bands around the tab rows.
+        layout.setContentsMargins(2, 2, 2, 0)
+        layout.setSpacing(0)
         outer.addLayout(layout)
 
-        row = QHBoxLayout()
-        self.tabs = QTabBar()
-        self.tabs.setObjectName("activityTabs")
-        self.tabs.setDocumentMode(True)
-        self.tabs.setExpanding(False)
+        self.tabs = GroupedTabs(GROUPS, name='activity')
         self._keys = [None] + [key for key, _label in CATEGORIES]
         self._labels = ['All'] + [label for _key, label in CATEGORIES]
         for key, label in zip(self._keys, self._labels):
             self.tabs.addTab(icons.icon(icons.ACTIVITY_CATEGORIES[key]),
-                             label)
+                             label, group=GROUP_OF.get(key))
         self.tabs.currentChanged.connect(self._tab_changed)
-        row.addWidget(self.tabs, 1)
         self.filter_input = QLineEdit()
         self.filter_input.setObjectName("activityFilter")
         self.filter_input.setPlaceholderText("Filter…")
@@ -249,8 +259,8 @@ class ActivityPanel(QWidget):
         self._filter_timer.timeout.connect(self.refresh)
         self.filter_input.textChanged.connect(
             lambda _t: self._filter_timer.start())
-        row.addWidget(self.filter_input)
-        layout.addLayout(row)
+        self.tabs.set_corner_widget(self.filter_input)
+        layout.addWidget(self.tabs)
 
         self.model = ActivityModel(self)
         self.proxy = QSortFilterProxyModel(self)
@@ -376,9 +386,15 @@ class ActivityPanel(QWidget):
             except sqlite3.Error as exc:
                 logger.error("Could not count activity: %s", exc)
         total = sum(self._summary.values())
+        groups = dict.fromkeys((key for key, _ in GROUPS), 0)
         for index, key in enumerate(self._keys):
             count = total if key is None else self._summary.get(key, 0)
             self.tabs.setTabText(index, f"{self._labels[index]} ({count:,})")
+            if key is not None:
+                groups[GROUP_OF.get(key, 'communication')] += count
+        groups['all'] = total
+        for key, label in GROUPS:
+            self.tabs.setGroupText(key, f"{label} ({groups[key]:,})")
 
     @property
     def count(self):

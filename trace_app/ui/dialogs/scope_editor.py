@@ -65,7 +65,7 @@ class _Rows:
 class _CountWorker(ProcessWorker):
     """core/background.job_scope_count: files in scope, per image."""
 
-    counted = Signal(int, int, str)        # in scope, total, error
+    counted = Signal(object, object, str)        # in scope, total, error
     progressed = Signal(str)
 
     kind = 'scope_count'

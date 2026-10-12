@@ -62,6 +62,12 @@ class TagsPanel(QWidget):
         self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.tree.setItemDelegate(NoFocusDelegate(self.tree))
         self.tree.setUniformRowHeights(True)
+        # No column of expand arrows and no indent: the tags are always
+        # open, and both left a white strip -- left of every tag's dot, and
+        # beside a selected file (the theme's item rule paints over the
+        # branch area). A tag's row is bold instead, its files under it.
+        self.tree.setRootIsDecorated(False)
+        self.tree.setIndentation(0)
         self.tree.header().setSectionResizeMode(QHeaderView.Interactive)
         for column, width in enumerate((260, 140, 150, 110)):
             self.tree.setColumnWidth(column, width)
@@ -119,6 +125,9 @@ class TagsPanel(QWidget):
             if not count:
                 continue
             head.setText(0, f"{head.text(0)} ({count:,})")
+            font = head.font(0)
+            font.setBold(True)
+            head.setFont(0, font)
             self.tree.addTopLevelItem(head)
             head.setExpanded(True)
         # Files, not marks: a file with two tags is one file.

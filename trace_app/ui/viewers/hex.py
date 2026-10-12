@@ -48,6 +48,7 @@ from trace_app.ui.widgets.export_button import ExportButton
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.context_menus import show_menu
+from trace_app.ui.widgets.elided_label import ElidedLabel
 
 logger = logging.getLogger('TRACE.Hex')
 
@@ -244,7 +245,7 @@ class _SidePanel(QSplitter):
 
 class HexViewer(QWidget):
     #: (image begin, image end, description): bookmark this byte range.
-    bookmark_requested = Signal(int, int, str)
+    bookmark_requested = Signal(object, object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -285,6 +286,13 @@ class HexViewer(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
         self.setup_toolbar()
+        # Offset, selection, image offset and size: in the controls' row,
+        # where the room after the View menu was empty, rather than a line
+        # of its own under the bytes. Shortened with "…" when narrow; the
+        # whole line is its tooltip.
+        self.status_label = ElidedLabel()
+        self.status_label.setObjectName("hexStatus")
+        self.toolbar.addWidget(self.status_label)
         # The controls, then the search in a strip of its own as wide as the
         # side panel below it: inside the controls' toolbar it was sized by
         # guesswork and, on a narrow window, moved into the overflow menu.
@@ -315,10 +323,6 @@ class HexViewer(QWidget):
         column.setSpacing(0)
         self.setup_hex_table()
         column.addWidget(self.hex_table, 1)
-        self.status_label = QLabel()
-        self.status_label.setObjectName("hexStatus")
-        self.status_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        column.addWidget(self.status_label)
         self.splitter.addWidget(left)
 
         # Right: search results and the data inspector -- side by side
@@ -406,7 +410,6 @@ class HexViewer(QWidget):
     def setup_toolbar(self):
         self.toolbar = QToolBar(self)
         prepare_toolbar(self.toolbar)
-        self.toolbar.setContentsMargins(0, 0, 0, 0)
         self.toolbar.setMovable(False)
         self.toolbar.setIconSize(QSize(TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE))
         self.toolbar.setObjectName("compactToolbar")

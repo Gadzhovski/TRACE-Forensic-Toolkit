@@ -36,7 +36,7 @@ CHANGE_LABELS = {vss_compare.DELETED: 'Deleted', vss_compare.ADDED: 'Added',
 class ShadowCompareWorker(ProcessWorker):
     """Runs the comparison in a child process; the rows arrive at the end."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     compared = Signal(list, str)
 
     kind = 'vss_compare'

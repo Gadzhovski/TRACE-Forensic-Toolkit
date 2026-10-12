@@ -6,7 +6,9 @@ question mark, a yellow triangle. Those were the last pieces of stock art left
 in the window, and they sat oddly beside the themed line icons everywhere else.
 
 These wrappers take the same arguments and behave the same way, but draw their
-glyph from the icon registry, so it follows the theme like every other icon.
+glyph from the icon registry: Tabler's filled glyph, in one colour per kind
+(blue question and information, amber warning, red error). The thin grey
+outline used before looked unfinished at dialog size.
 They also centre the buttons: Qt right-aligns them, which looks unbalanced in
 a small dialog whose text is short.
 """
@@ -17,13 +19,25 @@ from trace_app.infra.constants import DIALOG_ICON_SIZE
 from trace_app.ui import icons
 
 
-def _build(parent, title, text, icon_name, buttons, default=None, informative=None):
+#: Each kind's glyph and colour; the same in both themes (the glyph's
+#: mark is cut out, so it reads on either background).
+KINDS = {
+    'question': (icons.DIALOG_QUESTION, '#1E88E5'),
+    'information': (icons.DIALOG_INFO, '#1E88E5'),
+    'warning': (icons.DIALOG_WARNING, '#E3A008'),
+    'critical': (icons.DIALOG_ERROR, '#D93025'),
+}
+
+
+def _build(parent, title, text, kind, buttons, default=None, informative=None):
     box = QMessageBox(parent)
     box.setWindowTitle(title)
     box.setText(text)
     if informative:
         box.setInformativeText(informative)
-    box.setIconPixmap(icons.icon(icon_name).pixmap(DIALOG_ICON_SIZE, DIALOG_ICON_SIZE))
+    name, colour = KINDS[kind]
+    box.setIconPixmap(icons.icon(name, tint=colour).pixmap(
+        DIALOG_ICON_SIZE, DIALOG_ICON_SIZE))
     box.setStandardButtons(buttons)
     if default is not None:
         box.setDefaultButton(default)
@@ -46,21 +60,21 @@ def _centre_buttons(box):
 
 def warning(parent, title, text, informative=None):
     """A problem the user should know about, but which is not fatal."""
-    return _build(parent, title, text, icons.ALERT,
+    return _build(parent, title, text, 'warning',
                   QMessageBox.StandardButton.Ok,
                   informative=informative).exec()
 
 
 def information(parent, title, text, informative=None):
     """Confirmation that something completed."""
-    return _build(parent, title, text, icons.INFO,
+    return _build(parent, title, text, 'information',
                   QMessageBox.StandardButton.Ok,
                   informative=informative).exec()
 
 
 def critical(parent, title, text, informative=None):
     """An operation failed."""
-    return _build(parent, title, text, icons.ERROR,
+    return _build(parent, title, text, 'critical',
                   QMessageBox.StandardButton.Ok,
                   informative=informative).exec()
 
@@ -68,7 +82,7 @@ def critical(parent, title, text, informative=None):
 def question(parent, title, text, informative=None,
              default=QMessageBox.StandardButton.No):
     """Ask for confirmation. Returns True for Yes."""
-    box = _build(parent, title, text, icons.HELP,
+    box = _build(parent, title, text, 'question',
                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                  default=default, informative=informative)
     return box.exec() == QMessageBox.StandardButton.Yes

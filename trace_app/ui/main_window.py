@@ -19,9 +19,10 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
                                QTreeWidgetItem, QTableWidget, QTableWidgetItem, QDialog, QVBoxLayout,
                                QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit, QFormLayout, QApplication,
                                QWidget, QProgressDialog, QSizePolicy, QTabBar, QToolButton,
-                               QStackedWidget)
+                               QStackedWidget, QComboBox)
 
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.result_docks import ResultDocks
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.dialogs.about import AboutDialog
@@ -29,7 +30,7 @@ from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, GROUP_SP
                                        UNKNOWN_DATE, TABLE_ROW_HEIGHT,
                                        DEFAULT_WINDOW_HEIGHT,
                                        DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
-                                       INPUT_FIELD_MIN_WIDTH, PANEL_ICON_SIZE, PROGRESS_MIN_DURATION,
+                                       INPUT_FIELD_MIN_WIDTH, PROGRESS_MIN_DURATION,
                                        TABLE_BATCH_SIZE, TABLE_ICON_SIZE, TREE_ICON_SIZE,
                                        TREE_INDENTATION, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
@@ -173,6 +174,11 @@ class _HandlerOpener(QThread):
                     handler.get_directory_contents(start, None)
             # Searched here, off the UI thread: the tree shows them.
             handler.lost_partitions()
+            # The system on each volume (a hive or a release file read),
+            # for the tree's and Image Information's logos.
+            from trace_app.core import os_identity
+            for key in handler.volume_offsets():
+                os_identity.identify(handler, key)
         except Exception as exc:
             logger.debug("Warming %s: %s", handler.image_path, exc)
 
@@ -183,6 +189,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     #: The tree dock is never narrower than this.
     _TREE_MIN = 200
+    #: saveState's version: 2 since the result panels are docks of
+    #: `result_area` (1 had them in this window, with no central widget).
+    LAYOUT_VERSION = 2
 
     def __init__(self, case=None):
         super().__init__()
@@ -985,16 +994,39 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _apply_startup_layout(self):
         state = getattr(self, '_saved_state', None)
-        if state and self.restoreState(QByteArray(state)) \
+        # The window's own docks (tree, Utils) are arranged as in 2.2, whose
+        # saved states (version 0) are taken as they are.
+        if state and any(self.restoreState(QByteArray(state), version)
+                         for version in (self.LAYOUT_VERSION, 0)) \
                 and self.tree_dock.width() >= self._TREE_MIN \
                 and self.tree_dock.isVisible():
+            self._restore_panels()
             return
         self._apply_default_layout()
 
+    def _restore_panels(self):
+        """The result panels' arrangement, kept apart from the window's
+        (they are docks of `result_area`); the default when none is kept."""
+        import base64
+        import binascii
+        from trace_app.infra.window_state import read_value
+        try:
+            state = base64.b64decode(read_value('Layout', 'panels', ''))
+        except (ValueError, binascii.Error):
+            state = b''
+        if not state or not self.result_area.restoreState(
+                QByteArray(state), self.LAYOUT_VERSION):
+            self.result_viewer.arrange()
+
     def save_layout(self):
-        from trace_app.infra.window_state import save_window_state
-        save_window_state(self.saveGeometry().data(), self.saveState().data(),
+        import base64
+        from trace_app.infra.window_state import save_value, save_window_state
+        save_window_state(self.saveGeometry().data(),
+                          self.saveState(self.LAYOUT_VERSION).data(),
                           self._screen_signature())
+        save_value('Layout', 'panels', base64.b64encode(bytes(
+            self.result_area.saveState(self.LAYOUT_VERSION).data()))
+            .decode('ascii'))
 
     @staticmethod
     def _screen_signature():
@@ -1016,6 +1048,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             dock.show()
         self.addDockWidget(Qt.LeftDockWidgetArea, self.tree_dock)
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
+        self.result_viewer.arrange()
         if self.isMaximized() or self.isFullScreen():
             self._apply_default_layout()
             return
@@ -1624,8 +1657,33 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tree_viewer.setMinimumWidth(self._TREE_MIN)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
 
-        self.result_viewer = QTabWidget(self)
-        self.setCentralWidget(self.result_viewer)
+        # Every result panel is a dock (result_docks.py), so the examiner
+        # can put the Listing beside the Timeline or a tab on another
+        # monitor. They are docks of an inner window in the middle, not of
+        # this one: a window without a central widget shares every change
+        # of its size among all its docks, so maximising widened the tree
+        # to half the screen, and a restored layout came back wide. The
+        # middle takes the change; the tree and Utils keep what the
+        # examiner dragged them to. The tree owns both left corners and
+        # runs the full height (Qt gave the bottom-left to Utils).
+        options = (QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks
+                   | QMainWindow.AllowTabbedDocks)
+        self.setDockOptions(options)
+        self.setTabPosition(Qt.AllDockWidgetAreas, QTabWidget.North)
+        self.setCorner(Qt.TopLeftCorner, Qt.LeftDockWidgetArea)
+        self.setCorner(Qt.BottomLeftCorner, Qt.LeftDockWidgetArea)
+        self.result_area = QMainWindow(self)
+        self.result_area.setObjectName('resultArea')
+        self.result_area.setWindowFlags(Qt.Widget)
+        # Grouped dragging: a panel leaves its group by its tab (its title
+        # strip is hidden while tabbed -- result_docks); a lone panel's strip
+        # still moves it.
+        self.result_area.setDockOptions(options
+                                        | QMainWindow.GroupedDragging)
+        self.result_area.setTabPosition(Qt.AllDockWidgetAreas,
+                                        QTabWidget.North)
+        self.setCentralWidget(self.result_area)
+        self.result_viewer = ResultDocks(self.result_area)
 
         self.listing_table = QTableWidget()
         self.listing_table.setSortingEnabled(True)
@@ -1663,20 +1721,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # ==================== CREATE UNIFIED TOOLBAR (like File Carving tab) ====================
         self.listing_toolbar = QToolBar()
         prepare_toolbar(self.listing_toolbar)
-        self.listing_toolbar.setContentsMargins(0, 0, 0, 0)
         self.listing_toolbar.setMovable(False)
 
-        # LEFT SIDE: Icon and Title
-        self.listing_icon_label = QLabel()
-        self.listing_icon_label.setObjectName("panelIcon")
-        icons.apply_pixmap(self.listing_icon_label, icons.SEARCH_BROWSER, PANEL_ICON_SIZE)
-        self.listing_toolbar.addWidget(self.listing_icon_label)
-
-        self.listing_title_label = QLabel("File System Browser")
-        self.listing_title_label.setObjectName("panelTitle")
-        self.listing_toolbar.addWidget(self.listing_title_label)
-
-        # Add spacer after title
+        # No heading: the panel's tab names it (result_docks).
         title_spacer = QLabel()
         title_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.listing_toolbar.addWidget(title_spacer)
@@ -1705,22 +1752,36 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._build_listing_view_button()
         self.listing_toolbar.addSeparator()
 
-        # RIGHT SIDE: Search functionality
-        # Add search bar
+        # RIGHT SIDE: find by name, in a scope chosen from the dropdown in
+        # front of the box. "This folder" filters the folder shown as you
+        # type; "Whole image" searches every file of the image -- from the
+        # search index, so only once the image is indexed (greyed until
+        # then, saying why): it used to walk every directory on the
+        # window's thread, which froze large images for minutes
+        # (`_update_listing_scope`).
+        self.listing_scope = QComboBox()
+        self.listing_scope.setObjectName("listingScope")
+        self.listing_scope.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.listing_scope.addItem(icons.icon(icons.CASE), "This folder")
+        self.listing_scope.addItem(icons.icon(icons.IMAGE_INFO),
+                                   "Whole image")
+        self.listing_scope.currentIndexChanged.connect(
+            lambda index: self._listing_scope_toggled(
+                index == self.LISTING_WHOLE_IMAGE))
+        self.listing_toolbar.addWidget(self.listing_scope)
         self.listing_search_bar = QLineEdit()
         self.listing_search_bar.setObjectName("listingSearchBar")
-        self.listing_search_bar.setPlaceholderText("Filter this listing…")
-        self.listing_search_bar.setToolTip(
-            "Search the image for files by name.\n"
-            "Press Enter to run the search.\n"
-            "Wildcards are supported, for example *.pdf or report.*")
+        self.listing_search_bar.setClearButtonEnabled(True)
         self.listing_search_bar.setMinimumWidth(220)
         self.listing_search_bar.setMaximumWidth(380)
-        # Only search when user presses Enter
         self.listing_search_bar.returnPressed.connect(self.trigger_listing_search)
-        # Monitor text changes for auto-clearing results
         self.listing_search_bar.textChanged.connect(self.on_listing_search_text_changed)
         self.listing_toolbar.addWidget(self.listing_search_bar)
+        self._listing_filter_timer = QTimer(self)
+        self._listing_filter_timer.setSingleShot(True)
+        self._listing_filter_timer.setInterval(150)
+        self._listing_filter_timer.timeout.connect(self._apply_listing_filter)
+        self._update_listing_scope()
 
         # A trailing gap so the search field does not sit flush against the
         # panel edge. A zero-height spacer widget is collapsed by the toolbar,
@@ -1809,16 +1870,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # which ignored the active theme and stayed light grey in dark mode.
 
         header = self.listing_table.horizontalHeader()
-        header.setDefaultAlignment(Qt.AlignLeft)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.result_viewer.addTab(self.listing_widget, 'Listing')
+        self.result_viewer.addTab(self.listing_widget, 'Listing',
+                                  icons.SEARCH_BROWSER)
 
         self.registry_extractor_widget = RegistryExtractor(self.image_handler)
         # Hive reading runs on a worker thread, so its progress belongs in the
         # status bar with everything else rather than only as a placeholder row
         # in the tree.
         self.registry_extractor_widget.statusMessage.connect(self.set_status)
-        self.result_viewer.addTab(self.registry_extractor_widget, 'Registry')
+        self.result_viewer.addTab(self.registry_extractor_widget, 'Registry',
+                                  icons.REGISTRY)
 
         # Built here rather than with the viewer-dock panels: the tab below
         # needs it, and _build_central_widgets runs first.
@@ -1834,7 +1897,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Search results get their own tab rather than borrowing the listing
         # table. Sharing it meant every search toggled columns and saved and
         # restored browse state, and coming back was a mode change.
-        self.result_viewer.addTab(self.search_panel, 'Search')
+        self.result_viewer.addTab(self.search_panel, 'Search',
+                                  icons.SEARCH_CONTENT)
 
         self.triage_panel = TriagePanel()
         self.triage_panel.set_case(self.case)
@@ -1955,7 +2019,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             lambda point, position: self.open_finding_menu(
                 self._located_artifact(point), position))
         self.triage_panel.add_map_tab(self.map_panel)
-        self.result_viewer.addTab(self.triage_panel, 'Triage')
+        self.result_viewer.addTab(self.triage_panel, 'Triage', icons.TRIAGE)
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
         # it is a record of events across the case, not a list of flagged
@@ -1967,7 +2031,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.activity_panel.run_requested.connect(
             lambda: self.run_analysis_modules(self.activity_panel.evidence_id))
         self.activity_panel.set_case(self.case)
-        self.result_viewer.addTab(self.activity_panel, 'Activity')
+        self.result_viewer.addTab(self.activity_panel, 'Activity',
+                                  icons.ACTIVITY)
 
         # Everything with a time, in one order: NTFS times and journal,
         # activity, photo and document dates, carved files' own dates, and
@@ -1981,7 +2046,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.timeline_panel.menu_extender = self._timeline_menu_extras
         self.timeline_panel.detail_extender = self._timeline_detail
         self.timeline_panel.set_case(self.case)
-        self.result_viewer.addTab(self.timeline_panel, 'Timeline')
+        self.result_viewer.addTab(self.timeline_panel, 'Timeline',
+                                  icons.TIMELINE)
 
     def _build_viewer_dock(self):
         """Bottom "Utils" dock holding the viewer tabs."""
@@ -2038,8 +2104,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             CaseAdapter(self.case_panel),
             NotesAdapter(self.notes_panel),
         ]
+        # Tab icons by widget (VirusTotal's in `_tint_viewer_tabs`), re-tinted
+        # on a theme change: a QTabWidget's icons are not tracked.
+        self._viewer_tab_icons = {adapter.widget: adapter.icon
+                                  for adapter in self.viewer_adapters}
         for adapter in self.viewer_adapters:
-            self.viewer_tab.addTab(adapter.widget, adapter.label)
+            self.viewer_tab.addTab(adapter.widget, icons.icon(adapter.icon),
+                                   adapter.label)
 
         # VirusTotal is not one of the fixed tabs: it joins the dock the
         # first time a lookup is made (show_vt_panel) and can be closed.
@@ -2093,7 +2164,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')
         self.viewer_dock.setWidget(self.viewer_tab)
+        # Under the result panels, beside the tree.
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
+        self.result_viewer.arrange()
 
         # A floor, not a fixed size: the dock stays usable but the user can
         # drag the splitter. Setting minimum == maximum (as this did) pinned it
@@ -2185,6 +2258,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # registry needs to know which theme is active before anything asks it
         # for an icon.
         icons.set_theme(theme)
+        if getattr(self, 'result_viewer', None) is not None:
+            self.result_viewer.refresh()      # the tabs' icons
+        self._tint_viewer_tabs()
 
         self._apply_palette(theme)
 
@@ -3647,6 +3723,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         if not self.case:
             return
+        if getattr(self, '_loading_case_evidence', False):
+            # Still opening the evidence -- this was reached from inside the
+            # load's own event loop, and a modal dialog here held the
+            # loading bar at 20% until it was answered. Asked once the load
+            # is done (load_case_evidence).
+            self._pending_offer = True
+            return
 
         rows = self.case.evidence()
         if not rows:
@@ -3654,14 +3737,33 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # an image is added, not here.
             return
 
-        # Already analysed: re-offering on every reopen would train an
-        # examiner to dismiss the dialog without reading it.
-        if any((self.case.analysis_state(row['id']) or {}).get('status')
-               == 'done' for row in rows):
+        # Something was already run: re-offering on every reopen would train
+        # an examiner to dismiss the dialog without reading it.
+        if any(self._modules_have_run(row['id']) for row in rows):
             self.refresh_analysis_views()
             return
 
         self._ask_and_queue(rows)
+
+    def _modules_have_run(self, evidence_id):
+        """Whether any module was run on the evidence (finished or not): the
+        examiner has chosen what to run, so the reopen offer stays quiet.
+        It used to count only the file analysis, so a case that was only
+        indexed was asked again at every reopen."""
+        case = self.case
+        for state in (case.analysis_state, case.user_activity_state,
+                      case.ntfs_state, case.carving_state):
+            try:
+                if state(evidence_id):
+                    return True
+            except Exception as exc:
+                logger.debug("Module state of %s: %s", evidence_id, exc)
+        index = getattr(getattr(self, 'search_panel', None), 'index', None)
+        try:
+            return bool(index is not None and index.state(evidence_id))
+        except Exception as exc:
+            logger.debug("Index state of %s: %s", evidence_id, exc)
+            return False
 
     def run_analysis_modules(self, evidence_id=None):
         """Ask which modules to run, then queue a run per piece of evidence.
@@ -3855,6 +3957,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.queue_analysis(chosen, choice['modules'])
         if choice.get('index'):
             self.queue_indexing(chosen)
+        if choice.get('index_free'):
+            # After the file index: the files are searchable sooner.
+            self.queue_free_indexing(chosen)
         if choice.get('activity'):
             self.queue_activity(chosen)
         if choice.get('ntfs'):
@@ -4236,6 +4341,43 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             title=f"Indexing {name}",
             start=start,
             stop=lambda worker: worker.stop()))
+
+    def queue_free_indexing(self, rows):
+        """One job per image: the text in its free space and memory files
+        (indexer.index_free_space), resuming a stopped run."""
+        from trace_app.ui.viewers.search_panel import IndexFreeWorker
+        queued = 0
+        for row in rows:
+            if not os.path.exists(row['path']):
+                logger.warning("Skipping free-space indexing of missing %s",
+                               row['path'])
+                continue
+            evidence_id = row['id']
+            name = row.get('display_name') or os.path.basename(row['path'])
+            scope = self._job_scope()
+
+            def start(job, row=row, evidence_id=evidence_id, name=name,
+                      scope=scope):
+                worker = IndexFreeWorker(row['path'], self.case.folder,
+                                         evidence_id, self)
+                worker.params['unlock'] = self._unlocks_for(row['path'])
+                worker.params['scope'] = scope
+                worker.progressed.connect(
+                    lambda done, total, what: self.job_bar.report(
+                        done, total, what))
+                worker.finished_indexing.connect(
+                    lambda count, error: self._indexing_finished(
+                        f"{name} (free space)", count, error))
+                self._retain_worker(worker)
+                worker.start()
+                return worker
+
+            if self.job_bar.submit(Job(
+                    key=f"index_free:{evidence_id}",
+                    title=f"Searching free space of {name}",
+                    start=start, stop=lambda worker: worker.stop())):
+                queued += 1
+        return queued
 
     def _indexing_finished(self, name, count, error):
         if error:
@@ -5211,6 +5353,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def refresh_analysis_views(self):
         """Redraw everywhere findings are shown."""
+        # An index job may have finished: the whole-image search reads it.
+        self._update_listing_scope()
         if getattr(self, 'triage_panel', None) is not None:
             # The whole case: an investigation spans every device in it, and
             # showing only the image loaded last hid every other image's
@@ -5917,11 +6061,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'error': row.get('detail') or '', 'queried': row.get('queried_utc'),
         }
 
+    def _tint_viewer_tabs(self):
+        tabs = getattr(self, 'viewer_tab', None)
+        if tabs is None:
+            return
+        names = getattr(self, '_viewer_tab_icons', {})
+        for index in range(tabs.count()):
+            widget = tabs.widget(index)
+            name = (icons.TAB_VIRUSTOTAL if widget is getattr(
+                self, 'vt_panel', None) else names.get(widget))
+            if name:
+                tabs.setTabIcon(index, icons.icon(name))
+
     def show_vt_panel(self):
         """Bring the VirusTotal tab into the viewer dock, and to the front."""
         index = self.viewer_tab.indexOf(self.vt_panel)
         if index == -1:
-            index = self.viewer_tab.addTab(self.vt_panel, "VirusTotal")
+            index = self.viewer_tab.addTab(
+                self.vt_panel, icons.icon(icons.TAB_VIRUSTOTAL), "VirusTotal")
             # A close button on this tab only: the file viewers are permanent
             # and closing one would leave no way back.
             #
@@ -6037,7 +6194,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # More than one: the Triage tab's duplicate view already shows copies
         # of a hash, so send them there rather than inventing a second list.
         self.result_viewer.setCurrentWidget(self.triage_panel)
-        self.triage_panel.tabs.setCurrentIndex(2)
+        self.triage_panel.show_group('duplicates')
         self.set_status(f"{len(rows)} files share that hash")
 
     def mark_analysis_rows(self):
@@ -6046,6 +6203,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         finally:
             # Tags go over what the analysis wrote into the Flag column.
             self.mark_tagged_rows()
+            # Known-good rows were just hidden or shown: filter over them.
+            if getattr(self, 'listing_search_bar', None) is not None and \
+                    self.listing_search_bar.text().strip():
+                self._apply_listing_filter()
 
     def _mark_analysis_rows(self):
         """Fill the analysis columns for the rows currently listed.
@@ -6093,6 +6254,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             known_good = match is not None and \
                 match['category'] == hashsets.KNOWN_GOOD
             self.listing_table.setRowHidden(row, known_good and hide_known)
+            name_cell = self.listing_table.item(row, 0)
+            if name_cell is not None:
+                name_cell.setData(self._KNOWN_GOOD_ROLE,
+                                  known_good and hide_known)
             concealed_rows += 1 if known_good and hide_known else 0
             facts = found.get(ref)
             if not facts:
@@ -6647,6 +6812,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                None), None
         if pending:
             QTimer.singleShot(0, lambda: self.start_case_setup(pending))
+        if getattr(self, '_pending_offer', False):
+            self._pending_offer = False
+            QTimer.singleShot(0, self.offer_analysis_modules)
 
         if opened:
             self.set_status(
@@ -6751,11 +6919,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         self._view_menu.addSeparator()
 
+        # Every panel, so one closed (or left on a monitor since detached)
+        # can be reopened; Reset Layout puts them all back.
+        panels = self._view_menu.addMenu("Panels")
+        icons.apply_to(panels.menuAction(), icons.RESET_LAYOUT)
         for dock, label in ((self.tree_dock, "Tree View"),
                             (self.viewer_dock, "Utils Panel")):
             action = dock.toggleViewAction()
             action.setText(label)
-            self._view_menu.addAction(action)
+            panels.addAction(action)
+        panels.addSeparator()
+        for dock in self.result_viewer.docks():
+            panels.addAction(dock.toggleViewAction())
 
         # Not a dock toggle: the tab is closed by its own button and reopened
         # here, or by the next lookup.
@@ -6764,6 +6939,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         vt_action.triggered.connect(self.show_vt_panel)
 
     def enable_tabs(self, state):
+        # Each panel, not the docks: a disabled dock could not be moved.
         self.result_viewer.setEnabled(state)
         self.viewer_tab.setEnabled(state)
         self.listing_table.setEnabled(state)
@@ -7254,6 +7430,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.set_status_context(
             f"{os.path.basename(image_path)}   ·   "
             f"{len(handler.get_partitions())} partitions")
+        self._update_listing_scope()
         return True
 
     def activate_evidence(self, evidence_id):
@@ -7539,7 +7716,103 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 break
 
     def load_partitions_into_tree(self, image_path):
-        """Load partitions from an image into the tree viewer."""
+        """Load partitions from an image into the tree viewer, each volume
+        holding an operating system marked with its logo."""
+        self._fill_partitions_tree(image_path)
+        tree = self.tree_viewer
+        for index in range(tree.topLevelItemCount()):
+            root = tree.topLevelItem(index)
+            if (root.data(0, Qt.UserRole) or {}).get('image_path') == \
+                    image_path:
+                self._mark_system_volumes(root)
+        self._record_systems(image_path)
+
+    def _record_systems(self, image_path=None):
+        """Keep the systems found on the image's volumes in the case
+        (Case.set_systems) -- for the Case tab, the report and the
+        timeline's filter, which read the case, not the image. From what
+        opening the image found (os_identity.cached); a volume unlocked
+        since is read then."""
+        from trace_app.core import os_identity
+        handler = self.image_handler
+        if self.case is None or handler is None:
+            return
+        row = self.case.evidence_for_path(image_path or
+                                          self.current_image_path)
+        if row is None:
+            return
+        found = []
+        try:
+            for key in handler.volume_offsets():
+                identity = os_identity.cached(handler, key)
+                if identity:
+                    found.append(dict(identity, volume_key=key,
+                                      volume=self._volume_label(handler,
+                                                                key)))
+            if self.case.set_systems(row['id'], found):
+                case_panel = getattr(self, 'case_panel', None)
+                if case_panel is not None:
+                    case_panel.refresh()
+        except Exception as exc:
+            logger.debug("Could not record the systems found: %s", exc)
+
+    @staticmethod
+    def _volume_label(handler, key):
+        """'Basic data partition @ 65664' for a partition; for a volume
+        inside one (LVM, APFS, Btrfs layer) where TRACE keeps it."""
+        from trace_app.core import containers
+        if key < containers.SHADOW_KEY_BASE:
+            for _addr, desc, start, _length in handler.get_partitions():
+                if start == key:
+                    return handler.partition_label(start, desc)
+            return f"Volume @ {key}"
+        return "Volume in a container"
+
+    def _mark_system_volumes(self, top, compute=False):
+        """Give every volume node under `top` (and `top`, for an image that
+        is one volume) whose operating system is known its system's logo,
+        and name the system in its tooltip. Reads only what opening the
+        image found (`os_identity.cached`) unless `compute` -- an unlocked
+        volume, whose system nothing could read before."""
+        from trace_app.core import os_identity
+        handler = self.image_handler
+        if handler is None:
+            return
+        whole_volume = not handler.get_partitions()
+
+        def volume_key(item):
+            data = item.data(0, Qt.UserRole) or {}
+            if data.get('image_path'):
+                return 0 if whole_volume else None
+            if data.get('inode_number') is not None or data.get(
+                    'is_unallocated') or data.get('is_volume_group') or \
+                    data.get('start_offset') is None or data.get(
+                    'is_shadow_copy') or data.get('archive_chain'):
+                return None
+            return data['start_offset']
+
+        def visit(item, depth):
+            key = volume_key(item)
+            if key is not None:
+                identity = os_identity.identify(handler, key) if compute \
+                    else os_identity.cached(handler, key)
+                if identity:
+                    item.setIcon(0, icons.os_logo(identity['logo']))
+                    tip = item.toolTip(0)
+                    line = os_identity.describe(identity)
+                    if line not in tip:
+                        item.setToolTip(0, f"{line}\n{tip}" if tip else line)
+            if depth < 3:
+                for child in range(item.childCount()):
+                    visit(item.child(child), depth + 1)
+
+        try:
+            visit(top, 0)
+        except Exception as exc:
+            logger.debug("Could not mark system volumes: %s", exc)
+
+    def _fill_partitions_tree(self, image_path):
+        """The image's root node and its volumes."""
         # The image's own name, not its path: with several devices in a case
         # every root began "D:\Cases\..." and was cut off before the part
         # that differs. The path is kept in the data and the tooltip.
@@ -7580,8 +7853,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                             unlocked_kind(0), "Evidence")
                     size = facts.get('_stored_size')
                 self._add_bitlocker_node(root_item_tree, 0, label, size)
-            elif kind == 'lvm':
+            elif kind in ('lvm', 'android_super', 'ubi'):
                 self._add_lvm_nodes(root_item_tree, 0, "Volume")
+            elif kind == 'zfs':
+                self._add_zfs_nodes(root_item_tree, 0, "Volume")
             elif kind == 'apfs':
                 self._add_apfs_nodes(root_item_tree, 0, "Volume")
             elif self.image_handler.fs_layers(0):
@@ -7659,9 +7934,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self._add_bitlocker_node(
                     root_item_tree, start, label, size_in_bytes, '', end)
                 continue
-            if kind in ('lvm', 'apfs', 'ldm'):
+            if kind in ('lvm', 'apfs', 'ldm', 'android_super', 'ubi',
+                        'zfs'):
                 group = QTreeWidgetItem(root_item_tree)
-                what = {'lvm': 'LVM volume group', 'apfs': 'APFS container'}
+                what = {'lvm': 'LVM volume group', 'apfs': 'APFS container',
+                        'android_super': 'Android dynamic partitions',
+                        'ubi': 'UBI volumes', 'zfs': 'ZFS pool'}
                 if kind == 'ldm':
                     database = self.image_handler.ldm_database()
                     what = (f"Windows dynamic disk, disk group "
@@ -7676,7 +7954,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     "inode_number": None, "start_offset": start,
                     "end_offset": end, "is_volume_group": True})
                 {'lvm': self._add_lvm_nodes, 'apfs': self._add_apfs_nodes,
-                 'ldm': self._add_ldm_nodes}[kind](group, start, label)
+                 'ldm': self._add_ldm_nodes,
+                 'android_super': self._add_lvm_nodes,
+                 'ubi': self._add_lvm_nodes,
+                 'zfs': self._add_zfs_nodes}[kind](
+                     group, start, label)
                 group.setExpanded(True)
                 continue
             layers = self.image_handler.fs_layers(start)
@@ -7975,11 +8257,54 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 "inode_number": None, "start_offset": volume['key'],
                 "is_logical_volume": True,
                 "volume_label": f"{label} {volume['name']}"})
-            item.setToolTip(0, f"LVM logical volume {volume['name']} of "
-                               f"volume group {volume['group']}")
+            if self.image_handler.volume_kind(start) == 'ubi':
+                item.setToolTip(0, f"UBI volume {volume['name']} of the "
+                                   f"flash image")
+            elif self.image_handler.volume_kind(start) == 'android_super':
+                item.setToolTip(0, f"Android logical partition "
+                                   f"{volume['name']} (group "
+                                   f"{volume['group']}) of the super "
+                                   f"partition")
+            else:
+                item.setToolTip(0, f"LVM logical volume {volume['name']} "
+                                   f"of volume group {volume['group']}")
             item.setChildIndicatorPolicy(
                 QTreeWidgetItem.ShowIndicator if self.image_handler
                 .check_partition_contents(volume['key'])
+                else QTreeWidgetItem.DontShowIndicator)
+
+    def _add_zfs_nodes(self, parent, start, label):
+        """A node per dataset and snapshot of the ZFS pool at `start`, or
+        one saying why the pool cannot be read here (a raidz member
+        without the other disks)."""
+        datasets = self.image_handler.zfs_datasets(start)
+        if not datasets:
+            item = QTreeWidgetItem(parent)
+            problem = self.image_handler.zfs_problem(start) or \
+                "no datasets"
+            item.setText(0, f"ZFS pool not readable here: {problem} "
+                            f"(File > Assemble RAID or Multi-Disk Volume)")
+            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                'device', 'drive-harddisk')))
+            item.setData(0, Qt.UserRole, {"inode_number": None,
+                                          "start_offset": None})
+            return
+        for dataset in datasets:
+            item = QTreeWidgetItem(parent)
+            what = 'snapshot' if dataset['kind'] == 'snapshot' else \
+                'dataset'
+            locked = ', encrypted (not read)' if dataset['encrypted'] else ''
+            item.setText(0, f"{dataset['name']} (ZFS {what}{locked})")
+            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                'device', 'drive-harddisk')))
+            item.setToolTip(0, f"ZFS {what} {dataset['name']}")
+            item.setData(0, Qt.UserRole, {
+                "inode_number": None, "start_offset": dataset['key'],
+                "is_logical_volume": True,
+                "volume_label": f"ZFS {dataset['name']}"})
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.ShowIndicator if not dataset['encrypted'] and
+                self.image_handler.check_partition_contents(dataset['key'])
                 else QTreeWidgetItem.DontShowIndicator)
 
     def _add_layer_nodes(self, parent, start, label):
@@ -8091,6 +8416,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             fresh = self._apfs_volume_node(parent, volume, label)
             parent.removeChild(fresh)
             parent.insertChild(index, fresh)
+            self._mark_system_volumes(fresh, compute=True)
+            self._record_systems()
             self.tree_viewer.setCurrentItem(fresh)
             fresh.setExpanded(True)
             self.set_status(f"{label} unlocked: its files can now be browsed,"
@@ -8104,6 +8431,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Back where the locked node was, its shadow copies after it.
         parent.removeChild(fresh)
         parent.insertChild(index, fresh)
+        self._mark_system_volumes(fresh, compute=True)
+        self._record_systems()
         self.tree_viewer.setCurrentItem(fresh)
         fresh.setExpanded(True)
         self.set_status(f"{label} unlocked: its files can now be browsed, "
@@ -8267,7 +8596,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     # Worker thread for opening media files for streaming (doesn't load content into memory)
     class MediaStreamWorker(QThread):
-        completed = Signal(object, int, object)  # file_obj, file_size, metadata
+        completed = Signal(object, object, object)  # file_obj, file_size (may pass a C int), metadata
         error = Signal(str)
 
         def __init__(self, image_handler, inode_number, offset):
@@ -8324,9 +8653,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             except Exception as e:
                 self.error.emit(f"Error reading unallocated space: {str(e)}")
 
-    #: Index of the Listing tab in the result viewer.
-    LISTING_TAB = 0
-
     def show_listing_entries(self, entries, start_offset, label=None):
         """Fill the listing with `entries` and bring it to the front.
 
@@ -8347,7 +8673,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Selecting in the tree is a request to browse, so the Listing is what
         # the user wants in front -- not whichever of Deleted Files or Registry
         # they happened to leave open.
-        self.result_viewer.setCurrentIndex(self.LISTING_TAB)
+        self.result_viewer.setCurrentWidget(self.listing_widget)
         return True
 
     def on_item_clicked(self, item, column):
@@ -8425,7 +8751,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # partitions there produced an empty table.
                 if self.image_handler.get_partitions():
                     self.display_volumes_in_listing()
-                    self.result_viewer.setCurrentIndex(self.LISTING_TAB)
+                    self.result_viewer.setCurrentWidget(self.listing_widget)
                 elif self.image_handler.has_filesystem(0):
                     self.current_path = "/"
                     root_inode = self.image_handler.get_root_inode(0)
@@ -9799,15 +10125,161 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             current_item.setBackground(0, QBrush(QColor(255, 100, 100, 100)))  # Semi-transparent red
 
     def on_listing_search_text_changed(self):
-        """Handle text changes in search bar - auto-clear results if empty."""
+        """The folder filter follows the typing; a whole-image search runs
+        on Enter, and emptying the box goes back to the folder."""
         search_query = self.listing_search_bar.text().strip()
-
-        # Auto-clear results when user manually empties the search bar
+        if not self._listing_everywhere():
+            self._listing_filter_timer.start()
+            return
         if not search_query and self._search_mode:
             self.switch_to_browse_mode()
 
+    # --- finding by name: this folder, or the whole image ----------------
+
+    #: Item data role on a row's name cell: hidden as known good (Hash
+    #: Sets), which the folder filter must not un-hide.
+    _KNOWN_GOOD_ROLE = Qt.UserRole + 20
+
+    def _listing_index_ready(self):
+        """Whether the image on screen is indexed (the whole-image search
+        reads the index), and if not, why."""
+        index = getattr(getattr(self, 'search_panel', None), 'index', None)
+        if self.case is None or index is None:
+            return False, ("Searching the whole image needs a case: it reads "
+                           "the search index, which is kept with it.")
+        evidence_id = self.evidence_id_for_path(self.current_image_path) \
+            if self.current_image_path else None
+        if evidence_id is None:
+            return False, "Open an image first."
+        from trace_app.core.search_index import INDEX_DONE, unfinished_note
+        try:
+            state = index.state(evidence_id)
+        except Exception as exc:
+            logger.error("Could not read the index state: %s", exc)
+            state = None
+        if state and state['status'] == INDEX_DONE:
+            return True, ''
+        note = unfinished_note(state, self._indexing_now(evidence_id))
+        run = ("Analysis ▸ Run Analysis Modules ▸ Search index and "
+               "indicators")
+        if note and note.startswith('being indexed'):
+            return False, (f"This image is {note}. Searching the whole "
+                           f"image opens when it finishes.")
+        if note:
+            return False, (f"Not available: {note}. A search over part of "
+                           f"the image would silently miss the rest -- "
+                           f"run indexing again to finish it ({run}).")
+        return False, (f"Index this image first ({run}): the whole-image "
+                       f"search reads the index, which is what makes it "
+                       f"fast.")
+
+    def _indexing_now(self, evidence_id):
+        """Whether an index job for this image is running or queued."""
+        bar = getattr(self, 'job_bar', None)
+        if bar is None:
+            return False
+        key = f"index:{evidence_id}"
+        return any(job.key == key and state in ('running', 'queued')
+                   for job, state in bar.jobs())
+
+    #: The scope dropdown's entries, by index.
+    LISTING_THIS_FOLDER, LISTING_WHOLE_IMAGE = 0, 1
+
+    def _listing_everywhere(self):
+        scope = getattr(self, 'listing_scope', None)
+        return scope is not None and \
+            scope.currentIndex() == self.LISTING_WHOLE_IMAGE
+
+    def _update_listing_scope(self):
+        """Offer "Whole image" for an indexed image only -- listed, greyed
+        and saying why otherwise -- and say what the box does now."""
+        scope = getattr(self, 'listing_scope', None)
+        if scope is None:
+            return
+        ready, why = self._listing_index_ready()
+        if not ready and self._listing_everywhere():
+            scope.setCurrentIndex(self.LISTING_THIS_FOLDER)
+        entry = scope.model().item(self.LISTING_WHOLE_IMAGE)
+        entry.setEnabled(ready)
+        entry.setText("Whole image" if ready else
+                      "Whole image (indexing…)" if why.startswith("This image is being")
+                      else "Whole image (index incomplete)"
+                      if why.startswith("Not available") else
+                      "Whole image (index first)")
+        entry.setToolTip(
+            "Every file of this image, by name, from the search index."
+            if ready else why)
+        scope.setToolTip(
+            "Where to look: this folder (filters as you type), or the whole "
+            "image (needs the image indexed; press Enter)."
+            + ('' if ready else '\n\n' + why))
+        if self._listing_everywhere():
+            self.listing_search_bar.setPlaceholderText(
+                "Search the whole image… (Enter)")
+            self.listing_search_bar.setToolTip(
+                "Files of the whole image whose name contains this, any "
+                "case. Wildcards match the whole name: *.pdf, IMG_??.jpg. "
+                "Press Enter.")
+        else:
+            self.listing_search_bar.setPlaceholderText("Filter this folder…")
+            self.listing_search_bar.setToolTip(
+                "Show only this folder's entries whose name contains this, "
+                "any case, as you type. Wildcards match the whole name: "
+                "*.pdf, IMG_??.jpg.\nChoose \"Whole image\" in the "
+                "dropdown to search every file (needs the image indexed).")
+
+    def _listing_scope_toggled(self, everywhere):
+        self._update_listing_scope()
+        if everywhere:
+            self._apply_listing_filter()    # unfiltered: folder rows return
+            if self.listing_search_bar.text().strip():
+                self.trigger_listing_search()
+        elif self._search_mode:
+            self.switch_to_browse_mode()    # refills, then filters
+        else:
+            self._apply_listing_filter()
+
+    def _listing_name_matcher(self, query):
+        """name -> bool for the folder filter, reading a query as the index
+        search does: part of a name, or a whole-name wildcard."""
+        if '*' in query or '?' in query:
+            pattern = re.compile(self._wildcard_to_regex(query), re.IGNORECASE)
+            return lambda name: pattern.match(name) is not None
+        folded = query.casefold()
+        return lambda name: folded in name.casefold()
+
+    def _apply_listing_filter(self):
+        """Hide this folder's rows whose name does not match the box (in
+        folder mode); rows hidden as known good stay hidden."""
+        table = getattr(self, 'listing_table', None)
+        if table is None:
+            return
+        query = ''
+        if not self._listing_everywhere() and not self._search_mode:
+            query = self.listing_search_bar.text().strip()
+        matches = self._listing_name_matcher(query) if query else None
+        shown = total = 0
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            if item is None:
+                continue
+            total += 1
+            hide = bool(item.data(self._KNOWN_GOOD_ROLE)) or (
+                matches is not None and not matches(item.text()))
+            table.setRowHidden(row, hide)
+            shown += 0 if hide else 1
+        if getattr(self, 'listing_icon_view', None) is not None:
+            self.listing_icon_view.sync_hidden()
+        if query:
+            self.set_status(f"{shown:,} of {total:,} shown matching "
+                            f"'{query}'")
+
     def trigger_listing_search(self):
-        """Trigger search when Enter is pressed."""
+        """Enter: filter the folder now, or search the whole image."""
+        if not self._listing_everywhere():
+            self._listing_filter_timer.stop()
+            self._apply_listing_filter()
+            return
         search_query = self.listing_search_bar.text().strip()
 
         if not search_query:
@@ -9983,7 +10455,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # Check if search query contains wildcards
             has_wildcards = '*' in search_query or '?' in search_query
 
-            if has_wildcards:
+            indexed = self._indexed_name_search(search_query)
+            if indexed is not None:
+                files = indexed
+            elif has_wildcards:
                 # For wildcard searches, get all files and filter locally
                 files = self.image_handler.search_files(None)
                 # Filter by wildcard pattern
@@ -10020,6 +10495,36 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         except Exception as e:
             self.set_status(f"Search error: {str(e)}")
+
+    def _indexed_name_search(self, query):
+        """Files of the image on screen named like `query`, from the search
+        index -- None when the image is not indexed (the caller then walks
+        the image, as before; the window offers the whole-image search only
+        for an indexed image)."""
+        ready, _why = self._listing_index_ready()
+        if not ready:
+            return None
+        from trace_app.core.case import parse_artifact_ref
+        evidence_id = self.evidence_id_for_path(self.current_image_path)
+        files = []
+        for row in self.search_panel.index.find_files(evidence_id, query):
+            ref = parse_artifact_ref(row['artifact_ref'])
+            files.append({
+                'name': row['name'] or '',
+                'inode_number': row['inode'],
+                'start_offset': row['start_offset'],
+                'sequence': ref.get('sequence'),
+                'size': row['size'] or 0,
+                'created': row['created_utc'] or '',
+                'accessed': row['accessed_utc'] or '',
+                'modified': row['mtime_utc'] or '',
+                'changed': row['changed_utc'] or '',
+                'path': row['path'] or '',
+                'is_directory': False,
+                'is_deleted': bool(row['is_deleted']),
+                'type': 'file',
+            })
+        return files
 
     def insert_search_result_row(self, file_data):
         """Insert a search result into the listing table."""

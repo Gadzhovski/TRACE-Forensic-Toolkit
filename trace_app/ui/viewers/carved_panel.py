@@ -156,7 +156,7 @@ class CarvingWorker(ProcessWorker):
     """Carves one image in a child process (core/background.py)."""
 
     #: (megabytes done, megabytes total, files found)
-    progressed = Signal(int, int, int)
+    progressed = Signal(object, object, object)
     file_carved = Signal(dict)
     finished_carving = Signal(int, str)
 

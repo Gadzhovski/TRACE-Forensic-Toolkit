@@ -501,7 +501,7 @@ class ReportDialog(QDialog):
 class ReportWorker(ProcessWorker):
     """Writes the report in a child process (core/background.py)."""
 
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     item_written = Signal(dict)
     finished_report = Signal(int, str)
 

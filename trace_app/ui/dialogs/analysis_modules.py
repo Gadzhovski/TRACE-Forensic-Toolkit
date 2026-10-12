@@ -49,6 +49,11 @@ MODULE_CARVE = 'carve'
 #: rather than case.db, so it too runs as a job of its own.
 MODULE_INDEX = 'index'
 
+#: Text in free space and in page, swap and hibernation files
+#: (indexer.index_free_space): the slow part of indexing, a job of its own
+#: after the file index, so the files are searchable first.
+MODULE_INDEX_FREE = 'index_free'
+
 #: Windows activity and browser history (core/activity): reads known
 #: locations rather than every file, so it is its own, short job.
 MODULE_ACTIVITY = 'activity'
@@ -90,7 +95,7 @@ MODULE_DELETED = 'deleted'
 
 #: The modules that are jobs of their own, each a boolean in a choice; the
 #: rest (analysis.MODULES) are listed under 'modules'.
-JOB_MODULES = (MODULE_INDEX, MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
+JOB_MODULES = (MODULE_INDEX, MODULE_INDEX_FREE, MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
                MODULE_HASHSETS,
                MODULE_YARA, MODULE_SIGMA, MODULE_PERSISTENCE,
                MODULE_KEYWORDS, MODULE_THUMBNAILS, MODULE_DELETED)
@@ -153,6 +158,14 @@ DESCRIPTIONS = {
         "and hashes found in it (Triage ▸ Indicators).",
         "Reads every file in full; replaces a previous index of the same "
         "image.", EVERY_FILE),
+    MODULE_INDEX_FREE: (
+        "Search free space and memory files",
+        "Add the text in unallocated space — deleted documents, messages and "
+        "logs no file holds any more — and in the page, swap and hibernation "
+        "files to the search index (results marked [unallocated] and "
+        "[memory]). After the file index; it can be stopped and resumed.",
+        "Reads all of the image's free space; zero-filled space is skipped.",
+        WHOLE_IMAGE),
     MODULE_ACTIVITY: (
         "User activity and browser history",
         "What the users did. Windows: programs run (Prefetch, Amcache, Shimcache, "
@@ -252,7 +265,7 @@ GROUPS = (
                              MODULE_PERSISTENCE, MODULE_THUMBNAILS)),
     ("Rules and lists", (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
                          MODULE_KEYWORDS)),
-    ("Recovery", (MODULE_DELETED, MODULE_CARVE)),
+    ("Recovery", (MODULE_DELETED, MODULE_INDEX_FREE, MODULE_CARVE)),
 )
 
 #: Profiles: what each ticks. Modules that cannot run are left unticked
@@ -264,7 +277,7 @@ _QUICK = {MODULE_MAGIC, MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
           MODULE_THUMBNAILS, MODULE_DELETED, MODULE_SIGMA}
 _STANDARD = _QUICK | {MODULE_HASH, MODULE_EXECUTABLES, MODULE_INDEX,
                       MODULE_HASHSETS, MODULE_YARA, MODULE_KEYWORDS}
-_FULL = _STANDARD | {MODULE_ENTROPY, MODULE_CARVE}
+_FULL = _STANDARD | {MODULE_ENTROPY, MODULE_INDEX_FREE, MODULE_CARVE}
 #: None first: browsing without any analysis is a first-class answer.
 PROFILES = {NONE: frozenset(), QUICK: _QUICK, STANDARD: _STANDARD,
             FULL: _FULL}
@@ -273,10 +286,11 @@ PROFILE_LABELS = {
            "Modules can be run any time from Analysis \u25b8 Run Analysis "
            "Modules."),
     QUICK: ("Quick", "Fast modules only: nothing reads every file in full."),
-    STANDARD: ("Standard", "Everything but entropy and carving: hashes, "
-               "the search index and the rules this case uses."),
-    FULL: ("Full", "Every module, including entropy and file carving of "
-           "unallocated space. The slowest."),
+    STANDARD: ("Standard", "Everything but entropy, free space and "
+               "carving: hashes, the search index of the files and the "
+               "rules this case uses."),
+    FULL: ("Full", "Every module, including entropy, searching free space "
+           "and file carving of unallocated space. The slowest."),
     CUSTOM: ("Custom", "Your own selection."),
 }
 
@@ -299,7 +313,8 @@ def remember_profile(name):
 def default_choice(modules=None):
     """What the dialog offers before the examiner has chosen anything."""
     return {'modules': list(modules or ()), 'evidence_ids': None,
-            'index': bool(modules), 'activity': bool(modules),
+            'index': bool(modules), 'index_free': False,
+            'activity': bool(modules),
             'ntfs': bool(modules), 'fstimes': bool(modules),
             'hashsets': False,
             'persistence': bool(modules), 'thumbnails': bool(modules),
@@ -886,6 +901,7 @@ class AnalysisModulesDialog(QDialog):
         # The old attribute names, which callers and tests address.
         self.boxes = self.selector.boxes
         for name, key in (('index_box', MODULE_INDEX),
+                          ('index_free_box', MODULE_INDEX_FREE),
                           ('activity_box', MODULE_ACTIVITY),
                           ('ntfs_box', MODULE_NTFS),
                           ('fstimes_box', MODULE_FSTIMES),

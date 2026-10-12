@@ -64,7 +64,7 @@ _MEANING = {
 
 
 class DeletedWorker(ProcessWorker):
-    progressed = Signal(int, int, str)
+    progressed = Signal(object, object, str)
     finished_deleted = Signal(int, str)
 
     kind = 'deleted'
