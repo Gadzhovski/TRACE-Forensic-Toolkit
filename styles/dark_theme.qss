@@ -1870,7 +1870,7 @@ QLabel#mediaStatusLine {
 }
 
 /* The media player: a black picture area, times that do not jiggle as they count. */
-QVideoWidget#mediaVideo {
+FrameView#mediaVideo {
     background-color: #000000;
 }
 QLabel#mediaTime {

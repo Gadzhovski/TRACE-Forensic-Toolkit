@@ -27,8 +27,9 @@ import os
 import time
 
 from PySide6.QtCore import QEventLoop, QSize, Qt, QTimer, QUrl
-from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
-from PySide6.QtMultimediaWidgets import QVideoWidget
+from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtMultimedia import (QAudioOutput, QMediaMetaData,
+                                  QMediaPlayer, QVideoSink)
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QLabel,
                                QSizePolicy, QSlider, QStyle,
                                QStyleOptionSlider, QToolBar, QVBoxLayout,
@@ -46,6 +47,43 @@ JUMP_MS = 5000
 DEFAULT_FPS = 25.0
 #: Playback speeds offered.
 SPEEDS = (0.25, 0.5, 1.0, 1.5, 2.0)
+#: A stop() still running after this long is logged with the window's
+#: stack -- it is the backend's own wait, which nothing here can end.
+STOP_WATCHDOG_SECONDS = 5.0
+
+
+def _drain(seconds):
+    """Run pending events for `seconds`: the frames already on their way
+    to the window arrive before the player is torn down."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        QApplication.processEvents(QEventLoop.AllEvents, 20)
+
+
+class _StopWatchdog:
+    """Logs where the window's thread is if QMediaPlayer.stop() has not
+    returned in STOP_WATCHDOG_SECONDS. The wait is inside Qt's FFmpeg
+    backend; a thread cannot end it, but the log then says it happened and
+    where, instead of a window that froze with nothing recorded."""
+
+    def __init__(self):
+        import threading
+        self._main = threading.get_ident()
+        self._timer = threading.Timer(STOP_WATCHDOG_SECONDS, self._report)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def _report(self):
+        import sys
+        import traceback
+        frame = sys._current_frames().get(self._main)
+        stack = ''.join(traceback.format_stack(frame)) if frame else '?'
+        logger.error("The media player has not stopped after %.0f s (Qt's "
+                     "FFmpeg backend is waiting); the window's thread is "
+                     "at:\n%s", STOP_WATCHDOG_SECONDS, stack)
+
+    def cancel(self):
+        self._timer.cancel()
 
 
 class SeekSlider(QSlider):
@@ -70,6 +108,50 @@ class SeekSlider(QSlider):
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+
+class FrameView(QWidget):
+    """The picture: the newest frame, scaled to fit (never cropped), on
+    black. It reads a plain QVideoSink rather than being a QVideoWidget:
+    QVideoWidget hands frames over in a way that made the FFmpeg backend's
+    render thread wait for the window's thread, so a stop(), a new source
+    or a detach while a frame was on its way waited for ever (1 run in 10
+    under load, Linux and macOS). A sink only signals, queued to this
+    thread; nothing in the backend ever waits on the window."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sink = QVideoSink(self)
+        self._image = QImage()
+        self._sink.videoFrameChanged.connect(self._frame)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
+
+    def videoSink(self):
+        return self._sink
+
+    def _frame(self, frame):
+        if frame.isValid():
+            image = frame.toImage()
+            if not image.isNull():
+                self._image = image
+                self.update()
+
+    def clear(self):
+        self._image = QImage()
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0))
+        if self._image.isNull():
+            return
+        size = self._image.size().scaled(self.size(), Qt.KeepAspectRatio)
+        x = (self.width() - size.width()) // 2
+        y = (self.height() - size.height()) // 2
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.drawImage(self.rect().adjusted(
+            x, y, -(self.width() - size.width() - x),
+            -(self.height() - size.height() - y)), self._image)
 
 
 class AudioVideoPlayer(QWidget):
@@ -105,7 +187,7 @@ class AudioVideoPlayer(QWidget):
 
         # The picture takes what room there is -- and gives it up, so the
         # controls below always show.
-        self.video_widget = QVideoWidget(self)
+        self.video_widget = FrameView(self)
         self.video_widget.setObjectName("mediaVideo")
         self.video_widget.setMinimumSize(QSize(160, 90))
         self.video_widget.setSizePolicy(QSizePolicy.Expanding,
@@ -113,7 +195,7 @@ class AudioVideoPlayer(QWidget):
 
         self.media_player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
-        self.media_player.setVideoOutput(self.video_widget)
+        self.media_player.setVideoOutput(self.video_widget.videoSink())
         self.media_player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(self._current_volume / 100.0)
 
@@ -558,7 +640,8 @@ class AudioVideoPlayer(QWidget):
             pass
 
     def safe_stop(self):
-        """Safely stop playback even during shutdown."""
+        """Stop a player that is being destroyed (not one that will play
+        again: its video output is detached)."""
         try:
             if hasattr(self, 'media_player') and self.media_player:
                 self._shutting_down = True
@@ -570,10 +653,12 @@ class AudioVideoPlayer(QWidget):
                 if self.media_player.playbackState() == \
                         QMediaPlayer.PlayingState:
                     self.media_player.pause()
-                deadline = time.monotonic() + 0.15
-                while time.monotonic() < deadline:
-                    QApplication.processEvents(QEventLoop.AllEvents, 20)
-                self.media_player.stop()
+                _drain(0.05)
+                watchdog = _StopWatchdog()
+                try:
+                    self.media_player.stop()
+                finally:
+                    watchdog.cancel()
                 QApplication.processEvents()
                 if hasattr(self, 'audio_output') and self.audio_output:
                     try:
