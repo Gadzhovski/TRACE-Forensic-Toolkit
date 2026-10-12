@@ -1330,6 +1330,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.export_archive_action.triggered.connect(
             self.export_case_archive)
         case_menu.addAction(self.export_archive_action)
+        # What the analysis found, for other tools (core/interchange).
+        from trace_app.ui.dialogs.interchange_export import KINDS
+        tools_menu = case_menu.addMenu("Export for Other Tools")
+        icons.apply_to(tools_menu.menuAction(), icons.EXPORT_FILE)
+        self.interchange_actions = []
+        for kind, (text, _title, _ext, _pattern) in KINDS.items():
+            action = icons.action(icons.EXPORT_FILE, text, self)
+            action.triggered.connect(
+                lambda _=False, kind=kind: self.export_for_tools(kind))
+            tools_menu.addAction(action)
+            self.interchange_actions.append(action)
         open_archive_action = QAction(icons.icon(icons.ARCHIVE),
                                       "Open Case Archive...", self)
         open_archive_action.triggered.connect(self.open_case_archive)
@@ -1342,7 +1353,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         for action in (self.case_properties_action, self.verify_case_action,
                        self.create_report_action, self.export_archive_action,
-                       self.open_case_folder_action):
+                       self.open_case_folder_action,
+                       *self.interchange_actions):
             action.setEnabled(self.case is not None)
         if self.case is None:
             case_menu.setToolTipsVisible(True)
@@ -4091,6 +4103,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if export_case_archive(self, self.case) and \
                 getattr(self, 'case_panel', None):
             self.case_panel.refresh()
+
+    def export_for_tools(self, kind):
+        """Case > Export for Other Tools: DFXML or CASE/UCO."""
+        if self.case is None:
+            return None
+        from trace_app.ui.dialogs.interchange_export import export_for_tools
+        return export_for_tools(self, self.case, kind)
 
     def open_case_archive(self):
         """Unpack an archived case and switch to it: TRACE starts again on

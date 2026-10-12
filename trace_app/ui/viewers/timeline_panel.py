@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QTableView, QTextBrowser, QToolBar,
                                QToolButton, QToolTip, QVBoxLayout, QWidget)
 
-from trace_app.core import timeline
+from trace_app.core import timeline, timeline_export
 from trace_app.core.case import CASE_DB_NAME
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.ui import icons
@@ -465,10 +465,12 @@ class _Load(QThread):
 class _Export(QThread):
     done = Signal(int, str, str)
 
-    def __init__(self, folder, filters, path, names, parent=None):
+    def __init__(self, folder, filters, path, names, parent=None,
+                 fmt='csv'):
         super().__init__(parent)
         self.folder, self.filters, self.path, self.names = \
             folder, filters, path, names
+        self.fmt = fmt
 
     def run(self):
         try:
@@ -476,8 +478,9 @@ class _Export(QThread):
                 f'file:{os.path.join(self.folder, CASE_DB_NAME)}?mode=ro',
                 uri=True, timeout=10)
             try:
-                rows = timeline.write_csv(connection, self.filters, self.path,
-                                          self.names)
+                rows = timeline_export.write(self.fmt, connection,
+                                             self.filters, self.path,
+                                             self.names)
             finally:
                 connection.close()
         except Exception as exc:        # reported, never left hanging
@@ -550,11 +553,19 @@ class TimelinePanel(QWidget):
         self.views_button.setProperty("dropdown", True)
         self.views_button.menu().aboutToShow.connect(self._fill_views_menu)
         self.toolbar.addWidget(self.views_button)
-        self.export_button = QPushButton("Export CSV…")
+        self.export_button = QPushButton("Export…")
         self.export_button.setObjectName("triageRunButton")
-        self.export_button.setToolTip("Every event the filters select -- "
-                                      "not only the rows shown")
-        self.export_button.clicked.connect(lambda: self.export_csv())
+        self.export_button.setToolTip(
+            "Every event the filters select -- not only the rows shown -- "
+            "as CSV, or for Timesketch, plaso or mactime")
+        self.export_button.setProperty("dropdown", True)
+        export_menu = QMenu(self.export_button)
+        for fmt, (label, _extension, _pattern) in \
+                timeline_export.FORMATS.items():
+            action = export_menu.addAction(label + "…")
+            action.triggered.connect(
+                lambda _=False, fmt=fmt: self.export_csv(fmt=fmt))
+        self.export_button.setMenu(export_menu)
         self.toolbar.addWidget(self.export_button)
         outer.addWidget(self.toolbar)
 
@@ -1261,24 +1272,27 @@ class TimelinePanel(QWidget):
 
     # --- export and views ------------------------------------------------------
 
-    def export_csv(self, path=None):
+    def export_csv(self, path=None, fmt='csv'):
+        """Every selected event in `fmt` (timeline_export.FORMATS)."""
         if self.case is None:
             return
+        label, extension, pattern = timeline_export.FORMATS[fmt]
         # Only a real path: a button's `checked` flag once arrived here as
         # False, and open(False) is the console.
         if not isinstance(path, str) or not path:
             # The case's export folder -- its exports/, or the one its
             # settings name (Options > Settings > Carving & exports).
-            default = os.path.join(self.case.exports_dir, 'timeline.csv')
+            stem = 'timeline' if fmt == 'csv' else f'timeline-{fmt}'
+            default = os.path.join(self.case.exports_dir, stem + extension)
             os.makedirs(os.path.dirname(default), exist_ok=True)
             path, _ = QFileDialog.getSaveFileName(
-                self, "Export Timeline", default, "CSV (*.csv)")
+                self, f"Export Timeline as {label}", default, pattern)
             if not path:
                 return
         self.export_button.setEnabled(False)
         self.status_label.setText("Exporting…")
         self._export = _Export(self.case.folder, dict(self.filters), path,
-                               self._names, self)
+                               self._names, self, fmt=fmt)
         self._export.done.connect(self._exported)
         self._export.start()
 
