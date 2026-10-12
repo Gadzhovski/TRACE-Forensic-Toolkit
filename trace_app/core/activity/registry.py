@@ -546,6 +546,127 @@ def run_mru(hive):
     return out
 
 
+def _utf16_strings(raw, count=2):
+    """The first `count` NUL-terminated UTF-16 strings of a value, and
+    where the bytes after them begin."""
+    out, at = [], 0
+    while at + 1 < len(raw):
+        end = at
+        while end + 1 < len(raw) and raw[end:end + 2] != b'\x00\x00':
+            end += 2
+        out.append(raw[at:end].decode('utf-16-le', 'replace'))
+        at = end + 2
+        if len(out) == count:
+            break
+    return out, at
+
+
+def comdlg32(hive):
+    """The common Open / Save As dialog's memory, newest first: [{'key',
+    'what', 'path', 'program', 'extension', 'position', 'time'}].
+
+    * OpenSavePidlMRU\\<extension> (Vista on): files opened or saved, as
+      shell item lists; '*' lists every extension again (kept only for
+      files no other list names);
+    * LastVisitedPidlMRU: each program's last folder (its name in UTF-16,
+      then a shell item list); CIDSizeMRU: programs that showed the
+      dialog; FirstFolder: programs that used it, by full path;
+    * XP: OpenSaveMRU\\<extension> paths and LastVisitedMRU program and
+      folder, as strings under MRUList.
+
+    A key's last-write time is when its newest item was used, so only
+    position 0 of each list has a time."""
+    base = _EXPLORER + 'ComDlg32\\'
+    out = []
+
+    def listed(key, order, item, what, extension=''):
+        for position, index in enumerate(order):
+            try:
+                raw = key.value(str(index)).raw_data()
+            except Exception:
+                continue
+            found = item(raw)
+            if not found:
+                continue
+            program, path = found
+            out.append({'key': key.name(), 'what': what, 'path': path,
+                        'program': program, 'extension': extension,
+                        'position': position,
+                        'time': _utc(key.timestamp()) if position == 0
+                        else None})
+
+    def pidl(raw):
+        path = shellitems.join_path(shellitems.parse_id_list(raw))
+        return ('', path) if path else None
+
+    def program_and_pidl(raw):
+        strings, at = _utf16_strings(raw[:520], 1)
+        program = strings[0] if strings else ''
+        path = shellitems.join_path(shellitems.parse_id_list(raw, at))
+        return (program, path) if program or path else None
+
+    def program_only(raw):
+        strings, _at = _utf16_strings(raw[:520])
+        return (strings[0], '') if strings and strings[0] else None
+
+    def program_and_folder(raw):
+        strings, _at = _utf16_strings(raw)
+        if not strings or not strings[0]:
+            return None
+        return strings[0], strings[1] if len(strings) > 1 else ''
+
+    opened = _key(hive, base + 'OpenSavePidlMRU')
+    if opened is not None:
+        seen = set()
+        subkeys = sorted(opened.subkeys(), key=lambda k: k.name() == '*')
+        for sub in subkeys:
+            before = len(out)
+            listed(sub, _mru_order(sub), pidl, 'File opened or saved',
+                   '' if sub.name() == '*' else sub.name().lower())
+            if sub.name() == '*':
+                out[before:] = [item for item in out[before:]
+                                if item['path'] not in seen]
+            seen.update(item['path'] for item in out[before:])
+    for name, item, what in (
+            ('LastVisitedPidlMRU', program_and_pidl,
+             'Folder last used by a program'),
+            ('CIDSizeMRU', program_only, 'Program showed the dialog'),
+            ('FirstFolder', program_and_folder,
+             'Program used the Open/Save dialog')):
+        key = _key(hive, base + name)
+        if key is not None:
+            listed(key, _mru_order(key), item, what)
+    # Windows XP: strings, ordered by MRUList's letters.
+    for name, what in (('OpenSaveMRU', 'File opened or saved'),
+                       ('LastVisitedMRU', 'Folder last used by a program')):
+        root = _key(hive, base + name)
+        if root is None:
+            continue
+        for key in [root] + list(root.subkeys()):
+            order = str(_value(key, 'MRUList', '') or '')
+            for position, letter in enumerate(order):
+                try:
+                    raw = key.value(letter).raw_data()
+                except Exception:
+                    continue
+                strings, _at = _utf16_strings(raw)
+                if not strings or not strings[0]:
+                    continue
+                if name == 'LastVisitedMRU':
+                    program, path = strings[0], \
+                        strings[1] if len(strings) > 1 else ''
+                else:
+                    program, path = '', strings[0]
+                out.append({'key': key.name(), 'what': what, 'path': path,
+                            'program': program,
+                            'extension': key.name().lower()
+                            if key is not root and key.name() != '*'
+                            else '', 'position': position,
+                            'time': _utc(key.timestamp()) if position == 0
+                            else None})
+    return out
+
+
 def typed_paths(hive):
     """Paths typed into Explorer's address bar, newest (url1) first."""
     key = _key(hive, _EXPLORER + 'TypedPaths')

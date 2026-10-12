@@ -1,0 +1,474 @@
+{
+ "tool": "notepad_parser v0.2.0 (AbdulRhmanAlfaifi/notepad_parser @ f14171df0910e625dc2e6ec160de93ab7c8af9bd), built with Rust 1.86",
+ "how": "notepad_parser -f jsonl over each sample; content as the SHA-256 of its UTF-16LE, the unsaved chunks as the SHA-256 of json.dumps([[position, deletions, added], ...], ensure_ascii=False) in UTF-8",
+ "tabs": {
+  "notepad-x-00bc8eb6-b8bb-459b-973a-a998b734b47c.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Users\\Reversing\\Documents\\Notepad-State-Library\\NotepadStateLibrary\\xUnitTests\\TestFiles\\TextFiles\\SavedFile-Short.txt",
+   "file_size": 0,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "1601-01-01T00:00:00Z",
+   "file_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "cursor": [
+    17,
+    17
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 0,
+   "file_content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "file_content_start": "",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-x-1d971dfe-9e67-4849-a7e5-a46f4100ad0b.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Users\\Reversing\\Documents\\Notepad-State-Library\\NotepadStateLibrary\\xUnitTests\\TestFiles\\TextFiles\\SavedFile-Short-UnsavedChanges.txt",
+   "file_size": 18,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2025-08-02T19:51:07Z",
+   "file_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "cursor": [
+    46,
+    46
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": true,
+   "file_content_length": 64,
+   "file_content_sha256": "0211b0a03e2ade05bc12fe3de190ff21eec1c8790f353a1266b1ab67ce11ee72",
+   "file_content_start": "Saved file short  - I made a change at the end and did not save\r",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-x-215c7345-13c2-440a-b6bb-df737db3f327.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Users\\Reversing\\Documents\\Notepad-State-Library\\NotepadStateLibrary\\xUnitTests\\TestFiles\\TextFiles\\SavedFile-Long-UnsavedChanges.txt",
+   "file_size": 842208,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2025-08-02T19:50:30Z",
+   "file_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "cursor": [
+    15,
+    64
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": true,
+   "file_content_length": 840057,
+   "file_content_sha256": "08a302989bd55064453dd211c90e8fcc9f77b519776ff0627cc83c2b34b7433e",
+   "file_content_start": "Saved File Long - I made a change in the middle and did not save\r\rLorem ipsum do",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-x-3249c0ef-a5ef-4dc6-bb00-b84a1dab317f.bin": {
+   "is_saved_file": false,
+   "path": "",
+   "file_size": null,
+   "encoding": null,
+   "cr_type": null,
+   "last_write_time": null,
+   "file_hash": null,
+   "cursor": [
+    85,
+    85
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": true,
+   "file_content_length": 85,
+   "file_content_sha256": "313bed77789e35470b8747e19140e1599625e7324e4fce0c3ca9ced1515f418d",
+   "file_content_start": "This file has never been saved but has been closed and had the unsaved buffer fl",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-x-8508552a-b3e8-46d6-9203-9c75dd0b24a5.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Users\\Reversing\\Documents\\Notepad-State-Library\\NotepadStateLibrary\\xUnitTests\\TestFiles\\TextFiles\\SavedFile-Long.txt",
+   "file_size": 0,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "1601-01-01T00:00:00Z",
+   "file_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "cursor": [
+    840008,
+    840008
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 0,
+   "file_content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "file_content_start": "",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-x-abb3d672-e5d2-4994-9bc3-483a44805b16.bin": {
+   "is_saved_file": false,
+   "path": "",
+   "file_size": null,
+   "encoding": null,
+   "cr_type": null,
+   "last_write_time": null,
+   "file_hash": null,
+   "cursor": [
+    0,
+    0
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 0,
+   "file_content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "file_content_start": "",
+   "chunk_count": 70,
+   "chunks_sha256": "067169c9e205e27e656e109c766ad5a1951872f7d2698b243fafc27b34a3c3bb"
+  },
+  "notepad-rs-not_saved-arabic-rtl_set-bc0695dd.bin": {
+   "is_saved_file": false,
+   "path": "",
+   "file_size": null,
+   "encoding": null,
+   "cr_type": null,
+   "last_write_time": null,
+   "file_hash": null,
+   "cursor": [
+    0,
+    0
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 0,
+   "file_content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "file_content_start": "",
+   "chunk_count": 19,
+   "chunks_sha256": "a851f6b01dcbb37b15563e148549070dbf076b7324989905d7a6eaec28a3bac1"
+  },
+  "notepad-rs-not_saved-english-rtl_unset-9f7c2ef9.bin": {
+   "is_saved_file": false,
+   "path": "",
+   "file_size": null,
+   "encoding": null,
+   "cr_type": null,
+   "last_write_time": null,
+   "file_hash": null,
+   "cursor": [
+    0,
+    0
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 0,
+   "file_content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "file_content_start": "",
+   "chunk_count": 44,
+   "chunks_sha256": "a6733552d0a0589e823d018a7dac602eecdfd3542aa97c9ab1bd1c5921dc9e35"
+  },
+  "notepad-rs-saved-arabic-rtl_set-big_file-9cb51381.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Windows\\Temp\\notepad_files\\تجربة_ملف_كبير.txt",
+   "file_size": 2000053,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2024-08-11T17:12:33Z",
+   "file_hash": "FB184E9725B61C0926B40C05417C488D87E1E0AE8E29C436C1EF61601884B6E1",
+   "cursor": [
+    988358,
+    988358
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": true,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 1000032,
+   "file_content_sha256": "6acb2c5767e828853058a3267869a0c9ed47d37772101c32e8f62773c63feecb",
+   "file_content_start": "تجربة لملف حجمه أكبر من 1MB\r===\rزززةيلءيمآفةكهمصوطديدزسظخةأخرااذزصرثقحرأكقاصفرآع",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-rs-saved-arabic-rtl_set-c5bf63ad.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Windows\\Temp\\notepad_files\\تجربة.txt",
+   "file_size": 47,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2024-08-11T16:52:39Z",
+   "file_hash": "D1FB1DD9F2FCBB5E585756D3B2BE5C9661C9E8D0D32AD73C657057AB444CB3D3",
+   "cursor": [
+    0,
+    0
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": true,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 26,
+   "file_content_sha256": "6f272d36cf9fb35b40ef3e5d1efe4666bdfedf275a9feaccfe70473af9de5c53",
+   "file_content_start": "ملف تجربة, هذا الملف محفوظ",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-rs-saved-arabic-unsaved_mod-c5bf63ad.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Windows\\Temp\\notepad_files\\تجربة.txt",
+   "file_size": 47,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2024-08-11T16:57:08Z",
+   "file_hash": "D1FB1DD9F2FCBB5E585756D3B2BE5C9661C9E8D0D32AD73C657057AB444CB3D3",
+   "cursor": [
+    26,
+    26
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": true,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 26,
+   "file_content_sha256": "6f272d36cf9fb35b40ef3e5d1efe4666bdfedf275a9feaccfe70473af9de5c53",
+   "file_content_start": "ملف تجربة, هذا الملف محفوظ",
+   "chunk_count": 30,
+   "chunks_sha256": "50d0bf59f264992381f71beb49bc25e9f60b62d65ecdb090775c785596892619"
+  },
+  "notepad-rs-saved-english-rtl_unset-22bb38a5.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Windows\\Temp\\notepad_files\\test.txt",
+   "file_size": 39,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2024-08-11T16:55:41Z",
+   "file_hash": "DC0D761830E24FE676EBE508B6820CD0F9AAD7305EF04990D42B3FE857A18CAC",
+   "cursor": [
+    39,
+    39
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 39,
+   "file_content_sha256": "e0ac6c762877120ce5b84dca4c93e2efab4430a61b21416653c0b215905c2a7a",
+   "file_content_start": "This is a test file, this file is saved",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-rs-saved-english-rtl_unset-big_file-370b5af2.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Windows\\Temp\\notepad_files\\test_big.txt",
+   "file_size": 1050057,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2024-08-11T17:06:26Z",
+   "file_hash": "D76A89BD4D4B24FA2381265AC6EB07FCAF816670EFEB5BC414F4A2E68EA18322",
+   "cursor": [
+    1050055,
+    1050055
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 1050055,
+   "file_content_sha256": "5e43157f0661fbd5c2dc69bae4df3f6a865b37356d0f3c9933d1510d5ddf7ec4",
+   "file_content_start": "This is a file with the content is bigger than 1MB\r===\rpadkmovygbtswxnplbmlwbest",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-rs-saved-english-unsaved_mod-22bb38a5.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Windows\\Temp\\notepad_files\\test.txt",
+   "file_size": 39,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2024-08-11T17:00:32Z",
+   "file_hash": "DC0D761830E24FE676EBE508B6820CD0F9AAD7305EF04990D42B3FE857A18CAC",
+   "cursor": [
+    39,
+    39
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 2,
+    "unknown0": 1,
+    "unknown1": 1
+   },
+   "contain_unsaved_data": false,
+   "file_content_length": 39,
+   "file_content_sha256": "e0ac6c762877120ce5b84dca4c93e2efab4430a61b21416653c0b215905c2a7a",
+   "file_content_start": "This is a test file, this file is saved",
+   "chunk_count": 22,
+   "chunks_sha256": "002cb2dbe119f0a95234000fc57fc211994c101ce17215678dfc44b32e560e20"
+  },
+  "notepad-rs-vers-26200.6584-2adb69ab.bin": {
+   "is_saved_file": false,
+   "path": "",
+   "file_size": null,
+   "encoding": null,
+   "cr_type": null,
+   "last_write_time": null,
+   "file_hash": null,
+   "cursor": [
+    17,
+    17
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "unformated"
+   },
+   "contain_unsaved_data": true,
+   "file_content_length": 17,
+   "file_content_sha256": "b5663f5bc6f9b595759ff704d1dfbe32938bd185d6c6b9aa92bc5016720e6217",
+   "file_content_start": "This is a test :D",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-rs-vers-26200.6584-8f842aa4.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Users\\u0041\\Desktop\\This is Test.md",
+   "file_size": 36,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2026-01-08T16:40:21Z",
+   "file_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "cursor": [
+    519072,
+    519072
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "markdown_syntax"
+   },
+   "contain_unsaved_data": true,
+   "file_content_length": 519072,
+   "file_content_sha256": "b9292c62ea599970624718fc0a9fa1a37a5df5b9b34db67bfb53e10729f83bfb",
+   "file_content_start": "This is another *test* **test** ~aa~\rThis is another *test* **test** ~aa~\rThis i",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  "notepad-rs-vers-26200.6584-9bad4cfd.bin": {
+   "is_saved_file": true,
+   "path": "C:\\Users\\u0041\\Desktop\\H1.md",
+   "file_size": 50,
+   "encoding": "UTF8",
+   "cr_type": "CRLF",
+   "last_write_time": "2026-01-08T16:19:16Z",
+   "file_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+   "cursor": [
+    5168,
+    5168
+   ],
+   "config_block": {
+    "word_wrap": true,
+    "rtl": false,
+    "show_unicode": false,
+    "version": 3,
+    "unknown0": 1,
+    "unknown1": 1,
+    "formatting_type": "markdown"
+   },
+   "contain_unsaved_data": true,
+   "file_content_length": 6258,
+   "file_content_sha256": "d7e9ace6ed87608fec1d41f186f60f57179db0c1d012e3e0e8d64772675819be",
+   "file_content_start": "# H1\r\rThis is formatting test (**Markdown**)\r\r# H1\r\rThis is formatting test (**M",
+   "chunk_count": 0,
+   "chunks_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+ }
+}

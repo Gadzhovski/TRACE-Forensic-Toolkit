@@ -101,6 +101,17 @@ def script_runs(data, min_length=MIN_STRING_LENGTH):
     return kept
 
 
+def _notepad_text(content):
+    from trace_app.core.activity import notepad
+    try:
+        tab = notepad.parse(content)
+    except (notepad.TabStateError, IndexError, ValueError):
+        return None
+    if 'text' not in tab:
+        return None                       # a state file (.0.bin / .1.bin)
+    return '\n'.join(filter(None, (tab.get('path'), tab['text'])))
+
+
 def extract_text(content, name='', limit=None, skip_packed=False):
     """Readable text from `content`, chosen by what the file actually is.
 
@@ -128,6 +139,12 @@ def extract_text(content, name='', limit=None, skip_packed=False):
             text = _from_msg(content)
         elif extension == '.pdf' or content[:5] == b'%PDF-':
             text = _from_pdf(content)
+        elif extension == '.bin' and content[:2] == b'NP' and \
+                _notepad_text(content) is not None:
+            # Windows 11 Notepad's tab state: the tab's text with its
+            # unsaved edits applied -- typed a character per chunk, which
+            # the strings of the raw bytes never join into words.
+            text = _notepad_text(content)
         elif extension in ('.docx', '.xlsx', '.pptx', '.docm', '.xlsm',
                            '.pptm', '.dotm', '.xltm', '.potm', '.ppsm'):
             text = _from_ooxml(content, extension)
