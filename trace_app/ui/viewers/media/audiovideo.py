@@ -222,9 +222,14 @@ class AudioVideoPlayer(QWidget):
         self.media_player.errorOccurred.connect(self.handle_error)
         self.media_player.positionChanged.connect(self.update_position)
         self.media_player.durationChanged.connect(self.update_duration)
-        self.media_player.playbackStateChanged.connect(self.update_play_state)
+        # Queued: the player emits these from inside stop(), setSource()
+        # and pause(), with the FFmpeg backend's lock held, and a slot
+        # that touches the widgets there could wait for ever (CI hung in
+        # _set_enabled under stop()). They run on the next turn instead.
+        self.media_player.playbackStateChanged.connect(
+            self.update_play_state, Qt.QueuedConnection)
         self.media_player.mediaStatusChanged.connect(
-            self.handle_media_status_change)
+            self.handle_media_status_change, Qt.QueuedConnection)
         self.position_slider.sliderMoved.connect(self.set_position)
         self.volume_slider.valueChanged.connect(self.set_volume)
 
