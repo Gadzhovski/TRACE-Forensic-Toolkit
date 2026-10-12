@@ -32,7 +32,7 @@ LEVEL_NAMES = (('5', 'RAID 5'), ('0', 'RAID 0'), ('6', 'RAID 6'),
 class _Detect(QThread):
     """Runs hwraid.detect. Signals only: the panel's bound slots receive
     them on the GUI thread."""
-    progress = Signal(int, int)
+    progress = Signal(object, object)
     done = Signal(list)
 
     def __init__(self, members, names, parent=None):

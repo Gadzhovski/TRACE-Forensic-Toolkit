@@ -33,6 +33,13 @@ def readable(group):
         return True, (f"{missing} device{'s' if missing != 1 else ''} "
                       f"missing: what is mirrored or covered by parity is "
                       f"read; anything only on the missing device is not")
+    if group['kind'] == assembly.ZFS:
+        # One missing disk is rebuilt from P (XOR); Q is not read.
+        spare = 1 if group['level'].startswith('raidz') else 0
+        if missing <= spare:
+            return True, f"{missing} missing; rebuilt from parity"
+        return False, (f"{missing} missing: the pool cannot be read "
+                       f"without {'them' if missing != 1 else 'it'}")
     if group['kind'] == assembly.LDM:
         if group['level'] == 'raid5' and missing == 1:
             return True, "1 missing; rebuilt from parity"
@@ -99,7 +106,9 @@ class AssembleDialog(QDialog):
             ok, why = readable(group)
             what = (f"RAID{group['level']}" if group['kind'] ==
                     assembly.MDRAID else f"Dynamic {group['level']}"
-                    if group['kind'] == assembly.LDM else 'Btrfs')
+                    if group['kind'] == assembly.LDM else
+                    f"ZFS {group['level']}" if group['kind'] == assembly.ZFS
+                    else 'Btrfs')
             members = ', '.join(
                 names.get(m['image']) or m['image'].replace('\\', '/')
                 .rsplit('/', 1)[-1] for m in group['members'])

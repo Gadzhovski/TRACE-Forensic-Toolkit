@@ -34,10 +34,6 @@ search.db
 search.db-wal
 search.db-shm
 
-# The maintainer's working case and notes, kept beside the source
-/New folder/
-/features_to_add.txt
-
 # User config (may contain API keys)
 /config.ini
 
@@ -61,10 +57,6 @@ __pycache__/
 /build/
 /dist/
 
-# Vendored third-party binaries (downloaded, not committed)
-/tools/Arsenal-Image-Mounter-*/
-/tools/sleuthkit-*/
-
 # Local docs
 /docs/
 
@@ -82,3 +74,6 @@ desktop.ini
 
 # Screenshots pasted into an assistant session land here
 /image.png
+/dfvfs-main
+/sleuthkit_test_data-main
+/fedora

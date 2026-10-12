@@ -317,6 +317,23 @@ def split_ldm_key(key):
     return _split(key, _LDM_BASE, 2 ** 53)
 
 
+#: A ZFS pool's datasets and snapshots (core/zfs.py), above the dynamic
+#: disks' volumes: a pool has many more datasets than a container volumes.
+_ZFS_BASE = 2 ** 53
+DATASETS_PER_POOL = 1024
+
+
+def zfs_key(start_sector, index):
+    return _ZFS_BASE + start_sector * DATASETS_PER_POOL + index
+
+
+def split_zfs_key(key):
+    """(pool partition start, dataset index) or None."""
+    if not isinstance(key, int) or not _ZFS_BASE <= key < 2 ** 63:
+        return None
+    return divmod(key - _ZFS_BASE, DATASETS_PER_POOL)
+
+
 def split_layer_key(key):
     """(partition start, layer index) or None."""
     if not isinstance(key, int) or not _LAYER_BASE <= key < 2 ** 52:
@@ -326,7 +343,23 @@ def split_layer_key(key):
 
 def volume_kind(window):
     """What a partition holds that The Sleuth Kit cannot open by itself:
-    'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', or None."""
+    'bitlocker', 'fvde', 'luks', 'lvm', 'apfs', 'android_super', 'ubi',
+    'zfs' or None."""
+    from trace_app.core.android_super import RESERVED, is_super
+    from trace_app.core.ubi import HEADER, is_ubi
+    try:
+        window.seek(0)
+        head = window.read(RESERVED + 4)
+        if is_super(head):
+            return 'android_super'
+        if is_ubi(head[:HEADER]):
+            return 'ubi'
+        from trace_app.core.zfs import looks_like_label
+        window.seek(0)
+        if looks_like_label(window.read(256 * 1024)):
+            return 'zfs'
+    except Exception:
+        pass
     checks = (('bitlocker', 'pybde', 'check_volume_signature_file_object'),
               ('fvde', 'pyfvde', 'check_volume_signature_file_object'),
               ('luks', 'pyluksde', 'check_volume_signature_file_object'),

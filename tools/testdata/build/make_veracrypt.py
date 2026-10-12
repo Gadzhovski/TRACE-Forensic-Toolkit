@@ -10,7 +10,9 @@ mounted device -- so the decrypted bytes and every file have a known hash:
 * vc-sha256-pim.hc  AES, SHA-256, PIM 7 (password A-PASSWORD-OF-TWENTY-PLUS)
 * vc-blake2s.hc     AES, BLAKE2s-256
 * vc-hidden.hc      an outer volume (OUTER) with a hidden one (HIDDEN)
-* vc-serpent.hc     Serpent, SHA-512: TRACE must say it cannot read it
+* vc-serpent.hc     Serpent, SHA-512
+* vc-<encryption>.hc  2 MiB, each other encryption VeraCrypt offers:
+                      Twofish, Camellia, Kuznyechik and every cascade
 * vc-partition.raw  a GPT disk whose partition is a VeraCrypt volume
 
 and vc-key.json, the answer key. Password PASSWORD unless named.
@@ -163,13 +165,20 @@ def volume(folder, name, encryption='AES', hash_name='SHA-512', pim=0,
     create(target, size, password, encryption, hash_name, pim)
     entry = {'password': password, 'pim': pim, 'encryption': encryption,
              'hash': hash_name}
-    if encryption == 'AES':
-        # The usable size is the container less its two header areas.
-        plain, files = fat_image(name, size - 4 * 65536)
-        written = fill(target, password, pim, plain)
-        entry.update(size=written, plain_length=len(plain),
-                     plain_sha256=sha256(plain), files=files)
+    # The usable size is the container less its two header areas.
+    plain, files = fat_image(name, size - 4 * 65536)
+    written = fill(target, password, pim, plain)
+    entry.update(size=written, plain_length=len(plain),
+                 plain_sha256=sha256(plain), files=files)
     return entry
+
+
+#: Every other encryption VeraCrypt 1.26 offers, by its own names.
+ENCRYPTIONS = ('Twofish', 'Camellia', 'Kuznyechik', 'AES-Twofish',
+               'AES-Twofish-Serpent', 'Serpent-AES', 'Serpent-Twofish-AES',
+               'Twofish-Serpent', 'Camellia-Kuznyechik', 'Camellia-Serpent',
+               'Kuznyechik-AES', 'Kuznyechik-Serpent-Camellia',
+               'Kuznyechik-Twofish')
 
 
 def hidden_volume(folder):
@@ -232,6 +241,10 @@ def main():
     key['vc-hidden.hc'] = hidden_volume(folder)
     key['vc-serpent.hc'] = volume(folder, 'vc-serpent.hc',
                                   encryption='Serpent')
+    for encryption in ENCRYPTIONS:
+        name = f'vc-{encryption.lower()}.hc'
+        key[name] = volume(folder, name, encryption=encryption,
+                           size=2 * MIB)
     key['vc-partition.raw'] = partition_disk(folder)
     with open(os.path.join(folder, 'vc-key.json'), 'w') as handle:
         json.dump(key, handle, indent=2, sort_keys=True)

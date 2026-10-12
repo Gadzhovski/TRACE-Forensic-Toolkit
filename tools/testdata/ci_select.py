@@ -237,7 +237,9 @@ def catalog():
 #: images" step): a test file naming one needs that step.
 LINUX_BUILT = ('btrfs-deleted', 'md-raid', 'luks-lvm', 'luks1-lvm',
                'luks2-lvm', 'vc-key.json', 'f2fs-key.json',
-               'chromium-storage')
+               'fs-images-key.json', 'container-images-key.json',
+               'chromium-storage', 'vbox-snapshots-key.json',
+               'ubifs-key.json', 'zfs-key.json')
 
 
 def needs(test_files, graph):

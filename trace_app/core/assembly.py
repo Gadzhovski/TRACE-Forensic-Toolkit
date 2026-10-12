@@ -1,5 +1,5 @@
 """Evidence made of several disks: a Linux RAID (md) array, a multi-disk
-Btrfs file system (no Qt).
+Btrfs file system, a ZFS pool over several disks (no Qt).
 
 Each member disk is its own evidence -- imaged, hashed and verified on
 its own -- but what was on the machine is the array (or the Btrfs pool),
@@ -23,7 +23,8 @@ logger = logging.getLogger('TRACE.Assembly')
 
 EXTENSION = '.trace-assembly'
 VERSION = 1
-MDRAID, BTRFS, HWRAID, LDM = 'mdraid', 'btrfs', 'hwraid', 'ldm'
+MDRAID, BTRFS, HWRAID, LDM, ZFS = 'mdraid', 'btrfs', 'hwraid', 'ldm', \
+    'zfs'
 
 
 class AssemblyError(Exception):
@@ -57,6 +58,41 @@ def _btrfs_device(handler, start):
     devid = struct.unpack_from('<Q', sb, 0xc9)[0]
     label = sb[0x12b:0x22b].split(b'\0', 1)[0].decode('utf-8', 'replace')
     return fsid, devid, devices, label
+
+
+def _zfs_device(handler, start):
+    """(pool GUID, this disk's GUID, disks needed, pool name, level --
+    'raidz1'.. or 'stripe') of a ZFS
+    disk at a partition whose pool cannot be read from it alone (raidz, or
+    several top-level vdevs), or None."""
+    from trace_app.core import zfs
+    try:
+        offset, length = handler.partition_bytes(start)
+        if not zfs.looks_like_label(handler.read(offset, zfs.LABEL)):
+            return None
+        found = zfs.read_label(containers.ByteWindow(handler.read, offset,
+                                                     length), length)
+    except Exception:
+        return None
+    if found is None:
+        return None
+    config = found[0]
+    tree = config['vdev_tree']
+    tops = config.get('vdev_children', 1)
+    if tops == 1 and tree.get('type') in ('disk', 'file', 'mirror'):
+        return None                       # readable from this disk
+    leaves = _zfs_leaves(tree)
+    needed = len(leaves) if tops == 1 else tops
+    level = f"raidz{tree.get('nparity', 1)}" if tops == 1 and         tree.get('type') == 'raidz' else 'stripe'
+    return (config['pool_guid'], config['guid'], needed, config.get('name'),
+            level)
+
+
+def _zfs_leaves(tree):
+    if tree.get('type') in ('disk', 'file'):
+        return [tree.get('guid')]
+    return [leaf for child in tree.get('children', [])
+            for leaf in _zfs_leaves(child)]
 
 
 def find_groups(handlers):
@@ -97,6 +133,17 @@ def find_groups(handlers):
                 group['members'].append({'image': path,
                                          'start_sector': start,
                                          'slot': devid})
+                continue
+            pool = _zfs_device(handler, start)
+            if pool is not None:
+                pool_guid, guid, needed, name, level = pool
+                group = groups.setdefault((ZFS, pool_guid), {
+                    'kind': ZFS, 'id': f"{pool_guid:016x}",
+                    'name': name or f"{pool_guid:016x}"[:8], 'level': level,
+                    'needed': needed, 'members': []})
+                group['members'].append({'image': path,
+                                         'start_sector': start,
+                                         'slot': guid})
     _ldm_groups(handlers, groups)
     out = []
     for group in groups.values():
@@ -164,8 +211,8 @@ def describe(group):
                 f"'{group['name']}': {found} of {group['needed']} disks "
                 f"found")
     found = len({m['slot'] for m in group['members']})
-    what = (f"RAID{group['level']}" if group['kind'] == MDRAID
-            else 'Btrfs file system')
+    what = {MDRAID: f"RAID{group['level']}", BTRFS: 'Btrfs file system',
+            ZFS: f"ZFS {group['level']} pool"}[group['kind']]
     return (f"{what} '{group['name']}': {found} of {group['needed']} "
             f"{'disks' if group['kind'] == MDRAID else 'devices'} found")
 
@@ -199,7 +246,7 @@ def read_descriptor(path):
     except (OSError, ValueError) as exc:
         raise AssemblyError(f"Unreadable descriptor: {exc}") from exc
     if data.get('trace_assembly') != VERSION or \
-            data.get('kind') not in (MDRAID, BTRFS, HWRAID, LDM):
+            data.get('kind') not in (MDRAID, BTRFS, HWRAID, LDM, ZFS):
         raise AssemblyError("Not a TRACE assembly descriptor")
     return data
 
@@ -293,12 +340,13 @@ def open_assembly(path):
                 raise AssemblyError(str(exc)) from exc
             return (_Kept(mdraid.MdImgInfo(array), keep),
                     f"Linux {array.describe()}", (), keep)
-        # Btrfs: the devices end to end are the media; the reader is
-        # given each device on its own.
+        # Btrfs and ZFS: the devices end to end are the media; the reader
+        # is given each device on its own.
         sources = [containers.ByteWindow(h.read, o, n)
                    for h, o, n in windows]
         image = _Concat([(h, o, n) for h, o, n in windows], keep)
-        note = (f"Btrfs '{data['name']}' across {len(windows)} of "
+        what = 'ZFS pool' if data['kind'] == ZFS else 'Btrfs'
+        note = (f"{what} '{data['name']}' across {len(windows)} of "
                 f"{data['needed']} devices")
         return image, note, sources[1:], keep
     except Exception:

@@ -27,7 +27,9 @@ _ENCRYPTED = {'bitlocker': 'BitLocker', 'fvde': 'FileVault 2',
               'android_backup': 'Encrypted Android backup'}
 
 #: Volume kinds that hold further volumes.
-_POOLS = {'lvm': 'Linux LVM', 'apfs': 'APFS container'}
+_POOLS = {'lvm': 'Linux LVM', 'apfs': 'APFS container',
+          'android_super': 'Android dynamic partitions',
+          'ubi': 'UBI flash image', 'zfs': 'ZFS pool'}
 
 #: Header labels (EWF and L01 spell them differently) -> custody field.
 _CUSTODY_FROM_HEADER = {
@@ -55,6 +57,16 @@ _FORMATS = {
     '.l01': 'EnCase logical evidence (L01)',
     '.lx01': 'EnCase logical evidence (Lx01)', '.zip': 'ZIP archive',
     '.tar': 'TAR archive',
+    '.sqfs': 'SquashFS image', '.squashfs': 'SquashFS image',
+    '.erofs': 'EROFS image', '.jffs2': 'JFFS2 flash image',
+    '.ubi': 'UBI flash image', '.ubifs': 'UBIFS image',
+    '.ufdr': 'Cellebrite UFDR (Physical Analyzer report)',
+    '.simg': 'Android sparse image', '.vdi': 'VirtualBox disk (VDI)',
+    '.aff': 'AFF image', '.afm': 'AFF metadata + split raw (AFM)',
+    '.gz': 'gzip-compressed raw image',
+    '.xz': 'xz-compressed raw image', '.bz2': 'bzip2-compressed raw image',
+    '.zst': 'zstd-compressed raw image', '.lz4': 'LZ4-compressed raw image',
+    '.udf': 'UDF image', '.hfs': 'HFS image',
     '.trace-assembly': 'Assembled volume (RAID / multi-disk)',
 }
 
@@ -68,6 +80,9 @@ def format_name(path):
     from trace_app.core.containers import is_parallels
     if is_parallels(trimmed):
         return 'Parallels disk'
+    from trace_app.core.aff import is_afd
+    if is_afd(trimmed):
+        return 'AFF image split across a folder (AFD)'
     if os.path.isdir(trimmed) and not lowered.endswith('.sparsebundle'):
         from trace_app.core.logical_sources import kind_of
         return 'iOS backup' if kind_of(trimmed) == 'ios_backup' else 'Folder'
