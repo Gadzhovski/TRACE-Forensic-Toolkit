@@ -182,7 +182,7 @@ SAMPLES = {
         _PLASO + 'chrome/cookies.db',
         '57c81098b475576befa9e11e30b974313ff6bba4976123297d8c4815abaa805f'),
     'chrome-Web-Data': (
-        _PLASO + 'chrome/Web%20Data',
+        _PLASO + 'chrome/Web Data',
         '7779fb8b6dab0d38fd41df3dacfd9f5ca96ec1ee5ecece6b9d276a786bc23812'),
     'chromium-login_db_v43.sql': (
         _CHROMIUM + 'password_manager/login_db_v43.sql',
