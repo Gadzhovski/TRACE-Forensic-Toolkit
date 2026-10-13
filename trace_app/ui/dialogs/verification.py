@@ -2,7 +2,7 @@
 what a check found.
 
 There is one way evidence is verified: `EvidenceVerifyWorker` hashes it
-in full on a thread (core/case.hash_evidence), and the window judges and
+in full in a child process (core/case.hash_evidence), and the window judges and
 records the run on its own thread (Case.apply_verification, or
 core/case.verdict in quick triage, where nothing is recorded). The
 dialog only shows the outcome; closing it writes nothing. An earlier
@@ -13,23 +13,34 @@ once seen, became the baseline the next check matched.
 
 import logging
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QHeaderView)
 
 from trace_app.ui import icons
+from trace_app.ui.process_worker import ProcessWorker
 
 logger = logging.getLogger('TRACE.Verify')
 
 
-class EvidenceVerifyWorker(QThread):
-    """Hash one piece of evidence in full for the job bar.
+class EvidenceVerifyWorker(ProcessWorker):
+    """Hash one piece of evidence in full for the job bar, in a child
+    process (core/background.job_verify).
 
-    Only the reading happens here; the verdict is recorded on the UI
+    Only the reading happens there; the verdict is recorded on the UI
     thread, which owns the case's database connection. Cancel is
     cooperative: the next progress report stops it.
+
+    A process, not a thread: hashing opens the image with the native
+    libraries (libewf, The Sleuth Kit) while the window's own threads --
+    the Registry tab's hive search, the tree -- use them too, and on
+    Windows that corrupted the window's heap a few seconds into a new
+    case's analysis (0xC0000374, inside a garbage collection). Apart, a
+    failure costs the check, never the window.
     """
+
+    kind = 'verify'
 
     #: (bytes done, bytes total) -- objects, as images pass 2**31 bytes.
     progressed = Signal(object, object)
@@ -38,36 +49,35 @@ class EvidenceVerifyWorker(QThread):
     verified = Signal(dict)
 
     def __init__(self, row, parent=None):
-        super().__init__(parent)
+        super().__init__({'row': dict(row)}, parent)
         self.row = dict(row)
-        self._stop = False
         self._last = -1
+        self._answer = None
 
-    def stop(self):
-        self._stop = True
-
-    def _progress(self, done, total):
-        from trace_app.core.image_handler import HashingCancelled
-        if self._stop:
-            raise HashingCancelled()
+    def on_progress(self, done, total):
         if total:
             percent = int(done * 100 / total)
             if percent != self._last:
                 self._last = percent
                 self.progressed.emit(done, total)
 
-    def run(self):
-        from trace_app.core.case import hash_evidence
-        from trace_app.core.image_handler import HashingCancelled
+    def on_item(self, record):
+        self._answer = record
+
+    def on_done(self, count, error):
         out = {'row': self.row, 'cancelled': False, 'results': None}
-        try:
-            out['results'] = hash_evidence(self.row, self._progress)
-        except HashingCancelled:
+        answer = self._answer or {}
+        if answer.get('cancelled'):
             out['cancelled'] = True
-        except Exception as exc:
-            logger.exception("Verifying %s failed", self.row.get('path'))
+        elif answer.get('results') is not None:
+            out['results'] = answer['results']
+        else:
+            # The process failed, or ended without answering (crashed).
+            logger.error("Verifying %s failed: %s", self.row.get('path'),
+                         error or 'no result')
             out['results'] = {'path': self.row.get('path'),
-                              'error': str(exc)}
+                              'error': error or 'The check ended without '
+                                                'a result.'}
         self.verified.emit(out)
 
 

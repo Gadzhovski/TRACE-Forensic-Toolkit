@@ -661,6 +661,27 @@ def _scope_listing(image, progress, should_stop):
     return volumes
 
 
+def job_verify(params, progress, item, should_stop):
+    """Hash one piece of evidence in full (core/case.hash_evidence) and
+    send the results back as one item: {'results'} or {'cancelled'}. The
+    window judges and records them; nothing is written here."""
+    from trace_app.core.case import hash_evidence
+    from trace_app.core.image_handler import HashingCancelled
+    row = params['row']
+
+    def report(done, total):
+        if should_stop():
+            raise HashingCancelled()
+        progress(done, total)
+    try:
+        results = hash_evidence(row, report)
+    except HashingCancelled:
+        item({'cancelled': True})
+        return 0
+    item({'results': results})
+    return 1
+
+
 def job_ping(params, progress, item, should_stop):
     """Imports what the real jobs import and reports back: the packaged
     self-test's proof that a child process starts in a frozen build."""
@@ -702,5 +723,6 @@ JOBS = {
     'vss_compare': job_vss_compare,
     'pictures': job_pictures,
     'scope_count': job_scope_count,
+    'verify': job_verify,
     'ping': job_ping,
 }

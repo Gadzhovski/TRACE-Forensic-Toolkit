@@ -692,3 +692,43 @@ def test_quick_triage_verifies_without_recording(qapp, quiet_dialogs):
         assert window.case is None
     finally:
         close_window(window)
+
+
+@pytest.mark.images
+def test_verification_hashes_in_a_child_process(qapp):
+    """The verification job is a process of its own: hashing opens the
+    image with libewf and The Sleuth Kit, and beside the window's own
+    readers on threads that corrupted the window's heap (Windows,
+    0xC0000374). Its answer is the in-process one; a cancel says so."""
+    import multiprocessing
+    from trace_app.core.case import hash_evidence
+    from trace_app.ui.dialogs.verification import EvidenceVerifyWorker
+    from trace_app.ui.process_worker import ProcessWorker
+    row = {'path': image_path(E01)}
+    expected = hash_evidence(dict(row))
+
+    worker = EvidenceVerifyWorker(row)
+    assert isinstance(worker, ProcessWorker)
+    answers, seen = [], []
+    worker.verified.connect(answers.append)
+    worker.progressed.connect(lambda done, total: seen.append(done))
+    before = {p.pid for p in multiprocessing.active_children()}
+    worker.start()
+    assert pump(qapp, 120, lambda: answers)
+    worker.wait()
+    results = answers[0]['results']
+    assert not answers[0]['cancelled']
+    for name in ('md5', 'sha1', 'sha256'):
+        assert results[f'computed_{name}'] == expected[f'computed_{name}']
+    assert results['stored_md5'] == expected['stored_md5']
+    assert {p.pid for p in multiprocessing.active_children()} <= before
+
+    stopped = EvidenceVerifyWorker(row)
+    stopped_answers = []
+    stopped.verified.connect(stopped_answers.append)
+    stopped.stop()                    # before the first progress report
+    stopped.start()
+    assert pump(qapp, 120, lambda: stopped_answers)
+    stopped.wait()
+    assert stopped_answers[0]['cancelled']
+    assert stopped_answers[0]['results'] is None
