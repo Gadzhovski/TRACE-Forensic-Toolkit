@@ -8,17 +8,22 @@ Two lists, one above the other: the distinct values, most widespread first,
 and below them the files holding the one selected. Landing on a file previews
 it and leaves the lists where they are; double-click goes to its folder --
 the same way every other Triage list is worked down.
+
+Hashes get a Matches column (core/hash_indicators.py): the file, carve or
+image of the case with that hash, the hash sets holding it, or that no file
+has it -- the content it names is not here.
 """
 
 import logging
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMenu, QSizePolicy,
                                QSplitter, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from trace_app.core import hash_indicators, hashsets
 from trace_app.core.search_index import INDICATOR_KINDS, SearchIndex
 from trace_app.infra.constants import CONTROL_HEIGHT, TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
@@ -26,12 +31,21 @@ from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.context_menus import show_menu
+from trace_app.ui.viewers.virustotal import verdict_brush
 
 logger = logging.getLogger('TRACE.Indicators')
 
 #: Most values listed at once. A table of tens of thousands of rows takes
 #: seconds to fill and nobody reads it; the kind and text filters narrow it.
 SHOWN_LIMIT = 5000
+
+#: Columns of the values table.
+VALUE, KIND, MATCHES, FILES, EVIDENCE = range(5)
+
+#: Colour of a hash's match, in the verdict palette: a hash set's category
+#: decides; "not checked" is greyed. A file in the case is shown in bold.
+_SET_TONE = {hashsets.KNOWN_BAD: 'malicious', hashsets.NOTABLE: 'suspicious',
+             hashsets.KNOWN_GOOD: 'clean'}
 
 
 def kind_label(kind, plural=False):
@@ -110,7 +124,8 @@ class IndicatorsPanel(QWidget):
         splitter.setObjectName("indicatorSplitter")
         layout.addWidget(splitter, 1)
 
-        self.values_table = self._table(['Value', 'Kind', 'Files', 'Evidence'])
+        self.values_table = self._table(['Value', 'Kind', 'Matches', 'Files',
+                                         'Evidence'])
         self.values_table.itemSelectionChanged.connect(self._fill_files)
         self.values_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.values_table.customContextMenuRequested.connect(
@@ -228,6 +243,11 @@ class IndicatorsPanel(QWidget):
         kind, evidence_id = self.kind, self.evidence_id
         contains = self.filter_input.text().strip()
         self.status_label.setText("Loading…")
+        folder = self.case.folder
+        try:
+            hash_options = self.case.setting('hashsets')
+        except Exception:
+            hash_options = None
 
         def work(index):
             summary = indexed = None
@@ -237,6 +257,12 @@ class IndicatorsPanel(QWidget):
                     index.statistics(evidence_id)['items']
             rows = index.indicators(kind, evidence_id, contains,
                                     limit=SHOWN_LIMIT)
+            hashes = [r['value'] for r in rows if r['kind'] == 'hash']
+            if hashes:
+                matches = hash_indicators.match(folder, hashes, hash_options)
+                for row in rows:
+                    if row['kind'] == 'hash':
+                        row['match'] = matches.get(row['value'].lower())
             return summary, indexed, kind, rows
 
         self._ask('values', work)
@@ -287,21 +313,47 @@ class IndicatorsPanel(QWidget):
                                for e in row['evidence_ids'])
             cells = [QTableWidgetItem(row['value']),
                      QTableWidgetItem(kind_label(row['kind'])),
+                     self._match_cell(row.get('match')),
                      _NumberItem(row['files']),
                      QTableWidgetItem(images)]
-            cells[0].setData(Qt.UserRole, row)
-            cells[0].setToolTip(row['value'])
-            cells[3].setToolTip(images)
+            cells[VALUE].setData(Qt.UserRole, row)
+            cells[VALUE].setToolTip(row['value'])
+            cells[EVIDENCE].setToolTip(images)
             for column, cell in enumerate(cells):
                 table.setItem(position, column, cell)
         table.setSortingEnabled(True)
         if rows:
-            fit_columns(table, {0: 520, 3: 260})
+            fit_columns(table, {VALUE: 520, MATCHES: 360, EVIDENCE: 260})
         table.setUpdatesEnabled(True)
         # The tab counts every distinct value for the image filter, not what
         # the kind or text filter happens to leave showing.
         self.count = sum(self._summary.values())
         self.count_changed.emit(self.count)
+
+    @staticmethod
+    def _match_cell(match):
+        """What the case holds with a hash's value; empty for other kinds.
+        Sorts files in the case first, then hash sets, not found, unknown."""
+        if not match:
+            return _NumberItem(9, '')
+        order = {hash_indicators.IN_CASE: 0, hash_indicators.IN_SET: 1,
+                 hash_indicators.NOT_FOUND: 2, hash_indicators.NOT_CHECKED: 3}
+        cell = _NumberItem(order.get(match['status'], 4), match['text'])
+        cell.setToolTip(hash_indicators.explain(match))
+        categories = [c for _n, c in match['sets']]
+        for category in (hashsets.KNOWN_BAD, hashsets.NOTABLE,
+                         hashsets.KNOWN_GOOD):
+            if category in categories:
+                cell.setForeground(verdict_brush(_SET_TONE[category]))
+                break
+        else:
+            if match['status'] == hash_indicators.NOT_CHECKED:
+                cell.setForeground(verdict_brush('unknown'))
+        if match['status'] == hash_indicators.IN_CASE:
+            font = QFont(cell.font())
+            font.setBold(True)
+            cell.setFont(font)
+        return cell
 
     def _set_status(self, rows):
         if self.case is None:
@@ -322,7 +374,7 @@ class IndicatorsPanel(QWidget):
         items = self.values_table.selectedItems()
         if not items:
             return None
-        return self.values_table.item(items[0].row(), 0).data(Qt.UserRole)
+        return self.values_table.item(items[0].row(), VALUE).data(Qt.UserRole)
 
     def _fill_files(self):
         self.files_table.setRowCount(0)
@@ -370,12 +422,30 @@ class IndicatorsPanel(QWidget):
         item = self.values_table.itemAt(point)
         if item is None:
             return
-        row = self.values_table.item(item.row(), 0).data(Qt.UserRole)
+        row = self.values_table.item(item.row(), VALUE).data(Qt.UserRole)
         menu = QMenu(self)
         copy = menu.addAction("Copy Value")
         search = menu.addAction("Search for This Value")
+        targets = {}
+        files = [f for f in ((row.get('match') or {}).get('files') or ())
+                 if f.get('artifact_ref')]
+        if files:
+            # The files with this hash: go to each, as a double-click on a
+            # file below goes to it.
+            matching = menu.addMenu("Go to File with This Hash")
+            for found in files:
+                label = found.get('name') or found.get('path') or ''
+                if found.get('evidence_name'):
+                    label += f" — {found['evidence_name']}"
+                targets[matching.addAction(label)] = found
         chosen = show_menu(menu, self.values_table.viewport().mapToGlobal(point))
-        if chosen == copy:
+        if chosen in targets:
+            found = targets[chosen]
+            self.file_activated.emit({
+                'kind': 'file', 'artifact_ref': found['artifact_ref'],
+                'evidence_id': found['evidence_id'],
+                'name': found.get('name'), 'path': found.get('path')})
+        elif chosen == copy:
             QGuiApplication.clipboard().setText(row['value'])
         elif chosen == search:
             self.search_requested.emit(f"{row['kind']}:{row['value']}")

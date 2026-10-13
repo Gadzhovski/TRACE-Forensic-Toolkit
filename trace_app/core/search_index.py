@@ -58,15 +58,26 @@ def use_wal(connection):
 #: 3: phone, card and IBAN indicators. 4: entities carry their evidence id,
 #: so counting indicators per image needs no join to the items (and their
 #: text): the Indicators tab's refresh took up to 3 s against a growing index.
-INDEX_VERSION = 5
-#: Versions upgraded in place rather than discarded: 4 -> 5 added
-#: index_state's scope and free-space columns (resumable runs).
+INDEX_VERSION = 6
+#: Versions upgraded in place rather than discarded, one step at a time:
+#: 4 -> 5 added index_state's scope and free-space columns (resumable runs);
+#: 5 -> 6 stores hashes in lower case (one value, however it was written)
+#: and drops the runs no digest is: all decimal digits, or one character.
 _MIGRATIONS = {4: (
     "ALTER TABLE index_state ADD COLUMN scope TEXT",
     "ALTER TABLE index_state ADD COLUMN free_status TEXT",
     "ALTER TABLE index_state ADD COLUMN free_done INTEGER DEFAULT 0",
     "ALTER TABLE index_state ADD COLUMN free_total INTEGER DEFAULT 0",
     "ALTER TABLE index_state ADD COLUMN free_updated_utc TEXT",
+), 5: (
+    "UPDATE entities SET value = lower(value) WHERE kind = 'hash' "
+    "AND value <> lower(value)",
+    "DELETE FROM entities WHERE kind = 'hash' AND (value NOT GLOB '*[a-f]*' "
+    "OR replace(value, substr(value, 1, 1), '') = '')",
+    # An item that held a hash in both cases now holds it twice.
+    "DELETE FROM entities WHERE kind = 'hash' AND rowid NOT IN ("
+    "SELECT min(rowid) FROM entities WHERE kind = 'hash' "
+    "GROUP BY item_id, value)",
 )}
 #: Kinds of row free-space indexing writes (`index_free_space`).
 FREE_KINDS = ('unallocated', 'memory')
@@ -225,10 +236,20 @@ def _valid_phone(text):
     return '+' + digits
 
 
+def _valid_hash(text):
+    """The digest in lower case -- 'ABC...' and 'abc...' are one value --
+    or None for a run no digest is: decimal digits only (a 32-digit number
+    is a number) or one character repeated (padding, a filler)."""
+    value = text.lower()
+    if value.isdigit() or len(set(value)) == 1:
+        return None
+    return value
+
+
 #: Normalises a match to the value stored, or rejects it (None). Kinds not
 #: listed are stored as matched.
 _ENTITY_CHECKS = {'card': _valid_card, 'iban': _valid_iban,
-                  'phone': _valid_phone}
+                  'phone': _valid_phone, 'hash': _valid_hash}
 
 #: The kinds indexing extracts -- all, unless the case's settings narrow
 #: them (core/settings.py; phone numbers can be noise in some cases).
@@ -318,13 +339,15 @@ class SearchIndex:
             # index to read it while a job holds the write lock, and a
             # CREATE ... IF NOT EXISTS here waited out the busy timeout.
             return
-        if version in _MIGRATIONS and version + 1 == INDEX_VERSION:
+        if version and all(v in _MIGRATIONS
+                           for v in range(version, INDEX_VERSION)):
             # Hours of indexing are not thrown away for two columns.
-            for statement in _MIGRATIONS[version]:
-                try:
-                    self._db.execute(statement)
-                except sqlite3.OperationalError as exc:
-                    logger.debug("Index migration: %s", exc)
+            for step in range(version, INDEX_VERSION):
+                for statement in _MIGRATIONS[step]:
+                    try:
+                        self._db.execute(statement)
+                    except sqlite3.OperationalError as exc:
+                        logger.debug("Index migration: %s", exc)
             self._db.execute(f"PRAGMA user_version = {INDEX_VERSION}")
             self._db.commit()
             return
