@@ -230,6 +230,7 @@ def test_of_two_deleted_ntfs_files_the_one_freed_later_owns_the_clusters():
 
 def test_recycle_bin_deletions_keep_the_original_name_and_content():
     from tools.score.dfr_score import score
+    image_path('dfr-01-recycle-ntfs.dd')    # skips (or fails in CI) if absent
     result = score('ntfs-01-recycle', _key('ntfs-01-recycle'))
     assert result.get('listed') == 1 and not result.get('false ok')
     assert result.get('content ok') == 1

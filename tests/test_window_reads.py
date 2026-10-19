@@ -41,14 +41,16 @@ def test_a_slow_read_lets_the_window_run_but_takes_no_input(window_like,
     timer.start()
 
     def slow(value):
-        time.sleep(0.6)
+        time.sleep(1.2)
         return value * 2
     start = time.perf_counter()
     assert MainWindow._wait_for(window_like, slow, 21) == 42
     finished = time.perf_counter()
     timer.stop()
-    assert finished - start >= 0.6
-    assert sum(start < t < finished for t in ticks) >= 5     # not frozen
+    assert finished - start >= 1.2
+    # Not frozen. ~50 ticks are due; a loaded CI runner gave one in 0.6 s,
+    # so a few are enough to show the loop ran.
+    assert sum(start < t < finished for t in ticks) >= 3
     # Window-system input (clicks, keys) waits until the read is done.
     assert flags == [QEventLoop.ExcludeUserInputEvents]
 

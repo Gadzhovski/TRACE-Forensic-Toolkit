@@ -18,6 +18,7 @@ import pytest
 
 from tests.conftest import data_path
 from tests.disk_builders import fat16_volume
+from trace_app.core.logical import birth_ns
 
 
 def jpeg(colour='red', make='NIKON CORPORATION', model='NIKON D850'):
@@ -122,7 +123,10 @@ def test_the_export_has_the_shape_griffeye_writes(folder_evidence, tmp_path):
         assert kinds <= ref_media[key], key
     ref_files = _types(f for m in ref_case['Media'] for f in m['MediaFiles'])
     our_files = _types(f for m in case['Media'] for f in m['MediaFiles'])
-    assert set(our_files) == set(ref_files)
+    expected = set(ref_files)
+    if os.name != 'nt' and birth_ns(os.stat(folder_evidence[0])) is None:
+        expected.discard('Created')     # Linux records no creation time
+    assert set(our_files) == expected
     for key, kinds in our_files.items():
         assert kinds <= ref_files[key], key
     assert _all_keys(case, 'Exifs') == _all_keys(ref_case, 'Exifs')

@@ -316,6 +316,9 @@ jobs:
         shell: bash
         env:
           TESTS: ${{ needs.plan.outputs.tests }}
+          # Real LEAPP installs (test_modules_real) ask GitHub's API: with
+          # the job's read-only token, not the runners' shared 60 an hour.
+          TRACE_GITHUB_TOKEN: ${{ github.token }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           # Tier quick as tools/run_tests.py runs it: missing data skips.

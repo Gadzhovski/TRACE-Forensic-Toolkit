@@ -2,7 +2,8 @@
 
 Only when the examiner asks, and never while the open case is offline
 (settings.network_refusal) -- the rule every request TRACE makes follows.
-The requests carry TRACE's version in their User-Agent and nothing else.
+The requests carry TRACE's version in their User-Agent and nothing else
+(and, to GitHub's API only, a token when TRACE_GITHUB_TOKEN is set).
 
 1. `releases(spec)`  the published releases (no drafts, no pre-releases)
    at or past the spec's MIN_VERSION, newest first.
@@ -28,6 +29,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import urllib.parse
 import zipfile
 
 from trace_app.core.modules import paths
@@ -71,11 +73,19 @@ def _get(url, session=None, stream=False, accept='application/vnd.github+json'):
     if why:
         raise InstallError(why)
     session = session or requests
+    headers = {'Accept': accept,
+               'User-Agent': f'TRACE/{__version__} (module install)'}
+    # GitHub allows 60 unauthenticated API calls an hour per address, which
+    # CI's shared runners use up. A token is sent only when the examiner
+    # (or a CI workflow) set TRACE_GITHUB_TOKEN, and only to the API host --
+    # requests drops it on a redirect to another host anyway.
+    token = os.environ.get('TRACE_GITHUB_TOKEN', '').strip()
+    if token and urllib.parse.urlsplit(url).hostname == 'api.github.com':
+        headers['Authorization'] = f'Bearer {token}'
     try:
         response = session.get(
             url, timeout=TIMEOUT, stream=stream, allow_redirects=True,
-            headers={'Accept': accept,
-                     'User-Agent': f'TRACE/{__version__} (module install)'})
+            headers=headers)
     except requests.RequestException as exc:
         raise InstallError(f"GitHub could not be reached: {exc}") from exc
     if response.status_code != 200:

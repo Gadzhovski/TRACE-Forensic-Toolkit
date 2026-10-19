@@ -40,6 +40,18 @@ TIMES_KEPT = TIMES
 MISSING_TIME = -(2 ** 63)
 
 
+def birth_ns(info):
+    """A stat result's creation time in ns, or None. st_birthtime_ns is
+    Windows' only (3.12+); macOS and BSD give st_birthtime as a float --
+    without it a folder opened on a Mac had no creation times at all."""
+    birth = getattr(info, 'st_birthtime_ns', None)
+    if birth is None:
+        seconds = getattr(info, 'st_birthtime', None)
+        if seconds is not None:
+            birth = round(seconds * 1_000_000_000)
+    return birth
+
+
 class Node:
     __slots__ = ('inode', 'parent', 'name', 'is_dir', 'size', 'times',
                  'children', 'reader', 'deleted', 'facts')

@@ -25,7 +25,7 @@ import tarfile
 import threading
 import zipfile
 
-from trace_app.core.logical import ROOT, LogicalFileSystem
+from trace_app.core.logical import ROOT, LogicalFileSystem, birth_ns
 
 #: A member up to this size is read whole once and kept (a few at a time)
 #: rather than decompressed again for every read.
@@ -204,7 +204,7 @@ class _Members:
 
 def _stat_times(info):
     times = {'mtime': _split(info.st_mtime_ns), 'atime': _split(info.st_atime_ns)}
-    birth = getattr(info, 'st_birthtime_ns', None)
+    birth = birth_ns(info)
     if birth is None and os.name == 'nt':
         # Before 3.12 Windows reports creation as ctime.
         birth = info.st_ctime_ns

@@ -35,13 +35,14 @@ import time
 from array import array
 from datetime import datetime, timezone
 
-from trace_app.core.logical import MISSING_TIME, ROOT, TIMES_KEPT
+from trace_app.core.logical import MISSING_TIME, ROOT, TIMES_KEPT, birth_ns
 
 logger = logging.getLogger('TRACE.FolderListing')
 
 #: The walk's rules and this file's layout. Bump when either changes: an
 #: older listing is then walked again.
-FORMAT = 1
+#: 2: creation times on macOS (st_birthtime; version 1 kept none there).
+FORMAT = 2
 MAGIC = b'TRACE folder listing\0'
 #: No such time (the root's, or ctime on Windows).
 MISSING = MISSING_TIME
@@ -154,7 +155,7 @@ def _times(info):
     """(mtime, atime, ctime, crtime) in ns, as TRACE has always read a
     folder's files: creation is st_birthtime_ns, or on Windows before 3.12
     st_ctime_ns; ctime (inode change) is kept off Windows only."""
-    birth = getattr(info, 'st_birthtime_ns', None)
+    birth = birth_ns(info)
     if birth is None and _WINDOWS:
         birth = info.st_ctime_ns
     ctime = MISSING if _WINDOWS else info.st_ctime_ns
