@@ -1,8 +1,11 @@
 """The Text tab: a file as text, or the strings inside it.
 
-A file that is text -- UTF-8, UTF-16 with its byte-order mark, or a
-single-byte Western encoding -- is shown as written, line breaks and all.
-Anything else shows its strings, as `strings` does: runs of at least four
+A file that is text is shown as written, line breaks and all, in the
+encoding `core/text_encoding` finds: a byte-order mark, UTF-16 without
+one, UTF-8, or the legacy code page it reads as (Windows-1251, Mac
+Cyrillic, GB18030, Big5, Shift_JIS...). The encoding is named beside the
+page; Encoding chooses another when the guess cannot know (a Greek
+alphabet in Windows-1253 is a Thai one in Windows-874). Anything else shows its strings, as `strings` does: runs of at least four
 printable ASCII characters, and the same in UTF-16LE (how Windows stores
 text in binaries, the registry and memory), each with the byte offset it
 was found at. Show picks either by hand.
@@ -31,6 +34,7 @@ from PySide6.QtWidgets import (QComboBox, QLabel, QLineEdit, QTextEdit,
                                QToolBar, QToolButton, QToolTip, QVBoxLayout,
                                QWidget)
 
+from trace_app.core import text_encoding
 from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import fonts, icons
 from trace_app.ui.dialogs import message
@@ -45,10 +49,6 @@ MATCH_COLOUR = QColor(255, 190, 0, 90)
 PAGE_CHARACTERS = 100_000
 MIN_STRING = 4
 SHOW_AUTO, SHOW_TEXT, SHOW_STRINGS = 'auto', 'text', 'strings'
-#: Encoding shown -> (Python codec, byte-order mark length).
-_CODECS = {'UTF-8': ('utf-8', 0), 'UTF-16LE': ('utf-16-le', 2),
-           'UTF-16BE': ('utf-16-be', 2), 'Windows-1252': ('cp1252', 0),
-           'empty': ('utf-8', 0)}
 #: A strings line starts '00001A2B  U ' -- the text after these characters.
 _STRING_PREFIX = 12
 
@@ -69,26 +69,10 @@ def _printable_share(text):
 
 def decode_text(data):
     """(text, encoding name) when `data` is text, else None."""
-    if not data:
-        return '', 'empty'
-    if data.startswith(b'\xef\xbb\xbf'):
-        return data[3:].decode('utf-8', 'replace'), 'UTF-8'
-    for bom, codec, name in ((b'\xff\xfe', 'utf-16-le', 'UTF-16LE'),
-                             (b'\xfe\xff', 'utf-16-be', 'UTF-16BE')):
-        if data.startswith(bom):
-            return data[2:].decode(codec, 'replace'), name
-    if b'\x00' in data[:4096]:
-        return None                   # binary (or BOM-less UTF-16)
-    try:
-        text = data.decode('utf-8')
-        if _printable_share(text[:20000]) >= 0.97:
-            return text, 'UTF-8'
-    except UnicodeDecodeError:
-        pass
-    text = data.decode('cp1252', 'replace')
-    if _printable_share(text[:20000]) >= 0.97:
-        return text, 'Windows-1252'
-    return None
+    found = text_encoding.guess(data)
+    if found is None:
+        return None
+    return data[found.bom:].decode(found.codec, 'replace'), found.name
 
 
 _ASCII_RUN = re.compile(rb'[\x20-\x7e\t]{%d,}' % MIN_STRING)
@@ -133,18 +117,25 @@ class TextViewerManager:
 
     # --- loading ----------------------------------------------------------------
 
-    def load_text_content(self, file_content, show=SHOW_AUTO):
+    def load_text_content(self, file_content, show=SHOW_AUTO,
+                          encoding=None):
+        """`encoding`: a codec the examiner chose (None = guessed); it
+        shows even a file that does not read as text as text."""
         self.file_content = bytes(file_content or b'')
-        decoded = decode_text(self.file_content) if show != SHOW_STRINGS \
-            else None
-        if decoded is not None and show != SHOW_STRINGS:
-            self.text_content, encoding = decoded
+        found = text_encoding.guess(self.file_content) \
+            if show != SHOW_STRINGS and not encoding else None
+        if encoding and show != SHOW_STRINGS:
+            self.text_content, found = text_encoding.decode(
+                self.file_content, encoding)
             self.mode = SHOW_TEXT
-            self.description = f"Text · {encoding}"
-            self.codec, self.bom = _CODECS.get(encoding, ('cp1252', 0))
-            if encoding == 'UTF-8' and \
-                    self.file_content.startswith(b'\xef\xbb\xbf'):
-                self.bom = 3
+            self.description = f"Text · {found.name} (chosen)"
+            self.codec, self.bom = found.codec, found.bom
+        elif found is not None:
+            self.text_content = self.file_content[found.bom:].decode(
+                found.codec, 'replace')
+            self.mode = SHOW_TEXT
+            self.description = f"Text · {found.name}"
+            self.codec, self.bom = found.codec, found.bom
         elif show == SHOW_TEXT:
             self.text_content = self.file_content.decode('cp1252', 'replace')
             self.mode = SHOW_TEXT
@@ -346,6 +337,18 @@ class TextViewer(QWidget):
         self.show_combo.setFixedWidth(110)
         self.show_combo.currentIndexChanged.connect(self._show_changed)
         self.toolbar.addWidget(self.show_combo)
+        self.encoding_combo = QComboBox(self)
+        self.encoding_combo.setObjectName("textEncoding")
+        self.encoding_combo.addItem("Encoding: automatic", None)
+        for codec in text_encoding.CHOICES:
+            self.encoding_combo.addItem(text_encoding.name_of(codec), codec)
+        self.encoding_combo.setToolTip(
+            "The encoding the text was written in. Automatic names the one "
+            "it reads as; choose another when that is wrong -- a short text "
+            "in a legacy code page can read as more than one")
+        self.encoding_combo.setFixedWidth(150)
+        self.encoding_combo.currentIndexChanged.connect(self._show_changed)
+        self.toolbar.addWidget(self.encoding_combo)
         self.toolbar.addWidget(QLabel(" Font: "))
         self.font_size_combobox = QComboBox(self)
         self.font_size_combobox.setFixedWidth(64)
@@ -405,15 +408,23 @@ class TextViewer(QWidget):
 
     # --- content ----------------------------------------------------------------
 
-    def display_text_content(self, file_content):
-        self.manager.load_text_content(file_content, self._show)
+    def display_text_content(self, file_content, keep_encoding=False):
+        # A chosen encoding is for the file it was chosen on: the next
+        # file is guessed afresh.
+        if not keep_encoding and self.encoding_combo.currentIndex():
+            self.encoding_combo.blockSignals(True)
+            self.encoding_combo.setCurrentIndex(0)
+            self.encoding_combo.blockSignals(False)
+        self.manager.load_text_content(
+            file_content, self._show, self.encoding_combo.currentData())
         self.match_label.setText('')
         self.refresh_content()
 
     def _show_changed(self, *_args):
         self._show = self.show_combo.currentData()
         if self.manager.file_content:
-            self.display_text_content(self.manager.file_content)
+            self.display_text_content(self.manager.file_content,
+                                      keep_encoding=True)
 
     def _export_content(self):
         """The page shown, as plain text, for the export button."""
