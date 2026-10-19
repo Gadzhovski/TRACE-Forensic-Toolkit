@@ -33,7 +33,7 @@ import Pillars from '../../components/Pillars.astro';
 <Stats
 	items={[
 		{ value: '70', label: 'file types carved' },
-		{ value: '19', label: 'file systems read' },
+		{ value: '28', label: 'file systems read' },
 		{ value: '7', label: 'kinds of encryption unlocked' },
 		{ value: '4', label: 'platforms tested' },
 		{ value: 'MIT', label: 'free and open source' },
@@ -61,6 +61,9 @@ From the first hash check to the final report, in one application that never wri
 		{ icon: 'warning', title: 'Detection', text: 'YARA rules over files, Sigma rules over event logs, keyword lists, hash sets (NSRL) and persistence on Windows, Linux and macOS graded by risk.', href: 'features/detection/' },
 		{ icon: 'document', title: 'Viewers', text: 'Pictures, video, PDF, Office, mail, SQLite, registry hives, a hex editor with a data inspector, and HTML shown offline.', href: 'features/viewers/' },
 		{ icon: 'padlock', title: 'Encrypted volumes', text: 'BitLocker, FileVault 2, LUKS, VeraCrypt and encrypted APFS unlocked in place; shadow copies, LVM, RAID, ZFS, ReFS, Btrfs and more read too.', href: 'features/volumes/' },
+		{ icon: 'rocket', title: 'External modules', text: 'iLEAPP, aLEAPP, RLEAPP, VLEAPP and DLEAPP installed on request and run on files copied out of the evidence. What they read joins Activity, the Map and the Timeline.', href: 'features/modules/' },
+		{ icon: 'seti:image', title: 'Pictures and video', text: 'Pixel values, adjustments, error level analysis, JPEG quality and every frame; a video’s own metadata, markers and contact sheets. The evidence is never altered.', href: 'features/viewers/' },
+		{ icon: 'external', title: 'Exports', text: 'Reports in PDF, HTML and Word; timelines for Timesketch, plaso and mactime; DFXML, CASE/UCO and Project VICS for review tools.', href: 'features/reports/' },
 	]}
 />
 
@@ -81,9 +84,9 @@ From the first hash check to the final report, in one application that never wri
 | | |
 |:--|:--|
 | **Disk images** | E01 / Ex01, AFF4, AFF, raw / dd (split or compressed too), ISO, DMG, VMDK, VHD / VHDX, QCOW2, VDI, Parallels, Android sparse and super images |
-| **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups, Android backups, Cellebrite UFDR |
+| **Logical images** | AD1, L01, ZIP / TAR, a folder (KAPE, Velociraptor), iOS backups, Android backups, Cellebrite UFDR, GrayKey extractions |
 | **Live disks** | an attached disk, read-only, without imaging it first |
-| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, HFS, APFS, XFS, Btrfs, ZFS, ReFS, F2FS, UBIFS, JFFS2, SquashFS, EROFS, UDF, UFS, ISO 9660 |
+| **File systems** | NTFS, FAT, exFAT, ext2/3/4, HFS+, HFS, APFS, XFS, Btrfs, ZFS, ReFS, F2FS, UBIFS, JFFS2, YAFFS1/2, SquashFS, EROFS, cramfs, romfs, LittleFS, QNX4, QNX6, QNX ETFS / EFS / IFS, UDF, UFS, ISO 9660 |
 | **Encrypted volumes** | BitLocker, FileVault 2, LUKS, VeraCrypt / TrueCrypt, encrypted APFS, iOS and Android backups |
 | **Inside files** | archives (ZIP, 7z, RAR, TAR…), PST / OST, EML / mbox, registry hives, event logs, SQLite |
 

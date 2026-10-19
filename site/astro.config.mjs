@@ -19,7 +19,7 @@ const SOFTWARE = {
 		'Open-source digital forensics software for disk images: cases, triage, file carving, timelines, search, YARA and Sigma.',
 	applicationCategory: 'SecurityApplication',
 	operatingSystem: 'Windows, macOS, Linux',
-	softwareVersion: '2.0.0',
+	softwareVersion: '2.4.0',
 	license: 'https://opensource.org/licenses/MIT',
 	offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
 	url: `${SITE}/`,
@@ -90,7 +90,8 @@ export default defineConfig({
 						{ label: 'Detection: YARA, Sigma, keywords', slug: 'features/detection' },
 						{ label: 'Viewers', slug: 'features/viewers' },
 						{ label: 'Volumes and encryption', slug: 'features/volumes' },
-						{ label: 'Reports', slug: 'features/reports' },
+						{ label: 'Reports and exports', slug: 'features/reports' },
+						{ label: 'External modules (LEAPPs)', slug: 'features/modules' },
 					],
 				},
 				{

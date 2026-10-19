@@ -35,7 +35,10 @@ Not every time is *when it happened*. Where it is not, the record says so in its
 | **Browsers** | Chrome, Edge, Brave, Vivaldi and other Chromium browsers, Firefox, Safari, Internet Explorer (WebCache and `index.dat`) -- history and downloads (with Chromium's danger rating); for Chromium also cookies (names, never values), form entries, saved logins (site and user name, never the password), top sites, favicons, and Local Storage, Session Storage and IndexedDB -- overwritten and deleted values kept -- for browsers and Electron apps such as Teams, Slack and Discord |
 | **Searches** | WordWheelQuery (what was typed into Explorer's search box), search-engine searches from browser history, and what was typed into web forms (Chromium autofill) |
 | **Network** | NetworkList profiles, SRUM connectivity, Windows Wi-Fi profiles (the key never copied), the Windows Firewall log, Wi-Fi networks on iOS and Android, NetworkManager connections on Linux (saved passwords never copied) |
-| **Usage** | SRUM application, network and energy use; macOS KnowledgeC |
+| **Usage** | SRUM application, network and energy use; macOS KnowledgeC, Biome streams, Screen Time and the Spotlight store (files opened and downloaded, and indexed files no longer on the volume) |
+| **macOS** | saved application state (window titles, Terminal tab text), `.DS_Store` Trash records, TCC privacy decisions, login items, Dock, Launchpad, sharing and remote management settings, XProtect, QuickLook thumbnails, and Keychain items (secrets shown one at a time, on request) |
+| **Linux and ChromeOS** | the freedesktop Trash, mounts and encrypted volumes, snap and Flatpak, Vim and LibreOffice history, web server logs (attacks, uploads and a summary per client, not every request); ChromeOS users named from Local State, the device's VPD and firmware event log |
+| **Remote access** | Remote Desktop servers and `.rdp` files, VNC, GlobalProtect portals (saved passwords never copied) |
 | **Communication** | Skype, iMessage and SMS, WhatsApp (iOS and Android), Android and iOS call logs and contacts, and a Cellebrite UFDR report's chats, messages, calls, e-mail and contacts |
 | **Cloud** | OneDrive, Google Drive |
 | **Antivirus** | Microsoft Defender detection history, MPLog, and quarantined files (decrypted in memory) |
@@ -66,6 +69,15 @@ Prefetch's LZXPRESS Huffman compression, EVTX binary XML, shell items and LNK fi
 </figure>
 
 The timeline merges eight sources into one list: **file-system times** (`$STANDARD_INFORMATION` and `$FILE_NAME` separately on NTFS; created, modified, accessed and changed on every other file system -- ext, Btrfs, XFS, HFS+, APFS, FAT and exFAT, the last two shown as local time since they store no zone), the **change journal** (`$UsnJrnl`), **user activity**, **photo** EXIF times, **document** metadata times, **carved files**, **Sigma detections** and the case's own **events**. Filter by time range, source, user, folder and text -- or only deleted files, only timestomped ones, or without known-good files -- with a histogram on a square-root scale so quiet days still show. **Add to Report** picks rows for the [report](/features/reports/).
+
+- **No row limit**: pages are read as you scroll, and a click on the histogram lists from that moment.
+- **Bursts** -- hundreds of events of one kind in the same seconds, as an install writes them -- collapse into one row you can open.
+- **Summary** groups events by folder, extension or kind; **Lanes** draws each source on its own line.
+- **Insights**: a weekday × hour heatmap in the display zone, the longest gaps, and checks for clock changes, cleared logs, impossible dates, USN rollbacks and timestomping.
+- **Star** and colour events (S, N), and let **highlight rules** colour programs, USB devices or whatever you choose.
+- Export to **Timesketch**, **plaso** or **mactime** -- see [exports](/features/reports/#exports-for-other-tools).
+
+Activity itself has **Charts** (over time, by hour, ranked) and **Items** (a card per device, program, site or person). Every number opens exactly its records.
 
 ## The Recycle Bin, linked
 

@@ -34,6 +34,7 @@ A folder holding only an image's segments -- with the imager's log, or a report 
 | **iOS backup** | iTunes/Finder backups, plain or encrypted, files at their phone paths |
 | **Android backup** | `adb backup` `.ab` files, every version, compressed or not, encrypted with the password |
 | **Cellebrite UFDR** | the phone's files at their paths, plus the report's decoded chats, messages, calls, e-mail, contacts, accounts, web history and locations |
+| **GrayKey** | a `_files_full.zip` extraction; acquisition hashes and device details from GrayKey's PDF report (its passcode is never read) |
 
 ## Live disks
 
@@ -64,6 +65,10 @@ DOS/MBR (with extended partitions), GPT, Apple Partition Map, BSD disklabels, Su
 | SquashFS 4, EROFS | TRACE (Python) |
 | UDF 1.02-2.60 (bridge discs read as UDF) | TRACE (Python) |
 | HFS (classic Mac OS) | TRACE (Python) |
+| YAFFS1 / YAFFS2 (deleted files and earlier versions recovered) | TRACE (Python) |
+| cramfs, romfs, LittleFS v2 | TRACE (Python) |
+| QNX4, QNX6 (and its previous state), QNX ETFS and EFS flash, QNX IFS boot images (vehicle head units) | TRACE (Python) |
+| U-Boot environment (both copies of a redundant pair) | TRACE (Python) |
 
 Unpartitioned images -- a single file system with no partition table -- are read too.
 

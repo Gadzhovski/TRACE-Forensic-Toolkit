@@ -1,0 +1,40 @@
+---
+title: External modules (LEAPPs)
+description: TRACE installs and runs iLEAPP, aLEAPP, RLEAPP, VLEAPP and DLEAPP on files it copies out of the evidence, checks every download against its published hashes, and brings what they read into its own Activity, Conversations, Map, Timeline and Search.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The LEAPPs read hundreds of app and system artifacts that TRACE does not parse itself. TRACE drives their **published, ready-built programs** -- it never imports their code -- and puts what they read beside its own records.
+
+| Tool | Reads |
+|:--|:--|
+| **iLEAPP** | iOS: full file systems, iTunes/Finder backups (encrypted ones with their password), sysdiagnose archives |
+| **aLEAPP** | Android: file systems and extractions |
+| **RLEAPP** | warrant returns: the records service providers hand over |
+| **VLEAPP** | vehicles: Ford SYNC logs and QNX head units |
+| **DLEAPP** | Windows, macOS and Linux computers, and Discord, Wire and Signal |
+
+## Installing
+
+**Tools ▸ External Modules** installs a tool only when you click, at the version TRACE was tested with first. The download is hashed as it arrives and **refused unless it matches** the release's published SHA-256s. It is unpacked by Python or the operating system and started once to check that it is the version expected. No network access happens while a case is set offline. Installs are written to the audit trail.
+
+Only the tools that suit an image are offered: iLEAPP for an iPhone, aLEAPP for Android, RLEAPP when the image holds files its own patterns name, and so on.
+
+## Running
+
+TRACE finds the files the tool's own patterns name -- loose, or inside the tars and zips phone extractions arrive in -- copies them out of the evidence (each copy hashed and listed in a staging manifest), and runs the tool on the copies. Progress comes from the tool's own log; Cancel stops it and everything it started.
+
+A run is complete only when the tool's own database says so, not because the program exited. Each run keeps the tool's HTML report, which can travel with TRACE's.
+
+<Aside type="caution" title="Backup passwords">
+The LEAPPs take an encrypted backup's password on the command line only, so other programs running as you could see it. TRACE checks the password against the backup's keybag first, keeps it for the session only, and stars it out of the run's log and the tool's own HTML report.
+</Aside>
+
+## What they read, in TRACE
+
+- **Evidence** -- calls, messages, contacts, web history, locations, accounts, installed apps -- goes into **Activity**, **Conversations** and the **Map**, under the same columns TRACE's own readers fill. Each record says which tool read it.
+- A call or message read by TRACE **and** by a tool is shown **once**, and its tooltip names both readers.
+- **Telemetry** (the unified log, battery, settings, millions of rows on a phone) stays in **Activity ▸ Others**, browsable and chartable, unless **Settings ▸ Results** sends it to the Timeline and Search too.
+- Every row can be tagged, bookmarked, noted and added to the report, and previews the file it came from.
+- The tool's database is never written to: what TRACE did not sort as evidence is read from it live.

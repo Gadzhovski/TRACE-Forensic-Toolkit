@@ -1,6 +1,6 @@
 ---
 title: Viewers
-description: TRACE shows evidence as what it is – pictures, video, PDF and e-books, Office files with their hidden content, mail, SQLite with recovered rows, registry hives, archives, a hex editor with a data inspector, and HTML rendered offline.
+description: TRACE shows evidence as what it is – pictures and video with examiner's tools, PDF and e-books, Office files with their hidden content, mail, SQLite with recovered rows, registry hives, archives, a hex editor with a data inspector, and HTML rendered offline.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -17,17 +17,37 @@ Before showing a file, TRACE identifies it from its **content** as well as its n
 
 | | |
 |:--|:--|
-| **Pictures** | every common format, plus HEIC, AVIF, JPEG 2000, PSD and PCX; zoom and pan |
+| **Pictures** | every common format, plus HEIC, AVIF, JPEG 2000, PSD and PCX; zoom (sharp pixels when enlarged), pixel values, adjustments, error level analysis, every frame -- see below |
 | **Documents** | PDF, EPUB, XPS, CBZ, FB2 and MOBI, page by page |
-| **Office** | Word, Excel, PowerPoint and OpenDocument -- **including what a reader would not see**: tracked deletions, comments, speaker notes, hidden sheets, reported in the notice bar |
-| **Audio and video** | streamed from the image, any size; frame-by-frame stepping, ±5 s jumps, speed, loop, and *Save Frame* as a PNG named with its time |
+| **Office** | Word, Excel, PowerPoint and OpenDocument -- **including what a reader would not see**: tracked deletions, comments, speaker notes, hidden sheets, reported in the notice bar; RTF as formatted text |
+| **Audio and video** | streamed from the image, any size; the container's own metadata, exact frames, markers, contact sheets, a waveform -- see below |
 | **HTML** | rendered **offline**: no scripts run and nothing is fetched (see below) |
 | **Mail** | Outlook PST / OST, EML and mbox, as folders and messages with attachments |
 | **SQLite** | every table, plus rows recovered from free space and the write-ahead log beside it |
 | **Registry hives** | keys and values, with transaction logs replayed |
 | **Archives** | ZIP, 7z, RAR, TAR, GZIP, BZIP2 and XZ browsed like folders -- in memory, never unpacked to disk |
-| **Text** | text files in their encoding, or the ASCII and UTF-16 strings of anything else, with offsets |
+| **Text** | text files in their code page -- Cyrillic, Greek, Arabic, Hebrew, Chinese, Japanese, Mac encodings and more, with an Encoding list to override the guess -- or the ASCII and UTF-16 strings of anything else, with offsets |
 | **File metadata** | everything known about the file: times, attributes, type, hashes, EXIF and GPS, authors, executable details |
+
+## Pictures, for examiners
+
+**Every enhancement is a view, never the evidence.** *Save Image* writes the file's bytes as stored. An adjusted view is saved only as a labelled copy whose audit line names each step, and a badge says so while what you see is not the file's pixels.
+
+- The **pixel under the pointer** (RGB, alpha, hex), and a loupe; drag a **region** to export or bookmark it.
+- **Adjust**: brightness, contrast, gamma, levels, invert, greyscale, one channel at a time -- alpha shows what transparency hides.
+- **Error level analysis** for JPEGs, and the **JPEG quality** with whether its tables are a standard encoder's (other tables point to camera firmware or an editor). Both are indicators to look further, never proof.
+- **Every frame** of an animated GIF, APNG or WebP and every page of a TIFF -- a later frame can hide what the first does not.
+- The **EXIF thumbnail** compared with the picture: a thumbnail of something else, or of a crop, is also a Triage finding.
+- Shown as stored by default; turned upright only when you ask.
+
+## Video and audio, for examiners
+
+- The container's **own metadata**, read without loading the file: recording time (and the camera's zone), device, software, codecs, rotation and **GPS**, shown on the Map. Videos that record a place are Triage findings, like photos.
+- **Exact position**: the frame number beside the time, frame stepping at the file's own rate, and *Go to* a time or frame (Ctrl+G).
+- **Zoom** into a paused frame, and adjust it -- playback itself is never altered.
+- **Markers** (K) on the seek bar, each one a bookmark labelled with its time and frame.
+- **Contact sheets** (with the file's SHA-256 in the footer) that can go into the report, and **frame export** with a manifest of every frame's time and hash.
+- A **waveform** for audio: click to seek.
 
 ## Arrange the window your way
 

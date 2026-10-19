@@ -1,11 +1,11 @@
 ---
-title: Reports
-description: Build an HTML or PDF report of a TRACE case – evidence and verification, findings, activity, timeline picks, carved files, indicators, the methods used and the audit trail – with a table of contents and links.
+title: Reports and exports
+description: Build an HTML, PDF or Word report of a TRACE case – evidence and verification, findings, activity, timeline picks, carved files, indicators, the methods used and the audit trail – with a table of contents and links.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-**Case ▸ Create Report…** builds the case's report as **HTML** or **PDF**, as a background job. You choose the sections and their options; the report is saved in the case's `exports/` folder and its SHA-256 written to the audit trail.
+**Case ▸ Create Report…** builds the case's report as **HTML**, **PDF** or **Word**, as a background job. You choose the sections and their options, and can give any section your own heading and text. Each report is saved in a folder of its own in the case's `exports/` folder, and its SHA-256 written to the audit trail. Sections with nothing in them are left out, and the Methods section says which. The external tools' own reports can travel with it, listed in a manifest with their hashes.
 
 ## Sections
 
@@ -33,6 +33,16 @@ import { Aside } from '@astrojs/starlight/components';
 - **PDF** is the same report laid out on A4, with a running header and *Page n of m* footer, a table of contents with page numbers, clickable cross-references and a PDF outline.
 - Pictures are read from the images themselves and **scaled to fit -- never cropped**.
 - Every value that came from evidence is escaped: a file named `<script>` is text in the report, never markup.
+
+## Exports for other tools
+
+| Export | For |
+|:--|:--|
+| **Timesketch JSONL**, **plaso l2t CSV**, **mactime bodyfile**, CSV | the Timeline (Timeline ▸ Export), with its filters -- local times without a zone are never shifted |
+| **DFXML** and **CASE/UCO** | the files, times, hashes and findings of the case (Case ▸ Export for Other Tools) |
+| **Project VICS JSON** | pictures and videos for Griffeye Analyze and other review tools: one copy per hash, deleted and carved ones marked, with the Project VIC categories you set (Alt+0…4) |
+
+Every export is audited with its SHA-256.
 
 <Aside type="tip">
 The Methods section is what lets someone else reproduce your results: it states the versions and the settings, not just the conclusions.
