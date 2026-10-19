@@ -1,0 +1,37 @@
+{
+ "lzvn-small": {
+  "magic": "bvxn",
+  "size": 3000,
+  "sha256": "9092ba218a0bf2a1a2dc83c60a36693bf79a99cdef7ddd9bf0250757be6cbfcf",
+  "seed": 1,
+  "alphabet": "abcdefgh"
+ },
+ "lzvn-tiny": {
+  "magic": "bvxn",
+  "size": 200,
+  "sha256": "41aaa164277571af637d82617e102f078397009503cf21d6303211238a48bdae",
+  "seed": 2,
+  "alphabet": "xy"
+ },
+ "lzfse-text": {
+  "magic": "bvx2",
+  "size": 200000,
+  "sha256": "fbcaca2b4350cc4950f9a67e4f14f07aaa5e3bc298779d8fff16002e46fcb41a",
+  "seed": 3,
+  "alphabet": "abcdefghijklmnopqrstuvwxyz"
+ },
+ "lzfse-multiblock": {
+  "magic": "bvx2",
+  "size": 1500000,
+  "sha256": "9af6ad0130372d61b9779c7396f90d46876a9c0da180b5e791adccd86c1b2bf2",
+  "seed": 4,
+  "alphabet": "acgt"
+ },
+ "raw-random": {
+  "magic": "bvx-",
+  "size": 2000,
+  "sha256": "1d6d9e71c72e3c1ba522eee42eb99f7ad0a1c31d8f6fd55101af8b20f3ede73b",
+  "seed": null,
+  "alphabet": null
+ }
+}
