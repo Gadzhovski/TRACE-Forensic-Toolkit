@@ -17,25 +17,26 @@ file, like every other Triage list; double-click goes to the file.
 import logging
 import math
 
-from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt, QUrl, Signal
+from PySide6.QtCore import (QByteArray, QPointF, QRectF, Qt, QTimer, QUrl,
+                            Signal)
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
-                               QHeaderView,
-                               QLabel, QPushButton, QSizePolicy, QSplitter,
-                               QTableWidget, QTableWidgetItem, QToolTip,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton,
+                               QSizePolicy, QSplitter, QTableWidgetItem,
+                               QToolTip, QVBoxLayout, QWidget)
 
 from trace_app import __version__
-from trace_app.core import geo
-from trace_app.infra.constants import TABLE_ROW_HEIGHT
+from trace_app.core import conversations, geo
 from trace_app.infra.paths import resource_path
-from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tables import finding_table
 from trace_app.ui.widgets.row_preview import connect_row_preview
 
 logger = logging.getLogger('TRACE.MapPanel')
 
 USER_AGENT = (f"TRACE/{__version__} (digital forensics toolkit; "
               "+https://github.com/Gadzhovski/TRACE-Forensic-Toolkit)")
+#: Qt 6 sets no transfer timeout: a stalled tile server would leave its
+#: replies pending for good. The requests clients all time out too.
+TRANSFER_TIMEOUT_MS = 15000
 #: Tiles kept in memory before the oldest are dropped.
 TILE_CACHE = 512
 #: A click this close to a point picks it.
@@ -54,6 +55,9 @@ class MapCanvas(QWidget):
     point_activated = Signal(int)
     #: (fetched, failed) tile counts, for the status line.
     tiles_changed = Signal(int, int)
+    #: The area on screen moved or zoomed (Google's copyright line follows
+    #: it).
+    view_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -66,13 +70,20 @@ class MapCanvas(QWidget):
         self.zoom = geo.MIN_ZOOM
         self.cx, self.cy = geo.project(20.0, 0.0, self.zoom)
         self._land = None
+        #: The detailed offline basemap (map_offline.OfflineMap), shared:
+        #: loaded on the first offline paint.
+        self.offline = _offline_map()
         self._drag = None
         self._moved = False
         # Tiles: off until the examiner agrees.
         self.tiles_enabled = False
         self.style = geo.DEFAULT_STYLE
+        #: A Google style's session, key and copyright line
+        #: (core/google_tiles), set by the panel; None until made.
+        self.google = None
         #: (zoom, x, y) -> [url per layer, base first]; replaced in tests.
-        self.tile_urls = lambda z, x, y: geo.tile_urls(z, x, y, self.style)
+        self.tile_urls = lambda z, x, y: geo.tile_urls(z, x, y, self.style,
+                                                       self.google)
         self._network = None
         self._tiles = {}
         self._pending = {}
@@ -96,6 +107,7 @@ class MapCanvas(QWidget):
         self.zoom = zoom
         self.cx, self.cy = geo.project(lat, lon, zoom)
         self.update()
+        self.view_changed.emit()
 
     def centre_on(self, index):
         point = self.points[index]
@@ -123,6 +135,7 @@ class MapCanvas(QWidget):
         self.cx = nx - (anchor.x() - self.width() / 2)
         self.cy = ny - (anchor.y() - self.height() / 2)
         self.update()
+        self.view_changed.emit()
 
     def _screen(self, x, y):
         return (x - self.cx + self.width() / 2,
@@ -165,6 +178,23 @@ class MapCanvas(QWidget):
         if self.zoom > self.max_zoom():
             self.set_zoom(self.max_zoom())
 
+    def attribution(self):
+        """What the tiles' terms require on the map."""
+        style = geo.TILE_STYLES[self.style]
+        if style.get('provider') == 'google':
+            line = (self.google or {}).get('copyright') or ''
+            return 'Google' + (f' · {line}' if line else '')
+        return style['attribution']
+
+    def bounds(self):
+        """(north, south, east, west) of the area on screen."""
+        north, west = geo.unproject(self.cx - self.width() / 2,
+                                    self.cy - self.height() / 2, self.zoom)
+        south, east = geo.unproject(self.cx + self.width() / 2,
+                                    self.cy + self.height() / 2, self.zoom)
+        return (min(north, geo.MAX_LATITUDE), max(south, -geo.MAX_LATITUDE),
+                min(east, 180.0), max(west, -180.0))
+
     def max_zoom(self):
         if self.tiles_enabled:
             return min(geo.MAX_ZOOM,
@@ -194,6 +224,7 @@ class MapCanvas(QWidget):
         request = QNetworkRequest(QUrl(url))
         request.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader,
                           USER_AGENT)
+        request.setTransferTimeout(TRANSFER_TIMEOUT_MS)
         reply = self._network.get(request)
         self._pending[key] = reply
         reply.finished.connect(lambda: self._tile_arrived(key, reply))
@@ -229,7 +260,10 @@ class MapCanvas(QWidget):
         painter.fillRect(self.rect(), base)
         if self.tiles_enabled:
             self._paint_tiles(painter)
+        elif self.offline is not None and self.offline.data():
+            self.offline.draw(painter, self)
         else:
+            # The bundled detailed map is missing: the land outline.
             self._paint_land(painter, text)
             self._paint_grid(painter, text)
         self._paint_points(painter, palette)
@@ -331,7 +365,12 @@ class MapCanvas(QWidget):
     def _paint_footer(self, painter, text, base):
         notes = []
         if self.tiles_enabled:
-            notes.append(geo.TILE_STYLES[self.style]['attribution'])
+            notes.append(self.attribution())
+        elif self.offline is not None and self.offline.data():
+            from trace_app.ui.viewers.map_offline import DETAIL_ZOOM
+            notes.append("Offline map: Natural Earth" + (
+                " -- no more detail here; Online Map shows streets"
+                if self.zoom > DETAIL_ZOOM else ''))
         else:
             notes.append("Offline outline: Natural Earth")
         note = ' · '.join(notes)
@@ -384,7 +423,9 @@ class MapCanvas(QWidget):
         QToolTip.showText(event.globalPosition().toPoint(),
                           f"{point['name']}\n{point['what']}\n"
                           f"{point['when'] or 'no time recorded'}\n"
-                          f"{geo.describe(point['latitude'], point['longitude'])}",
+                          f"{geo.describe(point['latitude'], point['longitude'])}\n"
+                          f"{point['source']} · read by "
+                          f"{conversations.readers_text(point.get('read_by') or [])}",
                           self)
 
     def mouseReleaseEvent(self, event):
@@ -394,6 +435,8 @@ class MapCanvas(QWidget):
                 self.selected = index
                 self.update()
                 self.point_clicked.emit(index)
+        elif event.button() == Qt.LeftButton and self._moved:
+            self.view_changed.emit()
         self._drag = None
 
     def mouseDoubleClickEvent(self, event):
@@ -417,6 +460,17 @@ class MapCanvas(QWidget):
             self.set_zoom(self.zoom - 1)
         else:
             super().keyPressEvent(event)
+
+
+_SHARED_OFFLINE = []
+
+
+def _offline_map():
+    """One OfflineMap for every canvas (its data is ~9 MB in memory)."""
+    if not _SHARED_OFFLINE:
+        from trace_app.ui.viewers.map_offline import OfflineMap
+        _SHARED_OFFLINE.append(OfflineMap())
+    return _SHARED_OFFLINE[0]
 
 
 def _degrees(value, hemispheres):
@@ -448,6 +502,13 @@ class MapPanel(QWidget):
         self.ask = self._ask_for_tiles
         #: A style the examiner picked; until then it follows the theme.
         self._style_chosen = False
+        #: The examiner's Google Maps Platform key (Options ▸ Settings ▸ API Keys),
+        #: read when needed; set by the window. '' offers no Google style.
+        self.google_key = lambda: ''
+        #: style -> core/google_tiles session (one per map type).
+        self._google_sessions = {}
+        self._google_network = None
+        self._google_replies = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 0)
@@ -465,20 +526,38 @@ class MapPanel(QWidget):
         self.style_combo = QComboBox()
         self.style_combo.setObjectName("mapStyleCombo")
         for key, style in geo.TILE_STYLES.items():
+            if style.get('provider') == 'google' and \
+                    self.style_combo.findData('google_roadmap') < 0:
+                self.style_combo.insertSeparator(self.style_combo.count())
             self.style_combo.addItem(style['label'], key)
-            self.style_combo.setItemData(
-                self.style_combo.count() - 1,
-                f"Tiles from {style['host']}", Qt.ToolTipRole)
-        self.style_combo.setToolTip("How map tiles are drawn. Light and "
-                                    "dark follow TRACE's theme until "
-                                    "another is chosen.")
+        self.style_combo.setToolTip(
+            "The online map drawn under the points: choosing one turns "
+            "Online Map on (asking first); Online Map off goes back to the "
+            "offline map. "
+            "Light and dark follow TRACE's theme until another is chosen. "
+            "Google's maps need your own Google Maps Platform key (Options "
+            "▸ Settings ▸ API Keys).")
+        # Sized to a short name, not the longest: at its contents' width
+        # the Google entries made the whole Triage tab 752 px wide and took
+        # the room from the tree. The list itself shows every name whole.
+        self.style_combo.setSizeAdjustPolicy(
+            QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.style_combo.setMinimumContentsLength(18)
+        self.style_combo.view().setTextElideMode(Qt.ElideNone)
+        self.style_combo.view().setMinimumWidth(
+            self.style_combo.view().sizeHintForColumn(0) + 32)
         bar.addWidget(self.style_combo)
-        self.tiles_button = QPushButton("Map Tiles")
+        self.tiles_button = QPushButton("Online Map")
         self.tiles_button.setCheckable(True)
         self.tiles_button.setToolTip(
-            "Draw a map under the points. Fetches tiles for the area on "
-            "screen from the chosen style's server; asks first.")
+            "Draw an online map under the points, fetched for the area on "
+            "screen from the chosen style's server; asks first. Off: the "
+            "offline map (Natural Earth), which needs no network.")
         bar.addWidget(self.tiles_button)
+        self._viewport_timer = QTimer(self)
+        self._viewport_timer.setSingleShot(True)
+        self._viewport_timer.setInterval(600)
+        self._viewport_timer.timeout.connect(self._request_viewport)
         layout.addLayout(bar)
 
         splitter = QSplitter(Qt.Vertical)
@@ -486,8 +565,8 @@ class MapPanel(QWidget):
         layout.addWidget(splitter, 1)
         self.canvas = MapCanvas()
         splitter.addWidget(self.canvas)
-        self.table = self._table(['Name', 'Kind', 'Evidence', 'When',
-                                  'Position', 'Source', 'Path'])
+        self.table = finding_table(['Name', 'Kind', 'Evidence', 'When',
+                                  'Position', 'Source', 'Read by', 'Path'])
         connect_row_preview(self.table, self._row_landed)
         self.table.itemDoubleClicked.connect(
             lambda item: self.point_activated.emit(
@@ -506,24 +585,9 @@ class MapPanel(QWidget):
         self.canvas.point_activated.connect(
             lambda index: self.point_activated.emit(self.points[index]))
         self.canvas.tiles_changed.connect(lambda *_a: self._set_status())
+        self.canvas.view_changed.connect(self._view_changed)
+        self.refresh_styles()
         self.refresh()
-
-    @staticmethod
-    def _table(headers):
-        table = QTableWidget()
-        table.setObjectName("triageTable")
-        table.setColumnCount(len(headers))
-        table.setHorizontalHeaderLabels(headers)
-        table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setItemDelegate(NoFocusDelegate(table))
-        table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Interactive)
-        table.horizontalHeader().setStretchLastSection(True)
-        return table
 
     # --- what to show ----------------------------------------------------------
 
@@ -542,10 +606,39 @@ class MapPanel(QWidget):
 
     def shutdown(self):
         self.canvas.enable_tiles(False)
+        self._viewport_timer.stop()
+        for reply in self._google_replies:
+            reply.abort()
+        self._google_replies = []
 
     def refresh(self):
-        self.points = geo.located(self.case, self.evidence_id) \
-            if self.case is not None else []
+        self._fill(geo.located(self.case, self.evidence_id)
+                   if self.case is not None else [])
+
+    def show_place(self, latitude, longitude, name, what=''):
+        """Select a position a viewer read (a video's container
+        metadata): its point when the case has it, else one added for
+        this showing (the next refresh drops it). Returns its index."""
+        for index, point in enumerate(self.points):
+            if abs(point['latitude'] - latitude) < 1e-6 and \
+                    abs(point['longitude'] - longitude) < 1e-6 and \
+                    point['name'] == name:
+                break
+        else:
+            self._fill(self.points + [{
+                'kind': 'photo', 'latitude': latitude,
+                'longitude': longitude, 'name': name, 'when': '',
+                'what': what or 'Shown from the viewer',
+                'source': 'Shown from the viewer', 'read_by': ['TRACE'],
+                'evidence_id': None, 'artifact_ref': None, 'path': '',
+                'row': {}}])
+            index = len(self.points) - 1
+        self._select_row(index)
+        self.canvas.centre_on(index)
+        return index
+
+    def _fill(self, points):
+        self.points = points
         table = self.table
         table.setRowCount(len(self.points))
         for row, point in enumerate(self.points):
@@ -553,13 +646,16 @@ class MapPanel(QWidget):
                      self._names.get(point['evidence_id'], ''),
                      str(point['when'] or ''),
                      geo.describe(point['latitude'], point['longitude']),
-                     point['source'], point['path']]
+                     point['source'],
+                     conversations.readers_text(point.get('read_by') or []),
+                     point['path']]
             for column, value in enumerate(cells):
                 item = QTableWidgetItem(value)
                 if column == 0:
                     item.setData(Qt.UserRole, row)
                 table.setItem(row, column, item)
-        for column, width in enumerate((200, 110, 140, 150, 210, 120)):
+        for column, width in enumerate((200, 110, 140, 150, 210, 160,
+                                        100)):
             table.setColumnWidth(column, width)
         self.canvas.set_points(self.points)
         self._set_status()
@@ -586,14 +682,34 @@ class MapPanel(QWidget):
                     text += f", {len(self.canvas._failed):,} not fetched"
             else:
                 text += " · offline: no map tiles fetched"
+        note = getattr(self, 'hidden_note', '')
+        if note and self.case is not None:
+            text += f" · {note}"
         self.status_label.setText(text)
         self.status_label.setToolTip(text)
+
+    def set_hidden_note(self, text):
+        """What a tool read with positions that is not on the map (its
+        telemetry and unsorted artifacts), said in the status line."""
+        self.hidden_note = text or ''
+        self._set_status()
 
     # --- selection ---------------------------------------------------------------
 
     def _row_landed(self, index):
         self.canvas.centre_on(index)
         self.point_selected.emit(self.points[index])
+
+    def reveal(self, row_id):
+        """Select and centre the point that is activity row `row_id`
+        (from Activity's Show on Map). True when it is on the map."""
+        for index, point in enumerate(self.points):
+            if point['kind'] == 'activity' and \
+                    (point.get('row') or {}).get('id') == row_id:
+                self._select_row(index)
+                self.canvas.centre_on(index)
+                return True
+        return False
 
     def _select_row(self, index):
         for row in range(self.table.rowCount()):
@@ -620,6 +736,144 @@ class MapPanel(QWidget):
         if index >= 0:
             self.style_combo.setCurrentIndex(index)
         self.canvas.set_style(style)
+        self._prepare_google()
+
+    # --- Google (core/google_tiles) ------------------------------------------
+
+    def refresh_styles(self):
+        """Google's styles are offered only with a key (Options ▸ API
+        Keys); called again when the keys change."""
+        from trace_app.core import google_tiles
+        has_key = bool((self.google_key() or '').strip())
+        model = self.style_combo.model()
+        for index in range(self.style_combo.count()):
+            style = self.style_combo.itemData(index)
+            if not style:
+                continue
+            item = model.item(index)
+            host = geo.TILE_STYLES[style]['host']
+            if google_tiles.is_google(style):
+                item.setEnabled(has_key)
+                self.style_combo.setItemData(
+                    index, f"Tiles from {host}, with your Google Maps "
+                    f"Platform key" if has_key else
+                    "Needs your Google Maps Platform API key, with the Map "
+                    "Tiles API enabled: Options ▸ Settings ▸ API Keys", Qt.ToolTipRole)
+            else:
+                self.style_combo.setItemData(index, f"Tiles from {host}",
+                                             Qt.ToolTipRole)
+        if not has_key and google_tiles.is_google(self.canvas.style):
+            self.tiles_button.setChecked(False)
+            self._style_chosen = False
+            self._follow_theme()
+
+    def _prepare_google(self):
+        """A Google style on screen needs a session (createSession) before
+        any tile: made once per map type, kept while valid."""
+        from trace_app.core import google_tiles
+        style = self.canvas.style
+        if not (self.canvas.tiles_enabled and google_tiles.is_google(style)):
+            self.canvas.google = None
+            return
+        key = (self.google_key() or '').strip()
+        session = self._google_sessions.get(style)
+        if session and not google_tiles.expired(session):
+            self.canvas.google = {'session': session, 'key': key,
+                                  'copyright': ''}
+            self.canvas.update()
+            self._viewport_timer.start()
+            return
+        self.canvas.google = None
+        from PySide6.QtNetwork import QNetworkRequest
+        url, body = google_tiles.session_request(style, key)
+        request = QNetworkRequest(QUrl(url))
+        request.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader,
+                          USER_AGENT)
+        request.setTransferTimeout(TRANSFER_TIMEOUT_MS)
+        request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader,
+                          'application/json')
+        reply = self._google_net().post(request, QByteArray(body))
+        self._google_replies.append(reply)
+        reply.finished.connect(
+            lambda: self._session_answered(style, key, reply))
+        self._set_status()
+
+    def _google_net(self):
+        from PySide6.QtNetwork import QNetworkAccessManager
+        if self._google_network is None:
+            self._google_network = QNetworkAccessManager(self)
+        return self._google_network
+
+    def _session_answered(self, style, key, reply):
+        from trace_app.core import google_tiles
+        from PySide6.QtNetwork import QNetworkReply
+        if reply in self._google_replies:
+            self._google_replies.remove(reply)
+        aborted = reply.error() == \
+            QNetworkReply.NetworkError.OperationCanceledError
+        data = bytes(reply.readAll())
+        reply.deleteLater()
+        if aborted:
+            return
+        try:
+            session = google_tiles.parse_session(data)
+        except google_tiles.GoogleTilesError as exc:
+            if reply.error() != QNetworkReply.NetworkError.NoError and \
+                    not data:
+                exc = reply.errorString()
+            logger.warning("Google map session refused: %s", exc)
+            from trace_app.ui.dialogs import message
+            message.warning(
+                self, "Google Maps",
+                "Google did not start a map session with this key.",
+                f"{exc}\n\nThe key needs the Map Tiles API enabled in its "
+                f"Google Cloud project, with billing set up. The offline "
+                f"map is shown meanwhile.")
+            self.tiles_button.setChecked(False)
+            return
+        self._google_sessions[style] = session
+        if self.canvas.style == style and self.canvas.tiles_enabled:
+            self.canvas.google = {'session': session, 'key': key,
+                                  'copyright': ''}
+            self.canvas.update()
+            self._viewport_timer.start()
+        self._set_status()
+
+    def _view_changed(self):
+        if self.canvas.google and self.canvas.google.get('session'):
+            self._viewport_timer.start()
+
+    def _request_viewport(self):
+        """Google's copyright line for the area on screen."""
+        from trace_app.core import google_tiles
+        google = self.canvas.google
+        if not google or not google.get('session') or \
+                not self.canvas.tiles_enabled:
+            return
+        from PySide6.QtNetwork import QNetworkRequest
+        north, south, east, west = self.canvas.bounds()
+        request = QNetworkRequest(QUrl(google_tiles.viewport_url(
+            google['session'], google['key'], self.canvas.zoom, north,
+            south, east, west)))
+        request.setHeader(QNetworkRequest.KnownHeaders.UserAgentHeader,
+                          USER_AGENT)
+        request.setTransferTimeout(TRANSFER_TIMEOUT_MS)
+        reply = self._google_net().get(request)
+        self._google_replies.append(reply)
+        reply.finished.connect(lambda: self._viewport_answered(reply))
+
+    def _viewport_answered(self, reply):
+        from trace_app.core import google_tiles
+        if reply in self._google_replies:
+            self._google_replies.remove(reply)
+        data = bytes(reply.readAll())
+        reply.deleteLater()
+        google = self.canvas.google
+        if google is not None:
+            line = google_tiles.parse_copyright(data)
+            if line:
+                google['copyright'] = line
+                self.canvas.update()
 
     def _follow_theme(self):
         """Light tiles in the light theme, dark in the dark -- until the
@@ -639,11 +893,16 @@ class MapPanel(QWidget):
     def _style_picked(self, _index):
         style = self.style_combo.currentData()
         previous = self.canvas.style
-        if self.canvas.tiles_enabled and not self._agreed(style):
+        if not self._agreed(style):
             self._set_style(previous)       # a no keeps what was shown
             return
         self._style_chosen = True
         self._set_style(style)
+        if not self.canvas.tiles_enabled:
+            # Picking a map is asking to see it: with the offline map
+            # shown, choosing one changed nothing until Online Map was
+            # pressed as well. Agreed above, so this asks nothing more.
+            self.tiles_button.setChecked(True)
         self._set_status()
 
     def _agreed(self, style):
@@ -675,20 +934,27 @@ class MapPanel(QWidget):
             self.tiles_button.blockSignals(False)
             return
         self.canvas.enable_tiles(on)
+        self._prepare_google()
         self._set_status()
 
     def _ask_for_tiles(self, style):
         from trace_app.ui.dialogs import message
         chosen = geo.TILE_STYLES[style]
+        google = chosen.get('provider') == 'google'
         return message.question(
-            self, "Fetch map tiles?",
+            self, "Use an online map?",
             f"Draw the map from {chosen['host']} "
-            f"({chosen['label'].split(' (')[0].lower()} style)?",
+            f"({chosen['label'].split(' (')[0]})?",
             informative=(
-                "Tiles are requested for the area on screen, so the tile "
-                "server learns which areas you look at -- zoomed in on a "
-                "photo, roughly where it was taken -- from this computer's "
-                "internet address, and when. No file, name or list of "
-                "positions is sent. Tiles are kept in memory only.\n\n"
-                "Without tiles the points are drawn over an offline "
-                "outline of the world."))
+                "This needs internet access. Tiles are requested for the "
+                "area on screen, so the map's server learns which areas "
+                "you look at -- zoomed in on a photo, roughly where it was "
+                "taken -- from this computer's internet address, and when. "
+                "No file, name or list of positions is sent. Tiles are "
+                "kept in memory only."
+                + ("\n\nGoogle's tiles are requested with your Google Maps "
+                   "Platform key: Google records the use against that key's "
+                   "project, and bills it past the free monthly allowance."
+                   if google else '')
+                + "\n\nWithout it the points are drawn over the offline "
+                  "map (Natural Earth), which needs no network."))
