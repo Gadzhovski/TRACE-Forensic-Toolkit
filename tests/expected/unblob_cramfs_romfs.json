@@ -1,0 +1,372 @@
+{
+ "images": {
+  "unblob-fruits.cramfs_be": {
+   "apple.txt": {
+    "sha256": "303980bcb9e9e6cdec515230791af8b0ab1aaa244b58a8d99152673aa22197d0",
+    "size": 6
+   },
+   "cherry.txt": {
+    "sha256": "86baf3529da550a44b0681ffa031b6b676e620e9e06dc5ac1119d0cd21cbcf55",
+    "size": 7
+   }
+  },
+  "unblob-fruits.cramfs_le": {
+   "apple.txt": {
+    "sha256": "303980bcb9e9e6cdec515230791af8b0ab1aaa244b58a8d99152673aa22197d0",
+    "size": 6
+   },
+   "cherry.txt": {
+    "sha256": "86baf3529da550a44b0681ffa031b6b676e620e9e06dc5ac1119d0cd21cbcf55",
+    "size": 7
+   }
+  },
+  "unblob-fruits.crc_swap.cramfs_be": {
+   "apple.txt": {
+    "sha256": "303980bcb9e9e6cdec515230791af8b0ab1aaa244b58a8d99152673aa22197d0",
+    "size": 6
+   },
+   "cherry.txt": {
+    "sha256": "86baf3529da550a44b0681ffa031b6b676e620e9e06dc5ac1119d0cd21cbcf55",
+    "size": 7
+   }
+  },
+  "unblob-fruits.crc_swap.cramfs_le": {
+   "apple.txt": {
+    "sha256": "303980bcb9e9e6cdec515230791af8b0ab1aaa244b58a8d99152673aa22197d0",
+    "size": 6
+   },
+   "cherry.txt": {
+    "sha256": "86baf3529da550a44b0681ffa031b6b676e620e9e06dc5ac1119d0cd21cbcf55",
+    "size": 7
+   }
+  },
+  "unblob-fruits.old.cramfs_be": {
+   "apple.txt": {
+    "sha256": "303980bcb9e9e6cdec515230791af8b0ab1aaa244b58a8d99152673aa22197d0",
+    "size": 6
+   },
+   "cherry.txt": {
+    "sha256": "86baf3529da550a44b0681ffa031b6b676e620e9e06dc5ac1119d0cd21cbcf55",
+    "size": 7
+   }
+  },
+  "unblob-fruits.old.cramfs_le": {
+   "apple.txt": {
+    "sha256": "303980bcb9e9e6cdec515230791af8b0ab1aaa244b58a8d99152673aa22197d0",
+    "size": 6
+   },
+   "cherry.txt": {
+    "sha256": "86baf3529da550a44b0681ffa031b6b676e620e9e06dc5ac1119d0cd21cbcf55",
+    "size": 7
+   }
+  },
+  "unblob-fruits.romfs": {
+   "dir_1/file_1.txt": {
+    "sha256": "becb10d47cf52d60032f2929467ba38df39b2e1c02f48c5396dfc575bb5ca1eb",
+    "size": 7
+   },
+   "dir_1/file_2.txt": {
+    "sha256": "37a29c8a7653e125fc0126d165b627731523e1c467a7ee23fde9d91f6f5171c8",
+    "size": 7
+   },
+   "dir_1/file_3.txt": {
+    "sha256": "4688c417cd3449051a7cee4691ec454f4ae154f3de536d71cd585716a0a09954",
+    "size": 7
+   },
+   "dir_1/file_4.txt": {
+    "sha256": "b7265616ad9a7b222b97966bc6110dcd7c4b8806f3a1424f216b26c15f26fb22",
+    "size": 7
+   },
+   "dir_1/file_5.txt": {
+    "sha256": "83b0d78551a7600c6bac8dfaf7bf9819d135b8852ff84a8bf8bcce0018815316",
+    "size": 7
+   },
+   "dir_1/hosts": {
+    "link": "../hosts"
+   },
+   "dir_1/passwd": {
+    "link": "../etc/passwd"
+   },
+   "dir_2/file_1.txt": {
+    "sha256": "78cac369aa92a9cfd5af16a3380602e3b2af66fe83eef6bac8d71c19e08bd900",
+    "size": 7
+   },
+   "dir_2/file_2.txt": {
+    "sha256": "0bdd7feb316d15bca8c41b78a6a81773300b6515bc548c087dc380b47ce8e381",
+    "size": 7
+   },
+   "dir_2/file_3.txt": {
+    "sha256": "0a146526bb4bbe36e3e186599d8653d48683486c2854a3dceafdd92cac6398cd",
+    "size": 7
+   },
+   "dir_2/file_4.txt": {
+    "sha256": "dfdecb8aa7d23913bcf47bddb9d66e6b7de1a720df24979038419f8060d87cd2",
+    "size": 7
+   },
+   "dir_2/file_5.txt": {
+    "sha256": "a9863242af0e6cf5f0d8fd8e36f12bf7a60358485b60b6f0a5628e27f5240a09",
+    "size": 7
+   },
+   "dir_2/hosts": {
+    "link": "../hosts"
+   },
+   "dir_2/passwd": {
+    "link": "../etc/passwd"
+   },
+   "dir_3/file_1.txt": {
+    "sha256": "2c9d5497abe2cae2fdce09012831472c7c8ffcfd9cff904a56be7a39e2a93d90",
+    "size": 7
+   },
+   "dir_3/file_2.txt": {
+    "sha256": "14a56bd0a542a8b8a957bae31f9622a6a4a06c0de4e5cf3252147a576547a060",
+    "size": 7
+   },
+   "dir_3/file_3.txt": {
+    "sha256": "7bb81d4501597dfab76f70ca849502f9a35034aa2c1d8fb8a39fa66c31bd6702",
+    "size": 7
+   },
+   "dir_3/file_4.txt": {
+    "sha256": "2bbb0e7688de4b232efaa6ba60382fd2caad8ab88452e1146cca7ec3f6835308",
+    "size": 7
+   },
+   "dir_3/file_5.txt": {
+    "sha256": "fd0d7557064258dd117e985768074403e2e6a9f0f49bfea2562a062ae4e1a77f",
+    "size": 7
+   },
+   "dir_3/hosts": {
+    "link": "../hosts"
+   },
+   "dir_3/passwd": {
+    "link": "../etc/passwd"
+   },
+   "dir_4/file_1.txt": {
+    "sha256": "b85ac35d548685065dd22e8b66d9df1a786f34fb798e74bb528251edf04933e2",
+    "size": 7
+   },
+   "dir_4/file_2.txt": {
+    "sha256": "adcd05d6c0efaa6f956e63ad8fe1dea924460ae0689750bda2398cef61f8a90b",
+    "size": 7
+   },
+   "dir_4/file_3.txt": {
+    "sha256": "e1b753f28f66f2741a120bbe35d9f222c68c0070a6e13211c983b5b88085815d",
+    "size": 7
+   },
+   "dir_4/file_4.txt": {
+    "sha256": "be2efe425804d50d0ace593b5324a769ba6bcd146da717a268480aaae3078b1d",
+    "size": 7
+   },
+   "dir_4/file_5.txt": {
+    "sha256": "171efd9853ab67874d4f70f986ed8f2ff6aee0952edc4ae074d60587818ff51c",
+    "size": 7
+   },
+   "dir_4/hosts": {
+    "link": "../hosts"
+   },
+   "dir_4/passwd": {
+    "link": "../etc/passwd"
+   },
+   "dir_5/file_1.txt": {
+    "sha256": "a73ae48433e2beb1749e9f0707a7f374b6b4b21e6974286b2ed3a1b7f8979717",
+    "size": 7
+   },
+   "dir_5/file_2.txt": {
+    "sha256": "6af8fdb03c9758c0f98ffab425e350628b00f47dac8b88d8c789167045221742",
+    "size": 7
+   },
+   "dir_5/file_3.txt": {
+    "sha256": "31383ca4754c6c21489de7748d45ded38f7fda9f3efe69a5f7d0382715e796d9",
+    "size": 7
+   },
+   "dir_5/file_4.txt": {
+    "sha256": "097ef50924cb6d6fa2a5bfc05b6506424af7c60fc17364c10a7e1646a1f54f4c",
+    "size": 7
+   },
+   "dir_5/file_5.txt": {
+    "sha256": "3d8b0ad48d185cbebc586554edb091480bae29d74d2d67b6ab0fb1ade0ca6e17",
+    "size": 7
+   },
+   "dir_5/hosts": {
+    "link": "../hosts"
+   },
+   "dir_5/passwd": {
+    "link": "../etc/passwd"
+   },
+   "hlink_1_1": {
+    "sha256": "becb10d47cf52d60032f2929467ba38df39b2e1c02f48c5396dfc575bb5ca1eb",
+    "size": 7
+   },
+   "hlink_1_2": {
+    "sha256": "37a29c8a7653e125fc0126d165b627731523e1c467a7ee23fde9d91f6f5171c8",
+    "size": 7
+   },
+   "hlink_1_3": {
+    "sha256": "4688c417cd3449051a7cee4691ec454f4ae154f3de536d71cd585716a0a09954",
+    "size": 7
+   },
+   "hlink_1_4": {
+    "sha256": "b7265616ad9a7b222b97966bc6110dcd7c4b8806f3a1424f216b26c15f26fb22",
+    "size": 7
+   },
+   "hlink_1_5": {
+    "sha256": "83b0d78551a7600c6bac8dfaf7bf9819d135b8852ff84a8bf8bcce0018815316",
+    "size": 7
+   },
+   "hlink_2_1": {
+    "sha256": "78cac369aa92a9cfd5af16a3380602e3b2af66fe83eef6bac8d71c19e08bd900",
+    "size": 7
+   },
+   "hlink_2_2": {
+    "sha256": "0bdd7feb316d15bca8c41b78a6a81773300b6515bc548c087dc380b47ce8e381",
+    "size": 7
+   },
+   "hlink_2_3": {
+    "sha256": "0a146526bb4bbe36e3e186599d8653d48683486c2854a3dceafdd92cac6398cd",
+    "size": 7
+   },
+   "hlink_2_4": {
+    "sha256": "dfdecb8aa7d23913bcf47bddb9d66e6b7de1a720df24979038419f8060d87cd2",
+    "size": 7
+   },
+   "hlink_2_5": {
+    "sha256": "a9863242af0e6cf5f0d8fd8e36f12bf7a60358485b60b6f0a5628e27f5240a09",
+    "size": 7
+   },
+   "hlink_3_1": {
+    "sha256": "2c9d5497abe2cae2fdce09012831472c7c8ffcfd9cff904a56be7a39e2a93d90",
+    "size": 7
+   },
+   "hlink_3_2": {
+    "sha256": "14a56bd0a542a8b8a957bae31f9622a6a4a06c0de4e5cf3252147a576547a060",
+    "size": 7
+   },
+   "hlink_3_3": {
+    "sha256": "7bb81d4501597dfab76f70ca849502f9a35034aa2c1d8fb8a39fa66c31bd6702",
+    "size": 7
+   },
+   "hlink_3_4": {
+    "sha256": "2bbb0e7688de4b232efaa6ba60382fd2caad8ab88452e1146cca7ec3f6835308",
+    "size": 7
+   },
+   "hlink_3_5": {
+    "sha256": "fd0d7557064258dd117e985768074403e2e6a9f0f49bfea2562a062ae4e1a77f",
+    "size": 7
+   },
+   "hlink_4_1": {
+    "sha256": "b85ac35d548685065dd22e8b66d9df1a786f34fb798e74bb528251edf04933e2",
+    "size": 7
+   },
+   "hlink_4_2": {
+    "sha256": "adcd05d6c0efaa6f956e63ad8fe1dea924460ae0689750bda2398cef61f8a90b",
+    "size": 7
+   },
+   "hlink_4_3": {
+    "sha256": "e1b753f28f66f2741a120bbe35d9f222c68c0070a6e13211c983b5b88085815d",
+    "size": 7
+   },
+   "hlink_4_4": {
+    "sha256": "be2efe425804d50d0ace593b5324a769ba6bcd146da717a268480aaae3078b1d",
+    "size": 7
+   },
+   "hlink_4_5": {
+    "sha256": "171efd9853ab67874d4f70f986ed8f2ff6aee0952edc4ae074d60587818ff51c",
+    "size": 7
+   },
+   "hlink_5_1": {
+    "sha256": "a73ae48433e2beb1749e9f0707a7f374b6b4b21e6974286b2ed3a1b7f8979717",
+    "size": 7
+   },
+   "hlink_5_2": {
+    "sha256": "6af8fdb03c9758c0f98ffab425e350628b00f47dac8b88d8c789167045221742",
+    "size": 7
+   },
+   "hlink_5_3": {
+    "sha256": "31383ca4754c6c21489de7748d45ded38f7fda9f3efe69a5f7d0382715e796d9",
+    "size": 7
+   },
+   "hlink_5_4": {
+    "sha256": "097ef50924cb6d6fa2a5bfc05b6506424af7c60fc17364c10a7e1646a1f54f4c",
+    "size": 7
+   },
+   "hlink_5_5": {
+    "sha256": "3d8b0ad48d185cbebc586554edb091480bae29d74d2d67b6ab0fb1ade0ca6e17",
+    "size": 7
+   },
+   "slink_1_1": {
+    "link": "dir_1/file_1.txt"
+   },
+   "slink_1_2": {
+    "link": "dir_1/file_2.txt"
+   },
+   "slink_1_3": {
+    "link": "dir_1/file_3.txt"
+   },
+   "slink_1_4": {
+    "link": "dir_1/file_4.txt"
+   },
+   "slink_1_5": {
+    "link": "dir_1/file_5.txt"
+   },
+   "slink_2_1": {
+    "link": "dir_2/file_1.txt"
+   },
+   "slink_2_2": {
+    "link": "dir_2/file_2.txt"
+   },
+   "slink_2_3": {
+    "link": "dir_2/file_3.txt"
+   },
+   "slink_2_4": {
+    "link": "dir_2/file_4.txt"
+   },
+   "slink_2_5": {
+    "link": "dir_2/file_5.txt"
+   },
+   "slink_3_1": {
+    "link": "dir_3/file_1.txt"
+   },
+   "slink_3_2": {
+    "link": "dir_3/file_2.txt"
+   },
+   "slink_3_3": {
+    "link": "dir_3/file_3.txt"
+   },
+   "slink_3_4": {
+    "link": "dir_3/file_4.txt"
+   },
+   "slink_3_5": {
+    "link": "dir_3/file_5.txt"
+   },
+   "slink_4_1": {
+    "link": "dir_4/file_1.txt"
+   },
+   "slink_4_2": {
+    "link": "dir_4/file_2.txt"
+   },
+   "slink_4_3": {
+    "link": "dir_4/file_3.txt"
+   },
+   "slink_4_4": {
+    "link": "dir_4/file_4.txt"
+   },
+   "slink_4_5": {
+    "link": "dir_4/file_5.txt"
+   },
+   "slink_5_1": {
+    "link": "dir_5/file_1.txt"
+   },
+   "slink_5_2": {
+    "link": "dir_5/file_2.txt"
+   },
+   "slink_5_3": {
+    "link": "dir_5/file_3.txt"
+   },
+   "slink_5_4": {
+    "link": "dir_5/file_4.txt"
+   },
+   "slink_5_5": {
+    "link": "dir_5/file_5.txt"
+   }
+  }
+ },
+ "source": "onekey-sec/unblob 5dbc0fe665d1a9fa60476686e973cf88b3b3ab2c tests/integration/filesystem (MIT): the files unblob extracted from each image; links as git records them"
+}

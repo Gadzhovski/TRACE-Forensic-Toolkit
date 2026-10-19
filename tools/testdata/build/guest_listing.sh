@@ -4,6 +4,7 @@
 #   file  <size> <sha256> <mtime>
 #   link  <target>
 #   dir   (nothing)
+#   other (nothing: a device, FIFO or socket)
 TAB=$(printf '\t')
 list_tree() {
     base="$1"
@@ -14,6 +15,8 @@ list_tree() {
             echo "link${TAB}$(readlink "$path")${TAB}$rel"
         elif [ -d "$path" ]; then
             echo "dir${TAB}${TAB}$rel"
+        elif [ ! -f "$path" ]; then
+            echo "other${TAB}${TAB}$rel"
         else
             digest=$(sha256sum "$path" | cut -d' ' -f1)
             echo "file${TAB}$(stat -c %s "$path") $digest $(stat -c %Y "$path")${TAB}$rel"

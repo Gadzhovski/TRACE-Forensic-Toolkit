@@ -171,8 +171,8 @@ def parse_listing(text, prefix=''):
             if not path.startswith(prefix + '/'):
                 continue
             path = path[len(prefix):]
-        if kind == 'dir':
-            files[path] = {'type': 'dir'}
+        if kind in ('dir', 'other'):
+            files[path] = {'type': kind}
         elif kind == 'link':
             files[path] = {'type': 'link', 'target': fields,
                            'size': len(fields.encode())}
