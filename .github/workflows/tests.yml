@@ -318,7 +318,8 @@ jobs:
           TESTS: ${{ needs.plan.outputs.tests }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          if [ "$EVIDENCE" != "true" ]; then export TRACE_TEST_TIER=quick; fi
+          # Tier quick as tools/run_tests.py runs it: missing data skips.
+          if [ "$EVIDENCE" != "true" ]; then export TRACE_TEST_TIER=quick; unset TRACE_REQUIRE_IMAGES; fi
           # One worker per core; a test file stays on one worker, so the UI
           # tests' shared window and module fixtures behave as in series.
           # Each worker has its own sandbox (conftest), so none collide.
