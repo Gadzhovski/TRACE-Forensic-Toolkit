@@ -363,10 +363,17 @@ def matrix(event, ref, default='master'):
                                        f'{default} or a pull request)')
 
 
+def evidence_python(pythons):
+    """The Python whose jobs read evidence (one per system)."""
+    return max(pythons, key=lambda v: tuple(int(p) for p in v.split('.')))
+
+
 def summary(result):
     lines = ['## What this run tests', '',
              f"On {', '.join(result['oses'])} x Python "
-             f"{', '.join(result['pythons'])} -- {result['why']}.", '']
+             f"{', '.join(result['pythons'])} -- {result['why']}.",
+             f"Evidence on Python {evidence_python(result['pythons'])} only; "
+             "the other Pythons run the tests that need no data.", '']
     if result['full']:
         lines += [f"**Everything** -- {result['reason']}.", '']
     elif not result['tests'] and not result['carve_score']:
@@ -459,6 +466,11 @@ def main(argv=None):
         'linux_images': 'true' if result['linux_images'] else 'false',
         'carve_score': 'true' if result['carve_score'] else 'false',
         'pythons': json.dumps(result['pythons']),
+        # Evidence is read by one job per system: the newest Python's. The
+        # others run the tests that need no data (tier quick) -- reading an
+        # image does not change with the Python version, and every job
+        # downloading and building gigabytes only made CI slow.
+        'evidence_python': evidence_python(result['pythons']),
         'oses': json.dumps(result['oses']),
         'include': json.dumps(EXTRA_JOBS if result['pythons'] != QUICK_PYTHONS
                               else []),

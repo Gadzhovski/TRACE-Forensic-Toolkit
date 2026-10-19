@@ -1,6 +1,8 @@
 """config.ini has one reader and writer (infra/config_store.py), and API
 keys are kept protected (infra/api_keys.py)."""
 
+import os
+import subprocess
 import sys
 import threading
 import types
@@ -146,6 +148,22 @@ def test_macos_keeps_keys_in_the_keychain(monkeypatch):
     monkeypatch.setattr(api_keys, 'SERVICE',
                         'TRACE test ' + uuid.uuid4().hex)
     secret = 'vt-' + uuid.uuid4().hex
+    # Tried first in a child with a time limit: with no login keychain
+    # under the sandboxed HOME (a CI runner), Security.framework waits for
+    # an interaction nobody can give -- it held a worker for the whole job.
+    probe = ("from trace_app.infra import api_keys; "
+             f"api_keys.SERVICE = {api_keys.SERVICE!r}; "
+             "api_keys._keychain_set('probe', 'x'); "
+             "api_keys._keychain_set('probe', '')")
+    environment = {k: v for k, v in os.environ.items()
+                   if k != 'TRACE_KEY_STORE'}
+    try:
+        subprocess.run([sys.executable, '-c', probe], env=environment,
+                       timeout=30, check=True, capture_output=True)
+    except subprocess.TimeoutExpired:
+        pytest.skip("the keychain waits for user interaction here")
+    except subprocess.CalledProcessError as exc:
+        pytest.skip(f"no usable keychain here: {exc.stderr[-300:]!r}")
     try:
         api_keys._keychain_set('virustotal', secret)
     except api_keys.KeyStoreError as exc:

@@ -10,8 +10,10 @@ one lock, written to a temporary file and moved into place.
 """
 
 import configparser
+import locale
 import logging
 import os
+import sys
 import threading
 
 from trace_app.infra.paths import config_file
@@ -19,6 +21,15 @@ from trace_app.infra.paths import config_file
 logger = logging.getLogger('TRACE.Config')
 
 _LOCK = threading.RLock()
+
+
+def _ansi_code_page():
+    """The system's ANSI code page, whatever Python's UTF-8 mode says."""
+    if sys.platform == 'win32':
+        import ctypes
+        return f'cp{ctypes.windll.kernel32.GetACP()}'
+    getencoding = getattr(locale, 'getencoding', None)   # 3.11+
+    return getencoding() if getencoding else locale.getpreferredencoding(False)
 
 
 def load():
@@ -30,9 +41,16 @@ def load():
         try:
             parser.read(path, encoding='utf-8')
         except UnicodeDecodeError:
-            # Written by an older TRACE in the ANSI code page.
-            parser = configparser.ConfigParser(interpolation=None)
-            parser.read(path)
+            # Written by an older TRACE in the ANSI code page -- named, not
+            # the default encoding: in UTF-8 mode (PYTHONUTF8) that is UTF-8
+            # again, and the file read as empty. latin-1 never fails.
+            for encoding in (_ansi_code_page(), 'latin-1'):
+                parser = configparser.ConfigParser(interpolation=None)
+                try:
+                    parser.read(path, encoding=encoding)
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
     except (configparser.Error, OSError, UnicodeDecodeError) as exc:
         logger.debug("config.ini unreadable: %s", exc)
     return parser

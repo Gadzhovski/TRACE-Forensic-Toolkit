@@ -72,6 +72,7 @@ jobs:
       artifacts: ${{ steps.select.outputs.artifacts }}
       corpus: ${{ steps.select.outputs.corpus }}
       linux_images: ${{ steps.select.outputs.linux_images }}
+      evidence_python: ${{ steps.select.outputs.evidence_python }}
       carve_score: ${{ steps.select.outputs.carve_score }}
       pythons: ${{ steps.select.outputs.pythons }}
       oses: ${{ steps.select.outputs.oses }}
@@ -109,6 +110,9 @@ jobs:
     env:
       QT_QPA_PLATFORM: offscreen
       TRACE_REQUIRE_IMAGES: '1'
+      # One job per system reads evidence (ci_select.evidence_python); the
+      # other Pythons download nothing and run the tests needing no data.
+      EVIDENCE: ${{ matrix.python == needs.plan.outputs.evidence_python && 'true' || 'false' }}
       PYTHONUTF8: '1'
 
     steps:
@@ -159,7 +163,7 @@ jobs:
       # (tools/run_tests.py full). The fetch verifies every SHA-256.
       - name: Restore ci data
         id: cache-ci
-        if: needs.plan.outputs.fetch_images == 'true'
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.fetch_images == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: test_images/ci
@@ -167,7 +171,7 @@ jobs:
           enableCrossOsArchive: true
 
       - name: Get ci data
-        if: needs.plan.outputs.fetch_images == 'true'
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.fetch_images == 'true'
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
@@ -176,7 +180,7 @@ jobs:
       # Only master, the weekly and manual runs save: branches restore what
       # master saved and never fill the repository's 10 GB with copies.
       - name: Save ci data
-        if: needs.plan.outputs.fetch_images == 'true' && steps.cache-ci.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.fetch_images == 'true' && steps.cache-ci.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: test_images/ci
@@ -187,7 +191,7 @@ jobs:
       # (tools/testdata/build/carve_corpus.py).
       - name: Restore corpus data
         id: cache-corpus
-        if: needs.plan.outputs.corpus == 'true'
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.corpus == 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: test_images/corpus
@@ -195,7 +199,7 @@ jobs:
           enableCrossOsArchive: true
 
       - name: Get corpus data
-        if: needs.plan.outputs.corpus == 'true'
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.corpus == 'true'
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
@@ -204,11 +208,40 @@ jobs:
       # Only master, the weekly and manual runs save: branches restore what
       # master saved and never fill the repository's 10 GB with copies.
       - name: Save corpus data
-        if: needs.plan.outputs.corpus == 'true' && steps.cache-corpus.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.corpus == 'true' && steps.cache-corpus.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: test_images/corpus
           key: test-data-corpus-${{ hashFiles('tools/testdata/build/carve_corpus.py') }}
+          enableCrossOsArchive: true
+
+      # Real artifacts -- hives, logs, databases, small images -- pinned by
+      # SHA-256 (tools/testdata/samples.py). Before the Linux images: the
+      # kernel-keyed and IFS builders read the QNX / cramfs / romfs samples.
+      - name: Restore samples data
+        id: cache-samples
+        if: env.EVIDENCE == 'true' && (needs.plan.outputs.artifacts == 'true' || (runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'))
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/samples
+          key: test-data-samples-${{ hashFiles('tools/testdata/samples.py') }}
+          enableCrossOsArchive: true
+
+      - name: Get samples data
+        if: env.EVIDENCE == 'true' && (needs.plan.outputs.artifacts == 'true' || (runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'))
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          "$PY" -m tools.testdata.fetch --group samples
+
+      # Only master, the weekly and manual runs save: branches restore what
+      # master saved and never fill the repository's 10 GB with copies.
+      - name: Save samples data
+        if: env.EVIDENCE == 'true' && (needs.plan.outputs.artifacts == 'true' || (runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true')) && steps.cache-samples.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: test_images/samples
+          key: test-data-samples-${{ hashFiles('tools/testdata/samples.py') }}
           enableCrossOsArchive: true
 
       # Images made by the Linux kernel and its own tools, on loop devices
@@ -229,7 +262,7 @@ jobs:
       # kernel's own reading of them (and of the QNX4, QNX6, cramfs and
       # romfs samples) -- no module is loaded on the runner.
       - name: Build the Linux images
-        if: runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
+        if: env.EVIDENCE == 'true' && runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
         run: |
           sudo apt-get install -y -qq --no-install-recommends btrfs-progs \
             mdadm cryptsetup-bin lvm2 dosfstools mtools build-essential \
@@ -275,34 +308,6 @@ jobs:
             >/dev/null
           /tmp/playwright/bin/python tools/testdata/build/make_chromium_storage.py
 
-      # Real artifacts -- hives, logs, databases, small images -- pinned by
-      # SHA-256 (tools/testdata/samples.py).
-      - name: Restore samples data
-        id: cache-samples
-        if: needs.plan.outputs.artifacts == 'true'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: test_images/samples
-          key: test-data-samples-${{ hashFiles('tools/testdata/samples.py') }}
-          enableCrossOsArchive: true
-
-      - name: Get samples data
-        if: needs.plan.outputs.artifacts == 'true'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
-          "$PY" -m tools.testdata.fetch --group samples
-
-      # Only master, the weekly and manual runs save: branches restore what
-      # master saved and never fill the repository's 10 GB with copies.
-      - name: Save samples data
-        if: needs.plan.outputs.artifacts == 'true' && steps.cache-samples.outputs.cache-hit != 'true' && (github.ref == 'refs/heads/master' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
-        with:
-          path: test_images/samples
-          key: test-data-samples-${{ hashFiles('tools/testdata/samples.py') }}
-          enableCrossOsArchive: true
-
       # -rfE: every failure and error summarised at the end of the log;
       # the JUnit report feeds the run's summary page and the artifact.
       # TESTS empty = every test file (a full run).
@@ -313,13 +318,14 @@ jobs:
           TESTS: ${{ needs.plan.outputs.tests }}
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          if [ "$EVIDENCE" != "true" ]; then export TRACE_TEST_TIER=quick; fi
           # One worker per core; a test file stays on one worker, so the UI
           # tests' shared window and module fixtures behave as in series.
           # Each worker has its own sandbox (conftest), so none collide.
           "$PY" -m pytest -n auto --dist loadfile -v -rfE --junitxml=test-results.xml $TESTS
 
       - name: Carving against published answer keys
-        if: needs.plan.outputs.carve_score == 'true'
+        if: env.EVIDENCE == 'true' && needs.plan.outputs.carve_score == 'true'
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
