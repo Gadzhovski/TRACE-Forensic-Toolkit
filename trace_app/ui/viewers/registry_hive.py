@@ -3,7 +3,7 @@ import logging
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTreeWidgetItem, QToolBar, QLabel, QSplitter, QTableWidget, \
-    QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QMenu, QApplication, QHeaderView
+    QTableWidgetItem, QComboBox, QSizePolicy, QPushButton, QApplication, QHeaderView
 from Registry import Registry
 from Registry.Registry import RegistryValue, RegistryKey
 from trace_app.infra.constants import (SPLITTER_HANDLE_WIDTH, TREE_ICON_SIZE,
@@ -13,7 +13,7 @@ from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.property_table import PropertyTable
-from trace_app.ui.widgets.context_menus import show_menu
+from trace_app.ui.widgets.kept_threads import KeptThreads
 
 logger = logging.getLogger('TRACE.Registry')
 
@@ -34,12 +34,13 @@ class _HiveFinder(QThread):
     (core/registry_hives.py), off the UI thread: the Evidence list then says
     which images hold a registry at all."""
 
-    #: (evidence path, [Hive]).
-    found = Signal(str, object)
+    #: (evidence path, [Hive], generation it was searched for).
+    found = Signal(str, object, object)
 
-    def __init__(self, evidence, parent=None):
+    def __init__(self, evidence, parent=None, generation=0):
         super().__init__(parent)
         self.evidence = evidence            # [(path, unlocks)]
+        self.generation = generation
 
     def run(self):
         from trace_app.core import registry_hives
@@ -58,7 +59,7 @@ class _HiveFinder(QThread):
                 if handler is not None:
                     handler.close_resources()
             if not self.isInterruptionRequested():
-                self.found.emit(path, hives)
+                self.found.emit(path, hives, self.generation)
 
 
 class _HiveLoader(QThread):
@@ -120,7 +121,17 @@ class RegistryExtractor(QWidget):
         self._hives = {}
         #: The path the examiner picked; None until they pick one.
         self._chosen = None
-        self._finder = None
+        #: One search per evidence, never waited for on the window's
+        #: thread: a folder's search (opening it, finding its system
+        #: roots) stops only between volumes, and waiting for it froze the
+        #: window while a case's images opened (15 s for two phone
+        #: folders). A search made stale is told to stop and its answer
+        #: dropped by generation.
+        self._finders = KeptThreads(self)
+        #: path -> the search generation whose answer counts.
+        self._generation = {}
+        #: path -> generation being searched now.
+        self._searching = {}
         #: The running hive reader, retained so it is not collected mid-read.
         self._loader = None
         #: (path, Hive) of what the tree shows.
@@ -220,21 +231,6 @@ class RegistryExtractor(QWidget):
         align_controls(self.toolbar)
         self._fill_evidence()
 
-    def onCustomContextMenuRequested(self, position):
-        # Create the context menu
-        contextMenu = QMenu(self)
-        copyAction = contextMenu.addAction("Copy")
-
-        # Execute the menu and check which action was triggered
-        action = show_menu(contextMenu, self.tableWidget.mapToGlobal(position))
-
-        if action == copyAction:
-            # Copy the selected cell's text to the clipboard
-            selectedIndexes = self.tableWidget.selectedIndexes()
-            if selectedIndexes:
-                selectedText = selectedIndexes[0].data()  # Assuming single selection for simplicity
-                QApplication.clipboard().setText(selectedText)
-
     # --- which evidence, which hive ------------------------------------------
 
     def set_evidence(self, evidence):
@@ -251,10 +247,11 @@ class RegistryExtractor(QWidget):
         old = {path: handler for path, _n, handler in self._evidence}
         # Gone, reopened under the same path, or a volume unlocked since it
         # was searched: forget what was found.
-        for path in list(self._hives):
+        for path in set(self._hives) | set(self._searching):
             if path not in known or old.get(path) is not handlers.get(path) \
                     or self._searched_unlocked.get(path) != unlocked[path]:
                 self._hives.pop(path, None)
+                self._forget_search(path)
         self._evidence = list(evidence)
         if self._chosen not in known:
             self._chosen = None
@@ -263,36 +260,57 @@ class RegistryExtractor(QWidget):
         self._fill_evidence()
         self._search()
 
+    def _forget_search(self, path):
+        """A search of `path` under way no longer counts: told to stop (not
+        waited for) and its answer, when it comes, dropped."""
+        self._generation[path] = self._generation.get(path, 0) + 1
+        generation = self._searching.pop(path, None)
+        thread = self._finders.get((path, generation))
+        if thread is not None:
+            try:
+                thread.requestInterruption()
+            except RuntimeError:
+                pass
+
     def _search(self):
-        if self._finder is not None and self._finder.isRunning():
-            self._finder.requestInterruption()
-            self._finder.wait(10000)
-        pending = [(path, self.unlocks_for(path))
-                   for path, _n, _handler in self._evidence
-                   if path not in self._hives]
-        if not pending:
-            return
-        for path, unlocks in pending:
+        for path, _n, _handler in self._evidence:
+            if path in self._hives or path in self._searching:
+                continue
+            unlocks = self.unlocks_for(path)
             self._searched_unlocked[path] = sorted(unlocks)
-        self._finder = _HiveFinder(pending, self)
-        self._finder.found.connect(self._hives_found)
-        self._finder.start()
+            generation = self._generation.setdefault(path, 0)
+            self._searching[path] = generation
+            finder = _HiveFinder([(path, unlocks)], self, generation)
+            finder.found.connect(self._hives_found)
+            self._finders[(path, generation)] = finder
+            finder.start()
 
     def shutdown(self):
-        for thread in (self._finder, self._loader):
-            if thread is not None and thread.isRunning():
-                thread.requestInterruption()
-                thread.wait(10000)
+        for thread in self._finders.values() + [self._loader]:
+            if thread is not None:
+                try:
+                    if thread.isRunning():
+                        thread.requestInterruption()
+                except RuntimeError:
+                    pass
+        self._finders.clear(10000)
+        if self._loader is not None and self._loader.isRunning():
+            self._loader.wait(10000)
 
     def wait_for_search(self, timeout_ms=60000):
         """For tests and scripts: block until every evidence is searched."""
-        if self._finder is not None:
-            self._finder.wait(timeout_ms)
+        for thread in self._finders.values():
+            try:
+                thread.wait(timeout_ms)
+            except RuntimeError:
+                pass
         QApplication.processEvents()
 
-    def _hives_found(self, path, hives):
-        if path not in {p for p, _n, _h in self._evidence}:
+    def _hives_found(self, path, hives, generation):
+        if path not in {p for p, _n, _h in self._evidence} or \
+                generation != self._generation.get(path, 0):
             return
+        self._searching.pop(path, None)
         self._hives[path] = hives
         self._fill_evidence()
 

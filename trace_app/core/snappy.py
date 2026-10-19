@@ -12,24 +12,15 @@ case) are expanded by repeating the source span, so a long run costs a few
 slice operations rather than one per byte.
 """
 
+from trace_app.core.varint import uleb128
+
 
 class SnappyError(ValueError):
     """The data is not a valid Snappy block."""
 
 
 def _varint(data, position):
-    result = shift = 0
-    while True:
-        if position >= len(data):
-            raise SnappyError("truncated length")
-        byte = data[position]
-        position += 1
-        result |= (byte & 0x7F) << shift
-        if not byte & 0x80:
-            return result, position
-        shift += 7
-        if shift > 35:
-            raise SnappyError("length too long")
+    return uleb128(data, position, SnappyError, bits=32)
 
 
 def decompress(data):

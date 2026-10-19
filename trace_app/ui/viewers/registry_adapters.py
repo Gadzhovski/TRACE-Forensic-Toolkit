@@ -56,6 +56,11 @@ class ViewerAdapter:
                 method()
                 return
 
+    def show_nothing(self, message):
+        """The selected file has no bytes to show (`message` says why):
+        never leave the previous file on screen under the new selection."""
+        self.clear()
+
     def wants_stream(self, data):
         """True if this viewer prefers a streamed handle over loaded bytes."""
         return False
@@ -97,6 +102,10 @@ class ApplicationAdapter(ViewerAdapter):
         self.widget.display_application_content(content, data.get('name', ''),
                                                 data)
 
+    def show_nothing(self, message):
+        self.widget.clear()
+        self.widget._unavailable(message)
+
     def wants_stream(self, data):
         plan = plan_from_name(data.get('name', ''))
         return plan is not None and plan.kind in (VIEW_AUDIO, VIEW_VIDEO)
@@ -126,6 +135,9 @@ class MetadataAdapter(ViewerAdapter):
 
     def display(self, content, data):
         self.widget.display_metadata(data)
+
+    def show_nothing(self, message):
+        self.widget.show_status(message)
 
     def needs_content(self):
         # display_metadata() reads the file itself via the image handler.
@@ -161,14 +173,3 @@ class NotesAdapter(ViewerAdapter):
         # artifact, and nothing has to be read off disk to write one.
         return False
 
-
-#: Adapter classes in tab order. Adding a viewer means adding one entry here
-#: and constructing the widget in MainWindow -- no index arithmetic anywhere.
-VIEWER_ADAPTERS = (
-    HexAdapter,
-    TextAdapter,
-    ApplicationAdapter,
-    MetadataAdapter,
-    CaseAdapter,
-    NotesAdapter,
-)

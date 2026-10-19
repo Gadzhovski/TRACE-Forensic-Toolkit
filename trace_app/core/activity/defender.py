@@ -29,6 +29,7 @@ import re
 import struct
 
 from trace_app.core.activity import record, times
+from trace_app.core.timeconv import filetime_datetime
 
 DEFENDER = ('ProgramData', 'Microsoft', 'Windows Defender')
 
@@ -75,14 +76,7 @@ def rc4(data, key=RC4_KEY):
     return bytes(out)
 
 
-def _filetime(value):
-    if not value:
-        return None
-    try:
-        return datetime.datetime(1601, 1, 1, tzinfo=datetime.timezone.utc) \
-            + datetime.timedelta(microseconds=value // 10)
-    except OverflowError:
-        return None
+_filetime = filetime_datetime
 
 
 def _utf16(raw):

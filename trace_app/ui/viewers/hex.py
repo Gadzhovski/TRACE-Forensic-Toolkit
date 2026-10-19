@@ -45,6 +45,7 @@ from trace_app.infra.constants import TOOLBAR_ICON_SIZE
 from trace_app.ui import fonts, icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.widgets.export_button import ExportButton
+from trace_app.ui.widgets.kept_threads import release
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
 from trace_app.ui.widgets.context_menus import show_menu
@@ -639,7 +640,7 @@ class HexViewer(QWidget):
         self._align_search_controls()
 
     def _align_search_controls(self):
-        QTimer.singleShot(0, self._align_now)
+        QTimer.singleShot(0, self, self._align_now)
 
     def _align_now(self):
         """Arrange the side panel for its width, then size the search strip
@@ -674,7 +675,7 @@ class HexViewer(QWidget):
             self.side.insertWidget(0, self.results_table)
             extent = self.side.height()
         self.side.setSizes([extent // 2, extent - extent // 2])
-        QTimer.singleShot(0, self._align_now)
+        QTimer.singleShot(0, self, self._align_now)
 
     def set_inspector_visible(self, visible, remember=True):
         """Show or hide the data inspector (remembered)."""
@@ -1389,10 +1390,8 @@ class HexViewer(QWidget):
         # them to the GUI thread, where widgets may be touched.
         worker.finished.connect(self._search_finished)
         worker.finished.connect(thread.quit)
-        # Before the deleteLaters, so it is posted first and sender() is
-        # still the thread when it runs.
+        # Frees the thread once it has returned (kept_threads.release).
         thread.finished.connect(self._search_done)
-        thread.finished.connect(thread.deleteLater)
         # Every search stays referenced until its thread has finished: a
         # stopped search may still be running, and dropping the last
         # reference to its worker freed the object it was running in.
@@ -1412,6 +1411,8 @@ class HexViewer(QWidget):
         if self._search_thread is not None and \
                 self._search_thread is thread:
             self._search_thread = self._search_worker = None
+        if thread is not None:
+            release(thread)
 
     def _stop_search(self, wait=False):
         """Stop the current search: its result is ignored (generation),
@@ -1511,9 +1512,6 @@ class HexViewer(QWidget):
         self.results_table.scrollToItem(item)
         self.show_bytes(item.data(Qt.UserRole), self._match_length)
 
-    def search_result_clicked(self, item):
-        self.results_table.selectRow(item.row())
-
     def show_bytes(self, offset, length=1):
         """Go to `offset` and select the `length` bytes there -- in the
         theme's selection colour, across lines when they wrap."""
@@ -1528,8 +1526,3 @@ class HexViewer(QWidget):
             self.hex_table.scrollToItem(self.hex_table.item(*first),
                                         QAbstractItemView.PositionAtCenter)
 
-    def navigate_to_address(self, address):
-        try:
-            self.show_bytes(int(address, 16), 1)
-        except ValueError:
-            message.warning(self, "Navigation Error", "Invalid address.")

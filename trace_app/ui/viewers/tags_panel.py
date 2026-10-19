@@ -5,15 +5,19 @@ Needs review, Ignore, or one of their own). Files are tagged from any list
 -- right-click ▸ Tag, or the keys 1, 2, 3 (0 clears) -- and gathered here,
 grouped by tag, each naming its evidence, path, who tagged it and when.
 Landing on a file previews it; double-click goes to its folder.
+
+Project VIC categories (core/vics.CATEGORIES) are listed above the tags,
+most serious first: right-click ▸ Project VIC Category, or Alt+0..4
+(Alt+5 = Uncategorized). One per file; the VICS export writes them.
 """
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView,
-                               QLabel, QMenu, QPushButton, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout, QWidget)
+                               QLabel, QMenu, QPushButton, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from trace_app.ui import icons
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 
 COLUMNS = ('File', 'Evidence', 'Tagged', 'By', 'Path')
 
@@ -32,6 +36,9 @@ class TagsPanel(QWidget):
     count_changed = Signal(int)
     #: Manage Tags… was asked for (the window owns the dialog).
     manage_requested = Signal()
+    #: Delete on selected files: take off the mark each was listed under
+    #: (rows carry 'tag_id' or 'vic_category').
+    remove_requested = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -55,7 +62,7 @@ class TagsPanel(QWidget):
         bar.addWidget(manage)
         layout.addLayout(bar)
 
-        self.tree = QTreeWidget()
+        self.tree = BranchTreeWidget()
         self.tree.setObjectName("triageTable")
         self.tree.setColumnCount(len(COLUMNS))
         self.tree.setHeaderLabels(COLUMNS)
@@ -75,8 +82,19 @@ class TagsPanel(QWidget):
         self.tree.itemDoubleClicked.connect(self._activated)
         self.tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._menu)
+        self.tree.installEventFilter(self)
         layout.addWidget(self.tree, 1)
         self.refresh()
+
+    def eventFilter(self, watched, event):
+        from PySide6.QtCore import QEvent
+        if watched is self.tree and event.type() == QEvent.KeyPress and \
+                event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            rows = self.selected_rows()
+            if rows:
+                self.remove_requested.emit(rows)
+                return True
+        return super().eventFilter(watched, event)
 
     def set_case(self, case):
         self.case = case
@@ -96,6 +114,7 @@ class TagsPanel(QWidget):
             self.status_label.setText("Tags are kept in a case.")
             self.count_changed.emit(0)
             return
+        categorised = self._add_vic_groups()
         rows = self.case.tagged(evidence_id=self.evidence_id)
         groups = {}
         for tag in self.case.tags():
@@ -131,13 +150,61 @@ class TagsPanel(QWidget):
             self.tree.addTopLevelItem(head)
             head.setExpanded(True)
         # Files, not marks: a file with two tags is one file.
-        shown = len({(row.get('evidence_id'), row['artifact_ref'])
-                     for row in rows if row['tag_id'] in groups})
+        tagged = {(row.get('evidence_id'), row['artifact_ref'])
+                  for row in rows if row['tag_id'] in groups}
+        shown = len(tagged)
+        parts = []
+        if shown:
+            parts.append(f"{shown:,} tagged file(s)")
+        if categorised:
+            parts.append(f"{len(categorised):,} with a Project VIC category")
         self.status_label.setText(
-            f"{shown:,} tagged file(s)" if shown else
+            ', '.join(parts) if parts else
             "No file is tagged yet: right-click a file ▸ Tag, or select "
-            "files and press 1, 2 or 3 (0 clears).")
-        self.count_changed.emit(shown)
+            "files and press 1, 2 or 3 (0 clears). Project VIC categories "
+            "(pictures and videos): right-click ▸ Project VIC Category, or "
+            "Alt+0 to Alt+4 (Alt+5 clears). Delete here takes a mark off.")
+        self.count_changed.emit(len(tagged | categorised))
+
+    def _add_vic_groups(self):
+        """A group per Project VIC category the examiner gave (most
+        serious first), above the tags. Returns the files in them."""
+        from trace_app.core import vics
+        rows = self.case.vic_categories(evidence_id=self.evidence_id)
+        heads = {}
+        for row in rows:
+            category = row['category']
+            head = heads.get(category)
+            if head is None:
+                head = QTreeWidgetItem([
+                    f"Project VIC {vics.category_label(category)}",
+                    '', '', '', ''])
+                head.setIcon(0, icons.dot_icon(
+                    vics.CATEGORY_COLOURS.get(category, '#8B949E')))
+                head.setFirstColumnSpanned(True)
+                heads[category] = head
+            item = QTreeWidgetItem([
+                row.get('name') or row['artifact_ref'],
+                self._names.get(row.get('evidence_id'), ''),
+                (row.get('categorised_utc') or '').replace('T', ' ')[:19],
+                row.get('examiner') or '', row.get('path') or ''])
+            item.setData(0, Qt.UserRole, {
+                'evidence_id': row.get('evidence_id'),
+                'artifact_ref': row['artifact_ref'],
+                'name': row.get('name') or '', 'path': row.get('path') or '',
+                'vic_category': category})
+            item.setToolTip(4, row.get('path') or '')
+            head.addChild(item)
+        for category in sorted(heads, key=vics.SEVERITY.index):
+            head = heads[category]
+            head.setText(0, f"{head.text(0)} ({head.childCount():,})")
+            font = head.font(0)
+            font.setBold(True)
+            head.setFont(0, font)
+            self.tree.addTopLevelItem(head)
+            head.setExpanded(True)
+        return {(row.get('evidence_id'), row['artifact_ref'])
+                for row in rows}
 
     # --- rows ------------------------------------------------------------------
 

@@ -60,6 +60,12 @@ _FORMATS = {
     '.sqfs': 'SquashFS image', '.squashfs': 'SquashFS image',
     '.erofs': 'EROFS image', '.jffs2': 'JFFS2 flash image',
     '.ubi': 'UBI flash image', '.ubifs': 'UBIFS image',
+    '.cramfs': 'cramfs image', '.romfs': 'romfs image',
+    '.yaffs': 'YAFFS NAND image', '.yaffs2': 'YAFFS2 NAND image',
+    '.qnx6': 'QNX6 volume', '.qnx4': 'QNX4 volume',
+    '.ifs': 'QNX IFS boot image', '.etfs': 'QNX ETFS flash image',
+    '.lfs': 'LittleFS image', '.littlefs': 'LittleFS image',
+    '.efs': 'QNX EFS flash image',
     '.ufdr': 'Cellebrite UFDR (Physical Analyzer report)',
     '.simg': 'Android sparse image', '.vdi': 'VirtualBox disk (VDI)',
     '.aff': 'AFF image', '.afm': 'AFF metadata + split raw (AFM)',
@@ -95,7 +101,9 @@ def probe(path):
     Returns a dict: status (OK / NOTES / ERROR), path, name, format, size
     (bytes of media, or None), contents (one line: 'MBR · NTFS, FAT32'),
     notes (list of lines worth reading before going on), error, custody
-    ({field: value} from the image's own header) and stored_hashes (bool).
+    ({field: value} from the image's own header), stored_hashes (bool)
+    and not_applicable ({module: why it can find nothing there}, as
+    evidence_profile says).
     Never raises: an item that cannot be read is an answer, not a crash.
     """
     from trace_app.core.live_disk import is_device_path
@@ -134,6 +142,27 @@ def probe(path):
                                'an unsupported format.')
             return result
         _describe(handler, result)
+        # Which modules can find anything in it, worked out while it is
+        # open (the wizard's Modules page greys out the rest).
+        try:
+            from trace_app.core import evidence_profile
+            fitted = _logical_fit(handler)
+            if fitted is not None:
+                evidence_profile.set_module_fit(handler, fitted)
+            found = evidence_profile.profile(handler)
+            reasons = evidence_profile.not_applicable(found)
+            if fitted is None:
+                # A disk image is not listed here: a tool its own patterns
+                # fit (a warrant return, a car) is not ruled out unknown.
+                from trace_app.core.modules.spec import TOOLS
+                for spec in TOOLS.values():
+                    if spec.suits and set(spec.suits) <= set(
+                            evidence_profile.PATTERN_KINDS):
+                        reasons.pop(spec.id, None)
+            result['not_applicable'] = reasons
+            result['holds'] = found['summary']
+        except Exception as exc:
+            logger.debug("No module profile for %s: %s", path, exc)
     except Exception as exc:
         logger.warning("Probing %s failed: %s", path, exc)
         result['error'] = f"The evidence opened but could not be read: {exc}"
@@ -153,6 +182,49 @@ def probe(path):
             "blocker."))
     result['status'] = NOTES if result['notes'] else OK
     return result
+
+
+def _logical_fit(handler):
+    """{tool id: files its own patterns name} for the installed
+    pattern-fitted tools (RLEAPP, VLEAPP) over logical evidence, whose
+    file names are in memory -- zips and tars inside looked into, as the
+    window's module_fit job does for open images. None for a disk image
+    (listing it is a whole walk) or when no such tool is installed."""
+    fs = handler.logical_fs
+    if fs is None:
+        return None
+    from trace_app.core import containers, evidence_profile
+    from trace_app.core.modules import fit, install, stage
+    from trace_app.core.modules.spec import TOOLS
+    patterns = {}
+    for spec in TOOLS.values():
+        if not spec.suits or not set(spec.suits) <= set(
+                evidence_profile.PATTERN_KINDS):
+            continue
+        record = install.installed(spec)
+        if record is None:
+            continue
+        try:
+            patterns[spec.id] = stage.path_patterns(spec, record)
+        except stage.StageError as exc:
+            logger.debug("No patterns from %s: %s", spec.id, exc)
+    if not patterns:
+        return None
+    files = [(folder, name, size, None, False)
+             for folder, name, size in fs.file_rows()]
+    volumes = [{'offset': 0, 'files': files}]
+
+    def open_file(_offset, member_path):
+        try:
+            entry = handler.get_fs_info(0).open(path=member_path)
+            size = int(entry.info.meta.size)
+        except Exception:
+            return None
+        return containers.ByteWindow(
+            lambda at, length: entry.read_random(at, length), 0, size)
+
+    return {tool: fit.count(volumes, globs, None, open_file)[0]
+            for tool, globs in patterns.items()}
 
 
 def _describe(handler, result):

@@ -2,7 +2,7 @@
 
 The Evidence page of the New Case and Add Evidence wizards. Each item the
 examiner adds -- by button or by dropping files and folders on the list --
-is opened on a thread (core/evidence_probe.py) and its row says what it is:
+is opened in a child process (core/evidence_probe.py) and its row says what it is:
 ready, ready with something to know first (an encrypted volume, stored
 hashes), or unreadable and why. Unreadable items are listed so the examiner
 sees the reason, and are not added.
@@ -15,7 +15,7 @@ one, and marked so. They are what the report states about the evidence.
 import logging
 import os
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QFileDialog,
                                QFormLayout, QFrame, QHBoxLayout, QHeaderView,
                                QLabel, QLineEdit, QPushButton, QSplitter,
@@ -28,6 +28,8 @@ from trace_app.core.logical_sources import is_later_segment  # noqa: F401 (tests
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
+from trace_app.ui.process_worker import ProcessWorker
+from trace_app.ui.widgets.kept_threads import release
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.EvidenceIntake')
@@ -43,7 +45,9 @@ DISK_IMAGE_PATTERNS = ("*.e01", "*.E01", "*.ex01", "*.Ex01", "*.s01", "*.S01",
                        "*.vhd", "*.VHD", "*.vhdx", "*.VHDX", "*.qcow2",
                        "*.QCOW2", "*.qcow", "*.hc", "*.tc",
                        "*.sqfs", "*.squashfs", "*.erofs", "*.jffs2",
-                       "*.ubi", "*.ubifs",
+                       "*.ubi", "*.ubifs", "*.cramfs", "*.romfs", "*.yaffs",
+                       "*.yaffs2", "*.qnx6", "*.qnx4", "*.ifs", "*.etfs",
+                       "*.efs", "*.lfs", "*.littlefs",
                        "*.udf", "*.hfs", "*.simg", "*.vdi", "*.VDI",
                        "*.aff", "*.AFF", "*.afm", "*.AFM", "*.gz", "*.xz", "*.bz2", "*.zst",
                        "*.lz4")
@@ -79,22 +83,46 @@ def _key(path):
     return os.path.normcase(os.path.normpath(os.path.abspath(path)))
 
 
-class ProbeWorker(QThread):
-    """Opens one item off the UI thread (ImageHandler can take seconds on a
-    large or remote image)."""
+class ProbeWorker(ProcessWorker):
+    """Opens one item in a child process (job 'probe'). On a thread a large
+    folder froze the window: listing 1.3 million entries and matching them
+    against the tools' patterns is Python, holding the interpreter lock.
+    A live disk is probed here on the thread instead: its helper (and the
+    administrator prompt) belongs to the window's process, where the case
+    goes on reading it."""
 
     probed = Signal(str, dict)
+    kind = 'probe'
 
     def __init__(self, path):
-        super().__init__()
+        super().__init__({'path': path})
         self.path = path
+        self._result = None
 
     def run(self):
-        try:
-            result = evidence_probe.probe(self.path)
-        except Exception as exc:          # probe() is not meant to raise
-            logger.exception("Probe of %s failed", self.path)
-            result = {'status': evidence_probe.ERROR, 'error': str(exc)}
+        from trace_app.core.live_disk import is_device_path
+        if is_device_path(self.path):
+            try:
+                self._result = evidence_probe.probe(self.path)
+            except Exception as exc:      # probe() is not meant to raise
+                logger.exception("Probe of %s failed", self.path)
+                self._result = {'status': evidence_probe.ERROR,
+                                'error': str(exc)}
+            self.on_done(1, '')
+            return
+        super().run()
+
+    def on_progress(self, *payload):
+        pass
+
+    def on_item(self, record):
+        self._result = record.get('result')
+
+    def on_done(self, count, error):
+        result = self._result
+        if result is None:
+            result = {'status': evidence_probe.ERROR,
+                      'error': error or 'The evidence could not be checked.'}
         self.probed.emit(self.path, result)
 
 
@@ -369,7 +397,7 @@ class EvidenceIntake(QWidget):
     def _worker_done(self, worker):
         self._workers.pop(worker.path, None)
         _ORPHANS.discard(worker)
-        worker.deleteLater()
+        release(worker)
 
     def _probed(self, path, result):
         item = next((i for i in self.items if i['path'] == path), None)

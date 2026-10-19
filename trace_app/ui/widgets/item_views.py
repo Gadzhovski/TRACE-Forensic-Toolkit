@@ -61,6 +61,9 @@ def install(app=None):
     # Ctrl + wheel (or Ctrl+= / Ctrl+- / Ctrl+0): one view's text larger.
     from trace_app.ui.widgets import text_zoom
     text_zoom.install(app)
+    # Windows' title bars in the theme's colours (Windows only).
+    from trace_app.ui.widgets import title_bar
+    title_bar.install(app)
     # Asked by a property, not by app.style(): with a stylesheet set, Qt
     # answers with its stylesheet wrapper rather than the style beneath.
     if app is None or app.property('traceItemViewStyle'):

@@ -25,6 +25,8 @@ import logging
 import os
 import struct
 
+from trace_app.core.varint import uleb128
+
 logger = logging.getLogger('TRACE.LevelDB')
 
 BLOCK = 32 * 1024
@@ -61,18 +63,7 @@ def masked_crc(data):
 
 def varint(data, position):
     """(value, position after) of a LevelDB varint."""
-    result = shift = 0
-    while True:
-        if position >= len(data):
-            raise LevelDBError("varint runs past the data")
-        byte = data[position]
-        position += 1
-        result |= (byte & 0x7F) << shift
-        if not byte & 0x80:
-            return result, position
-        shift += 7
-        if shift > 63:
-            raise LevelDBError("varint too long")
+    return uleb128(data, position, LevelDBError)
 
 
 def _slice(data, position):

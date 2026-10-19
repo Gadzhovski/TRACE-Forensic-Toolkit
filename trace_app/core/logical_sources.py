@@ -219,43 +219,82 @@ def _split(nanoseconds):
     return divmod(int(nanoseconds), 1_000_000_000)
 
 
+#: Who hears how a folder's walk is going, per thread (the window's opener
+#: sets it around ImageHandler; jobs leave it unset).
+_WALK_REPORTS = threading.local()
+
+
+class reporting:
+    """with reporting(callback): a folder walked on this thread calls
+    callback(entries) as it goes."""
+
+    def __init__(self, callback):
+        self.callback = callback
+
+    def __enter__(self):
+        _WALK_REPORTS.callback = self.callback
+        return self
+
+    def __exit__(self, *_exc):
+        _WALK_REPORTS.callback = None
+
+
 def open_folder(path):
-    """A folder of files, read in place, opened read-only per read."""
+    """A folder of files, read in place, opened read-only per read.
+
+    Its listing (core/folder_listing) is walked once and kept: depth first
+    in os.walk's order -- a folder's subfolders (sorted, case-blind), then
+    its files, then each subfolder in turn -- because a node's number is
+    its place in this walk, and tags, bookmarks and external modules'
+    staging manifests in a case point at those numbers."""
+    from trace_app.core import folder_listing
     root = os.path.abspath(path)
-    fs = LogicalFileSystem('Folder', root)
+    listing, kept = folder_listing.listed(
+        root, getattr(_WALK_REPORTS, 'callback', None))
+    return folder_fs(listing, kept)
+
+
+def folder_fs(listing, kept=False):
+    """The LogicalFileSystem of a folder's Listing; its nodes are made as
+    they are asked for (logical.ListedNodes)."""
+    from trace_app.core.logical import ListedNodes
+    fs = LogicalFileSystem('Folder', listing.root)
+    fs.nodes = ListedNodes(listing, lambda inode, offset, length:
+                           _read_file(listing.full_path(inode), offset,
+                                      length))
+    # Every read opens its own handle: readers on several threads at once
+    # are safe (core/modules/stage copies so).
+    fs.parallel_reads = True
+    fs.problems = list(listing.problems)
+    fs.listing = listing
+    #: Whether the listing was the kept one (the window checks it again in
+    #: the background) rather than walked now.
+    fs.listing_kept = kept
     fs.facts.update({
         'Format': 'Folder',
-        'Path': root,
+        'Path': listing.root,
         'Times': "as the files have them on this disk -- the originals' only "
-                 "if the collector preserved them"})
-    inodes = {root: ROOT}
-    for folder, names, files in os.walk(root):
-        names.sort(key=str.lower)
-        parent = inodes.get(folder)
-        if parent is None:
-            continue
-        for name in sorted(names, key=str.lower):
-            full = os.path.join(folder, name)
-            try:
-                info = os.lstat(full)
-            except OSError as exc:
-                fs.problems.append(f"{full}: {exc}")
-                continue
-            if stat.S_ISLNK(info.st_mode):
-                continue                    # never followed out of the folder
-            inodes[full] = fs.add(parent, name, True, times=_stat_times(info))
-        for name in sorted(files, key=str.lower):
-            full = os.path.join(folder, name)
-            try:
-                info = os.lstat(full)
-            except OSError as exc:
-                fs.problems.append(f"{full}: {exc}")
-                continue
-            if not stat.S_ISREG(info.st_mode):
-                continue
-            fs.add(parent, name, False, size=info.st_size,
-                   times=_stat_times(info), reader=_file_reader(full))
+                 "if the collector preserved them",
+        'Listing': f"walked {listing.saved} UTC ({len(listing) - 1:,} "
+                   f"entries, {listing.seconds:.0f} s)"
+                   + ("; kept and checked again in the background" if kept
+                      else "")})
     return fs
+
+
+def _read_file(full, offset, length):
+    with open(full, 'rb') as handle:
+        handle.seek(offset)
+        return handle.read(length)
+
+
+#: A Windows reparse point (junction, mount point, symlink): never followed
+#: out of the folder. The attribute exists on Windows only.
+_REPARSE_POINT = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
+
+
+def _reparse_point(info):
+    return bool(getattr(info, 'st_file_attributes', 0) & _REPARSE_POINT)
 
 
 def _file_reader(full):

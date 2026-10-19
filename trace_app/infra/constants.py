@@ -124,8 +124,6 @@ DEFAULT_WINDOW_Y = 100
 # Floor for the bottom Utils dock. Kept modest so the file listing, which
 # is what an examiner reads, keeps the bulk of the window.
 VIEWER_DOCK_MIN_HEIGHT = 160
-VIEWER_DOCK_MAX_WIDTH = 1200
-VIEWER_DOCK_MAX_SIZE = 16777215  # Qt maximum size value
 
 # Column widths for listing table
 COLUMN_WIDTHS = {
@@ -141,14 +139,6 @@ COLUMN_WIDTHS = {
     'sequence': 50,      # Compact - MFT sequence is a small number
     'attributes': 320    # Wide - a list of NTFS attribute names
 }
-
-# Progress dialog settings
-PROGRESS_DIALOG_WIDTH = 300
-
-# Timeouts (in seconds)
-INFO_TIMEOUT = 10
-PROCESS_TIMEOUT = 30
-THREAD_SLEEP_MS = 1000  # milliseconds
 
 # Minimum duration for progress dialog (milliseconds)
 PROGRESS_MIN_DURATION = 1500
@@ -173,6 +163,11 @@ TOOLBAR_PADDING_Y = 3
 #: Left and right inset for a toolbar's contents: the padding, plus
 #: TOOLBAR_SIDE_MARGIN of contents margin set by `prepare_toolbar`.
 TOOLBAR_PADDING_X = 8
+#: A row of controls that is not a toolbar (a status line with a filter
+#: box, a tab row with one in its corner) stops this far short of the
+#: panel's right edge, as a toolbar's controls do: flush with the edge,
+#: a filter box read as cut off.
+ROW_EDGE_INSET = TOOLBAR_PADDING_X
 TOOLBAR_SIDE_MARGIN = TOOLBAR_PADDING_X - TOOLBAR_PADDING_Y
 
 #: The inset above a toolbar item: the stylesheet's frame (= its padding).
@@ -182,9 +177,6 @@ TOOLBAR_ITEM_INSET = TOOLBAR_PADDING_Y
 #: (CONTROL_HEIGHT + 4); it sits TOOLBAR_ITEM_INSET from the top, so the bar
 #: needs the same gap beneath it to look centred rather than top-heavy.
 TOOLBAR_HEIGHT = TOOLBAR_ITEM_INSET + (CONTROL_HEIGHT + 4) + TOOLBAR_ITEM_INSET
-
-#: Standard gap between related controls in a row.
-CONTROL_SPACING = 6
 
 #: Wider gap used to separate groups of controls in the same toolbar.
 GROUP_SPACING = 16
@@ -226,10 +218,6 @@ TABLE_ICON_SIZE = 20
 #: 125% display is 25 device pixels, drawn at exactly 24 -- every stroke on
 #: whole pixels (icons._TintedSvgEngine). 18 px was 22.5, and blurred.
 TOOLBAR_ICON_SIZE = 20
-#: Icon beside a panel heading (File System Browser, File Carving, Registry).
-#: A Tabler glyph carries internal padding, so this renders at roughly the
-#: same visual weight as the heading text next to it.
-PANEL_ICON_SIZE = 22
 
 #: Size of the glyph beside a message-dialog's text. Larger than a toolbar
 #: icon: it is the dialog's only piece of art and carries the message's tone.
@@ -238,22 +226,15 @@ DIALOG_ICON_SIZE = 40
 # --- Button widths --------------------------------------------------------
 #: Dialog buttons (Close, Save, Copy) so they line up in a row.
 BUTTON_WIDTH = 96
-#: Wider action buttons that carry a longer label.
-BUTTON_WIDTH_WIDE = 130
 
-# Table settings
-TABLE_COLUMN_COUNT = 9
 TABLE_BATCH_SIZE = 200  # Number of rows to process before updating UI
 
 # Input field settings
 INPUT_FIELD_MIN_WIDTH = 400
-API_DIALOG_WIDTH = 600
 
 # Shown where a carved file carries no date of its own. Carving recovers bytes
 # from unallocated space, not directory entries, so most formats yield nothing
 # -- and saying so is more useful than substituting the time of recovery.
 UNKNOWN_DATE = "Unknown"
 
-# Qt maximum size constant
-QT_MAX_SIZE = 16777215
 # ================================================================

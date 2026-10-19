@@ -26,10 +26,42 @@ beside another or floating, has no tab, so it gets the strip back: that
 is what is dragged and closed. The panels themselves carry no heading.
 """
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QDockWidget, QTabBar, QWidget
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtWidgets import (QApplication, QDockWidget, QFrame,
+                               QScrollArea, QTabBar, QWidget)
 
 from trace_app.ui import icons
+
+
+#: The least height a result panel holds out for. Below the panel's own
+#: minimum it scrolls instead of refusing to shrink.
+PANEL_MIN_HEIGHT = 120
+
+
+class _PanelScroll(QScrollArea):
+    """A result panel inside a dock, scrolling only when the dock is
+    smaller than the panel can be laid out in.
+
+    Tabbed docks share one place, and Qt holds that place at the largest
+    minimum of them all, the hidden ones too: the Timeline's 456 px kept
+    the Utils dock below from growing past ~430 px of a 1,000 px window
+    (detached it could be any size). Only the height is relieved: the
+    widths are kept modest by the panels themselves (test_layout)."""
+
+    def __init__(self, panel, parent=None):
+        super().__init__(parent)
+        self.setObjectName('resultPanelScroll')
+        self.setFrameShape(QFrame.NoFrame)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setWidget(panel)
+
+    def minimumSizeHint(self):
+        inner = self.widget().minimumSizeHint()
+        return QSize(inner.width(), min(inner.height(), PANEL_MIN_HEIGHT))
+
+    def sizeHint(self):
+        return self.widget().sizeHint()
 
 
 class ResultDocks(QObject):
@@ -107,7 +139,7 @@ class ResultDocks(QObject):
         # A QWidget subclass paints the theme's background only when asked:
         # without this its margins showed the window's grey as bands.
         widget.setAttribute(Qt.WA_StyledBackground, True)
-        dock.setWidget(widget)
+        dock.setWidget(_PanelScroll(widget, dock))
         dock.visibilityChanged.connect(
             lambda shown, d=dock: shown and self._make_current(d))
         if not self._docks:
@@ -130,23 +162,30 @@ class ResultDocks(QObject):
         window.addDockWidget(Qt.RightDockWidgetArea, first)
         for dock in self._docks[1:]:
             window.tabifyDockWidget(first, dock)
-        self.setCurrentWidget(first.widget())
+        self.setCurrentWidget(self.panel(first))
 
     # -- QTabWidget's part -----------------------------------------------
 
     def docks(self):
         return list(self._docks)
 
+    @staticmethod
+    def panel(dock):
+        """The panel `dock` holds (inside its scroll area)."""
+        holder = dock.widget()
+        return holder.widget() if isinstance(holder, QScrollArea) else holder
+
     def dock(self, widget):
         """The dock holding `widget`, or None."""
-        return next((d for d in self._docks if d.widget() is widget), None)
+        return next((d for d in self._docks if self.panel(d) is widget),
+                    None)
 
     def count(self):
         return len(self._docks)
 
     def widget(self, index):
         if 0 <= index < len(self._docks):
-            return self._docks[index].widget()
+            return self.panel(self._docks[index])
         return None
 
     def indexOf(self, widget):
@@ -159,7 +198,9 @@ class ResultDocks(QObject):
         return ''
 
     def currentWidget(self):
-        return self._current.widget() if self._current is not None else None
+        if self._current is None:
+            return None
+        return self.panel(self._current)
 
     def currentIndex(self):
         return (self._docks.index(self._current)
@@ -183,7 +224,7 @@ class ResultDocks(QObject):
 
     def setEnabled(self, state):
         for dock in self._docks:
-            dock.widget().setEnabled(state)
+            self.panel(dock).setEnabled(state)
 
     # -- tracking the current panel --------------------------------------
 

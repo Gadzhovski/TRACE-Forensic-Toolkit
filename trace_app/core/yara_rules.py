@@ -29,12 +29,13 @@ import re
 import shutil
 import uuid
 
+from trace_app.core import library as library_module
+
 logger = logging.getLogger('TRACE.YARA')
 
 MODULE_YARA = 'yara'
 
 RULE_EXTENSIONS = ('.yar', '.yara', '.rule', '.rules', '.yr')
-LIBRARY_FILE = 'library.json'
 
 #: Largest file scanned whole; larger ones are scanned in their first part.
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
@@ -71,85 +72,27 @@ def default_options():
 
 
 def case_options(case, library=None):
-    stored = case.setting('yara') if case is not None else None
-    options = default_options()
-    if stored:
-        options.update(stored)
-    elif library is not None and library.sets():
-        options['enabled'] = True
-    return options
+    return library_module.case_options(case, 'yara', default_options(),
+                                       library)
 
 
 def set_enabled_in(options, entry):
-    chosen = (options.get('sets') or {}).get(entry['id'])
-    return entry.get('enabled_by_default', True) if chosen is None \
-        else bool(chosen)
+    return library_module.enabled_in(options, entry)
 
 
 # --- the library ------------------------------------------------------------------
 
-class Library:
-    def __init__(self, folder=None):
-        if folder is None:
-            from trace_app.infra.paths import user_data_dir
-            folder = os.path.join(user_data_dir(), 'yara')
-        self.folder = folder
-        os.makedirs(folder, exist_ok=True)
-        self._path = os.path.join(folder, LIBRARY_FILE)
-
-    def _load(self):
-        try:
-            with open(self._path, encoding='utf-8') as handle:
-                data = json.load(handle)
-        except FileNotFoundError:
-            return {'sets': []}
-        except (OSError, ValueError) as exc:
-            logger.error("YARA library unreadable: %s", exc)
-            return {'sets': []}
-        data.setdefault('sets', [])
-        return data
-
-    def _save(self, data):
-        temporary = self._path + '.tmp'
-        with open(temporary, 'w', encoding='utf-8') as handle:
-            json.dump(data, handle, indent=2)
-        os.replace(temporary, self._path)
+class Library(library_module.RuleSetLibrary):
+    SUBFOLDER = 'yara'
+    LABEL = 'YARA'
+    FIELDS = frozenset({'name', 'grade', 'description', 'enabled_by_default'})
+    CHOICES = {'grade': GRADES}
+    ERROR = YaraError
+    MISSING = "No such rule set"
+    NOT_A_FIELD = "Not a rule set field"
 
     def sets(self):
-        out = []
-        for entry in self._load()['sets']:
-            entry = dict(entry)
-            entry['available'] = os.path.isdir(self.set_folder(entry))
-            out.append(entry)
-        return out
-
-    def get(self, set_id):
-        return next((e for e in self.sets() if e['id'] == set_id), None)
-
-    def set_folder(self, entry):
-        return os.path.join(self.folder, entry['id'])
-
-    def update(self, set_id, **fields):
-        allowed = {'name', 'grade', 'description', 'enabled_by_default'}
-        if set(fields) - allowed:
-            raise ValueError("Not a rule set field")
-        if 'grade' in fields and fields['grade'] not in GRADES:
-            raise ValueError("Unknown grade")
-        data = self._load()
-        for entry in data['sets']:
-            if entry['id'] == set_id:
-                entry.update(fields)
-                self._save(data)
-                return entry
-        raise YaraError("No such rule set")
-
-    def remove(self, set_id):
-        data = self._load()
-        gone = [e for e in data['sets'] if e['id'] == set_id]
-        data['sets'] = [e for e in data['sets'] if e['id'] != set_id]
-        self._save(data)
-        for entry in gone:
-            shutil.rmtree(self.set_folder(entry), ignore_errors=True)
+        return self.entries()
 
     def import_rules(self, source, name=None, grade='suspicious',
                      description=''):

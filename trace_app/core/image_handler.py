@@ -11,13 +11,14 @@ import threading
 import logging
 import os
 import re
-from functools import lru_cache
+from typing import Any
 
 import pyewf
 import pytsk3
 from Registry import Registry
 
 from trace_app.core import containers
+from trace_app.core.tsk_names import entry_name, open_path
 from trace_app.infra.constants import (CHUNK_SIZE, MAX_DIRECTORY_DEPTH,
                                        SECTOR_SIZE)
 from trace_app.infra.utils import FileSystemUtils, safe_datetime
@@ -65,29 +66,83 @@ class IncompleteEvidence(OSError):
 
 
 class EWFImgInfo(pytsk3.Img_Info):
+    #: Small reads go through a cache of recently read blocks. The Sleuth
+    #: Kit reads a scattered MFT in small pieces and its own cache
+    #: thrashes: listing a 3,656-entry folder made 2,876 reads of 64 KB
+    #: through libewf (decompressing each time); with this cache it is
+    #: 1.4x faster, the same bytes. Big reads (carving, export) bypass it.
+    CACHE_BLOCK = 32 * 1024
+    CACHE_BLOCKS = 2048                 # 64 MB per open image
+    CACHE_BYPASS = 4 * 1024 * 1024
+
     def __init__(self, ewf_handle):
+        from collections import OrderedDict
         self._ewf_handle = ewf_handle
         # One handle, read from the window's thread and from workers: a
         # seek and a read from two threads interleave into wrong bytes.
         self._lock = threading.Lock()
+        self._blocks = OrderedDict()
         #: (what is missing, where the data ends) for a set that is not
         #: whole -- ImageHandler.load_image fills it.
         self.incomplete = None
         super(EWFImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
 
     def close(self):
+        with self._lock:
+            self._blocks.clear()
         self._ewf_handle.close()
 
     def read(self, offset, size):
         with self._lock:
             try:
-                self._ewf_handle.seek(offset)
-                return self._ewf_handle.read(size)
+                if size >= self.CACHE_BYPASS or size <= 0 or \
+                        self.incomplete is not None:
+                    # An incomplete set reads only what was asked: a whole
+                    # block could reach past where its data ends.
+                    self._ewf_handle.seek(offset)
+                    return self._ewf_handle.read(size)
+                return self._read_cached(offset, size)
             except OSError:
                 if self.incomplete is None:
                     raise
         raise IncompleteEvidence(incomplete_message(self.incomplete,
                                                     offset))
+
+    def _read_cached(self, offset, size):
+        block = self.CACHE_BLOCK
+        first, last = offset // block, (offset + size - 1) // block
+        pieces = []
+        index = first
+        while index <= last:
+            data = self._blocks.get(index)
+            if data is not None:
+                self._blocks.move_to_end(index)
+                pieces.append(data)
+                index += 1
+                if len(data) < block:           # the end of the media
+                    break
+                continue
+            # The run of blocks not cached, read in one call.
+            end = index
+            while end < last and (end + 1) not in self._blocks:
+                end += 1
+            count = end - index + 1
+            self._ewf_handle.seek(index * block)
+            run = self._ewf_handle.read(count * block)
+            for n in range(count):
+                piece = run[n * block:(n + 1) * block]
+                if not piece:
+                    break
+                self._blocks[index + n] = piece
+            while len(self._blocks) > self.CACHE_BLOCKS:
+                self._blocks.popitem(last=False)
+            pieces.append(run)
+            if len(run) < count * block:        # the end of the media
+                break
+            index = end + 1
+        joined = pieces[0] if len(pieces) == 1 else b''.join(pieces)
+        start = offset - first * block
+        return joined[start:start + size]
 
     def get_size(self):
         return self._ewf_handle.get_media_size()
@@ -162,7 +217,22 @@ _TIMEZONE_NAIVE = frozenset({'FAT12', 'FAT16', 'FAT32', 'ExFAT', 'ZIP',
 #: File systems read by TRACE's own readers on core/libyal_fs, named by
 #: their KIND.
 _OWN_READERS = frozenset({'SquashFS', 'EROFS', 'UDF', 'HFS (classic)',
+                          'QNX6', 'QNX4', 'QNX IFS', 'QNX ETFS', 'QNX EFS',
+                          'YAFFS1',
+                          'YAFFS2',
+                          'cramfs', 'romfs', 'LittleFS',
+                          'U-Boot environment',
                           'JFFS2', 'ReFS', 'UBIFS', 'ZFS'})
+
+
+def _name_sequence(entry):
+    """The sequence a directory entry's name records for its MFT entry --
+    what refs are made from everywhere (walk, analysis, core/deleted.py).
+    The metadata's own when the name has none (libyal-shaped readers)."""
+    sequence = getattr(entry.info.name, 'meta_seq', None)
+    if sequence is None and entry.info.meta is not None:
+        sequence = getattr(entry.info.meta, 'seq', None)
+    return sequence
 
 
 class _NoMedia:
@@ -212,9 +282,15 @@ class ImageHandler:
         self.img_info = None
         self.volume_info = None
         self.fs_info_cache = {}
+        #: Keys get_fs_info found nothing at, and get_fs_type's answers.
+        #: Per handler: functools.lru_cache on the methods kept every
+        #: handler (and its open image file) alive in a class-wide cache.
+        self._fs_misses = set()
+        self._fs_types = {}
         self.fs_info = None
         self.is_wiped_image = False
         self._directory_cache = {}  # Cache for directory contents
+        self._listing_lock = threading.RLock()
         self._partition_cache = None  # Cache for partitions
         self._sector_size = None  # Read from the image on first use
         self._os_info_cache = {}  # Registry-derived OS details, per partition
@@ -255,8 +331,14 @@ class ImageHandler:
         """Cleanup resources when the object is destroyed."""
         self.close_resources()
 
-    def close_resources(self):
-        """Explicitly close all open resources."""
+    def close_resources(self) -> None:
+        """Explicitly close all open resources. Waits for a folder listing
+        in progress on another thread (the tree's folder probe), and no
+        listing is read afterwards."""
+        lock = getattr(self, '_listing_lock', None)
+        if lock is not None:
+            with lock:
+                self._closed = True
         # Close filesystem objects
         for fs_info in self.fs_info_cache.values():
             if hasattr(fs_info, 'close'):
@@ -298,6 +380,8 @@ class ImageHandler:
 
         # Clear caches
         self.fs_info_cache.clear()
+        getattr(self, '_fs_misses', set()).clear()
+        getattr(self, '_fs_types', {}).clear()
         self._directory_cache.clear()
         self._layers.clear()
 
@@ -308,7 +392,7 @@ class ImageHandler:
         else:
             raise AttributeError("Image not loaded or unsupported format.")
 
-    def read(self, offset, size):
+    def read(self, offset: int, size: int) -> bytes:
         """Reads data from the image starting at `offset` for `size` bytes.
         Offsets from CARVE_SPACE up are inside a volume (carve_volumes)."""
         if offset >= self.CARVE_SPACE:
@@ -660,8 +744,22 @@ class ImageHandler:
         images, which carry no such record.
         """
         if self.logical_fs is not None:
-            return {k: v for k, v in self.logical_fs.facts.items()
-                    if not k.startswith('_')}
+            facts = {k: v for k, v in self.logical_fs.facts.items()
+                     if not k.startswith('_')}
+            # An extraction's acquisition report beside it (GrayKey's
+            # PDF): read once -- PyMuPDF, so on the window's thread or in
+            # a child process, as every caller is.
+            if not hasattr(self, '_acquisition_report'):
+                try:
+                    from trace_app.core import graykey
+                    self._acquisition_report = graykey.acquisition_facts(
+                        self.image_path)
+                except Exception as exc:
+                    logger.warning("Acquisition report unreadable: %s", exc)
+                    self._acquisition_report = {}
+            for key, value in self._acquisition_report.items():
+                facts.setdefault(key, value)
+            return facts
         if self.get_image_type() == 'aff4':
             source = getattr(self.img_info, '_source', None)
             try:
@@ -748,13 +846,16 @@ class ImageHandler:
         ewf = [".e01", ".s01", ".ex01"]
         # .hc / .tc: VeraCrypt / TrueCrypt containers, read raw until
         # unlocked (unlock_volume, kind 'veracrypt').
-        # .sqfs/.squashfs/.erofs/.jffs2/.udf/.hfs/.ubi/.ubifs: file
+        # .sqfs/.squashfs/.erofs/.jffs2/.udf/.hfs/.ubi/.ubifs/.cramfs/
+        # .romfs/.yaffs/.yaffs2/.qnx6/.qnx4/.ifs/.etfs/.efs/.lfs: file
         # system and flash images (firmware, Android partitions, discs),
         # read as raw.
         raw = [".raw", ".img", ".dd", ".iso",
                ".000", ".001", ".sparse", ".bin", ".hc", ".tc",
                ".sqfs", ".squashfs", ".erofs", ".jffs2", ".udf", ".hfs",
-               ".ubi", ".ubifs", ""]
+               ".ubi", ".ubifs", ".cramfs", ".romfs", ".yaffs", ".yaffs2",
+               ".qnx6", ".qnx4", ".ifs", ".etfs", ".efs", ".lfs",
+               ".littlefs", ""]
         if extension == '.ctr' or _starts_with(self.image_path, b'XWFS'):
             raise UnsupportedEvidence(
                 "This is an X-Ways evidence file container (.ctr), a "
@@ -801,6 +902,7 @@ class ImageHandler:
         The queues are deliberately shallow: a worker that runs ahead blocks
         rather than buffering gigabytes of decompressed data.
         """
+        from trace_app.core import evidence_hash
         if total_size <= 0:
             return 0
 
@@ -844,19 +946,19 @@ class ImageHandler:
 
         size = 0
         try:
-            for index in range(workers):
-                while True:
-                    chunk = queues[index].get()
-                    if chunk is None:
-                        break
-                    for hasher in hashers:
-                        hasher.update(chunk)
-                    size += len(chunk)
-                    if progress_callback:
-                        try:
-                            progress_callback(size, total_size)
-                        except Exception as e:
-                            logger.error(f"Progress callback error: {e}")
+            with evidence_hash.Hashing(hashers) as hashing:
+                for index in range(workers):
+                    while True:
+                        chunk = queues[index].get()
+                        if chunk is None:
+                            break
+                        hashing.update(chunk)
+                        size += len(chunk)
+                        if progress_callback:
+                            try:
+                                progress_callback(size, total_size)
+                            except Exception as e:
+                                logger.error(f"Progress callback error: {e}")
         finally:
             # Cancelled (or failed) part-way: the workers stop at their next
             # chunk, and their queues are emptied so none stays blocked on a
@@ -983,16 +1085,16 @@ class ImageHandler:
                 f"The image's tables describe {chunk_map.media_size:,} "
                 f"bytes; libewf reads {total:,}")
         damaged = []
-        hashers = evidence_hash.new_hashers()
         position = 0
-        for offset, data, ok in ewf_chunks.read_media(chunk_map):
-            if not ok:
-                damaged.append(offset)
-            for hasher in hashers.values():
-                hasher.update(data)
-            position += len(data)
-            if progress_callback is not None:
-                progress_callback(min(position, total), total)
+        with evidence_hash.Hashing() as hashing:
+            for offset, data, ok in ewf_chunks.read_media(chunk_map):
+                if not ok:
+                    damaged.append(offset)
+                hashing.update(bytes(data))
+                position += len(data)
+                if progress_callback is not None:
+                    progress_callback(min(position, total), total)
+        hashers = hashing.hashers
         # The media counts whole sectors; a source that was not a whole
         # number of them keeps its last bytes in the last chunk, and the
         # hash the image stores covers them: they are hashed too.
@@ -1101,8 +1203,15 @@ class ImageHandler:
                     f"The L01 gave {size:,} bytes; its media is {total:,}")
             return evidence_hash.digests(hashers, size)
         if kind == 'folder':
-            files = sorted(((self.logical_fs.path_of(n.inode), n)
-                            for n in self.logical_fs.nodes.values()
+            # Walked again, never the listing the opening used: that one
+            # may be kept from an earlier session (core/folder_listing),
+            # and a file planted below the top level since then would
+            # verify as unchanged.
+            from trace_app.core import folder_listing
+            fs = logical_sources.folder_fs(
+                folder_listing.walk(os.path.abspath(self.image_path)))
+            files = sorted(((fs.path_of(n.inode), n)
+                            for n in fs.nodes.values()
                             if not n.is_dir), key=lambda pair: pair[0])
             total = sum(n.size for _p, n in files)
             hashers = evidence_hash.new_hashers()
@@ -1133,7 +1242,7 @@ class ImageHandler:
             return evidence_hash.digests(hashers, done)
         return evidence_hash.hash_file(self.image_path, progress_callback)
 
-    def load_image(self):
+    def load_image(self) -> bool:
         """Load the image and read its volume/filesystem information.
 
         Returns True if the image opened, False otherwise. Previously this
@@ -1227,7 +1336,7 @@ class ImageHandler:
                 try:
                     # A UDF bridge disc: read its UDF, not its ISO 9660.
                     self.fs_info = self._udf_first(0) or \
-                        pytsk3.FS_Info(self.img_info)
+                        self._own_yaffs(0, pytsk3.FS_Info(self.img_info))
                 except Exception:
                     # What TSK cannot read, TRACE may: XFS, Btrfs.
                     self.fs_info = self.get_fs_info(0)
@@ -1306,6 +1415,19 @@ class ImageHandler:
         (0x400, b'\xe2\xe1\xf5\xe0', 'EROFS'),
         # Classic HFS's Master Directory Block (an HFS+ wrapper too).
         (0x400, b'BD', 'HFS'),
+        # QNX (vehicle head units, industrial): the QNX6 superblock after
+        # its 8 KiB boot area, in either byte order; a QNX IFS boot image's
+        # startup header; QNX4's root directory entry "/" in block 1.
+        (0x2000, b'\x22\x11\x19\x68', 'QNX6'),
+        (0x2000, b'\x68\x19\x11\x22', 'QNX6'),
+        (0, b'\xeb\x7e\xff\x00', 'QNX IFS'),
+        # cramfs (magic in the image's byte order) and romfs.
+        (0, b'\x45\x3d\xcd\x28', 'cramfs'),
+        (0, b'\x28\xcd\x3d\x45', 'cramfs'),
+        (0, b'-rom1fs-', 'romfs'),
+        # LittleFS: 'littlefs' after block 0's revision count.
+        (8, b'littlefs', 'LittleFS'),
+        (0x200, b'/' + bytes(15), 'QNX4'),
         # UFS puts its superblock well past the partition start and writes the
         # magic in the host's byte order, so both spellings have to be
         # accepted. UFS1 and UFS2 differ only in where the block sits.
@@ -1443,7 +1565,7 @@ class ImageHandler:
             self._partition_cache = self._get_partitions()
         return self._partition_cache
 
-    def get_partitions(self):
+    def get_partitions(self) -> list[tuple[int, Any, int, int]]:
         """Retrieve partitions from the loaded image, or indicate unpartitioned space."""
         return self.partitions
 
@@ -1539,15 +1661,27 @@ class ImageHandler:
             return self.DEFAULT_ROOT_INODE
         return root if root >= 0 else self.DEFAULT_ROOT_INODE
 
-    @lru_cache(maxsize=32)
-    def get_fs_info(self, start_offset):
+    def get_fs_info(self, start_offset: int) -> Any:
         """Retrieve the FS_Info for a partition, initializing it if necessary.
 
         `start_offset` may also name a volume inside a partition: the
         unlocked BitLocker volume at that partition, or a shadow copy's key
         (containers.shadow_key) -- opened on first use, so a bookmark into a
-        snapshot resolves after the case is reopened.
+        snapshot resolves after the case is reopened. A miss is remembered
+        (`_fs_misses`) until `_forget_filesystem`: some searches (a QNX EFS
+        flash scan) read hundreds of MB to find nothing.
         """
+        fs = self.fs_info_cache.get(start_offset)
+        if fs is not None:
+            return fs
+        if start_offset in self._fs_misses:
+            return None
+        fs = self._open_fs_info(start_offset)
+        if fs is None:
+            self._fs_misses.add(start_offset)
+        return fs
+
+    def _open_fs_info(self, start_offset):
         if self.logical_fs is not None:
             return self.logical_fs if start_offset == 0 else None
         if start_offset not in self.fs_info_cache:
@@ -1595,6 +1729,10 @@ class ImageHandler:
                     source = self.img_info
                     base = start_offset * self.sector_size
                     fs_info = pytsk3.FS_Info(source, offset=base)
+                    own = self._own_yaffs(start_offset, fs_info)
+                    if own is not fs_info:
+                        self.fs_info_cache[start_offset] = own
+                        return own
                 # ext: heavily fragmented block-mapped files are opened
                 # from their own block maps (core/ext_blockmap.py) -- TSK
                 # takes 40 s to open one of 132,000 runs, every time.
@@ -1629,24 +1767,63 @@ class ImageHandler:
             except KeyError:
                 return None
         from trace_app.core.btrfs import open_btrfs
+        from trace_app.core.cramfs import open_cramfs
         from trace_app.core.erofs import open_erofs
         from trace_app.core.f2fs import open_f2fs
         from trace_app.core.hfs import open_hfs
         from trace_app.core.jffs2 import open_jffs2
+        from trace_app.core.littlefs import open_littlefs
+        from trace_app.core.qnx4 import open_qnx4
+        from trace_app.core.qnx6 import open_qnx6
+        from trace_app.core.qnx_efs import open_efs
+        from trace_app.core.qnx_ifs import open_ifs
+        from trace_app.core.qnx_etfs import open_etfs
+        from trace_app.core.yaffs import open_yaffs
         from trace_app.core.refs import open_refs
+        from trace_app.core.romfs import open_romfs
         from trace_app.core.squashfs import open_squashfs
         from trace_app.core.udf import open_udf
+        from trace_app.core.uboot_env import open_uboot_env
         from trace_app.core.ubifs import open_ubifs
         from trace_app.core.xfs import open_xfs
         # An assembled Btrfs file system: the other devices, by device.
         others = getattr(self, '_btrfs_others', ()) \
             if start_offset == 0 else ()
         # Each checks its own signature first; JFFS2, a scan for nodes with
-        # no fixed place, goes last.
+        # no fixed place, YAFFS (tags in each page's spare bytes, no
+        # header), EFS, whose boot record can be anywhere in a
+        # flash dump, and ETFS, with no superblock at all (its pages'
+        # records are replayed), go last.
         return open_xfs(window) or open_btrfs(window, others) or \
             open_f2fs(window) or open_squashfs(window) or \
+            open_cramfs(window) or open_romfs(window) or \
+            open_qnx4(window) or open_littlefs(window) or \
             open_erofs(window) or open_udf(window) or open_hfs(window) or \
-            open_refs(window) or open_ubifs(window) or open_jffs2(window)
+            open_refs(window) or open_qnx6(window) or open_ifs(window) or \
+            open_ubifs(window) or open_uboot_env(window) or \
+            open_jffs2(window) or \
+            open_yaffs(window) or open_efs(window) or open_etfs(window)
+
+    def _own_yaffs(self, start_offset, fs_info):
+        """TRACE's YAFFS reader (core/yaffs.py) in place of The Sleuth
+        Kit's, when TSK takes a volume for YAFFS2 and TRACE's reader opens
+        it: TSK misreads a history-rich image (files shrunk, regrown,
+        flushed but never closed -- qnxprobe's yaffs2-history: its live
+        files differ from what YAFFS's own code reads back) and lists
+        every older version as a deleted entry named 'name#object,version'
+        in the tree. TRACE's live files equal YAFFS's; its older versions
+        are Deleted Files rows, each proved (core/yaffs_recover.py)."""
+        try:
+            if int(fs_info.info.ftype) != int(pytsk3.TSK_FS_TYPE_YAFFS2):
+                return fs_info
+        except Exception:
+            return fs_info
+        from trace_app.core.yaffs import open_yaffs
+        try:
+            own = open_yaffs(self._partition_window(start_offset))
+        except Exception:
+            own = None
+        return own if own is not None else fs_info
 
     def _udf_first(self, start_offset):
         """A UDF volume to read instead of the ISO 9660 one The Sleuth Kit
@@ -1699,7 +1876,7 @@ class ImageHandler:
         if fs is None or not path:
             return None
         try:
-            handle = fs.open(path=path)
+            handle = open_path(fs, path)
             size = int(handle.info.meta.size)
             if not size or size > limit:
                 return None
@@ -1714,7 +1891,7 @@ class ImageHandler:
 
     # --- volumes inside partitions: BitLocker, shadow copies -----------------
 
-    def partition_bytes(self, start_sector):
+    def partition_bytes(self, start_sector: int) -> tuple[int, int]:
         """(byte offset, byte length) of the partition at `start_sector`;
         the whole image for an unpartitioned one at 0."""
         for _addr, _desc, start, length in self.get_partitions():
@@ -1742,8 +1919,10 @@ class ImageHandler:
                 stale.close()
             except Exception:
                 pass
-        self.get_fs_info.cache_clear()
-        self.get_fs_type.cache_clear()
+        # This image's misses and types only: an unlocked volume can make
+        # keys under it (an LVM inside LUKS) readable.
+        self._fs_misses.clear()
+        self._fs_types.clear()
         self._directory_cache.clear()
 
     @containers.holding_libyal
@@ -1814,15 +1993,22 @@ class ImageHandler:
         return self._lost
 
     def _lost_own_reader(self, start):
-        """A lost SquashFS, EROFS or classic HFS volume at `start`,
+        """A lost SquashFS, EROFS, classic HFS, cramfs, romfs, QNX4, QNX6 or
+        LittleFS volume at `start`,
         opened by TRACE's own reader, or None."""
+        from trace_app.core.cramfs import open_cramfs
         from trace_app.core.erofs import open_erofs
         from trace_app.core.hfs import open_hfs
+        from trace_app.core.littlefs import open_littlefs
+        from trace_app.core.qnx4 import open_qnx4
+        from trace_app.core.qnx6 import open_qnx6
+        from trace_app.core.romfs import open_romfs
         from trace_app.core.squashfs import open_squashfs
         offset = start * self.sector_size
         window = containers.ByteWindow(self.read, offset,
                                        self.get_size() - offset)
-        for opener in (open_squashfs, open_erofs, open_hfs):
+        for opener in (open_squashfs, open_erofs, open_hfs, open_cramfs,
+                       open_romfs, open_qnx4, open_qnx6, open_littlefs):
             try:
                 fs = opener(window)
             except Exception:
@@ -2158,7 +2344,8 @@ class ImageHandler:
             raise containers.ContainerError(str(exc)) from exc
         self._unlocked_kind[0] = kind
         self._directory_cache.clear()
-        self.get_fs_type.cache_clear()
+        self._fs_misses.clear()
+        self._fs_types.clear()
         logger.info("%s unlocked", containers.ENCRYPTION_NAMES.get(kind,
                                                                    kind))
         return True
@@ -2355,7 +2542,7 @@ class ImageHandler:
         self.fs_info_cache[key] = fs
         return fs
 
-    def volume_offsets(self):
+    def volume_offsets(self) -> list[int]:
         """Every file system to read: each partition's start -- or, for
         an LVM partition or APFS container, its volumes' keys (unlocked ones
         only). What analysis, indexing, activity and NTFS walk."""
@@ -2488,9 +2675,13 @@ class ImageHandler:
                         'identifier': str(getattr(store, 'identifier', ''))})
         return out
 
-    @lru_cache(maxsize=32)
     def get_fs_type(self, start_offset):
         """Retrieve the file system type for a partition."""
+        if start_offset not in self._fs_types:
+            self._fs_types[start_offset] = self._fs_type(start_offset)
+        return self._fs_types[start_offset]
+
+    def _fs_type(self, start_offset):
         try:
             fs = self.get_fs_info(start_offset)
             from trace_app.core.apfs import is_apfs
@@ -2603,9 +2794,25 @@ class ImageHandler:
                                    ('created', 'crtime'),
                                    ('changed', 'ctime'))}
 
-    def get_directory_contents(self, start_offset, inode_number=None):
-        """Get directory contents with caching for performance."""
+    def cached_directory_contents(
+            self, start_offset: int,
+            inode_number: int | None = None) -> list[dict] | None:
+        """The folder's entries if already read, else None -- never reads."""
+        return self._directory_cache.get(f"{start_offset}_{inode_number}")
+
+    def get_directory_contents(
+            self, start_offset: int,
+            inode_number: int | None = None) -> list[dict]:
+        """Get directory contents with caching for performance. One
+        listing at a time: the window reads folders on a thread while the
+        tree's folder probe (ui/widgets/folder_probe) reads others."""
+        with self._listing_lock:
+            return self._directory_contents(start_offset, inode_number)
+
+    def _directory_contents(self, start_offset, inode_number):
         cache_key = f"{start_offset}_{inode_number}"
+        if getattr(self, '_closed', False):
+            return self._directory_cache.get(cache_key, [])
 
         # Check if we have this directory in our cache
         if cache_key in self._directory_cache:
@@ -2641,8 +2848,9 @@ class ImageHandler:
                         is_directory = True
 
                     entries.append({
-                        "name": entry.info.name.name.decode('utf-8', errors='replace') if hasattr(entry.info.name,
-                                                                                                  'name') else None,
+                        # Whole, where TSK cut a long NTFS name.
+                        "name": entry_name(entry, fs) if hasattr(
+                            entry.info.name, 'name') else None,
                         "is_directory": is_directory,
                         "inode_number": inode,
                         "size": meta.size if meta and meta.size is not None else 0,
@@ -2668,8 +2876,13 @@ class ImageHandler:
                         # files can share an inode over a volume's life, and
                         # the sequence is what tells them apart -- which
                         # matters when correlating a deleted entry against a
-                        # later allocation of the same record.
-                        "sequence": getattr(entry.info.meta, 'seq', None),
+                        # later allocation of the same record. The *name's*
+                        # (what fls shows, and what the walk, the analysis
+                        # and core/deleted.py put in their refs): a deleted
+                        # NTFS name has no metadata here (no sequence at
+                        # all), and its MFT entry's own was advanced when it
+                        # was freed. For a live file the two are one.
+                        "sequence": _name_sequence(entry),
                         # The NTFS attributes present, which is where alternate
                         # data streams show up.
                         "attributes": self._describe_attributes(fs, entry),
@@ -3271,7 +3484,8 @@ class ImageHandler:
             logger.error(f"Unable to search the file system at {offset}: {e}")
         return True
 
-    def get_file_content(self, inode_number, offset):
+    def get_file_content(self, inode_number: int,
+                         offset: int) -> tuple[bytes | None, Any]:
         #: Why the last read failed, in words, for the window to show.
         self.last_read_error = None
         fs = self.get_fs_info(offset)

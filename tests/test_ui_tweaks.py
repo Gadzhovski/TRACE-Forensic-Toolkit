@@ -88,6 +88,9 @@ def test_ctrl_wheel_and_keys_zoom_one_view_and_are_remembered(themed):
     hex_table = QTableWidget(1, 1, holder)
     QVBoxLayout(holder).addWidget(hex_table)
     assert text_zoom.zoomable(hex_table.viewport()) is None
+    # QTest keeps Ctrl held after the clicks above: a later test's
+    # selectRow became a Ctrl-click and cleared the selection.
+    QTest.keyRelease(table, Qt.Key_Control)
     for widget in (table, another, holder):
         widget.deleteLater()
 
@@ -295,6 +298,66 @@ def test_about_checks_and_shows_the_answer(qapp, monkeypatch):
     dialog.deleteLater()
 
 
+def test_a_newer_release_is_named_in_the_status_bar_at_start(
+        qapp, monkeypatch):
+    """At start TRACE asks once, a few seconds on, and names a newer
+    release in the status bar. Turned off, or offline, nothing is asked;
+    the same version shows nothing."""
+    from tests.conftest import close_window, pump
+    from trace_app.core import settings, updates
+    from trace_app.ui.main_window import MainWindow
+    asked = []
+    answer = {'version': '99.0.0', 'url':
+              'https://github.com/x/releases/tag/v99.0.0', 'published': '',
+              'name': 'TRACE 99.0.0'}
+
+    def latest():
+        asked.append(1)
+        return answer
+    monkeypatch.setattr(updates, 'latest', latest)
+    monkeypatch.setattr(settings, 'network_refusal', lambda kind='': None)
+    wanted = {'check_updates': True, 'check_updates_at_start': True}
+    real_user = settings.user
+    monkeypatch.setattr(settings, 'user', lambda key: wanted[key]
+                        if key in wanted else real_user(key))
+    window = MainWindow()
+    try:
+        # A window built (a test's, or app.main's before the call) asks
+        # nothing by itself.
+        pump(qapp, 5)
+        assert asked == [] and not window.update_notice.isVisibleTo(window)
+        assert window.check_for_update_at_start(delay=0)
+        assert pump(qapp, 50, lambda: window.update_notice.isVisibleTo(
+            window))
+        assert asked == [1]
+        assert '99.0.0 is available' in window.update_notice.text()
+        assert window._update_url.endswith('/v99.0.0')
+
+        # The same version: asked, nothing shown.
+        window.update_notice.setVisible(False)
+        from trace_app import __version__
+        answer['version'] = __version__
+        assert window.check_for_update_at_start(delay=0)
+        assert pump(qapp, 50, lambda: len(asked) == 2)
+        pump(qapp, 5)
+        assert not window.update_notice.isVisibleTo(window)
+
+        # Off at start, or the gate off, or offline: not asked at all.
+        wanted['check_updates_at_start'] = False
+        assert not window.check_for_update_at_start(delay=0)
+        wanted['check_updates_at_start'] = True
+        wanted['check_updates'] = False
+        assert not window.check_for_update_at_start(delay=0)
+        wanted['check_updates'] = True
+        monkeypatch.setattr(settings, 'network_refusal',
+                            lambda kind='': "This case is offline")
+        assert not window.check_for_update_at_start(delay=0)
+        pump(qapp, 10)
+        assert len(asked) == 2
+    finally:
+        close_window(window)
+
+
 def test_progress_of_a_large_image_reaches_the_bar(qapp):
     """Byte counts past a C int (62 GB of free space being indexed) cross
     the workers' signals and fill the job bar. IndexWorker.progressed was
@@ -320,36 +383,166 @@ def test_progress_of_a_large_image_reaches_the_bar(qapp):
     assert bar.eta_label.text().startswith('about ')
 
 
-def test_the_reopen_offer_waits_for_the_evidence(qapp, tmp_path, monkeypatch):
-    """Reopening a case queues the evidence load and the "run modules?"
-    offer together (app.main). Opening an image runs a nested event loop,
-    which used to run the offer mid-load: a modal dialog over the loading
-    bar, stuck at 20% until it was answered. The offer now waits for the
-    load -- and does not come back once any module has run."""
-    from PySide6.QtCore import QTimer
+def test_reopening_a_case_asks_nothing(qapp, tmp_path, monkeypatch):
+    """Modules are chosen in the New Case wizard (and Analysis Modules in
+    the menu). Reopening a case whose evidence nothing had analysed used to
+    put the Analysis Modules dialog up at every open."""
     from tests.conftest import image_path, pump
+    from trace_app import app
     from trace_app.core.case import Case
     from trace_app.ui import main_window as mw
     asked = []
-
-    def choose(window, *args, **kwargs):
-        asked.append((getattr(window, '_loading_case_evidence', False),
-                      list(window._image_handlers)))
-        return None
-    monkeypatch.setattr(mw, 'choose_modules', choose)
+    monkeypatch.setattr(mw, 'choose_modules',
+                        lambda *a, **k: asked.append(a) or None)
     case = Case.create(str(tmp_path / 'case'), 'Reopen')
-    evidence_id = case.add_evidence(image_path('8-jpeg-search.dd'), 'Disk')
+    case.add_evidence(image_path('8-jpeg-search.dd'), 'Disk')
     window = mw.MainWindow(case=case)
     try:
-        QTimer.singleShot(0, window.offer_analysis_modules)   # as app.main
-        pump(qapp, 60, until=lambda: asked)
-        assert len(asked) == 1
-        loading, opened = asked[0]
-        assert not loading and opened, "offered before the evidence opened"
-        # Once something has run (here: the activity module), no offer.
-        case.set_user_activity_state(evidence_id, 'done', records=0)
-        asked.clear()
-        window.offer_analysis_modules()
-        assert asked == []
+        pump(qapp, 60, until=lambda: window._image_handlers)
+        pump(qapp, 1)
+        assert window._image_handlers and asked == []
+        assert not hasattr(window, 'offer_analysis_modules')
     finally:
+        close_window(window)
+    source = open(app.__file__, encoding='utf-8').read()
+    assert 'offer_analysis_modules' not in source
+
+
+def test_every_tree_is_drawn_like_the_evidence_tree():
+    """The themes leave tree branches to BranchTreeWidget (painted
+    chevrons, one highlight strip). A plain QTreeWidget fell back to Qt's
+    boxed branch markers: white squares down the Modules, Tags,
+    Conversations and Similar pictures trees."""
+    import os
+    import re
+    root = os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), 'trace_app', 'ui')
+    plain = []
+    for folder, _dirs, names in os.walk(root):
+        for name in names:
+            if not name.endswith('.py') or name == 'tree_branch.py':
+                continue
+            path = os.path.join(folder, name)
+            with open(path, encoding='utf-8') as handle:
+                for number, line in enumerate(handle, start=1):
+                    if re.search(r'(?<![\w.])QTreeWidget\(', line) or \
+                            re.search(r'class \w+\(QTreeWidget\)', line):
+                        plain.append(f"{os.path.relpath(path, root)}:{number}")
+    assert plain == []
+
+
+def _started_with(monkeypatch):
+    """QProcess.startDetached replaced: what the restarted TRACE would
+    have been started with (its environment's TRACE_* names)."""
+    from PySide6.QtCore import QProcess
+    started = []
+
+    def start(program, arguments, *rest):
+        import os
+        started.append({name: os.environ.get(name) for name in (
+            'TRACE_REOPEN_CASE', 'TRACE_QUICK_TRIAGE', 'TRACE_CASE_SETUP')})
+        return True
+    monkeypatch.setattr(QProcess, 'startDetached', staticmethod(start))
+    # Detached, as a packaged build starts it -- whatever pytest's stdout is.
+    from trace_app import app
+    monkeypatch.setattr(app, 'has_console', lambda: False)
+    return started
+
+
+def test_from_a_terminal_trace_waits_for_the_next_one(
+        qapp, tmp_path, monkeypatch):
+    """Started from a terminal, a restart is not detached: the window
+    closes and app.main runs the next TRACE in the same terminal, so the
+    prompt comes back once, when TRACE is done (a detached start returned
+    it at once and the new TRACE logged under it)."""
+    import os
+    import sys
+    from PySide6.QtCore import QProcess
+    from tests.conftest import close_window
+    from trace_app import app
+    from trace_app.ui.dialogs import case_launcher
+    from trace_app.ui.main_window import MainWindow
+    detached = []
+    monkeypatch.setattr(QProcess, 'startDetached', staticmethod(
+        lambda *a: detached.append(a) or True))
+    monkeypatch.setattr(app, 'has_console', lambda: True)
+    window = MainWindow()
+    try:
+        assert window.restart(case_launcher.TRIAGE) is True
+        assert detached == []
+        program, arguments, environment = window.restart_request
+        assert program == sys.executable
+        assert environment['TRACE_QUICK_TRIAGE'] == '1'
+        assert 'TRACE_QUICK_TRIAGE' not in os.environ
+    finally:
+        window._restarting = False
+        close_window(window)
+    environment = dict(os.environ, TRACE_TEST_EXIT='3')
+    script = ['-c', 'import os, sys; '
+              'sys.exit(int(os.environ["TRACE_TEST_EXIT"]))']
+    if sys.platform == 'win32':
+        # No exec on Windows: this process waits and passes the code on.
+        assert app.run_again(sys.executable, script, environment) == 3
+    else:
+        replaced = []
+        monkeypatch.setattr(os, 'execve', lambda *a: replaced.append(a))
+        monkeypatch.setattr('logging.shutdown', lambda: None)
+        app.run_again(sys.executable, script, environment)
+        assert replaced == [(sys.executable, [sys.executable] + script,
+                             environment)]
+
+
+def test_switch_case_starts_trace_again_on_the_choice(
+        qapp, tmp_path, monkeypatch):
+    """File ▸ Switch Case shows the welcome screen from the window; the
+    case, new case (with what its wizard asked for) or quick triage chosen
+    is what TRACE starts again on. Cancelled, nothing happens -- and the
+    window's own environment is left as it was."""
+    import json
+    import os
+    from tests.conftest import close_window
+    from trace_app import app
+    from trace_app.core.case import Case
+    from trace_app.ui.dialogs import case_launcher
+    from trace_app.ui.main_window import MainWindow
+    started = _started_with(monkeypatch)
+    window = MainWindow()
+    closed = []
+    monkeypatch.setattr(window, 'close', lambda: closed.append(1))
+    try:
+        assert window.switch_case_action.shortcut().toString() == \
+            'Ctrl+Shift+O'
+        monkeypatch.setattr(case_launcher, 'choose_case',
+                            lambda parent=None: (None, None))
+        assert window.switch_case() is None
+        assert started == [] and closed == []
+
+        monkeypatch.setattr(case_launcher, 'choose_case', lambda parent=None:
+                            (case_launcher.TRIAGE, None))
+        assert window.switch_case() == case_launcher.TRIAGE
+        assert started[-1]['TRACE_QUICK_TRIAGE'] == '1'
+        assert started[-1]['TRACE_REOPEN_CASE'] is None
+        assert closed == [1]
+
+        window._restarting = False
+        case = Case.create(str(tmp_path / 'Other case'), 'Other')
+        setup = {'verify': True, 'choice': {'modules': ['hash'],
+                                            'index': True}}
+        monkeypatch.setattr(case_launcher, 'choose_case',
+                            lambda parent=None: (case, setup))
+        assert window.switch_case() == case.folder
+        assert started[-1]['TRACE_REOPEN_CASE'] == case.folder
+        assert started[-1]['TRACE_QUICK_TRIAGE'] is None
+        assert json.loads(started[-1]['TRACE_CASE_SETUP']) == setup
+        # The launcher's copy of the case is closed: the new TRACE opens it.
+        assert case._db is None
+        for name in ('TRACE_REOPEN_CASE', 'TRACE_QUICK_TRIAGE',
+                     'TRACE_CASE_SETUP'):
+            assert name not in os.environ
+        # app.main reads the setup back as the wizard made it.
+        assert app._restart_setup(started[-1]['TRACE_CASE_SETUP']) == setup
+        assert app._restart_setup('') is None
+        assert app._restart_setup('not json') is None
+    finally:
+        window._restarting = False
         close_window(window)

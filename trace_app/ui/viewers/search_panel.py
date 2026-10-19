@@ -376,6 +376,8 @@ class SearchPanel(QWidget):
                              else 'In archive')
             elif kind == 'carved':
                 type_text = 'Carved file'
+            elif kind == 'module':
+                type_text = 'Module row'
             elif kind == 'slack':
                 type_text = 'File slack'
             elif kind == 'memory':

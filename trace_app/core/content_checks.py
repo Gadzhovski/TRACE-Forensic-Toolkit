@@ -13,6 +13,8 @@ places.
   every camera JPEG carries a thumbnail with its own end marker inside.
 * **Encryption**: password-protected archives, Office documents and PDFs,
   stated from the format rather than guessed from entropy.
+* **Thumbnail mismatch**: a JPEG whose EXIF thumbnail shows something else
+  or another shape (core/image_forensics.thumbnail_check) -- notable.
 * **Macros**: VBA in Office documents (core/vba.py) -- notable; code that
   runs itself and downloads, starts programs or writes files, suspicious.
 * **Photo metadata**: camera, capture time, editing software and GPS position
@@ -107,11 +109,6 @@ def family(head):
     return ''
 
 
-#: Families any of the content checks want the whole file for.
-NEEDS_FULL = {'jpeg', 'png', 'pdf', 'zip', 'ole', '7z', 'tiff', 'webp', 'heif',
-              'executable'}
-
-
 def wants_full_read(head, modules):
     """Whether these modules have anything to check in a file like this."""
     fam = family(head)
@@ -143,6 +140,7 @@ def inspect(name, data, modules, size=None):
             findings += appended_data(data)
             findings += encryption(data)
             findings += macros(data)
+            findings += thumbnail_mismatch(data)
     if MODULE_PHOTO in modules and data:
         facts = photo_metadata(data)
         if facts:
@@ -362,6 +360,26 @@ def appended_data(data):
 
 # --- encryption -------------------------------------------------------------------------
 
+def thumbnail_mismatch(data):
+    """A JPEG whose EXIF thumbnail is not the picture (core/
+    image_forensics.thumbnail_check): editors often change the picture and
+    keep the camera's thumbnail -- of the scene before it was cropped or
+    retouched."""
+    if not bytes(data[:3]) == b'\xff\xd8\xff':
+        return []
+    from trace_app.core.image_forensics import thumbnail_check
+    check = thumbnail_check(data)
+    if not check or not check['differs']:
+        return []
+    return [Finding(
+        MODULE_HIDDEN, 'thumbnail_mismatch', GRADE_NOTABLE,
+        f"EXIF thumbnail is not this picture: {check['reason']}.",
+        {'difference': check['difference'],
+         'picture_ratio': check['shape'][0],
+         'thumbnail_ratio': check['shape'][1],
+         'thumbnail_size': list(check['size'])})]
+
+
 def encryption(data):
     fam = family(data[:16])
     try:
@@ -566,6 +584,41 @@ def photo_metadata(data):
             if stamp:
                 facts['gps_date'] = stamp
     return facts
+
+
+def video_finding(head, read, size):
+    """What a video's container records (core/media_metadata.py) -- device,
+    recording time, position -- as a photo-module finding (kind 'video', or
+    'audio' with no video track),
+    so it is listed with the photos and placed on the Map; None when the
+    file is no video or records none of it."""
+    from trace_app.core import media_metadata
+    if not media_metadata.kind(head):
+        return None
+    meta = media_metadata.read_metadata(read, size, head)
+    detail = media_metadata.video_finding_detail(meta)
+    if not detail:
+        return None
+    camera = ' '.join(p for p in (detail.get('make'), detail.get('model'))
+                      if p)
+    if 'latitude' in detail:
+        summary = (f"Recorded at {detail['latitude']:.5f}, "
+                   f"{detail['longitude']:.5f}")
+        grade = GRADE_NOTABLE
+    else:
+        summary = "Recorded"
+        grade = GRADE_BENIGN
+    if camera:
+        summary += f" with {camera}"
+    elif detail.get('software'):
+        summary += f" (written by {detail['software']})"
+    when = detail.get('taken') or (f"{detail['recorded']} UTC"
+                                   if detail.get('recorded') else '')
+    if when:
+        summary += f" on {when}"
+    kind = 'video' if any(track.get('kind') == 'video'
+                          for track in meta.get('tracks') or []) else 'audio'
+    return Finding(MODULE_PHOTO, kind, grade, summary + '.', detail)
 
 
 def _photo_finding(facts):

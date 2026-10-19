@@ -46,7 +46,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 25
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -107,6 +107,7 @@ _SPAN_REF = re.compile(r'^p(\d+):x([0-9a-fA-F]+)-([0-9a-fA-F]+)$')
 
 #: A registry key or value, identified by hive and key path.
 _REGISTRY_REF = re.compile(r'^reg:([^:]+):(.*)$')
+_MODULE_REF = re.compile(r'^mod:(\d+):([^:]+):(\d+)$')
 
 
 #: The mismatch grades worth putting in front of an examiner. Suspicious is an
@@ -150,6 +151,12 @@ def make_span_ref(start_offset, begin, end):
     return f"p{int(start_offset)}:x{int(begin):x}-{int(end):x}"
 
 
+def make_module_ref(run_id, table, rowid):
+    """A reference to one row an external module (core/modules) wrote:
+    its run, its LAVA table and the row's rowid there."""
+    return f"mod:{int(run_id)}:{table}:{int(rowid)}"
+
+
 def make_registry_ref(hive, key_path):
     """A reference to a registry key or value."""
     return f"reg:{hive}:{key_path}"
@@ -183,6 +190,16 @@ def parse_artifact_ref(ref):
             'start_offset': int(match.group(1)),
             'begin': int(match.group(2), 16),
             'end': int(match.group(3), 16),
+            'ref': ref,
+        }
+
+    match = _MODULE_REF.match(ref)
+    if match:
+        return {
+            'kind': 'module',
+            'run_id': int(match.group(1)),
+            'table': match.group(2),
+            'rowid': int(match.group(3)),
             'ref': ref,
         }
 
@@ -549,6 +566,8 @@ class Case:
         ('vt_results', 'VirusTotal results'),
         ('bookmarks', 'bookmarks'),
         ('artifact_tags', 'tags'),
+        ('vic_categories', 'Project VIC categories'),
+        ('module_runs', 'external module runs'),
         ('report_items', 'report picks'),
         ('verifications', 'verification records'),
         ('evidence_systems', 'operating systems found'),
@@ -628,6 +647,11 @@ class Case:
         footprint = self.evidence_footprint(evidence_id)
         notes = self.notes_for_evidence(evidence_id)
         carved_folder = self._carved_folder_path(evidence_id)
+        # Run folders of external modules (staged copies, the tools'
+        # reports) inside the case folder: the rows cascade, the files not.
+        run_folders = [run['path'] for run in self.module_runs(evidence_id)
+                       if os.path.realpath(run['path']).startswith(
+                           os.path.realpath(self.folder) + os.sep)]
 
         # Notes first: the evidence row's cascade would take them too.
         self._db.execute(
@@ -646,7 +670,7 @@ class Case:
                 from trace_app.core.search_index import SearchIndex
                 index = SearchIndex(self.folder)
                 try:
-                    index.clear_evidence(evidence_id)
+                    index.clear_evidence(evidence_id, keep_modules=False)
                     index.commit()
                 finally:
                     index.close()
@@ -656,12 +680,15 @@ class Case:
 
         # The carved copies TRACE wrote for this evidence (never anything
         # the examiner exported).
+        import shutil
         if carved_folder and os.path.isdir(carved_folder):
-            import shutil
             shutil.rmtree(carved_folder, ignore_errors=True)
             if os.path.exists(carved_folder):
                 logger.warning("Carved files for %s not all removed: %s",
                                name, carved_folder)
+
+        for folder in run_folders:
+            shutil.rmtree(folder, ignore_errors=True)
 
         hashes = ', '.join(f"{k.upper()} {row[k]}" for k in
                            ('md5', 'sha1', 'sha256') if row.get(k))
@@ -761,6 +788,21 @@ class Case:
         if row is None:
             raise CaseError(f"No evidence {evidence_id} in this case")
         row = dict(row)
+        # An acquisition log found only now (placed beside the evidence
+        # later, or a format TRACE learnt to read since it was added): its
+        # hashes become the row's reference, audited, before judging.
+        if not row.get('stored_source') and not any(
+                row.get(f'stored_{n}') for n in HASH_NAMES) and \
+                not results.get('live') and os.path.isfile(row['path']):
+            logged, log_path = _acquisition_log(row['path'])
+            if logged:
+                self.set_acquisition_hashes(
+                    evidence_id,
+                    f"acquisition log {os.path.basename(log_path)}",
+                    **logged)
+                row = dict(self._db.execute(
+                    "SELECT * FROM evidence WHERE id = ?",
+                    (evidence_id,)).fetchone())
         recorded = {name: row.get(name) for name in HASH_NAMES
                     if row.get(name)}
         stored = acquisition_hashes(row, results)
@@ -976,27 +1018,6 @@ class Case:
         return found
 
     # --- read-only status -------------------------------------------------
-
-    def set_evidence_readonly(self, evidence_id, read_only=True):
-        """Mark evidence as read-only, or release it.
-
-        TRACE never writes to evidence, so this records intent rather than
-        enforcing a filesystem permission -- but an examiner who has
-        deliberately released the flag has said so on the record.
-        """
-        self._db.execute(
-            "UPDATE evidence SET read_only = ? WHERE id = ?",
-            (1 if read_only else 0, evidence_id))
-        self._db.commit()
-        self._record_activity(
-            'evidence read-only set' if read_only else
-            'evidence read-only released', f'id={evidence_id}')
-
-    def is_readonly(self, evidence_id):
-        row = self._db.execute(
-            "SELECT read_only FROM evidence WHERE id = ?",
-            (evidence_id,)).fetchone()
-        return bool(row['read_only']) if row else True
 
     # --- bookmarks --------------------------------------------------------
 
@@ -1254,6 +1275,454 @@ class Case:
         args.append(limit)
         return [dict(row) for row in self._db.execute(query, args)]
 
+    # --- Project VIC categories -----------------------------------------
+    # The examiner's classification of a picture or video in Project VIC's
+    # terms (core/vics.CATEGORIES), for the VICS export. One per file;
+    # setting one replaces the last, and every change is audited.
+
+    def set_vic_category(self, category, rows):
+        """Give files (rows of {'evidence_id', 'artifact_ref', 'name',
+        'path'}) category `category` (0-4). Returns how many changed."""
+        from trace_app.core.vics import CATEGORIES, category_label
+        if category not in CATEGORIES:
+            raise CaseError(f"No Project VIC category {category!r}.")
+        now, who = _utc_now(), self.examiner
+        changed = []
+        for row in rows:
+            evidence_id = row.get('evidence_id')
+            if evidence_id is not None and \
+                    not self._evidence_exists(evidence_id):
+                evidence_id = None
+            old = self._db.execute(
+                "SELECT category FROM vic_categories WHERE evidence_id IS ? "
+                "AND artifact_ref = ?",
+                (evidence_id, row['artifact_ref'])).fetchone()
+            if old is not None and old['category'] == category:
+                continue
+            self._db.execute(
+                "DELETE FROM vic_categories WHERE evidence_id IS ? AND "
+                "artifact_ref = ?", (evidence_id, row['artifact_ref']))
+            self._db.execute(
+                "INSERT INTO vic_categories (evidence_id, artifact_ref, "
+                "category, name, path, categorised_utc, examiner) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (evidence_id, row['artifact_ref'], category,
+                 row.get('name') or '', row.get('path') or '', now, who))
+            what = row.get('path') or row.get('name') or row['artifact_ref']
+            changed.append(f"{what} (was {category_label(old['category'])})"
+                           if old is not None else what)
+        self._db.commit()
+        if changed:
+            self._record_activity('Project VIC category set', _tag_detail(
+                category_label(category), changed))
+        return len(changed)
+
+    def clear_vic_category(self, rows):
+        """Take the category off files (Uncategorized again)."""
+        from trace_app.core.vics import category_label
+        removed = []
+        for row in rows:
+            old = self._db.execute(
+                "SELECT category FROM vic_categories WHERE evidence_id IS ? "
+                "AND artifact_ref = ?",
+                (row.get('evidence_id'), row['artifact_ref'])).fetchone()
+            if old is None:
+                continue
+            self._db.execute(
+                "DELETE FROM vic_categories WHERE evidence_id IS ? AND "
+                "artifact_ref = ?",
+                (row.get('evidence_id'), row['artifact_ref']))
+            what = row.get('path') or row.get('name') or row['artifact_ref']
+            removed.append(f"{what} (was {category_label(old['category'])})")
+        self._db.commit()
+        if removed:
+            self._record_activity('Project VIC category cleared',
+                                  _tag_detail('Uncategorized', removed))
+        return len(removed)
+
+    def vic_categories(self, evidence_id=None, limit=100000):
+        """Categorised files, most serious category first."""
+        query = "SELECT * FROM vic_categories"
+        args = []
+        if evidence_id is not None:
+            query += " WHERE evidence_id = ?"
+            args.append(evidence_id)
+        query += (" ORDER BY CASE category WHEN 0 THEN 9 ELSE category END, "
+                  "categorised_utc DESC, path LIMIT ?")
+        args.append(limit)
+        return [dict(row) for row in self._db.execute(query, args)]
+
+    def vic_categories_for(self, evidence_id, refs=None):
+        """{artifact_ref: category} for one image's files (all of them when
+        `refs` is None)."""
+        if refs is None:
+            return {row['artifact_ref']: row['category'] for row in
+                    self._db.execute(
+                        "SELECT artifact_ref, category FROM vic_categories "
+                        "WHERE evidence_id IS ?", (evidence_id,))}
+        refs, found = list(refs), {}
+        for start in range(0, len(refs), 500):
+            chunk = refs[start:start + 500]
+            marks = ','.join('?' * len(chunk))
+            for row in self._db.execute(
+                    f"SELECT artifact_ref, category FROM vic_categories "
+                    f"WHERE evidence_id IS ? AND artifact_ref IN ({marks})",
+                    [evidence_id] + chunk):
+                found[row['artifact_ref']] = row['category']
+        return found
+
+    # --- external modules (core/modules) -----------------------------------
+
+    def add_module_run(self, evidence_id, tool, version, executable_sha256,
+                       params, folder):
+        """Begin a run; returns its id. `folder` is absolute or relative to
+        the case folder (kept relative). Audited."""
+        if os.path.isabs(folder):
+            try:
+                folder = os.path.relpath(folder, self.folder)
+            except ValueError:
+                pass            # another drive: kept absolute
+        cursor = self._db.execute(
+            "INSERT INTO module_runs (evidence_id, tool, version, "
+            "executable_sha256, params, folder, status, started_utc) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'running', ?)",
+            (evidence_id, tool, version, executable_sha256,
+             json.dumps(params or {}), folder, _utc_now()))
+        self._db.commit()
+        self._record_activity(
+            'external module run started',
+            f"{tool} {version} on evidence id={evidence_id}; program SHA-256 "
+            f"{executable_sha256}; folder {folder}")
+        return cursor.lastrowid
+
+    def finish_module_run(self, run_id, status, staged=None,
+                          manifest_sha256=None, lava_sha256=None,
+                          message='', params=None):
+        if params is not None:
+            self._db.execute("UPDATE module_runs SET params = ? WHERE id = ?",
+                             (json.dumps(params), run_id))
+        self._db.execute(
+            "UPDATE module_runs SET status = ?, staged = ?, "
+            "manifest_sha256 = ?, lava_sha256 = ?, finished_utc = ?, "
+            "message = ? WHERE id = ?",
+            (status, staged, manifest_sha256, lava_sha256, _utc_now(),
+             message, run_id))
+        self._db.commit()
+        run = self.module_run(run_id) or {}
+        self._record_activity(
+            'external module run finished',
+            f"{run.get('tool')} {run.get('version')} run id={run_id}: "
+            f"{status}; {staged or 0} file(s) staged, manifest SHA-256 "
+            f"{manifest_sha256}; LAVA database SHA-256 {lava_sha256}"
+            + (f"; {message}" if message else ''))
+
+    def set_module_run_params(self, run_id, params):
+        """Replace a run's params (an import limit applied again)."""
+        self._db.execute("UPDATE module_runs SET params = ? WHERE id = ?",
+                         (json.dumps(params), run_id))
+        self._db.commit()
+
+    def drop_module_events(self, artifact_ids):
+        """The Timeline events of these artifacts (a smaller import limit
+        took them out)."""
+        ids = list(artifact_ids)
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            self._db.execute(
+                f"DELETE FROM module_events WHERE artifact_id IN "
+                f"({','.join('?' * len(chunk))})", chunk)
+        self._db.commit()
+
+    def add_module_artifacts(self, run_id, artifacts):
+        """Store a run's artifacts (lava.load's); returns {tablename: id}."""
+        ids = {}
+        for artifact in artifacts:
+            cursor = self._db.execute(
+                "INSERT INTO module_artifacts (run_id, category, name, "
+                "tablename, module, columns, row_count, source_path, "
+                "conversation, icon) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (run_id, artifact['category'], artifact['name'],
+                 artifact['tablename'], artifact['module'],
+                 json.dumps(artifact['columns']), artifact['record_count'],
+                 artifact['source_path'],
+                 json.dumps(artifact['conversation'])
+                 if artifact.get('conversation') else None,
+                 artifact.get('icon') or ''))
+            ids[artifact['tablename']] = cursor.lastrowid
+        self._db.commit()
+        return ids
+
+    def add_module_events(self, run_id, events):
+        """Rows of (artifact_id, row_id, time_utc, label, summary),
+        committed every 50,000 (one transaction of millions grew a WAL past
+        a gigabyte, and the window's reads waited on it)."""
+        batch, written = [], 0
+        for event in events:
+            batch.append((run_id,) + tuple(event))
+            if len(batch) >= 2000:
+                self._db.executemany(
+                    "INSERT INTO module_events (run_id, artifact_id, row_id, "
+                    "time_utc, label, summary) VALUES (?,?,?,?,?,?)", batch)
+                written += len(batch)
+                batch = []
+                if written % 50000 == 0:
+                    self._db.commit()
+        if batch:
+            self._db.executemany(
+                "INSERT INTO module_events (run_id, artifact_id, row_id, "
+                "time_utc, label, summary) VALUES (?,?,?,?,?,?)", batch)
+        self._db.commit()
+
+    def drop_module_activity(self, artifact_id):
+        """The Activity rows an external module's artifact gave."""
+        self._db.execute("DELETE FROM user_activity "
+                         "WHERE module_artifact_id = ?", (artifact_id,))
+
+    def set_module_event_kind(self, artifact_id, kind, name, primary_label):
+        """Tag an artifact's Timeline events with its role; the events of
+        its Activity rows' own time 'bridged' (shown once, as the row)."""
+        self._db.execute("UPDATE module_events SET kind = ? "
+                         "WHERE artifact_id = ?", (kind, artifact_id))
+        if primary_label and kind == 'evidence':
+            self._db.execute(
+                "UPDATE module_events SET kind = 'bridged' "
+                "WHERE artifact_id = ? AND label = ?",
+                (artifact_id, f"{name}: {primary_label}"))
+
+    def set_module_artifact_route(self, artifact_id, key, role, why,
+                                  digest, version, superseded_by=None,
+                                  sorted_by=''):
+        self._db.execute(
+            "UPDATE module_artifacts SET artifact_key = ?, role = ?, "
+            "route_why = ?, content_sha256 = ?, bridged_version = ?, "
+            "superseded_by = ?, sorted_by = ? WHERE id = ?",
+            (key, role, why, digest, version, superseded_by, sorted_by,
+             artifact_id))
+
+    def _same_artifacts(self, evidence_id, tool, key, digest):
+        return self._db.execute(
+            "SELECT a.id, a.run_id FROM module_artifacts a "
+            "JOIN module_runs r ON r.id = a.run_id "
+            "WHERE r.evidence_id IS ? AND r.tool = ? AND r.status = "
+            "'complete' AND COALESCE(NULLIF(a.artifact_key, ''), "
+            "a.tablename) = ? AND a.content_sha256 = ?",
+            (evidence_id, tool, key, digest)).fetchall()
+
+    def newer_same_artifact(self, run_id, evidence_id, tool, key, digest):
+        """The id of the same artifact (same rows) a newer run of the same
+        tool read on the same evidence, or None."""
+        newer = [row['id'] for row in self._same_artifacts(
+            evidence_id, tool, key, digest) if row['run_id'] > run_id]
+        return max(newer) if newer else None
+
+    def supersede_older_artifacts(self, run_id, evidence_id, tool, key,
+                                  digest, keep):
+        """Older runs' copies of artifact `keep` (same rows) step aside:
+        their Activity rows go, their events are tagged 'superseded'. They
+        stay in the Modules tab. Returns how many."""
+        older = [row['id'] for row in self._same_artifacts(
+            evidence_id, tool, key, digest) if row['run_id'] < run_id]
+        for artifact_id in older:
+            self.drop_module_activity(artifact_id)
+            self._db.execute("UPDATE module_events SET kind = 'superseded' "
+                             "WHERE artifact_id = ?", (artifact_id,))
+            self._db.execute("UPDATE module_artifacts SET superseded_by = ? "
+                             "WHERE id = ?", (keep, artifact_id))
+        return len(older)
+
+    def unbridged_module_runs(self):
+        """Complete runs with an artifact not yet sorted at the current
+        ROUTES_VERSION (core/modules/bridge) -- the 'module_bridge' job's
+        work when a case opens."""
+        from trace_app.core.modules.routes import ROUTES_VERSION
+        return [row[0] for row in self._db.execute(
+            "SELECT DISTINCT r.id FROM module_runs r "
+            "JOIN module_artifacts a ON a.run_id = r.id "
+            "WHERE r.status = 'complete' AND a.bridged_version < ? "
+            "ORDER BY r.id", (ROUTES_VERSION,))]
+
+    def module_runs(self, evidence_id=None):
+        """Runs, newest first, with an absolute `path` to their folder."""
+        query, args = "SELECT * FROM module_runs", []
+        if evidence_id is not None:
+            query += " WHERE evidence_id = ?"
+            args.append(evidence_id)
+        query += " ORDER BY id DESC"
+        return [self._module_run_row(row)
+                for row in self._db.execute(query, args)]
+
+    def module_run(self, run_id):
+        row = self._db.execute("SELECT * FROM module_runs WHERE id = ?",
+                               (run_id,)).fetchone()
+        return self._module_run_row(row) if row else None
+
+    def _module_run_row(self, row):
+        row = dict(row)
+        folder = row.get('folder') or ''
+        row['path'] = folder if os.path.isabs(folder) else \
+            os.path.join(self.folder, folder)
+        try:
+            row['params'] = json.loads(row.get('params') or '{}')
+        except ValueError:
+            row['params'] = {}
+        return row
+
+    def module_artifacts(self, run_id):
+        """A run's artifacts, by category then name."""
+        out = []
+        for row in self._db.execute(
+                "SELECT * FROM module_artifacts WHERE run_id = ? "
+                "ORDER BY category, name", (run_id,)):
+            row = dict(row)
+            for key, empty in (('columns', '[]'), ('conversation', 'null')):
+                try:
+                    row[key] = json.loads(row.get(key) or empty)
+                except ValueError:
+                    row[key] = None
+            out.append(row)
+        return out
+
+    def supersede_keyless_runs(self, evidence_id, tool, label, keep):
+        """Forget complete runs of the same evidence, tool and input made
+        without a key the tool wanted (input.secrets_wanted: DLEAPP's
+        Signal key) -- once run `keep` has read it with the key: the new
+        run holds all the old one did, and more. Audited, each."""
+        gone = []
+        for run in self.module_runs(evidence_id):
+            given = run['params'].get('input') or {}
+            if run['id'] != keep and run['tool'] == tool and \
+                    given.get('label') == label and \
+                    given.get('secrets_wanted'):
+                self.remove_module_run(
+                    run['id'], why=f"superseded by run id={keep}, which read "
+                                   f"it with the key it wanted")
+                gone.append(run['id'])
+        return gone
+
+    def supersede_password_runs(self, evidence_id, tool, label, keep):
+        """Forget the runs an encrypted backup's password made needless:
+        the same evidence, tool and input, skipped for want of its password
+        or failed on a wrong one -- once run `keep` has read it. They never
+        started the tool (no folder, no rows). Audited, each. Returns their
+        ids."""
+        gone = []
+        for run in self.module_runs(evidence_id):
+            given = run['params'].get('input') or {}
+            if run['id'] == keep or run['tool'] != tool or \
+                    given.get('label') != label:
+                continue
+            if run['status'] == 'skipped' or (
+                    run['status'] == 'failed' and given.get('needs_password')):
+                self.remove_module_run(
+                    run['id'], why=f"superseded by run id={keep}, which read "
+                                   f"the backup with its password")
+                gone.append(run['id'])
+        return gone
+
+    def remove_module_run(self, run_id, why=''):
+        """Forget a run (its artifacts and events go with it); the caller
+        deletes its folder. Audited."""
+        run = self.module_run(run_id)
+        if run is None:
+            return None
+        # What this run's artifacts had superseded is sorted again (the
+        # 'module_bridge' job): the older reading is the one left.
+        self._db.execute(
+            "UPDATE module_artifacts SET superseded_by = NULL, "
+            "bridged_version = 0 WHERE superseded_by IN ("
+            "SELECT id FROM module_artifacts WHERE run_id = ?)", (run_id,))
+        self._db.execute("DELETE FROM module_runs WHERE id = ?", (run_id,))
+        self._db.commit()
+        if run.get('evidence_id') is not None:
+            self.relink_matches(run['evidence_id'])
+        index_path = os.path.join(self.folder, 'search.db')
+        if os.path.exists(index_path):
+            try:
+                from trace_app.core.search_index import SearchIndex
+                index = SearchIndex(self.folder)
+                try:
+                    index.clear_module_run(run_id)
+                finally:
+                    index.close()
+            except Exception as exc:
+                logger.warning("Search index rows of run %s not removed: %s",
+                               run_id, exc)
+        self._record_activity(
+            'external module run removed',
+            f"{run['tool']} {run['version']} run id={run_id} on evidence "
+            f"id={run['evidence_id']}; folder {run['folder']}"
+            + (f"; {why}" if why else ''))
+        return run
+
+    #: Rows that point at a file by ref and record where it was:
+    #: (table, ref column, path column).
+    _REF_ROWS = (('bookmarks', 'artifact_ref', 'artifact_path'),
+                 ('artifact_tags', 'artifact_ref', 'path'),
+                 ('vic_categories', 'artifact_ref', 'path'),
+                 ('notes', 'artifact_ref', 'artifact_path'))
+
+    def repair_file_refs(self, evidence_id, resolve):
+        """Give the examiner's marks on one image's files (bookmarks, tags,
+        Project VIC categories, notes) the ref the name entry makes --
+        core/ref_repair.py: an older Listing named a deleted NTFS file its
+        own way. `resolve(ref, path)` -> the new ref or None. Audited, the
+        old and new ref of each. Returns how many rows changed."""
+        changed = []
+        for table, ref_column, path_column in self._REF_ROWS:
+            rows = self._db.execute(
+                f"SELECT rowid AS rid, {ref_column} AS ref, {path_column} AS path "
+                f"FROM {table} WHERE evidence_id IS ? AND {ref_column} "
+                f"LIKE 'p%:i%'", (evidence_id,)).fetchall()
+            for row in rows:
+                fixed = resolve(row['ref'], row['path'] or '')
+                if not fixed or fixed == row['ref']:
+                    continue
+                # A mark already on the fixed ref (made since) wins; the
+                # old row then goes rather than becoming a duplicate.
+                updated = self._db.execute(
+                    f"UPDATE OR IGNORE {table} SET {ref_column} = ? "
+                    f"WHERE rowid = ?", (fixed, row['rid'])).rowcount
+                if not updated:
+                    self._db.execute(f"DELETE FROM {table} WHERE rowid = ?",
+                                     (row['rid'],))
+                changed.append(f"{table}: {row['path'] or row['ref']} "
+                               f"{row['ref']} -> {fixed}")
+        if not changed:
+            return 0
+        self._db.commit()
+        shown = '; '.join(changed[:20])
+        more = f" and {len(changed) - 20} more" if len(changed) > 20 else ''
+        self._record_activity(
+            'file references updated',
+            f"evidence id={evidence_id}: {len(changed)} mark(s) on deleted "
+            f"files now use the name entry's sequence, as the rest of TRACE "
+            f"does: {shown}{more}")
+        return len(changed)
+
+    def vics_comments(self, evidence_id):
+        """{artifact_ref: text} of one image's files: each bookmark's label
+        and the notes written on the file or its bookmark -- what the VICS
+        export writes as a picture's Comments."""
+        texts = {}
+
+        def add(ref, text):
+            text = ' '.join((text or '').split())
+            if ref and text and text not in texts.setdefault(ref, []):
+                texts[ref].append(text)
+        marks = {}
+        for row in self._db.execute(
+                "SELECT id, artifact_ref, label FROM bookmarks "
+                "WHERE evidence_id IS ? ORDER BY id", (evidence_id,)):
+            marks[row['id']] = row['artifact_ref']
+            add(row['artifact_ref'], f"Bookmark: {row['label']}"
+                if row['label'] else '')
+        for row in self._db.execute(
+                "SELECT artifact_ref, bookmark_id, body FROM notes "
+                "WHERE evidence_id IS ? ORDER BY id", (evidence_id,)):
+            ref = row['artifact_ref'] or marks.get(row['bookmark_id'])
+            add(ref, f"Note: {row['body']}")
+        return {ref: ' | '.join(parts) for ref, parts in texts.items()}
+
     # --- notes ------------------------------------------------------------
 
     def add_note(self, body, evidence_id=None, artifact_ref=None,
@@ -1487,15 +1956,7 @@ class Case:
     def picture_hashes(self, evidence_id=None):
         """Every picture with a perceptual hash: [{evidence_id,
         artifact_ref, name, path, size, is_deleted, phash}]."""
-        query = ("SELECT evidence_id, artifact_ref, name, path, size, "
-                 "is_deleted, phash FROM file_analysis WHERE phash IS NOT "
-                 "NULL")
-        params = []
-        if evidence_id is not None:
-            query += " AND evidence_id = ?"
-            params.append(evidence_id)
-        return [dict(row) for row in self._db.execute(
-            query + " ORDER BY evidence_id, path", params)]
+        return query_picture_hashes(self._db, evidence_id)
 
     def add_analysis_batch(self, evidence_id, rows):
         """Record what the modules found, for a batch of files.
@@ -1617,20 +2078,82 @@ class Case:
     # --- what the users did (core/activity) --------------------------
 
     def clear_user_activity(self, evidence_id):
-        self._db.execute("DELETE FROM user_activity WHERE evidence_id = ?",
-                         (evidence_id,))
+        """TRACE's own activity rows of an image -- not what an external
+        module read (core/modules/bridge), which goes with its run."""
+        self._db.execute("DELETE FROM user_activity WHERE evidence_id = ? "
+                         "AND module_run_id IS NULL", (evidence_id,))
         self._db.commit()
 
-    def add_user_activity(self, evidence_id, records):
-        """Store records made by core.activity.record()."""
+    def add_user_activity(self, evidence_id, records, module_run_id=None,
+                          module_artifact_id=None, reader='TRACE'):
+        """Store records made by core.activity.record() -- TRACE's own, or
+        (`module_run_id`, its artifact, `reader` the tool) an external
+        module's. Each gets its record key (core/activity_match); call
+        relink_matches once the image's rows are in."""
+        from trace_app.core.activity_match import match_key
         self._db.executemany(
             "INSERT INTO user_activity (evidence_id, category, what, "
             "time_utc, time_local, subject, user, detail, source, "
-            "source_path, source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "source_path, source_ref, reader, module_run_id, "
+            "module_artifact_id, match_key) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [(evidence_id, r['category'], r['what'], r['time'],
               1 if r.get('local') else 0, r['subject'], r.get('user', ''),
               json.dumps(r.get('detail') or {}, default=str), r['source'],
-              r.get('path', ''), r.get('ref', '')) for r in records])
+              r.get('path', ''), r.get('ref', ''), reader or 'TRACE',
+              module_run_id, module_artifact_id, match_key(r))
+             for r in records])
+
+    def relink_matches(self, evidence_id):
+        """Link the image's readings of one record (same match_key) made by
+        different readers: each points at one primary (TRACE's own reading
+        if there is one, else the first imported). Two readings by the same
+        reader are two records (a message really sent twice), so a key is
+        counted per reading -- per reader, and per run and artifact of a
+        tool: the n-th of one matches the n-th of another. (aLEAPP's 'SMS
+        and MMS Messages' repeats its 'SMS Messages': one record, read
+        twice.) Set-wise; run after anything changes the image's rows.
+        With the case setting module_link_readings off, every reading is
+        a row of its own."""
+        from trace_app.core import settings as case_settings
+        self._db.execute("UPDATE user_activity SET duplicate_of = NULL "
+                         "WHERE evidence_id = ? AND duplicate_of IS NOT NULL",
+                         (evidence_id,))
+        if not case_settings.current('module_link_readings'):
+            self._db.commit()
+            return
+        self._db.execute("DROP TABLE IF EXISTS temp.match_ranks")
+        self._db.execute(
+            "CREATE TEMP TABLE match_ranks AS "
+            "SELECT id, match_key, occurrence, FIRST_VALUE(id) OVER ("
+            "  PARTITION BY match_key, occurrence "
+            "  ORDER BY (reader != 'TRACE'), id) AS primary_id "
+            "FROM (SELECT id, match_key, reader, ROW_NUMBER() OVER ("
+            "  PARTITION BY match_key, reader, COALESCE(module_run_id, 0), "
+            "  COALESCE(module_artifact_id, 0) ORDER BY id) AS occurrence "
+            "  FROM user_activity WHERE evidence_id = ? "
+            "  AND match_key IS NOT NULL)", (evidence_id,))
+        self._db.execute(
+            "UPDATE user_activity SET duplicate_of = ("
+            "  SELECT primary_id FROM temp.match_ranks r "
+            "  WHERE r.id = user_activity.id) "
+            "WHERE id IN (SELECT id FROM temp.match_ranks "
+            "             WHERE primary_id != id)")
+        self._db.execute("DROP TABLE IF EXISTS temp.match_ranks")
+        self._db.commit()
+
+    def readings(self, activity_id):
+        """Every reading of one record: the primary and the rows linked to
+        it, each with its reader -- what the details pane lists."""
+        rows = query_user_activity(self._db, primary_only=False,
+                                   ids_of=activity_id)
+        return sorted(rows, key=lambda r: (r['id'] != activity_id, r['id']))
+
+    def activity_readers(self):
+        """The readers a case's activity has: 'TRACE' and each tool."""
+        return [row[0] for row in self._db.execute(
+            "SELECT DISTINCT reader FROM user_activity ORDER BY "
+            "reader != 'TRACE', reader")]
 
     def user_activity(self, evidence_id=None, category=None, limit=None):
         """Activity rows, newest first, `detail` parsed."""
@@ -1638,6 +2161,9 @@ class Case:
                                    limit=limit)
 
     def _communication(self, evidence_id=None):
+        """Messages and calls -- TRACE's own and what external modules read
+        (core/modules/bridge stores those as activity rows), one row per
+        record whoever read it."""
         return query_user_activity(self._db, evidence_id, 'communication')
 
     def conversations(self, evidence_id=None):
@@ -1657,8 +2183,13 @@ class Case:
 
     def user_activity_summary(self, evidence_id=None):
         """{category: rows} for the tree and the tab labels."""
-        where = " WHERE evidence_id = ?" if evidence_id is not None else ""
-        params = [evidence_id] if evidence_id is not None else []
+        where = " WHERE duplicate_of IS NULL"
+        params = []
+        if evidence_id is not None:
+            where += " AND evidence_id = ?"
+            params.append(evidence_id)
+        # One per record, as the Activity tab lists them (a record two
+        # readers read is one row).
         return {row[0]: row[1] for row in self._db.execute(
             f"SELECT category, COUNT(*) FROM user_activity{where} "
             "GROUP BY category", params)}
@@ -1736,11 +2267,6 @@ class Case:
                          "source IN ('FS', 'FS-local')", (evidence_id,))
         self._db.commit()
 
-    def fs_times_count(self, evidence_id):
-        return self._db.execute(
-            "SELECT COUNT(*) FROM fs_events WHERE evidence_id = ? AND "
-            "source IN ('FS', 'FS-local')", (evidence_id,)).fetchone()[0]
-
     def add_fs_events(self, evidence_id, rows):
         """rows: (ref, path, time, macb, source, deleted) -- source 'SI',
         'FN' or 'I30' from NTFS; 'FS' or 'FS-local' (no zone) from
@@ -1817,6 +2343,86 @@ class Case:
         query += " ORDER BY time_utc DESC, usn DESC LIMIT ?"
         params.append(limit)
         return [dict(row) for row in self._db.execute(query, params)]
+
+    # --- timeline marks (schema 21) -------------------------------------------
+
+    #: A mark's colours, by name: the Timeline's menu and the report.
+    MARK_COLOURS = {'red': '#E5534B', 'orange': '#E8743B',
+                    'yellow': '#E3A008', 'green': '#3FB950',
+                    'blue': '#4C8BF5', 'purple': '#9B6CF0'}
+
+    def mark_events(self, rows, starred=None, colour=None, comment=None):
+        """Star, colour or comment on timeline events (timeline rows).
+        None leaves that part as it was; colour '' and comment '' clear.
+        A mark left with nothing is removed. Audited: what was marked, and
+        a comment's text old -> new (the audit trail is its history).
+        Returns how many marks changed."""
+        from trace_app.core import timeline
+        now = _utc_now()
+        examiner = self._examiner()
+        changed, lines = 0, []
+        for row in rows:
+            key = timeline.event_key(row)
+            old = self._db.execute(
+                "SELECT starred, colour, comment FROM timeline_marks WHERE "
+                "event_key = ?", (key,)).fetchone()
+            was = (bool(old[0]), old[1] or '', old[2] or '') if old \
+                else (False, '', '')
+            new = (was[0] if starred is None else bool(starred),
+                   was[1] if colour is None else (colour or ''),
+                   was[2] if comment is None else (comment or '').strip())
+            if new == was:
+                continue
+            changed += 1
+            if not any(new):
+                self._db.execute("DELETE FROM timeline_marks WHERE "
+                                 "event_key = ?", (key,))
+            else:
+                self._db.execute(
+                    "INSERT INTO timeline_marks (event_key, evidence_id, "
+                    "source, time, local, kind, title, subject, user, "
+                    "artifact_ref, deleted, starred, colour, comment, "
+                    "examiner, updated_utc) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,"
+                    "?,?,?,?) ON CONFLICT(event_key) DO UPDATE SET "
+                    "starred = excluded.starred, colour = excluded.colour, "
+                    "comment = excluded.comment, examiner = "
+                    "excluded.examiner, updated_utc = excluded.updated_utc",
+                    (key, row.get('evidence_id'), row.get('source'),
+                     row.get('time'), 1 if row.get('local') else 0,
+                     row.get('kind'), row.get('title'), row.get('subject'),
+                     row.get('user'), row.get('artifact_ref'),
+                     1 if row.get('deleted') else 0, 1 if new[0] else 0,
+                     new[1] or None, new[2] or None, examiner, now))
+            what = f"{row.get('time') or ''} {timeline.describe_kind(row)}" \
+                f" {row.get('title') or row.get('subject') or ''}".strip()
+            parts = []
+            if new[0] != was[0]:
+                parts.append('starred' if new[0] else 'unstarred')
+            if new[1] != was[1]:
+                parts.append(f"colour {was[1] or 'none'} -> "
+                             f"{new[1] or 'none'}")
+            if new[2] != was[2]:
+                parts.append(f"comment {was[2]!r} -> {new[2]!r}")
+            lines.append(f"{what} (evidence id={row.get('evidence_id')}): "
+                         + ', '.join(parts))
+        self._db.commit()
+        if lines:
+            self._record_activity('timeline events marked',
+                                  '; '.join(lines[:50]) +
+                                  (f"; and {len(lines) - 50} more"
+                                   if len(lines) > 50 else ''))
+        return changed
+
+    def timeline_marks(self, starred_only=False):
+        """{event_key: mark dict} -- every mark, or the starred ones."""
+        query = "SELECT * FROM timeline_marks"
+        if starred_only:
+            query += " WHERE starred = 1"
+        query += " ORDER BY time"
+        cursor = self._db.execute(query)
+        names = [d[0] for d in cursor.description]
+        return {row[names.index('event_key')]: dict(zip(names, row))
+                for row in cursor}
 
     # --- items picked for the report -----------------------------------
 
@@ -2390,6 +2996,32 @@ class Case:
         params.append(limit)
         return [dict(r) for r in self._db.execute(query, params)]
 
+    def regrade_mismatches(self):
+        """Grade the stored type mismatches again (analysis.
+        classify_mismatch) -- the entropy threshold, a setting, decides
+        whether an unidentifiable file is notable, and every value it reads
+        is stored: nothing is read from the evidence. Returns how many
+        changed; audited when any did."""
+        from trace_app.core import analysis
+        changes = []
+        for row in self._db.execute(
+                "SELECT id, extension, mime, entropy, mismatch FROM "
+                "file_analysis WHERE mime = 'application/octet-stream' AND "
+                "entropy IS NOT NULL"):
+            grade = analysis.classify_mismatch(row['extension'] or '',
+                                               row['mime'], row['entropy'])
+            if grade != row['mismatch']:
+                changes.append((grade, row['id']))
+        if changes:
+            self._db.executemany(
+                "UPDATE file_analysis SET mismatch = ? WHERE id = ?", changes)
+            self._db.commit()
+            self._record_activity(
+                'type mismatches graded again',
+                f"{len(changes):,} file(s) at a high-entropy threshold of "
+                f"{analysis.HIGH_ENTROPY} bits per byte")
+        return len(changes)
+
     def high_entropy_files(self, evidence_id=None, limit=1000):
         """Files that look random with no business doing so, most extreme first.
 
@@ -2519,15 +3151,48 @@ class Case:
             (digest,))]
 
     def analysis_summary(self, evidence_id=None):
-        """Counts for the tree node and the Triage tab."""
+        """Counts for the tree node and the Triage tab.
+
+        Kept until the database changes -- a write on this connection
+        (total_changes) or a commit by another, a job's (data_version) --
+        or the entropy thresholds do: opening a case asked for the same
+        counts twice, about a second each on a 500,000-file case."""
+        from trace_app.core import analysis
+        state = (self._db.total_changes,
+                 self._db.execute("PRAGMA data_version").fetchone()[0],
+                 analysis.HIGH_ENTROPY, analysis.HIGH_PEAK_ENTROPY)
+        cache = self.__dict__.setdefault('_summary_cache', {})
+        cached = cache.get(evidence_id)
+        if cached is None or cached[0] != state:
+            if cache and next(iter(cache.values()))[0] != state:
+                cache.clear()
+            cached = cache[evidence_id] = (state,
+                                           self._analysis_summary(evidence_id))
+        return dict(cached[1])
+
+    def _analysis_summary(self, evidence_id):
         where = " WHERE evidence_id = ?" if evidence_id is not None else ""
         params = [evidence_id] if evidence_id is not None else []
 
         analysed = self._db.execute(
             f"SELECT COUNT(*) FROM file_analysis{where}", params).fetchone()[0]
-        mismatches = len(self.type_mismatches(
-            evidence_id, grade=REPORTED_MISMATCHES))
-        entropy = len(self.high_entropy_files(evidence_id))
+        # Counted in SQL, capped where the lists are: the rows themselves
+        # (up to 1,000 each, every column) were read only to be counted.
+        from trace_app.core.analysis import (_EXPECTED_HIGH_ENTROPY,
+                                             HIGH_ENTROPY, HIGH_PEAK_ENTROPY)
+        scope = " AND evidence_id = ?" if evidence_id is not None else ""
+        grades = list(REPORTED_MISMATCHES)
+        mismatches = self._db.execute(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM file_analysis WHERE "
+            f"mismatch IN ({','.join('?' * len(grades))}){scope} "
+            "LIMIT 1000)", grades + params).fetchone()[0]
+        expected = sorted(_EXPECTED_HIGH_ENTROPY)
+        entropy = self._db.execute(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM file_analysis WHERE "
+            "(entropy >= ? OR entropy_peak >= ?) AND COALESCE(mime, '') "
+            f"NOT IN ({','.join('?' * len(expected))}){scope} LIMIT 1000)",
+            [HIGH_ENTROPY, HIGH_PEAK_ENTROPY] + expected + params
+        ).fetchone()[0]
         duplicates = self._db.execute(
             "SELECT COUNT(*) FROM (SELECT sha256 FROM file_analysis"
             + (" WHERE evidence_id = ?" if evidence_id is not None else "")
@@ -2634,6 +3299,33 @@ class Case:
                 created_utc   TEXT
             );
 
+            -- Timeline events the examiner starred, coloured or wrote a
+            -- comment on (schema 21). The event is copied, so the mark
+            -- outlives a module run again (core/timeline.event_key finds
+            -- it in the new rows) and the Starred filter needs no join.
+            CREATE TABLE IF NOT EXISTS timeline_marks (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_key     TEXT NOT NULL UNIQUE,
+                evidence_id   INTEGER REFERENCES evidence(id)
+                              ON DELETE CASCADE,
+                source        TEXT,
+                time          TEXT,
+                local         INTEGER NOT NULL DEFAULT 0,
+                kind          TEXT,
+                title         TEXT,
+                subject       TEXT,
+                user          TEXT,
+                artifact_ref  TEXT,
+                deleted       INTEGER NOT NULL DEFAULT 0,
+                starred       INTEGER NOT NULL DEFAULT 0,
+                colour        TEXT,
+                comment       TEXT,
+                examiner      TEXT,
+                updated_utc   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_timeline_marks_time
+                ON timeline_marks(time);
+
             -- The operating system found on each volume (schema 20;
             -- core/os_identity), for the Case tab, the report and the
             -- timeline's filter. Recorded when the image is opened.
@@ -2666,6 +3358,86 @@ class Case:
                 examiner      TEXT,
                 PRIMARY KEY (tag_id, evidence_id, artifact_ref)
             );
+
+            -- The Project VIC category the examiner gave a picture or
+            -- video (schema 22; core/vics.CATEGORIES, 0-4 -- none is
+            -- Uncategorized). One per file, unlike tags: a category is a
+            -- statement about the content, and the VICS export writes it.
+            CREATE TABLE IF NOT EXISTS vic_categories (
+                evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
+                artifact_ref  TEXT NOT NULL,
+                category      INTEGER NOT NULL,
+                name          TEXT,
+                path          TEXT,
+                categorised_utc TEXT,
+                examiner      TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_vic_categories
+                ON vic_categories(IFNULL(evidence_id, -1), artifact_ref);
+
+            -- External modules' runs (schema 23; core/modules): iLEAPP,
+            -- aLEAPP... run on files staged from one image. `folder` is
+            -- the run's folder, relative to the case folder: input/ (the
+            -- staged files), staging-manifest.csv, report/ (the tool's
+            -- own output, LAVA included), run.log. The rows stay in the
+            -- tool's _lava_artifacts.db; the case keeps what joins need.
+            CREATE TABLE IF NOT EXISTS module_runs (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                evidence_id   INTEGER REFERENCES evidence(id) ON DELETE CASCADE,
+                tool          TEXT NOT NULL,
+                version       TEXT,
+                executable_sha256 TEXT,
+                params        TEXT,
+                folder        TEXT NOT NULL,
+                status        TEXT NOT NULL,
+                staged        INTEGER,
+                manifest_sha256 TEXT,
+                lava_sha256   TEXT,
+                started_utc   TEXT,
+                finished_utc  TEXT,
+                message       TEXT
+            );
+            CREATE TABLE IF NOT EXISTS module_artifacts (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id        INTEGER NOT NULL
+                              REFERENCES module_runs(id) ON DELETE CASCADE,
+                category      TEXT,
+                name          TEXT,
+                tablename     TEXT,
+                module        TEXT,
+                columns       TEXT,
+                row_count     INTEGER,
+                source_path   TEXT,
+                conversation  TEXT,
+                icon          TEXT,
+                -- Schema 24: how core/modules/routes sorted it.
+                artifact_key  TEXT,
+                role          TEXT,
+                route_why     TEXT,
+                content_sha256 TEXT,
+                bridged_version INTEGER NOT NULL DEFAULT 0,
+                superseded_by INTEGER,
+                -- Schema 25: what decided it (routes.Route.sorted_by).
+                sorted_by     TEXT
+            );
+            -- One per timestamp in a row (a message's sent, read and
+            -- delivered times are three), for the Timeline.
+            CREATE TABLE IF NOT EXISTS module_events (
+                run_id        INTEGER NOT NULL
+                              REFERENCES module_runs(id) ON DELETE CASCADE,
+                artifact_id   INTEGER NOT NULL
+                              REFERENCES module_artifacts(id) ON DELETE CASCADE,
+                row_id        INTEGER NOT NULL,
+                time_utc      TEXT NOT NULL,
+                label         TEXT,
+                summary       TEXT,
+                -- Schema 24: evidence / telemetry / other, 'bridged' (its
+                -- row is in Activity: not shown twice), 'superseded' (a
+                -- newer run read the same rows).
+                kind          TEXT NOT NULL DEFAULT 'other'
+            );
+            CREATE INDEX IF NOT EXISTS idx_module_events_time
+                ON module_events(time_utc);
 
             CREATE TABLE IF NOT EXISTS verifications (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2735,6 +3507,10 @@ class Case:
             -- the one index the feature genuinely cannot do without.
             CREATE INDEX IF NOT EXISTS idx_analysis_sha256
                 ON file_analysis(sha256);
+            -- The same for one image: without it the group was sorted in a
+            -- temporary tree, 2.4 s on a 500,000-file case.
+            CREATE INDEX IF NOT EXISTS idx_analysis_evidence_sha256
+                ON file_analysis(evidence_id, sha256);
             CREATE INDEX IF NOT EXISTS idx_verifications_evidence
                 ON verifications(evidence_id, id DESC);
             CREATE INDEX IF NOT EXISTS idx_notes_artifact
@@ -2895,7 +3671,17 @@ class Case:
                 detail        TEXT,
                 source        TEXT,
                 source_path   TEXT,
-                source_ref    TEXT
+                source_ref    TEXT,
+                -- Schema 24: who read it (TRACE, or an external module's
+                -- run, whose artifact it came from), and the record it is
+                -- (core/activity_match) -- one read by two readers shows
+                -- once, the others pointing at it (duplicate_of).
+                reader        TEXT NOT NULL DEFAULT 'TRACE',
+                module_run_id INTEGER
+                              REFERENCES module_runs(id) ON DELETE CASCADE,
+                module_artifact_id INTEGER,
+                match_key     TEXT,
+                duplicate_of  INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_user_activity
                 ON user_activity(evidence_id, category, time_utc);
@@ -3044,6 +3830,10 @@ class Case:
             );
         """)
         self._db.commit()
+        try:
+            self._create_indexes_24()
+        except sqlite3.OperationalError:
+            pass        # an older case: its columns come in _migrate
         self._set('schema_version', SCHEMA_VERSION)
 
     def _migrate_custody(self):
@@ -3130,6 +3920,57 @@ class Case:
                 f"TRACE chained its audit trail; they were chained now, as "
                 f"found, so the chain shows changes after this point only")
 
+    def _migrate_module_bridge(self):
+        """Schema 24: readers and record keys on user_activity, routes on
+        module_artifacts, kinds on module_events (core/modules/bridge).
+        The LEAPP runs are sorted by the 'module_bridge' job the window
+        starts once the case is open (bridged_version 0)."""
+        added = (('user_activity', 'reader', "TEXT NOT NULL DEFAULT 'TRACE'"),
+                 ('user_activity', 'module_run_id',
+                  'INTEGER REFERENCES module_runs(id) ON DELETE CASCADE'),
+                 ('user_activity', 'module_artifact_id', 'INTEGER'),
+                 ('user_activity', 'match_key', 'TEXT'),
+                 ('user_activity', 'duplicate_of', 'INTEGER'),
+                 ('module_artifacts', 'artifact_key', 'TEXT'),
+                 ('module_artifacts', 'role', 'TEXT'),
+                 ('module_artifacts', 'route_why', 'TEXT'),
+                 ('module_artifacts', 'content_sha256', 'TEXT'),
+                 ('module_artifacts', 'bridged_version',
+                  'INTEGER NOT NULL DEFAULT 0'),
+                 ('module_artifacts', 'superseded_by', 'INTEGER'),
+                 ('module_events', 'kind', "TEXT NOT NULL DEFAULT 'other'"))
+        for table, column, kind in added:
+            try:
+                self._db.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+            except sqlite3.OperationalError:
+                pass            # already present (created above at v24)
+        self._db.commit()
+        self._create_indexes_24()
+        # TRACE's own rows get their record keys now.
+        from trace_app.core.activity_match import match_key
+        evidence_ids = [row[0] for row in self._db.execute(
+            "SELECT DISTINCT evidence_id FROM user_activity")]
+        for row in query_user_activity(self._db, primary_only=False):
+            self._db.execute(
+                "UPDATE user_activity SET match_key = ? WHERE id = ?",
+                (match_key(row), row['id']))
+        self._db.commit()
+        for evidence_id in evidence_ids:
+            self.relink_matches(evidence_id)
+
+    def _create_indexes_24(self):
+        self._db.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_user_activity_match
+                ON user_activity(evidence_id, match_key);
+            CREATE INDEX IF NOT EXISTS idx_user_activity_duplicate
+                ON user_activity(duplicate_of);
+            CREATE INDEX IF NOT EXISTS idx_user_activity_artifact
+                ON user_activity(module_artifact_id);
+            CREATE INDEX IF NOT EXISTS idx_module_events_artifact
+                ON module_events(artifact_id);
+        """)
+
     def _migrate(self):
         """Bring an existing case up to the current schema version."""
         # Read the version the case was written at BEFORE touching the schema.
@@ -3150,6 +3991,20 @@ class Case:
         # Tables the case predates are created unconditionally; CREATE TABLE IF
         # NOT EXISTS makes this safe for a case at the current version too.
         self._create_schema()
+
+        if version < 24:
+            self._migrate_module_bridge()
+
+        if version < 25:
+            # How each LEAPP artifact was sorted (the tool's map, a name
+            # rule...): filled when the runs are sorted again
+            # (routes.ROUTES_VERSION 5).
+            try:
+                self._db.execute(
+                    "ALTER TABLE module_artifacts ADD COLUMN sorted_by TEXT")
+            except sqlite3.OperationalError:
+                pass            # already present (created above at v25)
+            self._db.commit()
 
         if version < 19:
             # Tags in use (schema 19): which file, by whom, when -- the
@@ -3302,22 +4157,62 @@ class Case:
         if version != SCHEMA_VERSION:
             self._set('schema_version', SCHEMA_VERSION)
 
+        self._create_indexes_24()
         # After every step: a rebuilt table loses its triggers.
         self._custody_guards()
 
 # --- module helpers -------------------------------------------------------
 
 def query_user_activity(connection, evidence_id=None, category=None,
-                        text='', limit=None, located=False):
+                        text='', limit=None, located=False,
+                        primary_only=True, reader=None, only_reader=False,
+                        ids_of=None, evidence_ids=None, trace_only=False,
+                        count=False):
     """Activity rows from a case database connection, newest first.
 
     Shared by Case and by the Activity tab's reader thread, which uses a
     read-only connection of its own. Rows without a time sort last.
+
+    One record read by two readers (TRACE and a LEAPP, say) is one row:
+    the primary, `read_by` naming every reader (core/activity_match,
+    Case.relink_matches); `primary_only=False` gives every reading.
+    `reader` keeps the records that reader read (as primary or not);
+    with `only_reader`, those no other reader read. `ids_of`: a primary's
+    readings. Older cases (before schema 24) have no reader columns.
+    `evidence_ids`: rows of these images only; `trace_only`: no external
+    tool's rows (a report leaving them out); `count`: the number of rows
+    instead of the rows.
     """
+    columns = {row[1] for row in connection.execute(
+        "PRAGMA table_info(user_activity)")}
+    readers = 'duplicate_of' in columns
     clauses, params = [], []
+    if readers and ids_of is not None:
+        clauses.append("(id = ? OR duplicate_of = ?)")
+        params.extend([ids_of, ids_of])
+    elif readers and primary_only:
+        clauses.append("duplicate_of IS NULL")
+    if readers and reader:
+        if only_reader:
+            clauses.append(
+                "reader = ? AND NOT EXISTS (SELECT 1 FROM user_activity d "
+                "WHERE d.duplicate_of = user_activity.id AND d.reader != ?)")
+            params.extend([reader, reader])
+        else:
+            clauses.append(
+                "(reader = ? OR EXISTS (SELECT 1 FROM user_activity d "
+                "WHERE d.duplicate_of = user_activity.id AND d.reader = ?))")
+            params.extend([reader, reader])
     if evidence_id is not None:
         clauses.append("evidence_id = ?")
         params.append(evidence_id)
+    if evidence_ids is not None:
+        ids = [int(i) for i in evidence_ids]
+        clauses.append("evidence_id IN (" + ','.join('?' * len(ids)) + ")"
+                       if ids else "0")
+        params.extend(ids)
+    if readers and trace_only:
+        clauses.append("module_run_id IS NULL")
     if category:
         clauses.append("category = ?")
         params.append(category)
@@ -3329,6 +4224,9 @@ def query_user_activity(connection, evidence_id=None, category=None,
         clauses.append("detail LIKE '%\"latitude\"%' AND "
                        "detail LIKE '%\"longitude\"%'")
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+    if count:
+        return connection.execute("SELECT COUNT(*) FROM user_activity"
+                                  + where, params).fetchone()[0]
     query = ("SELECT * FROM user_activity" + where
              + " ORDER BY time_utc IS NULL, time_utc DESC, id")
     if limit:
@@ -3343,9 +4241,31 @@ def query_user_activity(connection, evidence_id=None, category=None,
         except ValueError:
             row['detail'] = {}
         row['artifact_ref'] = row.get('source_ref')
+        row.setdefault('reader', 'TRACE')
+        row['read_by'] = [row['reader']]
         out.append(row)
+    if readers and out and primary_only and ids_of is None:
+        _attach_readers(connection, out)
     link_recycle_contents(connection, out)
     return out
+
+
+def _attach_readers(connection, rows):
+    """Each primary row's `read_by`: its reader, then the other readers of
+    the same record, TRACE first."""
+    by_id = {row['id']: row for row in rows}
+    ids = list(by_id)
+    for start in range(0, len(ids), 900):
+        chunk = ids[start:start + 900]
+        marks = ','.join('?' * len(chunk))
+        for primary, reader in connection.execute(
+                f"SELECT duplicate_of, reader FROM user_activity "
+                f"WHERE duplicate_of IN ({marks})", chunk):
+            found = by_id[primary]['read_by']
+            if reader not in found:
+                found.append(reader)
+    for row in rows:
+        row['read_by'].sort(key=lambda r: (r != 'TRACE', r))
 
 
 def _volume_of(ref):
@@ -3476,6 +4396,22 @@ def query_ntfs(connection, section, evidence_id=None, text='',
                 row['detail'] = {}
         out.append(row)
     return out
+
+
+def query_picture_hashes(connection, evidence_id=None):
+    """`Case.picture_hashes` on any connection -- the Similar pictures job
+    reads them in its own process (a whole case's pictures, read on the
+    window's thread, held a big case's window for seconds)."""
+    query = ("SELECT evidence_id, artifact_ref, name, path, size, "
+             "is_deleted, phash FROM file_analysis WHERE phash IS NOT NULL")
+    params = []
+    if evidence_id is not None:
+        query += " AND evidence_id = ?"
+        params.append(evidence_id)
+    cursor = connection.execute(query + " ORDER BY evidence_id, path",
+                                params)
+    names = [c[0] for c in cursor.description]
+    return [dict(zip(names, row)) for row in cursor]
 
 
 def ntfs_counts(connection, evidence_id=None):
@@ -3803,17 +4739,6 @@ class _PathOnly:
         self.image_path = path
 
 
-def _hash_file(path, algorithm='md5', progress=None):
-    """A file's digest in `algorithm`, or None if it cannot be read in
-    full (core/evidence_hash.py)."""
-    from trace_app.core import evidence_hash
-    try:
-        return evidence_hash.hash_file(path, progress)[algorithm]
-    except evidence_hash.HashingError as exc:
-        logger.error("Could not hash %s: %s", path, exc)
-        return None
-
-
 def is_case_folder(folder):
     """Does this folder hold a case?"""
     return os.path.isfile(os.path.join(folder, CASE_DB_NAME))
@@ -3829,14 +4754,12 @@ def read_case_summary(folder):
     to a WAL database leaves -wal and -shm files behind. A case open in
     another window may show slightly stale counts; that is all.
     """
-    from urllib.request import pathname2url
+    from trace_app.infra.sqlite_uri import connect_read_only
     path = os.path.join(folder, CASE_DB_NAME)
     if not os.path.isfile(path):
         return None
     try:
-        connection = sqlite3.connect(
-            f"file:{pathname2url(os.path.abspath(path))}"
-            f"?mode=ro&immutable=1", uri=True)
+        connection = connect_read_only(path, immutable=True)
     except sqlite3.Error:
         return None
     try:

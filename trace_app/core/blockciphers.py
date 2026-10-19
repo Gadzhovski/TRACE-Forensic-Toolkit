@@ -54,18 +54,6 @@ def _xor(a, b):
         .to_bytes(len(a), 'little')
 
 
-def xts(cipher, tweak_cipher, unit, data, decrypt=True):
-    """`data` (whole blocks of one data unit) through XTS: `cipher` and
-    `tweak_cipher` are block ciphers with encrypt_blocks/decrypt_blocks."""
-    count = len(data) // BLOCK
-    tweak = tweak_cipher.encrypt_blocks(unit.to_bytes(16, 'little'))
-    pads = _tweaks(tweak, count)
-    middle = _xor(data[:count * BLOCK], pads)
-    middle = cipher.decrypt_blocks(middle) if decrypt else \
-        cipher.encrypt_blocks(middle)
-    return _xor(middle, pads)
-
-
 def xts_units(cipher, tweak_cipher, first_unit, data, unit_size=512,
               decrypt=True):
     """Several consecutive data units at once: one call into the cipher
@@ -380,10 +368,6 @@ def _h_bytes(x_bytes, words, k):
 
 def _rol(x, r):
     return ((x << r) | (x >> (32 - r))) & 0xFFFFFFFF
-
-
-def _ror(x, r):
-    return ((x >> r) | (x << (32 - r))) & 0xFFFFFFFF
 
 
 class Twofish:

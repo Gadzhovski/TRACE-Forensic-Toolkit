@@ -11,6 +11,8 @@ algorithm gives the same value (a source hash and an image hash agreeing,
 or the hash written once). A log giving two different MD5s -- a failed
 verification, two images in one log -- gives no MD5 at all, and the log
 is never guessed at by searching for any 32 hex digits.
+
+GrayKey's PDF report is read by core/graykey.py, the last resort here.
 """
 
 import os
@@ -70,4 +72,7 @@ def logged_hashes(path):
         hashes = read_hashes(text)
         if hashes:
             return hashes, candidate
-    return {}, None
+    # GrayKey's report, <UDID>.pdf beside <UDID>_files_full.zip
+    # (core/graykey.py: only the extraction of the file's own size).
+    from trace_app.core import graykey
+    return graykey.logged_hashes(path)

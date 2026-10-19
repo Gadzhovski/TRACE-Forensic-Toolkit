@@ -36,7 +36,7 @@ FORMATS = {
 #: short source names where one fits).
 L2T_SOURCES = {'fs': 'FILE', 'usn': 'FILE', 'activity': 'LOG',
                'photo': 'EXIF', 'document': 'META', 'carved': 'FILE',
-               'sigma': 'EVT', 'case': 'TRACE'}
+               'sigma': 'EVT', 'modules': 'LEAPP', 'case': 'TRACE'}
 
 L2T_HEADER = ('date', 'time', 'timezone', 'MACB', 'source', 'sourcetype',
               'type', 'user', 'host', 'short', 'desc', 'version', 'filename',

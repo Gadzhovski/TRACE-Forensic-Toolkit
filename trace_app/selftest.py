@@ -148,9 +148,10 @@ def _run(report, images, sandbox):
     def _():
         import platform
         from trace_app.infra import capabilities
-        expected_missing = set()
+        # Downloaded by the examiner, never part of the package.
+        expected_missing = set(capabilities.ON_REQUEST)
         if sys.platform == 'win32' and platform.machine().upper() == 'ARM64':
-            expected_missing = {'yara', 'heic'}
+            expected_missing |= {'yara', 'heic'}
             # Their wheels for Windows on ARM start at these Pythons.
             if sys.version_info < (3, 12):
                 expected_missing.add('sigma')
@@ -222,6 +223,42 @@ def _run(report, images, sandbox):
         return (f"started, imported the engines, ran a text pool, "
                 f"answered ({process.name})")
 
+    if os.environ.get('TRACE_MODULE_CHECK') == '1':
+        # CI only (it downloads): a frozen TRACE installing and starting a
+        # frozen LEAPP -- unpacked as the examiner's copy would be, in a
+        # clean environment (core/modules/run.clean_environment) -- and
+        # reading its LAVA output.
+        @check('an external module installs and runs from the package')
+        def _():
+            import tempfile
+            from trace_app.core import settings
+            from trace_app.core.modules import install, lava, run
+            from trace_app.core.modules.spec import ILEAPP
+            work = tempfile.mkdtemp(prefix='trace-module-check-')
+            settings.user('examiner')
+            settings._user_cache['modules_folder'] = os.path.join(
+                work, 'modules')
+            record = install.install(ILEAPP, ILEAPP.tested_version)
+            source = os.path.join(work, 'input', 'private', 'var', 'mobile',
+                                  'Library', 'Preferences')
+            os.makedirs(source)
+            with open(os.path.join(source, 'com.apple.example.plist'),
+                      'wb') as handle:
+                import plistlib
+                plistlib.dump({'checked': True}, handle)
+            out = os.path.join(work, 'out')
+            os.makedirs(out)
+            code = run.run([record['executable'], '-t', 'fs', '-i',
+                            os.path.join(work, 'input'), '-o', out,
+                            '--custom_output_folder', 'report'],
+                           os.path.dirname(record['executable']),
+                           os.path.join(work, 'run.log'), timeout=900)
+            info = lava.load(os.path.join(out, 'report'))
+            assert info['status'] == 'Complete', (code, info['status'])
+            return (f"{ILEAPP.name} {record['version']} installed "
+                    f"({record['asset']}) and ran (exit {code}); LAVA "
+                    f"{info['status']}")
+
     @check('bundled resources')
     def _():
         from PySide6.QtGui import QIcon, QPixmap
@@ -237,7 +274,20 @@ def _run(report, images, sandbox):
         from trace_app.core import geo
         land = geo.land_rings(resource_path('resources', 'world_land.json'))
         assert len(land) > 100, "the Map tab's offline outline is missing"
-        return "logo, both themes, SVG icons, the map's world outline"
+        import gzip
+        import json
+        with gzip.open(resource_path('resources', 'offline_map.json.gz'),
+                       'rt', encoding='utf-8') as handle:
+            offline = json.load(handle)
+        assert len(offline.get('places') or ()) > 5000 and \
+            offline.get('land', {}).get('2'), \
+            "the Map tab's offline map (Natural Earth) is missing"
+        from trace_app.core.modules import maps
+        for tool in ('aleapp', 'ileapp'):
+            mapped = maps.load(tool)
+            assert len(mapped['artifacts']) > 50 and                 not maps.problems(mapped), f"the {tool} map is missing"
+        return ("logo, both themes, SVG icons, the map's world outline and "
+                "offline map, the LEAPP maps")
 
     @check('image formats')
     def _():
@@ -286,15 +336,52 @@ def _run(report, images, sandbox):
     @check('other libraries')
     def _():
         import certifi
-        import chardet
         import olefile  # noqa: F401
         from Registry import Registry  # noqa: F401
         import sqlite3
+        from trace_app.core import text_encoding
         assert os.path.isfile(certifi.where()), "no CA bundle: HTTPS will fail"
-        assert chardet.detect('Привет мир'.encode('cp1251'))['encoding']
+        # charset_normalizer finds its code pages by module: a missing one
+        # in the package reads every legacy text as Windows-1252.
+        assert text_encoding.guess(
+            'Привет мир, как дела'.encode('cp1251')).codec == 'cp1251', \
+            "legacy code pages are not recognised"
         db = sqlite3.connect(':memory:')
         db.execute("CREATE VIRTUAL TABLE t USING fts5(body)")
         return f"SQLite {sqlite3.sqlite_version} with FTS5"
+
+    @check("TRACE's own file-system readers (QNX, flash, embedded)")
+    def _():
+        import importlib
+        import io
+        import struct
+        names = ('qnx6', 'qnx4', 'qnx_ifs', 'ucl', 'qnx_etfs', 'qnx_efs',
+                 'yaffs', 'yaffs_recover', 'cramfs', 'romfs', 'littlefs',
+                 'uboot_env', 'squashfs', 'erofs', 'jffs2', 'ubifs', 'f2fs',
+                 'btrfs', 'refs', 'udf', 'hfs', 'zfs')
+        for name in names:
+            importlib.import_module(f'trace_app.core.{name}')
+        from trace_app.core.romfs import open_romfs
+
+        def header(following, kind, info, size, name):
+            raw = name + b'\0' * (16 - len(name) % 16)
+            return struct.pack('>IIII', following | kind, info, size, 0) + raw
+        image = (b'-rom1fs-' + struct.pack('>II', 112, 0) + b'test'.ljust(16, b'\0')
+                 + header(64, 1, 32, 0, b'.')
+                 + header(0, 2, 0, 5, b'hello.txt') + b'hello'.ljust(16, b'\0'))
+        fs = open_romfs(io.BytesIO(image))
+        assert fs is not None, "romfs not opened"
+        entry = fs.open('/hello.txt')
+        assert entry.read_random(0, 5) == b'hello', "romfs file misread"
+        import zlib
+        from trace_app.core.uboot_env import open_uboot_env
+        data = b'bootdelay=3\0ipaddr=10.0.0.1\0\0'.ljust(8188, b'\xff')
+        env = open_uboot_env(io.BytesIO(struct.pack('<I', zlib.crc32(data))
+                                        + data))
+        assert env is not None, "U-Boot environment not opened"
+        text = env.open('/environment.txt').read_random(0, 100)
+        assert text == b'bootdelay=3\nipaddr=10.0.0.1\n', "U-Boot misread"
+        return f"{len(names)} readers import; romfs and U-Boot env read"
 
     if images:
         _case_workflow(check, report, images, sandbox, app)

@@ -23,6 +23,11 @@ themselves were deleted.
   tiles of remote sessions' screens, each tile a picture, plus a collage
   of them all in file order.
 
+* **QuickLook** (macOS, /private/var/folders/.../C/
+  com.apple.QuickLook.thumbnailcache): index.sqlite names each picture's
+  file (folder, name, its date and size then) and where its raw RGBA
+  bitmap lies in thumbnails.data; the bitmap is made a PNG when shown.
+
 A Thumbs.db names the files whose pictures it holds, so each is looked up
 in the folder it sits in: a picture of a file that is no longer there, or
 is there only as a deleted entry, is a finding.
@@ -31,13 +36,14 @@ Nothing is extracted: the table records where each picture lies, and the
 viewer reads it back from the cache file on the image. No Qt here.
 """
 
-import datetime
 import hashlib
 import io
 import json
 import logging
 import re
 import struct
+
+from trace_app.core.timeconv import filetime_text
 
 logger = logging.getLogger('TRACE.Thumbnails')
 
@@ -162,14 +168,7 @@ def parse_thumbcache(data):
 
 # --- Thumbs.db -----------------------------------------------------------------------
 
-def _filetime(value):
-    if not value:
-        return None
-    try:
-        return (datetime.datetime(1601, 1, 1) + datetime.timedelta(
-            microseconds=value // 10)).strftime('%Y-%m-%d %H:%M:%S')
-    except (OverflowError, ValueError):
-        return None
+_filetime = filetime_text
 
 
 def might_be_thumbs_db(data):
@@ -337,10 +336,20 @@ def read_member(data, name, kind, limit):
 
 # --- one image ---------------------------------------------------------------------------
 
+#: macOS QuickLook's cache folder (/private/var/folders/.../C/...).
+QUICKLOOK_FOLDER = 'com.apple.quicklook.thumbnailcache'
+QUICKLOOK_DATA = 'thumbnails.data'
+
+
 def is_cache_name(name):
     lower = (name or '').lower()
-    return lower in THUMBS_DB_NAMES or (lower.startswith('thumbcache_')
-                                        and lower.endswith('.db'))
+    return lower in THUMBS_DB_NAMES or lower == QUICKLOOK_DATA or (
+        lower.startswith('thumbcache_') and lower.endswith('.db'))
+
+
+def _is_quicklook(path):
+    lower = path.lower()
+    return lower.endswith('/' + QUICKLOOK_DATA) and QUICKLOOK_FOLDER in lower
 
 
 def _user_of(path):
@@ -360,6 +369,8 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
     replaces earlier rows and findings for it. Returns the picture count."""
     from trace_app.core import walk, winsearch
     caches, names, indexes = [], {}, []
+    quicklook_indexes = {}          # (offset, QuickLook folder) -> index
+    by_inode = []                   # QuickLook rows named only by inode
     count = 0
 
     def note(offset, path, deleted, ref):
@@ -381,9 +392,15 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         if winsearch.is_index_path(entry.path) and entry.size and \
                 not entry.deleted:
             indexes.append(entry)
+        lower = entry.name.lower()
         if (is_cache_name(entry.name) or _is_rdp_cache(entry.path)) and \
-                entry.size:
+                entry.size and (lower != QUICKLOOK_DATA or
+                                _is_quicklook(entry.path)):
             caches.append(entry)
+        if lower == 'index.sqlite' and entry.size and \
+                QUICKLOOK_FOLDER in entry.path.lower():
+            folder = entry.path.rsplit('/', 1)[0].lower()
+            quicklook_indexes[(entry.offset, folder)] = entry
 
     rows, findings = [], []
     for done, cache in enumerate(caches, 1):
@@ -403,7 +420,17 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         common = {'cache_ref': cache.ref, 'cache_path': cache.path,
                   'cache_deleted': 1 if cache.deleted else 0, 'user': user}
         try:
-            if _is_rdp_cache(cache.path):
+            if _is_quicklook(cache.path):
+                folder = cache.path.rsplit('/', 1)[0].lower()
+                index = quicklook_indexes.get((cache.offset, folder))
+                if index is not None:
+                    found, gone = _quicklook_rows(
+                        data, index.read(index.size), common, cache, names)
+                    rows += found
+                    findings += gone
+                    if any(r['detail'].get('inode') for r in found):
+                        by_inode.append(found)
+            elif _is_rdp_cache(cache.path):
                 rows += _rdp_rows(data, common)
             elif is_thumbcache(data[:8]):
                 parsed = parse_thumbcache(data)
@@ -470,6 +497,9 @@ def analyse_evidence(image_handler, case, evidence_id, progress=None,
         except Exception as exc:
             logger.warning("Could not read %s: %s", cache.path, exc)
 
+    if by_inode:
+        findings += _name_quicklook_inodes(image_handler, by_inode,
+                                           should_stop)
     findings += _link_to_search_index(rows, indexes, names, progress)
     case.replace_thumbnails(evidence_id, rows)
     case.clear_findings(evidence_id, MODULE_THUMBNAILS)
@@ -600,8 +630,272 @@ def times_text(value):
     return value.strftime('%Y-%m-%d %H:%M:%S') if value else None
 
 
+def _quicklook_rows(data, index_data, common, cache, names):
+    """thumbnails rows (and findings) for a QuickLook cache.
+
+    Two layouts of index.sqlite (as mac_apt reads them):
+
+    * with a `files` table (to macOS 10.14): each picture's file by folder
+      and name, its date and size then (the 'version' plist); RGBA;
+    * `basic_files` (10.15+): the file by its inode only (fileId; the
+      thumbnail's file_id has the top bit set), the row layout in a
+      'bitmapFormat' plist from preference version 11; BGRA. Names come
+      from the volume afterwards (`_name_quicklook_inodes`).
+
+    A picture of a file no longer in its folder, or there only as a
+    deleted entry, is a finding."""
+    from trace_app.core.activity import sqlite_bytes
+    try:
+        with sqlite_bytes.open_database(index_data) as db:
+            tables = {r[0] for r in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            if 'files' in tables:
+                entries = _quicklook_old(db)
+            elif 'basic_files' in tables:
+                entries = _quicklook_new(db, tables)
+            else:
+                entries = []
+    except Exception as exc:
+        logger.info("QuickLook index beside %s unreadable: %s", cache.path,
+                    exc)
+        return [], []
+    rows, findings = [], []
+    for entry in entries:
+        location, length = entry['location'], entry['length']
+        if location is None or not length or location + length > len(data):
+            continue
+        raw = data[location:location + length]
+        row = dict(
+            common, cache_kind='quicklook', cache_size='',
+            system='macOS QuickLook', key=str(entry['key']),
+            location=f"{location}:{length}:{entry['width']}:"
+                     f"{entry['height']}:{entry['bpr']}:"
+                     f"{'bgra' if entry['bgra'] else 'rgba'}",
+            name=entry.get('name') or '', original_state=None,
+            original_ref=None, modified_utc=entry.get('modified'),
+            width=entry['width'], height=entry['height'], format='png',
+            size=length, sha256=hashlib.sha256(raw).hexdigest(),
+            detail={'original path': entry.get('original'),
+                    'original size': entry.get('original_size'),
+                    'inode': entry.get('inode'),
+                    'hit count': entry['hits'],
+                    'last shown': times_text(_cocoa(entry['last_hit']))})
+        if entry.get('folder') is not None and row['name']:
+            here = names.get((cache.offset,
+                              entry['folder'].lower().rstrip('/') or '/'))
+            if here is not None:
+                found = here.get(row['name'].lower())
+                if found is None:
+                    row['original_state'] = 'absent'
+                else:
+                    row['original_state'] = ('deleted' if found[0]
+                                             else 'present')
+                    row['original_ref'] = found[1]
+        rows.append(row)
+        finding = _quicklook_finding(row, cache.ref, cache.path)
+        if finding:
+            findings.append(finding)
+    return rows, findings
+
+
+def _cocoa(value):
+    from trace_app.core.activity import times as activity_times
+    return activity_times.mac_absolute(value) if isinstance(
+        value, (int, float)) else None
+
+
+def _quicklook_old(db):
+    """The largest thumbnail of each file, to macOS 10.14."""
+    query = ("SELECT f.rowid AS key, f.folder AS folder, "
+             "f.file_name AS name, f.version AS version, "
+             "t.width AS width, t.height AS height, "
+             "t.bytesperrow AS bpr, t.bitmapdata_location AS location, "
+             "t.bitmapdata_length AS length, t.last_hit_date AS last_hit, "
+             "t.hit_count AS hits, max(t.size) AS size FROM files f "
+             "JOIN thumbnails t ON t.file_id = f.rowid "
+             "WHERE t.size IS NOT NULL GROUP BY f.rowid")
+    cursor = db.execute(query)
+    columns = [c[0] for c in cursor.description]
+    out = []
+    for values in cursor.fetchall():
+        entry = dict(zip(columns, values))
+        folder = _quicklook_folder(entry['folder'])
+        version = _quicklook_version(entry['version'])
+        stamp = version.get('date')
+        if isinstance(stamp, (int, float)):
+            modified = times_text(_cocoa(stamp))
+        elif hasattr(stamp, 'strftime'):
+            modified = times_text(stamp)
+        else:
+            modified = None
+        entry.update(
+            folder=folder, bgra=False, modified=modified,
+            original=f"{folder.rstrip('/')}/{entry['name'] or ''}",
+            original_size=version.get('size'))
+        out.append(entry)
+    return out
+
+
+def _quicklook_new(db, tables):
+    """The largest thumbnail of each file, macOS 10.15 on (by inode)."""
+    columns = {r[1].lower() for r in db.execute(
+        "PRAGMA table_info(thumbnails)")}
+    layout = ('t.bitmapFormat AS format' if 'bitmapformat' in columns
+              else 't.bytesperrow AS bpr')
+    query = (f"SELECT b.fileId AS inode, t.width AS width, "
+             f"t.height AS height, {layout}, "
+             f"t.bitmapdata_location AS location, "
+             f"t.bitmapdata_length AS length, t.last_hit_date AS last_hit, "
+             f"t.hit_count AS hits, max(t.size) AS size FROM thumbnails t "
+             f"JOIN basic_files b "
+             f"ON (b.fileId | -9223372036854775808) = t.file_id "
+             f"WHERE b.fileId IS NOT NULL GROUP BY b.fileId")
+    cursor = db.execute(query)
+    names = [c[0] for c in cursor.description]
+    out = []
+    for values in cursor.fetchall():
+        entry = dict(zip(names, values))
+        if 'format' in entry:
+            entry['bpr'] = _bitmap_format(entry.pop('format')).get('bpr')
+        entry.update(key=entry['inode'], bgra=True, folder=None)
+        out.append(entry)
+    return out
+
+
+def _bitmap_format(blob):
+    """{'bpr', 'bpp', 'bpc'} from a thumbnail's bitmapFormat archive."""
+    import plistlib
+    try:
+        objects = plistlib.loads(bytes(blob)).get('$objects') or []
+    except Exception:
+        return {}
+    return next((o for o in objects if isinstance(o, dict) and 'bpr' in o),
+                {})
+
+
+def _quicklook_finding(row, cache_ref, cache_path):
+    state = row['original_state']
+    if state not in ('absent', 'deleted'):
+        return None
+    original = row['detail'].get('original path') or row['name']
+    gone = ('is no longer in its folder' if state == 'absent'
+            else 'is in its folder only as a deleted entry')
+    return (cache_ref, row['name'], cache_path, row['size'],
+            f'thumbnail-{state}', 'notable',
+            f"A QuickLook picture of {original}, which {gone}",
+            json.dumps({'original path': original,
+                        'modified': row['modified_utc'],
+                        'original_ref': row['original_ref'],
+                        'quicklook': cache_path}, default=str))
+
+
+def _name_quicklook_inodes(image_handler, groups, should_stop=None):
+    """Name QuickLook rows that know their file only by inode (10.15+):
+    one more walk of the volumes holding such caches, inode -> path. A
+    file whose inode is not on the volume any more is 'absent' -- APFS
+    does not reuse inode numbers -- and a finding."""
+    from trace_app.core import walk
+    from trace_app.core.case import parse_artifact_ref
+    wanted = {}
+    for rows in groups:
+        for row in rows:
+            offset = parse_artifact_ref(row['cache_ref']).get(
+                'start_offset')
+            if row['detail'].get('inode'):
+                wanted.setdefault(offset, set()).add(
+                    int(row['detail']['inode']))
+    found = {}
+
+    def note(offset, path, deleted, ref):
+        inode = parse_artifact_ref(ref).get('inode')
+        if inode in wanted.get(offset, ()):
+            known = found.get((offset, inode))
+            if known is None or (known[1] and not deleted):
+                found[(offset, inode)] = (path, deleted, ref)
+
+    for _entry in walk.iter_files(image_handler, should_stop,
+                                  offsets=list(wanted), every_name=note):
+        pass
+    findings = []
+    for rows in groups:
+        for row in rows:
+            inode = row['detail'].get('inode')
+            if not inode:
+                continue
+            offset = parse_artifact_ref(row['cache_ref']).get(
+                'start_offset')
+            hit = found.get((offset, int(inode)))
+            if hit is None:
+                row['original_state'] = 'absent'
+                row['name'] = f"inode {inode}"
+            else:
+                path, deleted, ref = hit
+                row['name'] = path.rsplit('/', 1)[-1]
+                row['detail']['original path'] = path
+                row['original_state'] = 'deleted' if deleted else 'present'
+                row['original_ref'] = ref
+            finding = _quicklook_finding(row, row['cache_ref'],
+                                         row['cache_path'])
+            if finding:
+                findings.append(finding)
+    return findings
+
+
+def _quicklook_folder(value):
+    """index.sqlite's folder: a path, or a file:// URL on newer macOS."""
+    from urllib.parse import unquote, urlparse
+    text = value.decode('utf-8', 'replace') if isinstance(value, bytes) \
+        else str(value or '')
+    if text.startswith('file://'):
+        text = unquote(urlparse(text).path)
+    return text or '/'
+
+
+def _quicklook_version(blob):
+    """The 'version' plist of a QuickLook file row: the file's date
+    (Cocoa seconds) and size when the thumbnail was made."""
+    import plistlib
+    if not blob:
+        return {}
+    try:
+        value = plistlib.loads(bytes(blob))
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def quicklook_span(location):
+    """(offset, length) in thumbnails.data of a QuickLook row."""
+    parts = location.split(':')
+    return int(parts[0]), int(parts[1])
+
+
+def quicklook_png(raw, location):
+    """A QuickLook bitmap (`bytesperrow` bytes a row; RGBA before 10.15,
+    BGRA after) as PNG, cropped to its width."""
+    from PIL import Image
+    parts = location.split(':')
+    width, height, per_row = (int(p) if p not in ('', 'None') else 0
+                              for p in parts[2:5])
+    order = parts[5] if len(parts) > 5 else 'rgba'
+    if not (width and height and per_row) or per_row * height > len(raw):
+        raise ThumbnailError("QuickLook bitmap smaller than its size says")
+    image = Image.frombuffer('RGBA', (per_row // 4, height), bytes(raw),
+                             'raw', 'BGRA' if order == 'bgra' else 'RGBA',
+                             per_row, 1)
+    if per_row // 4 != width:
+        image = image.crop((0, 0, min(width, per_row // 4), height))
+    out = io.BytesIO()
+    image.save(out, 'PNG')
+    return out.getvalue()
+
+
 def picture_bytes(cache_data, row):
     """The picture a `thumbnails` row describes, from its cache's bytes."""
+    if row['cache_kind'] == 'quicklook':
+        start, length = quicklook_span(row['location'])
+        return quicklook_png(cache_data[start:start + length],
+                             row['location'])
     if row['cache_kind'] == 'thumbcache':
         start = int(row['location'])
         return bytes(cache_data[start:start + int(row['size'] or 0)])

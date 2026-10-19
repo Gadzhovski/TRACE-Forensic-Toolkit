@@ -118,7 +118,8 @@ def _indexed(folder, evidence_id):
 
 def test_removing_evidence_takes_its_data_and_keeps_its_notes(
         qapp, case_folder, answered, monkeypatch):
-    from PySide6.QtWidgets import QInputDialog, QProgressDialog
+    from PySide6.QtWidgets import QInputDialog
+    from trace_app.ui.widgets.progress_card import ProgressDialog
     from trace_app.core.case import Case
     from trace_app.ui.main_window import MainWindow
     folder, ids = case_folder
@@ -153,7 +154,7 @@ def test_removing_evidence_takes_its_data_and_keeps_its_notes(
         assert window.current_image_path == os.path.normpath(
             image_path(KEEP))
         # ...and no loading dialog left behind to surface later.
-        assert not [d for d in window.findChildren(QProgressDialog)
+        assert not [d for d in window.findChildren(ProgressDialog)
                     if d.isVisible()]
     finally:
         close_window(window)

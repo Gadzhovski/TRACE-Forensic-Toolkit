@@ -29,7 +29,9 @@ test_images/
   corpus/    the carving corpus: 60+ real published files (samples/) and the
              image built from them, carve-corpus.dd                       -- CI too
   built/     images the Linux kernel's tools make: Btrfs with deleted files,
-             md RAID, LUKS + LVM (tools/testdata/build/)            -- Linux CI
+             md RAID, LUKS + LVM, UBIFS, ZFS, QNX4/cramfs/romfs read by
+             the kernel, QNX IFS read by dumpifs, LittleFS, U-Boot
+             environments (tools/testdata/build/)                   -- Linux CI
   local/     public but too big or slow for CI: DFRWS 2006/2007, NPS
              domexusers (4.4 GB), ubnist1, Fedora 44 (catalog.py: LOCAL)
   nist/      NIST CFReDS: dfr/ carving/ containers/ russian/ winreg/
@@ -83,6 +85,33 @@ set of tests that run only on your machines.
 - `tools/score/dfr_score.py` scores Deleted Files against NIST's DFR answer
   key (`tests/expected/nist_dfr_ground_truth.json`). It fails if any
   deleted file is called recoverable when it is not.
+
+## Building `built/` on Windows or macOS (Docker)
+
+Linux CI builds `built/` with the kernel's own tools. Anywhere else, with
+Docker running:
+
+```bash
+python tools/testdata/build/docker_build.py            # every builder
+python tools/testdata/build/docker_build.py --list     # what each makes
+python tools/testdata/build/docker_build.py kernel ifs littlefs uboot
+python tools/run_tests.py full                         # then the tests
+```
+
+One image (`tools/testdata/build/Dockerfile`: Ubuntu 24.04 and what CI
+installs) runs each builder in a privileged container; each writes
+`test_images/built/docker-<name>.log`. The QEMU guests (kernel keys,
+UBIFS, ZFS) boot Ubuntu's own kernel inside the container, so modules
+Docker Desktop's kernel lacks are no obstacle there. F2FS made *by the
+kernel* (`f2fs-kernel.raw`) is the one image that needs Linux CI.
+
+The answer keys made this way come from the format's own software, never
+from TRACE: the Linux kernel's drivers (QNX4, QNX6, cramfs, romfs, UBIFS),
+QNX's dumpifs (IFS), littlefs's C code (LittleFS), libubootenv's
+fw_printenv (U-Boot), OpenZFS (ZFS). Where that software is itself wrong
+the test says so and holds it to what it does read: Linux's QNX6 driver
+reads the state before the last commit, its romfs driver stops at a name
+of 128 bytes or more.
 
 ## CI (`.github/workflows/tests.yml`)
 

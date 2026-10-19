@@ -26,36 +26,81 @@ logger = logging.getLogger('TRACE.TextExtract')
 #: loses short but real strings like drive letters and registry value names.
 MIN_STRING_LENGTH = 4
 
-#: Extensions handled by a real parser rather than the strings fallback.
-PARSED_EXTENSIONS = {
-    '.pdf', '.docx', '.xlsx', '.pptx', '.doc', '.xls', '.ppt',
-    '.txt', '.log', '.csv', '.json', '.xml', '.html', '.htm', '.md',
-    '.ini', '.cfg', '.conf', '.reg', '.eml', '.rtf',
-}
 
 _PRINTABLE_ASCII = re.compile(rb'[\x20-\x7e\t\r\n]{%d,}' % MIN_STRING_LENGTH)
-_PRINTABLE_UTF16 = re.compile(
-    rb'(?:[\x20-\x7e]\x00){%d,}' % MIN_STRING_LENGTH)
 
-#: UTF-16 text in a non-Latin alphabet -- Greek, Cyrillic, Armenian,
-#: Hebrew, Arabic (U+0370-06FF) -- mixed with ASCII spaces, digits and
-#: punctuation, in either byte order. The Latin-only patterns above saw
-#: none of it: NIST's Russian Tea Room menu (UTF-16BE) was invisible
+#: UTF-16 runs are units of two bytes at either alignment: printable
+#: ASCII (high byte 00) for the strings pass, and for script_runs also a
+#: letter of a non-Latin alphabet -- Greek, Cyrillic, Armenian, Hebrew,
+#: Arabic (U+0370-06FF, high byte 03-06) -- mixed with ASCII spaces,
+#: digits and punctuation, in either byte order. The Latin-only pass saw
+#: none of that: NIST's Russian Tea Room menu (UTF-16BE) was invisible
 #: wherever it was not a whole .txt file. CJK is left out: its code
 #: points cover a third of all byte pairs, and blind matching would read
 #: every compressed file as Chinese.
-_SCRIPT_UTF16 = {
-    'utf-16-le': re.compile(
-        rb'(?:[\x20-\x7e]\x00|[\x00-\xff][\x03-\x06]){%d,}'
-        % MIN_STRING_LENGTH),
-    'utf-16-be': re.compile(
-        rb'(?:\x00[\x20-\x7e]|[\x03-\x06][\x00-\xff]){%d,}'
-        % MIN_STRING_LENGTH),
-}
-
+#:
+#: Runs are found as re.finditer would find (?:<unit>){4,} -- leftmost
+#: first, never overlapping, each as long as it goes -- with the units
+#: classified in C (bytes.translate, big-int masks): that regex tried its
+#: alternation at every byte offset, 13 MB/s, a tenth of indexing a
+#: Windows image.
+_UNIT_RUN = re.compile(rb'\x01{%d,}' % MIN_STRING_LENGTH)
+_IS_ZERO = bytes([1] + [0] * 255)
+_IS_PRINTABLE = bytes(1 if 0x20 <= b <= 0x7e else 0 for b in range(256))
+_IS_SCRIPT = bytes(1 if 0x03 <= b <= 0x06 else 0 for b in range(256))
 
 #: High bytes of U+0300-06FF, where the alphabets above live.
 _SCRIPT_HIGH_BYTES = (b'\x03', b'\x04', b'\x05', b'\x06')
+
+
+def _unit_runs(data, first, big_endian, scripts):
+    """[(i, j)]: maximal runs, in code units counted from byte `first`, of
+    MIN_STRING_LENGTH or more units that may belong to a run."""
+    count = (len(data) - first) // 2
+    if count < MIN_STRING_LENGTH:
+        return []
+    end = first + 2 * count
+    if big_endian:
+        high, low = data[first:end:2], data[first + 1:end:2]
+    else:
+        low, high = data[first:end:2], data[first + 1:end:2]
+
+    def bits(raw, table):
+        return int.from_bytes(raw.translate(table), 'big')
+    ok = bits(high, _IS_ZERO) & bits(low, _IS_PRINTABLE)
+    if scripts:
+        ok |= bits(high, _IS_SCRIPT)
+    return [match.span() for match in
+            _UNIT_RUN.finditer(ok.to_bytes(count, 'big'))]
+
+
+def _utf16_runs(data, big_endian=False, scripts=True):
+    """(start, end) byte spans of the runs, in the order and extent the
+    regex's finditer gives them: from each position, the earliest start in
+    either alignment, as far as its run goes."""
+    runs = (_unit_runs(data, 0, big_endian, scripts),
+            _unit_runs(data, 1, big_endian, scripts))
+    at = [0, 0]
+    position = 0
+    while True:
+        best = None
+        for first in (0, 1):
+            found = runs[first]
+            k = at[first]
+            unit = max(0, (position - first + 1) // 2)  # first unit >= position
+            while k < len(found) and \
+                    found[k][1] - max(found[k][0], unit) < MIN_STRING_LENGTH:
+                k += 1
+            at[first] = k
+            if k < len(found):
+                i, j = found[k]
+                start = first + 2 * max(i, unit)
+                if best is None or start < best[0]:
+                    best = (start, first + 2 * j)
+        if best is None:
+            return
+        yield best
+        position = best[1]
 
 
 def script_runs(data, min_length=MIN_STRING_LENGTH):
@@ -65,14 +110,12 @@ def script_runs(data, min_length=MIN_STRING_LENGTH):
     -- random bytes seldom manage that; text does. (A Latin-only UTF-16LE
     run is the strings pass's.)"""
     found = []
-    for encoding, pattern in _SCRIPT_UTF16.items():
+    data = bytes(data)
+    for encoding in ('utf-16-le', 'utf-16-be'):
         # Where a code unit's high byte sits: odd bytes in LE, even in BE.
         high = 1 if encoding == 'utf-16-le' else 0
-        for match in pattern.finditer(data):
-            raw = match.group()
-            start = match.start()
-            if len(raw) % 2:
-                raw = raw[:-1]
+        for start, end in _utf16_runs(data, big_endian=not high):
+            raw = data[start:end]
             # A letter of these alphabets has high byte 03-06, so fewer such
             # units than `min_length` cannot pass the test below. Counted in
             # C before decoding: decoding and testing every run character
@@ -139,6 +182,11 @@ def extract_text(content, name='', limit=None, skip_packed=False):
             text = _from_msg(content)
         elif extension == '.pdf' or content[:5] == b'%PDF-':
             text = _from_pdf(content)
+        elif _is_rtf(content):
+            # Word writes non-ASCII as \'xx in each font's code page or as
+            # \uN: read as plain text, its Russian was never searchable.
+            from trace_app.core import rtf
+            text = rtf.text(content)
         elif extension == '.bin' and content[:2] == b'NP' and \
                 _notepad_text(content) is not None:
             # Windows 11 Notepad's tab state: the tab's text with its
@@ -190,7 +238,7 @@ def extract_text(content, name='', limit=None, skip_packed=False):
 #: Archive kinds (core/archives.detect_archive) whose own bytes hold no
 #: text worth reading: compressed, or packed with their members (which are
 #: indexed themselves).
-_PACKED = frozenset(('zip', '7z', 'rar', 'tar', 'cpio', 'gzip', 'bzip2',
+_PACKED = frozenset(('zip', '7z', 'rar', 'tar', 'cpio', 'qnx_ifs', 'gzip', 'bzip2',
                      'xz', 'lzma', 'zlib', 'cab', 'lzh', 'alz', 'compress'))
 
 
@@ -208,6 +256,11 @@ def packed_kind(content):
 def _is_msg(content):
     from trace_app.core.msgfile import is_msg
     return is_msg(content)
+
+
+def _is_rtf(content):
+    """RTF by content, whatever the name: Word saves RTF as '.doc' too."""
+    return bytes(content[:16]).lstrip()[:5] == b'{\\rtf'
 
 
 def _from_msg(content):
@@ -237,25 +290,54 @@ def extract_strings(content, min_length=MIN_STRING_LENGTH, budget=None):
     """
     pieces = []
     size = -1                           # length of '\n'.join(pieces)
-
-    def full():
-        return budget is not None and size >= budget
-
-    for match in _PRINTABLE_ASCII.finditer(content):
-        pieces.append(match.group().decode('ascii', errors='replace'))
-        size += len(pieces[-1]) + 1
-        if full():
-            return '\n'.join(pieces)
-
-    for match in _PRINTABLE_UTF16.finditer(content):
-        pieces.append(match.group().decode('utf-16-le', errors='replace'))
-        size += len(pieces[-1]) + 1
-        if full():
-            return '\n'.join(pieces)
+    for find, stop, separator, encoding in _STRING_SCANS:
+        for found in _windows(content, find, stop):
+            text = separator.join(found).decode(encoding, errors='replace')
+            pieces.append(text)
+            size += len(text) + 1
+            if budget is not None and size >= budget:
+                # More than the caller keeps; what it keeps is the same.
+                return '\n'.join(pieces)
 
     if not _never_utf16_scripts(bytes(content[:4])):
         pieces += [text for _start, text in script_runs(content, min_length)]
     return '\n'.join(pieces)
+
+
+def _latin_utf16(content, position, end):
+    window = bytes(content[position:end])
+    return [window[start:stop] for start, stop in
+            _utf16_runs(window, scripts=False)]
+
+
+#: (find, a byte no match can hold, separator, encoding) per strings pass:
+#: printable ASCII, then printable UTF-16LE. Matches are taken a window at
+#: a time, each window decoded once: decoding match by match was 16
+#: million calls on one Windows image.
+_STRING_SCANS = (
+    (_PRINTABLE_ASCII.findall, re.compile(rb'[^\x20-\x7e\t\r\n]'), b'\n',
+     'ascii'),
+    (_latin_utf16, re.compile(rb'[^\x00\x20-\x7e]'), b'\n\x00', 'utf-16-le'),
+)
+_WINDOW = 1 << 20
+
+
+def _windows(content, find, stop):
+    """find(content, start, end) over `content`, a window at a time: each
+    window ends at a byte no match can contain, so no match is cut in two
+    and the matches are exactly those of one scan over the whole."""
+    position, size = 0, len(content)
+    while position < size:
+        end = position + _WINDOW
+        if end < size:
+            boundary = stop.search(content, end)
+            end = boundary.start() if boundary else size
+        else:
+            end = size
+        found = find(content, position, end)
+        if found:
+            yield found
+        position = end
 
 
 def _never_utf16_scripts(head):
@@ -349,14 +431,9 @@ def _from_plain(content):
         except UnicodeDecodeError:
             pass
 
-    try:
-        import chardet
-        guess = chardet.detect(content[:65536])
-        if guess and guess.get('encoding'):
-            return content.decode(guess['encoding'], errors='replace')
-    except Exception:
-        pass
-
-    return content.decode('latin-1', errors='replace')
+    # A legacy code page: the Text tab's guess, so a search finds the
+    # words the examiner sees there.
+    from trace_app.core import text_encoding
+    return text_encoding.decode(content)[0]
 
 

@@ -22,6 +22,7 @@ from trace_app.core import sigma
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.process_worker import ProcessWorker
+from trace_app.ui.widgets.dialog_page import PageDialog
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.SigmaDialog')
@@ -85,12 +86,14 @@ class ImportSigmaDialog(QDialog):
         layout.addWidget(buttons)
 
 
-class SigmaRulesDialog(QDialog):
+class SigmaRulesDialog(PageDialog):
     #: The examiner asked to scan now (after the options were saved).
     scan_requested = Signal()
 
     def __init__(self, case=None, library=None, parent=None):
-        super().__init__(parent)
+        super().__init__("Sigma Rules", '', icon=icons.SIGMA,
+                         parent=parent, scroll=False,
+                         object_name="hashSetsDialog")
         self.setWindowTitle("Sigma Rules")
         self.setObjectName("hashSetsDialog")
         self.setWindowIcon(icons.icon(icons.SIGMA))
@@ -101,7 +104,7 @@ class SigmaRulesDialog(QDialog):
         self.options = sigma.case_options(case, self.library)
         self._initial = dict(self.options, sets=dict(self.options['sets']))
 
-        layout = QVBoxLayout(self)
+        layout = self.table_body()
         intro = QLabel(
             "Sigma rules describe suspicious activity in Windows event logs "
             "— log clearing, credential dumping, lateral movement, "
@@ -112,7 +115,7 @@ class SigmaRulesDialog(QDialog):
             "own.")
         intro.setObjectName("analysisModulesIntro")
         intro.setWordWrap(True)
-        layout.addWidget(intro)
+        self.set_intro(intro.text())
         if not self.usable:
             warning = QLabel("Sigma is unavailable on this system: "
                              + sigma.unavailable_reason())
@@ -171,7 +174,7 @@ class SigmaRulesDialog(QDialog):
         self.status = QLabel()
         self.status.setObjectName("triageStatus")
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        self.footer_status(self.status)
 
         buttons = QDialogButtonBox()
         self.scan_button = buttons.addButton("Save and Scan Now",
@@ -180,7 +183,7 @@ class SigmaRulesDialog(QDialog):
         close = buttons.addButton(QDialogButtonBox.Close)
         close.clicked.connect(self.accept)
         buttons.rejected.connect(self.accept)
-        layout.addWidget(buttons)
+        self.add_button(buttons)
 
         for widget in (self.import_file, self.import_folder, self.use_box,
                        self.options_box, self.scan_button):

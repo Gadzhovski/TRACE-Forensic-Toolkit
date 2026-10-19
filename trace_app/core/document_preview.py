@@ -79,6 +79,12 @@ def to_html(content, kind):
     readers = {'docx': _docx, 'xlsx': _xlsx, 'pptx': _pptx,
                'odt': _odf, 'ods': _odf, 'odp': _odf, 'legacy': _legacy,
                'msg': _msg, 'pcap': _pcap}
+    if kind == 'rtf':
+        from trace_app.core import rtf
+        try:
+            return rtf.to_html(content)
+        except rtf.NotRtf as exc:
+            raise PreviewError(str(exc))
     reader = readers.get(kind)
     if reader is None:
         raise PreviewError(f"No reader for {kind}.")
@@ -600,11 +606,6 @@ def decode_html(content):
             return content.decode(encoding), encoding
         except (LookupError, UnicodeDecodeError):
             continue
-    try:
-        import chardet
-        guess = (chardet.detect(content[:65536]) or {}).get('encoding')
-        if guess:
-            return content.decode(guess, errors='replace'), guess
-    except Exception:
-        pass
-    return content.decode('latin-1'), 'latin-1'
+    from trace_app.core import text_encoding
+    text, found = text_encoding.decode(content)
+    return text, found.codec

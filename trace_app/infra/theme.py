@@ -10,11 +10,11 @@ choice is written next to the other user settings rather than being lost on
 exit.
 """
 
-import configparser
 import logging
 import os
 
-from trace_app.infra.paths import config_file, resource_path
+from trace_app.infra import config_store
+from trace_app.infra.paths import resource_path
 
 logger = logging.getLogger('TRACE.Theme')
 
@@ -34,13 +34,7 @@ _KEY = 'theme'
 
 def read_choice():
     """What the user last chose: 'light', 'dark' or 'system'."""
-    parser = configparser.ConfigParser()
-    try:
-        parser.read([config_file(), 'config.ini'])
-        theme = parser.get(_SECTION, _KEY, fallback=DEFAULT_THEME)
-    except (configparser.Error, OSError) as exc:
-        logger.debug("Could not read the saved theme: %s", exc)
-        return DEFAULT_THEME
+    theme = config_store.get(_SECTION, _KEY, DEFAULT_THEME)
     return theme if theme in CHOICES else DEFAULT_THEME
 
 
@@ -75,22 +69,8 @@ def save_theme(theme):
     if theme not in CHOICES:
         return
 
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-    except (configparser.Error, OSError):
-        pass        # a damaged file is replaced, not a reason to fail
-
-    if not parser.has_section(_SECTION):
-        parser.add_section(_SECTION)
-    parser.set(_SECTION, _KEY, theme)
-
-    try:
-        with open(config_file(), 'w', encoding='utf-8') as handle:
-            parser.write(handle)
-    except OSError as exc:
-        # The theme still applies for this session; only the memory is lost.
-        logger.warning("Could not save the theme: %s", exc)
+    # Not saved: the theme still applies for this session (logged).
+    config_store.set_value(_SECTION, _KEY, theme)
 
 
 def stylesheet_for(theme):

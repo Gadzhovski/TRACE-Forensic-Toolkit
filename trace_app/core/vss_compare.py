@@ -23,6 +23,8 @@ import logging
 
 import pytsk3
 
+from trace_app.core.tsk_names import entry_name
+
 logger = logging.getLogger('TRACE.VSSCompare')
 
 DELETED, ADDED, CHANGED, RENAMED = 'deleted', 'added', 'changed', 'renamed'
@@ -52,7 +54,7 @@ def entries(fs, system=False, should_stop=None):
             info = entry.info
             if info.name is None:
                 continue
-            name = info.name.name.decode('utf-8', 'replace')
+            name = entry_name(entry, fs)
             if name in ('.', '..') or (depth == 0 and name == '$OrphanFiles'):
                 continue
             if not system and depth == 0 and name.startswith('$'):

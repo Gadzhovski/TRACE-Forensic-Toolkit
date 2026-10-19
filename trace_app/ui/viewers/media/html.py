@@ -50,6 +50,7 @@ p.comment { background-color: #fff8c5; padding: 4px; }
 div.notes { background-color: #f6f8fa; padding: 4px; margin: 4px 0 10px 0; }
 span.deleted { color: #cf222e; text-decoration: line-through; }
 span.inserted { color: #1a7f37; text-decoration: underline; }
+span.hidden { color: #8250df; text-decoration: underline; }
 """
 
 

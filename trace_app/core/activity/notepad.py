@@ -33,6 +33,7 @@ import struct
 import zlib
 
 from trace_app.core.activity import record, times
+from trace_app.core.varint import uleb128
 
 TAB_FOLDER = ('AppData', 'Local', 'Packages')
 PACKAGE = 'microsoft.windowsnotepad_'
@@ -50,18 +51,7 @@ class TabStateError(ValueError):
 
 
 def _uleb(data, at):
-    value = shift = 0
-    while True:
-        if at >= len(data):
-            raise TabStateError("cut short inside a number")
-        byte = data[at]
-        at += 1
-        value |= (byte & 0x7F) << shift
-        if not byte & 0x80:
-            return value, at
-        shift += 7
-        if shift > 63:
-            raise TabStateError("number too long")
+    return uleb128(data, at, TabStateError)
 
 
 def _utf16(data, at, characters):

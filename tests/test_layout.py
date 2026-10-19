@@ -58,7 +58,7 @@ def _shown(qapp, window):
 def _panels(window):
     return [window.listing_widget, window.registry_extractor_widget,
             window.search_panel, window.triage_panel, window.activity_panel,
-            window.timeline_panel]
+            window.modules_panel, window.timeline_panel]
 
 
 def _rect(window, widget):
@@ -71,9 +71,10 @@ def _rect(window, widget):
 def test_every_result_panel_is_a_dock(window):
     from PySide6.QtWidgets import QDockWidget, QMenu
     docks = window.result_viewer.docks()
-    assert [d.widget() for d in docks] == _panels(window)
+    assert [window.result_viewer.panel(d) for d in docks] == _panels(window)
     assert [d.windowTitle() for d in docks] == [
-        'Listing', 'Registry', 'Search', 'Triage', 'Activity', 'Timeline']
+        'Listing', 'Registry', 'Search', 'Triage', 'Activity', 'Modules',
+        'Timeline']
     names = {d.objectName() for d in docks}
     assert len(names) == len(docks) and all(names)
     for dock in docks:
@@ -105,7 +106,7 @@ def test_bringing_a_panel_forward_raises_its_dock(qapp, window):
     pump(qapp, 0.2)
     timeline = tabs.dock(window.timeline_panel)
     assert tabs.currentWidget() is window.timeline_panel
-    assert tabs.currentIndex() == 5 and changed[-1] == 5
+    assert tabs.currentIndex() == 6 and changed[-1] == 6
     assert not timeline.visibleRegion().isEmpty()
     # A closed panel is reopened, not left closed.
     timeline.close()
@@ -318,12 +319,14 @@ def test_activity_categories_are_grouped_like_triage(qapp, window):
     from trace_app.ui.viewers.activity_panel import GROUP_OF, GROUPS
     panel = window.activity_panel
     tabs = panel.tabs
-    # Every category has a group, and every group a category.
-    keys = [key for key, _ in GROUPS]
+    # Every category has a group, and every group a category -- but From
+    # modules, which is there only while external modules read something
+    # TRACE did not sort (this case has no module run).
+    keys = [key for key, _ in GROUPS if key != 'modules']
     assert all(GROUP_OF.get(key) in keys for key, _ in CATEGORIES)
     assert {tabs.group_of(i) for i in range(tabs.count())} == set(keys)
     assert [h.rsplit(' (', 1)[0] for h in tabs.headings()] == \
-        [label for _, label in GROUPS]
+        [label for key, label in GROUPS if key != 'modules']
     for category in ('downloads', 'usb', 'logons', None):
         panel.show_category(category)
         index = tabs.currentIndex()
@@ -338,3 +341,30 @@ def test_activity_categories_are_grouped_like_triage(qapp, window):
     assert tabs.tabText(0) == 'All (0)'
     assert tabs.headings()[keys.index('web')] == 'Web (0)'
 
+
+
+def test_the_same_stylesheet_is_not_set_twice(qapp, window, monkeypatch):
+    """Setting the sheet the application already has makes Qt repolish every
+    widget; after earlier windows that repolish crashed inside Qt (access
+    violation in setStyleSheet, tests building windows one after another).
+    A theme switch still sets the new sheet."""
+    from PySide6.QtWidgets import QApplication
+    calls = []
+    original = QApplication.setStyleSheet
+
+    def spy(app, sheet):
+        calls.append(sheet)
+        return original(app, sheet)
+
+    monkeypatch.setattr(QApplication, 'setStyleSheet', spy)
+    before = qapp.styleSheet()
+    window.apply_stylesheet('light')
+    window.apply_stylesheet('light')
+    assert len(calls) <= 1
+    if calls:
+        assert calls[0] != before
+    window.apply_stylesheet('dark')
+    assert calls and calls[-1] == qapp.styleSheet() != ''
+    window.apply_stylesheet('dark')
+    assert calls.count(calls[-1]) == 1
+    window.apply_stylesheet('light')

@@ -255,7 +255,7 @@ class VirusTotalClient:
             if response.status_code in (401, 403):
                 raise AuthError(
                     "VirusTotal refused the API key. Check it under "
-                    "Options ▸ API Keys.")
+                    "Options ▸ Settings ▸ API Keys.")
             if response.status_code == 429:
                 # Another client on the same key, or a quota we do not know
                 # about: give the minute back and try again.

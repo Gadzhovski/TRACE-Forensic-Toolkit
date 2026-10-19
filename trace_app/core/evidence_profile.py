@@ -11,9 +11,11 @@ there, each with the reason the dialog shows.
 
 Only what is certain is ruled out. A module that searches the whole image
 by name (thumbnail caches, event logs for Sigma, YARA, keywords) can find
-something on any file system and is never ruled out; and an image with a
-volume TRACE cannot read (locked, damaged) rules nothing out, because what
-it holds is unknown.
+something on any file system, and on a disk image is never ruled out;
+logical evidence (a folder, a zip, an extraction) has every file name in
+memory already, so there it is ruled out when none of the files it reads
+is there (`present_files`). An image with a volume TRACE cannot read
+(locked, damaged) rules nothing out, because what it holds is unknown.
 """
 
 import logging
@@ -39,11 +41,196 @@ _UNREAD = {'bitlocker': 'a locked BitLocker volume',
            'mdraid': 'a RAID member whose other disks are not here'}
 
 
+#: The kinds of evidence external modules suit (spec.suits), as a reason
+#: names them. Phones and computers TRACE finds itself; a warrant return
+#: and a car's extraction are found by the tool's own patterns
+#: (core/modules/fit, `PATTERN_KINDS`).
+KIND_NAMES = {'ios': 'iOS (iPhone or iPad)', 'android': 'Android',
+              'windows': 'Windows', 'macos': 'macOS', 'linux': 'Linux',
+              'chromeos': 'ChromeOS',
+              'return': 'warrant return', 'vehicle': 'vehicle'}
+#: Kinds no system shows: a tool reading one fits where its patterns name
+#: files (`module_fit`).
+PATTERN_KINDS = ('return', 'vehicle')
+#: Systems os_identity names that a tool can suit.
+_SYSTEM_KINDS = ('ios', 'android', 'windows', 'macos', 'linux', 'chromeos')
+#: On evidence TRACE knows for a phone or a computer, a pattern-fitted tool
+#: needs this many files its patterns name: a few are that system's own
+#: files (a Pixel 3: RLEAPP's patterns took 6 Gmail screenshot attachments,
+#: VLEAPP's 4 Android crash tombstones). A return or a car's dump on its
+#: own, with no system found, needs one.
+MIN_FIT_ON_SYSTEM = 20
+#: File systems TRACE cannot open yet whose signature says what the image
+#: is from: a QNX head unit is a car's. A tool reading the image itself
+#: (`-t raw`, core/modules/inputs.RAW) is offered for them.
+RAW_ONLY = {'QNX6': 'vehicle', 'QNX4': 'vehicle', 'QNX IFS': 'vehicle'}
+#: File systems TRACE reads that mark an image as a car's: a QNX6 volume
+#: TRACE opens is still a head unit's, for VLEAPP.
+VEHICLE_FILESYSTEMS = ('QNX6', 'QNX4', 'QNX IFS', 'QNX ETFS', 'QNX EFS')
+
+
+def unreadable_signatures(image_handler):
+    """[(volume start, file system)] the image's signatures name that
+    TRACE does not open (RAW_ONLY): a QNX6 volume of a head unit."""
+    if image_handler.logical_fs is not None:
+        return []
+    found = []
+    try:
+        starts = [p[2] for p in image_handler.get_partitions()] or [0]
+    except Exception:
+        starts = [0]
+    for start in dict.fromkeys(starts):
+        try:
+            names = image_handler.detect_filesystems(start)
+            if not names or image_handler.get_fs_info(start) is not None:
+                continue
+        except Exception:
+            continue
+        found += [(start, name) for name in names if name in RAW_ONLY]
+    return found
+
+
+def tool_systems(image_handler, read=True):
+    """The kinds of evidence an image holds for external tools: phones
+    ('ios' / 'android': a backup's kind, what os_identity found -- installed
+    or packed in a tar or zipped backup inside a folder -- or a phone's
+    user data at a system root, as a partial extraction has no
+    SystemVersion.plist or build.prop), computers ('windows' / 'macos' /
+    'linux', os_identity), and the kinds the tools' own patterns found
+    (`module_fit`: 'return', 'vehicle'). Worked out once per handler;
+    read=False never reads (the window's thread: the image's opening
+    worked it out), answering from what is known so far."""
+    from trace_app.core import logical_sources, os_identity
+    known = image_handler.__dict__.get('_tool_systems')
+    if known is not None:
+        return list(known) + fitted_kinds(image_handler, known)
+    found = []
+    try:
+        kind = logical_sources.kind_of(image_handler.image_path) or ''
+    except Exception:
+        kind = ''
+    if kind == 'ios_backup':
+        found.append('ios')
+    elif kind == 'android_backup':
+        found.append('android')
+    look = os_identity.identify if read else os_identity.cached
+    try:
+        keys = list(image_handler.volume_offsets())
+        for key in keys:
+            family = (look(image_handler, key) or {}).get('family')
+            if family in _SYSTEM_KINDS:
+                found.append(family)
+        if read:
+            found += _phone_data(image_handler, keys)
+            found += [RAW_ONLY[name] for _start, name in
+                      unreadable_signatures(image_handler)]
+            for key in keys:
+                try:
+                    if image_handler.get_fs_type(key) in \
+                            VEHICLE_FILESYSTEMS:
+                        found.append('vehicle')
+                except Exception:
+                    continue
+    except Exception as exc:
+        logger.debug("No phone systems for %s: %s",
+                     image_handler.image_path, exc)
+    found = list(dict.fromkeys(found))
+    if read:
+        image_handler.__dict__['_tool_systems'] = found
+    return list(found) + fitted_kinds(image_handler, found)
+
+
+def set_module_fit(image_handler, fit):
+    """Keep what core/modules/fit counted on an image: {tool id: files}."""
+    image_handler.__dict__['_module_fit'] = dict(fit)
+
+
+def module_fit(image_handler):
+    """{tool id: files its patterns name}, or None before it is counted."""
+    return image_handler.__dict__.get('_module_fit')
+
+
+def fit_needed(systems):
+    """Files a pattern-fitted tool must find on evidence holding `systems`
+    (MIN_FIT_ON_SYSTEM where a phone or computer was found)."""
+    return MIN_FIT_ON_SYSTEM if set(systems or ()) & set(_SYSTEM_KINDS) \
+        else 1
+
+
+def fitted_kinds(image_handler, systems=()):
+    """The kinds the tools' own patterns found on the image -- enough of
+    them for what else it is (fit_needed)."""
+    from trace_app.core.modules.spec import TOOLS
+    fit = module_fit(image_handler) or {}
+    needed = fit_needed(systems)
+    return list(dict.fromkeys(
+        kind for tool, files in fit.items()
+        if (files or 0) >= needed and tool in TOOLS
+        for kind in TOOLS[tool].suits if kind in PATTERN_KINDS))
+
+
+def _phone_data(image_handler, keys):
+    """'ios' / 'android' where a volume's system root holds a phone's
+    user data (activity/mobile's own tests for it)."""
+    from trace_app.core.activity import Volume, mobile
+    found = []
+    for key in keys:
+        if image_handler.get_fs_info(key) is None:
+            continue
+        for volume in Volume.all(image_handler, key):
+            try:
+                if mobile.is_ios(volume):
+                    found.append('ios')
+                if mobile.android_base(volume) is not None:
+                    found.append('android')
+            except Exception as exc:
+                logger.debug("Phone check at %s failed: %s", key, exc)
+    return found
+
+
+def tool_reason(spec, systems):
+    """Why an external tool (core/modules/spec) cannot run on an image
+    holding `systems` (tool_systems), or None when it can."""
+    if not spec.suits or set(spec.suits) & set(systems):
+        return None
+    if set(spec.suits) <= set(PATTERN_KINDS):
+        return (f"{spec.name} reads {spec.reads or 'its own evidence'}: "
+                f"none of the files it reads was found on this image (or "
+                f"the image is still being listed).")
+    wanted = ' or '.join(KIND_NAMES.get(s, s) for s in spec.suits)
+    there = ' and '.join(KIND_NAMES.get(s, s) for s in systems)
+    return (f"{spec.name} reads {wanted} evidence; "
+            + (f"this image holds {there}." if systems else
+               f"no {wanted} system was found on this image."))
+
+
+def present_files(image_handler):
+    """For logical evidence, which files the name-searching modules read
+    are among its files: {'event_logs', 'thumbnail_caches'} -> bool. None
+    for a disk image (listing it is a walk of the whole image: unknown)."""
+    fs = image_handler.logical_fs
+    if fs is None:
+        return None
+    from trace_app.core.rdpcache import is_rdp_cache_name
+    from trace_app.core.thumbnails import is_cache_name
+    found = {'event_logs': False, 'thumbnail_caches': False}
+    for name in fs.file_names():
+        if not found['event_logs'] and name.lower().endswith('.evtx'):
+            found['event_logs'] = True
+        if not found['thumbnail_caches'] and (
+                is_cache_name(name) or is_rdp_cache_name(name)):
+            found['thumbnail_caches'] = True
+        if all(found.values()):
+            break
+    return found
+
+
 def profile(image_handler):
-    """{'filesystems', 'systems', 'logical', 'unreadable', 'summary'} for
-    an open image."""
+    """{'filesystems', 'systems', 'tool_systems', 'logical',
+    'logical_kind', 'present', 'unreadable', 'summary'} for an open
+    image."""
     from trace_app.core import containers
-    from trace_app.core.activity import Volume, linux, macos
+    from trace_app.core.activity import Volume, chromeos, linux, macos
     filesystems, systems, unreadable = [], [], False
     #: Why some of it is not read, in words: 'a locked LUKS volume'.
     why = []
@@ -93,6 +280,8 @@ def profile(image_handler):
                     systems.append('Linux')
                 if macos.is_macos(volume):
                     systems.append('macOS')
+                if chromeos.is_chromeos(volume):
+                    systems.append('ChromeOS')
             except Exception as exc:
                 logger.debug("System check at %s failed: %s", key, exc)
     systems = list(dict.fromkeys(systems))
@@ -108,8 +297,23 @@ def profile(image_handler):
         parts.append(', '.join(dict.fromkeys(why)))
     elif unreadable:
         parts.append('a volume TRACE cannot read')
+    logical_kind = None
+    if logical:
+        from trace_app.core import logical_sources
+        try:
+            logical_kind = logical_sources.kind_of(image_handler.image_path)
+        except Exception:
+            logical_kind = None
+    try:
+        present = present_files(image_handler)
+    except Exception as exc:
+        logger.debug("Files present not known: %s", exc)
+        present = None
     return {'filesystems': filesystems, 'systems': systems,
-            'logical': logical, 'unreadable': unreadable,
+            'tool_systems': tool_systems(image_handler),
+            'fit': module_fit(image_handler),
+            'logical': logical, 'logical_kind': logical_kind,
+            'present': present, 'unreadable': unreadable,
             'summary': ' · '.join(parts) or 'No file system found'}
 
 
@@ -133,6 +337,25 @@ def not_applicable(found):
     out = {}
     if found['unreadable']:
         return out
+    # External tools read one kind of phone: iLEAPP on an Android
+    # extraction finds nothing (and stages copies for nothing).
+    from trace_app.core.modules.spec import TOOLS
+    systems = found.get('tool_systems', ())
+    fit = found.get('fit') or {}
+    for spec in TOOLS.values():
+        why = tool_reason(spec, systems)
+        files = fit.get(spec.id) or 0
+        if why and files and set(spec.suits) <= set(PATTERN_KINDS):
+            # Some matched, too few for evidence that is something else.
+            what = ' and '.join(KIND_NAMES.get(s, s) for s in systems
+                                if s in _SYSTEM_KINDS)
+            why = (f"{spec.name} reads {spec.reads or 'its own evidence'}: "
+                   f"only {files} file(s) its patterns name were found, on "
+                   f"{what} evidence -- that system's own files, not "
+                   f"{' or '.join(KIND_NAMES.get(s, s) for s in spec.suits)}"
+                   f" evidence (it takes {MIN_FIT_ON_SYSTEM}).")
+        if why:
+            out[spec.id] = why
     filesystems = found['filesystems']
     if not filesystems:
         reason = "No file system TRACE can read on this image."
@@ -156,4 +379,16 @@ def not_applicable(found):
                         "there is nothing between them to carve.")
         out['index_free'] = ("Logical evidence holds files, not disk "
                              "space: it has no free space to search.")
+    if found.get('logical_kind') == 'folder':
+        out['fstimes'] = ("A folder of copied files: their file-system "
+                          "times are the copies', not the device's.")
+    present = found.get('present')
+    if present is not None:
+        if not present.get('event_logs'):
+            out['sigma'] = ("No Windows event log (.evtx) among its files: "
+                            "Sigma rules read those.")
+        if not present.get('thumbnail_caches'):
+            out['thumbnails'] = ("No thumbnail cache among its files "
+                                 "(thumbcache_*.db, Thumbs.db, RDP bitmap "
+                                 "caches).")
     return out

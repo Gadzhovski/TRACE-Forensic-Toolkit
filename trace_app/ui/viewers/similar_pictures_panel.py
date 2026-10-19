@@ -20,14 +20,16 @@ import logging
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout,
                                QHeaderView, QLabel, QPushButton, QSizePolicy,
-                               QSpinBox, QTreeWidget, QTreeWidgetItem,
+                               QSpinBox, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
 from trace_app.core import phash
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
+from trace_app.ui.widgets.kept_threads import release
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 
 logger = logging.getLogger('TRACE.SimilarPictures')
 
@@ -51,7 +53,7 @@ class _Task(ProcessWorker):
         self._result = None
 
     def on_item(self, record):
-        self._result = record.get('result')
+        self._result = record
 
     def on_done(self, count, error):
         if self._stop.is_set():
@@ -116,7 +118,7 @@ class SimilarPicturesPanel(QWidget):
         bar.addWidget(self.groups_button)
         layout.addLayout(bar)
 
-        self.tree = QTreeWidget()
+        self.tree = BranchTreeWidget()
         self.tree.setObjectName("triageTable")
         self.tree.setColumnCount(len(self.COLUMNS))
         self.tree.setHeaderLabels(self.COLUMNS)
@@ -151,8 +153,11 @@ class SimilarPicturesPanel(QWidget):
 
     def shutdown(self):
         if self._task is not None:
-            self._task.stop()
-            self._task.wait(3000)
+            try:
+                self._task.stop()
+                self._task.wait(3000)
+            except RuntimeError:
+                pass            # already deleted
 
     def refresh(self):
         """Group (or match) the case's pictures on a thread."""
@@ -162,24 +167,25 @@ class SimilarPicturesPanel(QWidget):
                                       "case's analysed pictures.")
             self.count_changed.emit(0)
             return
-        items = self.case.picture_hashes(self.evidence_id)
-        threshold = self.threshold.value()
-        if not items:
-            self.tree.clear()
-            self.status_label.setText(
-                "No picture has a perceptual hash yet: run the analysis "
-                "with Photo metadata (Analysis ▸ Run Analysis Modules).")
-            self.count_changed.emit(0)
-            return
+        # The job reads the case's pictures itself (core/background.
+        # job_pictures): read here, a big case's held the window.
+        source = {'case_folder': self.case.folder,
+                  'evidence_id': self.evidence_id,
+                  'threshold': self.threshold.value()}
         if self._mode == 'reference' and self._reference:
-            self._run({'operation': 'match', 'items': items,
-                       'references': self._reference[1],
-                       'threshold': threshold}, self._show_matches)
+            self._run(dict(source, operation='match',
+                           references=self._reference[1]),
+                      self._show_matches)
         else:
-            self._run({'operation': 'groups', 'items': items,
-                       'threshold': threshold},
-                      lambda groups: self._show_groups(groups, len(items)))
+            self._run(dict(source, operation='groups'), self._show_groups)
         self.status_label.setText("Comparing…")
+
+    def _no_pictures(self):
+        self.tree.clear()
+        self.status_label.setText(
+            "No picture has a perceptual hash yet: run the analysis "
+            "with Photo metadata (Analysis ▸ Run Analysis Modules).")
+        self.count_changed.emit(0)
 
     def _run(self, params, then):
         if self._task is not None:
@@ -198,16 +204,19 @@ class SimilarPicturesPanel(QWidget):
 
     def _task_ended(self, task):
         # The reference goes before the object: deleteLater frees it, and a
-        # later refresh asking a freed thread isRunning() crashed.
+        # later refresh asking a freed thread isRunning() crashed. Freed
+        # only once its thread has returned (kept_threads.release).
         if self._task is task:
             self._task = None
-        task.deleteLater()
+        release(task)
 
-    def _finished(self, result, then):
-        if isinstance(result, Exception):
-            self.status_label.setText(f"Comparison failed: {result}")
+    def _finished(self, record, then):
+        if isinstance(record, Exception):
+            self.status_label.setText(f"Comparison failed: {record}")
             return
-        then(result)
+        if record is None:
+            return
+        then(record.get('result'), record.get('total', 0))
 
     # --- groups ------------------------------------------------------------
 
@@ -217,6 +226,9 @@ class SimilarPicturesPanel(QWidget):
         self.refresh()
 
     def _show_groups(self, groups, total):
+        if not total:
+            self._no_pictures()
+            return
         self.tree.clear()
         for group in groups:
             head = QTreeWidgetItem([f"{len(group)} pictures that look "
@@ -246,7 +258,7 @@ class SimilarPicturesPanel(QWidget):
         self.status_label.setText(f"Reading reference pictures in "
                                   f"{folder}…")
 
-        def hashed(references):
+        def hashed(references, _total):
             if not references:
                 self.status_label.setText(f"No picture in {folder} could be "
                                           f"read.")
@@ -257,7 +269,10 @@ class SimilarPicturesPanel(QWidget):
             self.refresh()
         self._run({'operation': 'hash_folder', 'folder': folder}, hashed)
 
-    def _show_matches(self, matches):
+    def _show_matches(self, matches, total):
+        if not total:
+            self._no_pictures()
+            return
         folder, references = self._reference
         self.tree.clear()
         for reference, items in matches:

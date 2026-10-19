@@ -1,8 +1,11 @@
 """Volume and image information view.
 
-The "View Image Information" dialog: the image's overview, its disk layout
-drawn as a platter and a bar (ui/widgets/disk_map.py), and per-volume
-tables. Roughly 520 lines that had no reason to sit
+The Evidence Information dialog: for a disk image, its overview, its disk
+layout drawn as a platter and a bar (ui/widgets/disk_map.py), and
+per-volume tables; for a folder, extraction or backup (logical evidence,
+which has no layout), what it holds -- the device it came from, the phone
+file systems and backups packed in it, its top-level folders
+(core/evidence_overview.py). Roughly 520 lines that had no reason to sit
 inside MainWindow.
 
 Provided as a mixin because the methods read `self.image_handler`,
@@ -17,7 +20,7 @@ import os
 
 import pytsk3
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QBrush, QColor, QFontMetrics, QIcon
+from PySide6.QtGui import QBrush, QColor, QFontMetrics
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton,
                                QScrollArea, QSizePolicy, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
@@ -35,10 +38,14 @@ class VolumeInfoMixin:
 
 
     def show_image_information(self):
-        """Display comprehensive disk image information with space allocation pie chart."""
+        """Evidence Information: a disk image's layout and volumes, or a
+        folder's (extraction's, backup's) contents and device."""
+        if getattr(self.image_handler, 'logical_fs', None) is not None:
+            return self._show_logical_information()
         # Create modern dialog
         dialog = QDialog(self)
-        dialog.setWindowTitle("Disk Image Information")
+        dialog.setWindowTitle("Evidence Information — " + os.path.basename(
+            self.image_handler.image_path.rstrip('/\\')))
         dialog.resize(1200, 800)
 
         # Main vertical layout
@@ -288,6 +295,178 @@ class VolumeInfoMixin:
 
         dialog.exec()
 
+    def _show_logical_information(self):
+        """A folder, extraction or backup: what it is, the device it came
+        from, what is packed in it, its top-level folders, and what the
+        case's analysis found -- no sectors or partitions, which it has
+        none of."""
+        from trace_app.core import evidence_overview
+        from trace_app.ui.widgets.property_table import PropertyTable
+        from PySide6.QtWidgets import QTabWidget
+        handler = self.image_handler
+        path = handler.image_path.rstrip('/\\')
+        name = os.path.basename(path) or path
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Evidence Information — {name}")
+        dialog.resize(1100, 760)
+        main_layout = QVBoxLayout(dialog)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        top_widget = QWidget()
+        top_widget.setObjectName("volumeInfoHeader")
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(20, 20, 20, 20)
+        top_layout.setSpacing(30)
+
+        card = QWidget()
+        card.setObjectName("volumeInfoCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(7)
+        title = QLabel("Evidence Overview")
+        title.setObjectName("volumeInfoTitle")
+        card_layout.addWidget(title)
+
+        def heading(text):
+            label = QLabel(text.upper())
+            label.setObjectName("volumeInfoSectionHeading")
+            card_layout.addWidget(label)
+
+        def row(field, text, tip=None):
+            holder = QWidget()
+            holder.setObjectName("volumeInfoRow")
+            line = QHBoxLayout(holder)
+            line.setContentsMargins(0, 0, 0, 0)
+            line.setSpacing(10)
+            label = QLabel(field)
+            label.setObjectName("volumeInfoFieldLabel")
+            label.setFixedWidth(130)
+            label.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+            value = QLabel(str(text))
+            value.setObjectName("volumeInfoFieldValue")
+            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            value.setWordWrap(True)
+            if tip:
+                value.setToolTip(tip)
+            line.addWidget(label)
+            line.addWidget(value, 1)
+            card_layout.addWidget(holder)
+
+        size = FileSystemUtils.get_readable_size
+        # Worked out while the evidence opened and kept on the handler;
+        # read off this thread only if it was not (a failure there).
+        if evidence_overview.overview_ready(handler):
+            facts = evidence_overview.overview(handler)
+        else:
+            facts = self._wait_for(evidence_overview.overview, handler)
+        overview = facts['summary']
+        heading("Evidence")
+        row("Path", name, path)
+        row("Type", handler.logical_fs.label)
+        row("Files", f"{overview.get('files', 0):,}")
+        row("Folders", f"{overview.get('folders', 0):,}")
+        row("Total size", f"{size(overview.get('bytes', 0))} "
+                          f"({overview.get('bytes', 0):,} bytes)")
+        if os.path.exists(path):
+            row("Modified", datetime.datetime.fromtimestamp(
+                os.path.getmtime(path), datetime.timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S UTC"))
+        systems = self._installed_systems()
+        for _start, installed, identity in systems[:1]:
+            heading("Installed System")
+            if identity:
+                card_layout.addWidget(self._system_badge(identity))
+        device = dict(facts['device'])
+        # GrayKey's report beside the extraction: the phone as it was
+        # acquired (here, on the window's thread: PyMuPDF).
+        try:
+            from trace_app.core import graykey
+            for field, text in graykey.device_facts(path).items():
+                device.setdefault(field, text)
+        except Exception as exc:
+            logger.debug("No acquisition report for %s: %s", path, exc)
+        if device:
+            heading("Device")
+            for field, text in device.items():
+                row(field, text)
+        packed = facts['contents']
+        if packed:
+            heading("Contents")
+            for what, where, bytes_ in packed:
+                row(what, f"{os.path.basename(where)} ({size(bytes_)})",
+                    where)
+        acquisition = handler.get_acquisition_info()
+        if acquisition:
+            heading("Source")
+            for field, text in acquisition.items():
+                row(field, text)
+        card_layout.addStretch()
+        card.setFixedWidth(430)
+        scroll = QScrollArea()
+        scroll.setObjectName("volumeInfoScroll")
+        scroll.setWidget(card)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFixedWidth(450)
+        top_layout.addWidget(scroll)
+
+        # Right: the top-level folders, largest first, with their share --
+        # what a folder has in place of a disk's layout.
+        folders = QWidget()
+        folders.setObjectName("volumeInfoCard")
+        folders_layout = QVBoxLayout(folders)
+        folders_layout.setContentsMargins(18, 16, 18, 16)
+        caption = QLabel("Top-level Contents")
+        caption.setObjectName("volumeInfoTitle")
+        folders_layout.addWidget(caption)
+        top = sorted(overview.get('top', []), key=lambda item: -item[3])
+        total = max(1, overview.get('bytes', 0))
+        table = QTableWidget(len(top), 4)
+        table.setObjectName("volumeInfoTable")
+        table.setHorizontalHeaderLabels(['Name', 'Files', 'Size', 'Share'])
+        table.verticalHeader().setVisible(False)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setSelectionBehavior(QTableWidget.SelectRows)
+        table.setIconSize(QSize(TABLE_ICON_SIZE, TABLE_ICON_SIZE))
+        for index, (entry, is_dir, files, bytes_) in enumerate(top):
+            item = QTableWidgetItem(entry)
+            item.setIcon(icons.icon("Icons/tabler/folder.svg" if is_dir
+                                    else "Icons/tabler/file-text.svg"))
+            table.setItem(index, 0, item)
+            for column, text in ((1, f"{files:,}"), (2, size(bytes_)),
+                                 (3, f"{100 * bytes_ / total:.1f}%")):
+                cell = QTableWidgetItem(text)
+                cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                table.setItem(index, column, cell)
+        table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Stretch)
+        folders_layout.addWidget(table, 1)
+        top_layout.addWidget(folders, 1)
+        main_layout.addWidget(top_widget, 4)
+
+        bottom = QWidget()
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(20, 0, 20, 20)
+        tabs = QTabWidget()
+        tabs.setObjectName("volumeInfoTabs")
+        analysis = PropertyTable("Field", "Value")
+        analysis.setObjectName("volumeInfoAnalysis")
+        analysis.set_rows(self._analysis_rows())
+        tabs.addTab(analysis, icons.icon(icons.TRIAGE), "Analysis")
+        bottom_layout.addWidget(tabs, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        close_button.setMinimumWidth(BUTTON_WIDTH)
+        buttons.addWidget(close_button)
+        bottom_layout.addLayout(buttons)
+        main_layout.addWidget(bottom, 1)
+        self._evidence_dialog = dialog
+        dialog.exec()
+        return dialog
+
     def _analysis_rows(self):
         """What the case recorded about the image on screen, for the
         Analysis tab -- or why there is nothing to show."""
@@ -333,7 +512,7 @@ class VolumeInfoMixin:
             # Column 0: Volume, named as the tree and the map name it
             volume_item = QTableWidgetItem(region.get('label') or
                                            disk_layout.label(region))
-            volume_item.setIcon(QIcon(icon_path))
+            volume_item.setIcon(icons.cached_icon(icon_path))
             table.setItem(idx, 0, volume_item)
 
             # Column 1: what it holds

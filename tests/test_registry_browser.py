@@ -152,3 +152,50 @@ def test_the_browser_reads_the_evidence_chosen_in_it(qapp, tmp_path):
         assert browser.treeWidget.topLevelItemCount() == 0
     finally:
         browser.shutdown()
+
+
+def test_a_slow_hive_search_never_holds_the_window(qapp, tmp_path,
+                                                   monkeypatch):
+    """Each image the window opens activates it, which hands the browser
+    the evidence again. It used to wait (up to 10 s, twice) for the last
+    search to stop -- a phone folder's search stops only between volumes:
+    15 s of frozen window while a case's two phone folders opened. Now a
+    search runs on, its answer dropped if it went stale."""
+    import threading
+    import time
+    from trace_app.core import registry_hives
+    from trace_app.ui.viewers import registry_hive
+    release = threading.Event()
+
+    class Handler:
+        def close_resources(self):
+            pass
+
+    def slow(handler, should_stop=None):
+        release.wait(30)            # deaf to interruption, like a big walk
+        return []
+    monkeypatch.setattr(registry_hive, '_own_handler',
+                        lambda path, unlocks: Handler())
+    monkeypatch.setattr(registry_hives, 'find_hives', slow)
+    first, second = str(tmp_path / 'ios'), str(tmp_path / 'pixel')
+    browser = registry_hive.RegistryExtractor()
+    try:
+        handlers = {first: object(), second: object()}
+        started = time.monotonic()
+        browser.set_evidence([(first, 'ios', handlers[first])])
+        browser.set_evidence([(first, 'ios', handlers[first]),
+                              (second, 'pixel', handlers[second])])
+        # The first image reopened: its search is stale, not waited for.
+        handlers[first] = object()
+        browser.set_evidence([(first, 'ios', handlers[first]),
+                              (second, 'pixel', handlers[second])])
+        assert time.monotonic() - started < 1
+        release.set()
+        browser.wait_for_search()
+        from tests.conftest import pump
+        pump(qapp, 5, lambda: browser._hives.keys() == {first, second})
+        assert set(browser._hives) == {first, second}
+    finally:
+        release.set()
+        browser.shutdown()
+        browser.deleteLater()

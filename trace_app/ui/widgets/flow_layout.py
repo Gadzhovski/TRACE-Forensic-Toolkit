@@ -10,7 +10,7 @@ Adapted from Qt's Flow Layout example (BSD).
 """
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
-from PySide6.QtWidgets import QLayout, QSizePolicy
+from PySide6.QtWidgets import QLayout
 
 
 class FlowLayout(QLayout):
@@ -82,12 +82,3 @@ class FlowLayout(QLayout):
         return y + row_height - rect.y() + margins.bottom()
 
 
-def flow_row(parent, widgets, spacing=6):
-    """A widget holding `widgets` in a FlowLayout, for a parent layout."""
-    from PySide6.QtWidgets import QWidget
-    holder = QWidget(parent)
-    holder.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-    layout = FlowLayout(holder, spacing)
-    for widget in widgets:
-        layout.addWidget(widget)
-    return holder

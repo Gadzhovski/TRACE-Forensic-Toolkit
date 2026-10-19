@@ -46,6 +46,8 @@ _ESRI_SOURCES = ('Powered by Esri · Esri, HERE, Garmin, © OpenStreetMap '
 #: follows the theme unless the examiner picks another. Tiles are fetched
 #: for the area on screen only, with an identifying User-Agent, and kept in
 #: memory only.
+_ESRI_IMAGERY = ('Powered by Esri · Esri, Maxar, Earthstar Geographics, '
+                 'and the GIS User Community')
 TILE_STYLES = {
     'light': {'label': "Light (English labels)",
               'host': 'server.arcgisonline.com',
@@ -66,19 +68,41 @@ TILE_STYLES = {
                 'layers': (_ESRI + 'World_Street_Map/MapServer/tile/'
                            '{z}/{y}/{x}',),
                 'max_zoom': 18, 'attribution': _ESRI_SOURCES},
+    'satellite': {'label': "Satellite (English labels)",
+                  'host': 'server.arcgisonline.com',
+                  'layers': (_ESRI + 'World_Imagery/MapServer/tile/'
+                             '{z}/{y}/{x}',
+                             _ESRI + 'Reference/World_Boundaries_and_Places/'
+                             'MapServer/tile/{z}/{y}/{x}'),
+                  'max_zoom': 18, 'attribution': _ESRI_IMAGERY},
+    'satellite_plain': {'label': "Satellite (no labels)",
+                        'host': 'server.arcgisonline.com',
+                        'layers': (_ESRI + 'World_Imagery/MapServer/tile/'
+                                   '{z}/{y}/{x}',),
+                        'max_zoom': 18, 'attribution': _ESRI_IMAGERY},
     'osm': {'label': "OpenStreetMap (local names)",
             'host': 'tile.openstreetmap.org',
             'layers': ('https://tile.openstreetmap.org/{z}/{x}/{y}.png',),
             'max_zoom': 18,
             'attribution': '© OpenStreetMap contributors'},
+    # Google Maps Platform's Map Tiles API: the examiner's own key
+    # (core/google_tiles.py); offered only once one is set.
+    'google_roadmap': {'label': "Google Maps", 'provider': 'google',
+                       'host': 'tile.googleapis.com', 'layers': (),
+                       'max_zoom': 18, 'attribution': 'Google'},
+    'google_satellite': {'label': "Google Satellite", 'provider': 'google',
+                         'host': 'tile.googleapis.com', 'layers': (),
+                         'max_zoom': 18, 'attribution': 'Google'},
+    'google_hybrid': {'label': "Google Hybrid (satellite + labels)",
+                      'provider': 'google', 'host': 'tile.googleapis.com',
+                      'layers': (), 'max_zoom': 18, 'attribution': 'Google'},
+    'google_terrain': {'label': "Google Terrain", 'provider': 'google',
+                       'host': 'tile.googleapis.com', 'layers': (),
+                       'max_zoom': 18, 'attribution': 'Google'},
 }
 #: The style that matches each theme.
 THEME_STYLES = {'light': 'light', 'dark': 'dark'}
 DEFAULT_STYLE = 'light'
-
-# The default style's host and attribution, for callers that name one.
-TILE_HOST = TILE_STYLES[DEFAULT_STYLE]['host']
-ATTRIBUTION = TILE_STYLES[DEFAULT_STYLE]['attribution']
 
 KIND_LABELS = {'photo': 'Photo GPS', 'activity': 'Activity record'}
 
@@ -108,8 +132,10 @@ def position(detail):
 def located(case, evidence_id=None):
     """Every placed item in the case, oldest first (undated last):
     {'kind', 'latitude', 'longitude', 'name', 'when', 'what', 'source',
-    'evidence_id', 'artifact_ref', 'path', 'row'} -- `row` being the
-    finding or activity row it came from, for previewing."""
+    'read_by', 'evidence_id', 'artifact_ref', 'path', 'row'} -- `row`
+    being the finding or activity row it came from, for previewing;
+    `read_by` who read it (TRACE, a LEAPP, or both)."""
+    from trace_app.core.conversations import readers_of, source_text
     points = []
     for row in case.findings(evidence_id, 'photo'):
         detail = row.get('detail') or {}
@@ -118,12 +144,21 @@ def located(case, evidence_id=None):
             continue
         camera = ' '.join(p for p in (detail.get('make'),
                                       detail.get('model')) if p)
+        # A video's or recording's container metadata (kind 'video' /
+        # 'audio', core/media_metadata.py) is placed like a photo's EXIF.
+        media = row.get('kind') in ('video', 'audio')
+        verb = {'video': "Video recorded", 'audio': "Audio recorded"}.get(
+            row.get('kind'), "Photo taken")
         points.append({
             'kind': 'photo', 'latitude': where[0], 'longitude': where[1],
             'name': row.get('name') or '', 'when': detail.get('taken')
-            or detail.get('gps_date') or '',
-            'what': f"Photo taken{' with ' + camera if camera else ''}",
-            'source': 'EXIF GPS', 'evidence_id': row.get('evidence_id'),
+            or detail.get('gps_date') or (
+                f"{detail['recorded']} UTC" if detail.get('recorded')
+                else ''),
+            'what': f"{verb}{' with ' + camera if camera else ''}",
+            'source': 'Video metadata' if media else 'EXIF GPS',
+            'read_by': ['TRACE'],
+            'evidence_id': row.get('evidence_id'),
             'artifact_ref': row.get('artifact_ref'),
             'path': row.get('path') or '', 'row': row})
     for row in case.located_activity(evidence_id):
@@ -134,7 +169,8 @@ def located(case, evidence_id=None):
             'kind': 'activity', 'latitude': where[0], 'longitude': where[1],
             'name': row.get('subject') or '',
             'when': row.get('time_utc') or '',
-            'what': row.get('what') or '', 'source': row.get('source') or '',
+            'what': row.get('what') or '', 'source': source_text(row),
+            'read_by': readers_of(row),
             'evidence_id': row.get('evidence_id'),
             'artifact_ref': row.get('artifact_ref'),
             'path': row.get('source_path') or '', 'row': row})
@@ -202,10 +238,17 @@ def visible_tiles(centre_x, centre_y, width, height, zoom):
             for x in range(left, right + 1)]
 
 
-def tile_urls(zoom, x, y, style=DEFAULT_STYLE):
+def tile_urls(zoom, x, y, style=DEFAULT_STYLE, google=None):
     """The URLs of one tile's layers in `style`, base first, its x wrapped
-    round the world."""
+    round the world. A Google style needs `google` ({'session': ...,
+    'key': ...}, core/google_tiles) -- none until the session is made."""
     count = 2 ** zoom
+    if TILE_STYLES[style].get('provider') == 'google':
+        from trace_app.core import google_tiles
+        if not google or not google.get('session'):
+            return []
+        return [google_tiles.tile_url(google['session'], google['key'],
+                                      zoom, x, y)]
     return [layer.format(z=zoom, x=x % count, y=y)
             for layer in TILE_STYLES[style]['layers']]
 

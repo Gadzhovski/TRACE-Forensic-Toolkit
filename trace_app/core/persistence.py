@@ -593,7 +593,8 @@ def _startup(volume, folder, user, lnk, tick):
                                    if p).strip() or entry.name
                 detail = {'shortcut': entry.name,
                           'working folder': facts.get('working_dir')}
-            except Exception:
+            except Exception as exc:
+                logger.debug("Shortcut %s not read: %s", entry.path, exc)
                 pass
         else:
             command = 'C:\\' + entry.path.strip('/').replace('/', '\\')

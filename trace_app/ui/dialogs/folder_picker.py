@@ -12,10 +12,11 @@ import logging
 import pytsk3
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHeaderView, QLabel,
-                               QTreeWidget, QTreeWidgetItem, QVBoxLayout)
+                               QTreeWidgetItem, QVBoxLayout)
 
 from trace_app.core import scope as scope_module
 from trace_app.ui import icons
+from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 
 logger = logging.getLogger('TRACE.FolderPicker')
 
@@ -66,7 +67,7 @@ class FolderPicker(QDialog):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        self.tree = QTreeWidget()
+        self.tree = BranchTreeWidget()
         self.tree.setObjectName("folderPickerTree")
         self.tree.setHeaderHidden(True)
         self.tree.header().setSectionResizeMode(QHeaderView.ResizeToContents)

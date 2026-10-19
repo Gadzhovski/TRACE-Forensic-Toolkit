@@ -49,6 +49,7 @@ import logging
 import pytsk3
 
 from trace_app.core.activity import times
+from trace_app.core.tsk_names import entry_name
 
 logger = logging.getLogger('TRACE.Deleted')
 
@@ -175,10 +176,11 @@ def deleted_files(image_handler, allocated=None, should_stop=None,
         matcher = scope.matcher(fs) if scope is not None else None
         in_scope = None if matcher is None else (
             lambda path, m=matcher: not m.skips_path(path))
-        from trace_app.core.btrfs import is_btrfs
-        if is_btrfs(fs):
-            # No deleted names in a Btrfs directory: the files survive in
-            # the older leaves copy-on-write leaves (core/btrfs_recover).
+        if hasattr(fs, 'deleted_scan'):
+            # No deleted names in a folder to walk: Btrfs's files survive
+            # in the older leaves copy-on-write leaves (core/btrfs_recover),
+            # YAFFS's in pages garbage collection has not erased yet
+            # (core/yaffs_recover) -- each file system finds its own.
             yield from fs.deleted_scan(should_stop, progress).records(
                 offset, base, should_stop, progress, in_scope)
             continue
@@ -206,7 +208,7 @@ def deleted_files(image_handler, allocated=None, should_stop=None,
                 info = entry.info
                 if info.name is None:
                     continue
-                name = info.name.name.decode('utf-8', 'replace')
+                name = entry_name(entry, fs)
                 if name in ('.', '..'):
                     continue
                 child = f"{path}/{name}"

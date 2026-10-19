@@ -24,6 +24,7 @@ from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.dialog_page import PageDialog
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.KeywordDialog')
@@ -126,12 +127,14 @@ class EditListDialog(QDialog):
         self.accept()
 
 
-class KeywordListsDialog(QDialog):
+class KeywordListsDialog(PageDialog):
     #: The examiner asked to search now (after the options were saved).
     search_requested = Signal()
 
     def __init__(self, case=None, library=None, parent=None):
-        super().__init__(parent)
+        super().__init__("Keyword Lists", '', icon=icons.KEYWORDS,
+                         parent=parent, scroll=False,
+                         object_name="hashSetsDialog")
         self.setWindowTitle("Keyword Lists")
         self.setObjectName("hashSetsDialog")
         self.setWindowIcon(icons.icon(icons.KEYWORDS))
@@ -141,7 +144,7 @@ class KeywordListsDialog(QDialog):
         self.options = keywords.case_options(case, self.library)
         self._initial = dict(self.options, lists=dict(self.options['lists']))
 
-        layout = QVBoxLayout(self)
+        layout = self.table_body()
         intro = QLabel(
             "A keyword list is a set of terms searched for across the whole "
             "case at once: every file, deleted ones included, every archive "
@@ -150,7 +153,7 @@ class KeywordListsDialog(QDialog):
             "report. Lists are kept in your library and chosen per case.")
         intro.setObjectName("analysisModulesIntro")
         intro.setWordWrap(True)
-        layout.addWidget(intro)
+        self.set_intro(intro.text())
 
         self.use_box = QCheckBox("Search with keyword lists in this case")
         self.use_box.setObjectName("analysisModuleCheck")
@@ -199,7 +202,7 @@ class KeywordListsDialog(QDialog):
         self.status = QLabel()
         self.status.setObjectName("triageStatus")
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        self.footer_status(self.status)
 
         buttons = QDialogButtonBox()
         self.search_button = buttons.addButton("Save and Search Now",
@@ -208,7 +211,7 @@ class KeywordListsDialog(QDialog):
         close = buttons.addButton(QDialogButtonBox.Close)
         close.clicked.connect(self.accept)
         buttons.rejected.connect(self.accept)
-        layout.addWidget(buttons)
+        self.add_button(buttons)
         if case is None:
             self.use_box.setEnabled(False)
             self.search_button.setEnabled(False)

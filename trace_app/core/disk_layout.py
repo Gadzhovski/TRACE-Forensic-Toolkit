@@ -9,7 +9,7 @@ volume over a table over unallocated space, containers left out because
 what they contain is shown -- in disk order, with what each volume holds.
 
 It is the one account of the disk the window gives: the tree's partition,
-table and free-space nodes, the Image Information map and its volume table
+table and free-space nodes, the Evidence Information map and its volume table
 all name a region with `label(region)` -- the name the tree has always used
 (ImageHandler.partition_label: 'GPT Header', 'Linux Filesystem @ 4096'),
 free space by where it really starts ('Unallocated Space @ 34', not

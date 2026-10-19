@@ -706,9 +706,8 @@ def test_virustotal_lookup_and_upload_are_recorded_and_audited(
     monkeypatch.setattr(vt, 'POLL_INTERVAL', 0.05)
     vt._limiters['test-key'] = vt.RateLimiter(per_minute=10000,
                                               per_day=100000)
-    if not window.api_keys.has_section('API_KEYS'):
-        window.api_keys.add_section('API_KEYS')
-    window.api_keys.set('API_KEYS', 'virustotal', 'test-key')
+    from trace_app.infra import api_keys
+    monkeypatch.setitem(api_keys._session, 'virustotal', 'test-key')
 
     finding = next(f for f in window.case.findings() if f['module']
                    in ('authors', 'photo', 'hidden'))
@@ -817,6 +816,19 @@ def test_carving_is_a_triage_tab_with_its_findings(qapp, window, truth):
     assert shown.get('is_carved')
     assert shown['file_content'] == truth[SECOND].read(finding['offset'],
                                                        finding['size'])
+
+    # Its thumbnail: read on the icon views' own thread, as the panel's
+    # rows have it. It asked the case database for fragments there, which
+    # SQLite refuses from another thread -- no carve ever had a thumbnail.
+    import threading
+    panel = window.carved_panel
+    row = next(r for r in panel._rows if r['offset'] == finding['offset'])
+    got = []
+    reader = threading.Thread(target=lambda: got.append(
+        panel._carve_bytes(row)))
+    reader.start()
+    reader.join(30)
+    assert got and got[0] == shown['file_content']
 
 
 def test_quick_triage_carving_keeps_nothing_in_a_case(qapp, stubbed_dialogs,
@@ -1002,12 +1014,15 @@ def test_indexing_is_a_job_and_its_indicators_are_triage_and_tree(
     # Triage's image filter narrows the values to that image's.
     second = next(r['id'] for r in window.case.evidence()
                   if r['path'].endswith(SECOND))
-    panel.set_kind('ip')
+    # A kind that image has (its dotted numbers are no longer IPv4
+    # addresses: search_index._ipv4_in_context).
+    kind = next(k for k in sorted(kinds) if index.indicators(k, second))
+    panel.set_kind(kind)
     window.triage_panel.set_evidence_filter(second)
     assert pump(qapp, 30, lambda: not panel.loading)
     shown = {panel.values_table.item(r, 0).text()
              for r in range(panel.values_table.rowCount())}
-    assert shown == {r['value'] for r in index.indicators('ip', second)}
+    assert shown == {r['value'] for r in index.indicators(kind, second)}
 
     # A value's files are that image's, and preview from that image.
     panel.values_table.selectRow(0)
@@ -1534,6 +1549,8 @@ def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
     import csv
     from PySide6.QtCore import Qt
     panel = window.timeline_panel
+    # One row per event: a collapsed burst is not one to preview.
+    panel.collapse_button.setChecked(False)
     if not window.case._db.execute("SELECT 1 FROM fs_events").fetchone():
         window.queue_ntfs(window.case.evidence())
         assert pump(qapp, 300, lambda: not window.job_bar.busy)
@@ -1691,7 +1708,9 @@ def test_report_is_a_job_and_lands_in_exports(qapp, window):
     assert set(written) == {'html', 'pdf'}
     for item in written.values():
         assert os.path.exists(item['path'])
-        assert os.path.dirname(item['path']) == os.path.join(
+        # Each report has a folder of its own in exports/.
+        assert os.path.dirname(item['path']) == item['folder']
+        assert os.path.dirname(item['folder']) == os.path.join(
             window.case.folder, 'exports')
     with open(written['html']['path'], encoding='utf-8') as handle:
         page = handle.read()
@@ -1707,6 +1726,8 @@ def test_timeline_histogram_controls(qapp, window):
     from PySide6.QtGui import QMouseEvent, QWheelEvent
     from trace_app.core import timeline
     panel = window.timeline_panel
+    # One row per event: a collapsed burst is not one to preview.
+    panel.collapse_button.setChecked(False)
     if not window.case._db.execute("SELECT 1 FROM fs_events").fetchone():
         window.queue_ntfs(window.case.evidence())
         assert pump(qapp, 300, lambda: not window.job_bar.busy)
@@ -2088,6 +2109,13 @@ def test_deleted_files_are_a_job_and_a_triage_tab(qapp, window, truth):
                                                  ref['start_offset'])
     assert captured and captured[-1] == expected
     assert expected[:3] == b'\xff\xd8\xff'
+    # Its thumbnail is the same bytes, read from its own image on the
+    # icon views' thread (no image activated).
+    assert panel._read(row) == expected
+    assert panel._head(row) == expected[:len(panel._head(row))]
+    panel.set_view('large', remember=False)
+    assert panel.stack.currentWidget() is panel.gallery
+    panel.set_view('details', remember=False)
 
 
 def test_an_interrupted_carve_offers_resume(qapp, window):
@@ -2171,6 +2199,78 @@ def test_a_database_shows_its_tables_and_what_it_deleted(qapp, window,
     assert not viewer.isVisibleTo(application)
 
 
+def test_a_file_with_nothing_to_show_replaces_the_one_before(qapp, window):
+    """An empty file, or one whose main stream reads as nothing (NTFS's
+    $Secure and $Volume keep their data in named streams), used to leave
+    the previous file on screen under the new selection."""
+    import io
+    from PIL import Image
+    picture = io.BytesIO()
+    Image.new('RGB', (8, 8), 'red').save(picture, 'PNG')
+    application = window.application_viewer
+    window.current_selected_data = None
+    window._cancel_worker('file_worker')
+    window._cancel_worker('media_worker')
+    pump(qapp, 2)
+    window.viewer_tab.setCurrentWidget(application)
+    pump(qapp, 1)
+    for content, size, said in ((b'', '0.00 B', 'This file is empty'),
+                                (b'', '264 KB', 'Nothing could be read')):
+        window.update_viewer_with_file_content(picture.getvalue(), {
+            'name': 'red.png', 'path': '/red.png', 'start_offset': 0})
+        shown = application.get_picture_viewer()
+        assert shown.isVisibleTo(application)
+        window.update_viewer_with_file_content(content, {
+            'name': '$Secure', 'path': '/$Secure', 'start_offset': 0,
+            'size': size})
+        assert not shown.isVisibleTo(application)
+        assert application.placeholder.text().startswith(said)
+
+
+def test_a_late_read_of_the_file_before_is_dropped(qapp, window,
+                                                   monkeypatch):
+    """NTFSImage: Inbox.dbx (5 MB) clicked, then an RTF -- the RTF showed,
+    then the mailbox's read landed and its bytes were shown under the
+    RTF's name ("This RTF document could not be read")."""
+    from PySide6.QtCore import QThread, Signal
+
+    class Held(QThread):
+        completed = Signal(bytes, object)
+        error = Signal(str)
+        made = []
+
+        def __init__(self, handler, inode, offset):
+            super().__init__()
+            self.inode = inode
+            Held.made.append(self)
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr(type(window), 'FileContentWorker', Held)
+    shown = []
+    monkeypatch.setattr(window, 'update_viewer_with_file_content',
+                        lambda content, data: shown.append(
+                            (data['name'], content)))
+    monkeypatch.setattr(window, '_file_unreadable',
+                        lambda data, message: shown.append(
+                            (data['name'], message)))
+    mailbox = {'name': 'Inbox.dbx', 'inode_number': 41, 'start_offset': 0}
+    note = {'name': 'note.rtf', 'inode_number': 42, 'start_offset': 0}
+    window.current_selected_data = mailbox
+    window._read_file_for(mailbox, mailbox)
+    window.current_selected_data = note
+    window._read_file_for(note, note)
+    first, second = Held.made
+    second.completed.emit(b'{\\rtf1 note}', None)
+    first.completed.emit(b'mailbox bytes', None)     # late: dropped
+    first.error.emit('late failure')                 # late: dropped
+    assert shown == [('note.rtf', b'{\\rtf1 note}')]
+    for worker in Held.made:
+        worker.wait()
+    window.current_selected_data = None
+
+
 def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
                                                                  window):
     """Neither image holds a program, so a signed one and one that calls
@@ -2208,7 +2308,11 @@ def test_executables_are_a_triage_tab_and_flagged_ones_a_finding(qapp,
         assert cells[1][2] == '' and cells[1][3] == 'PE32+ program'
         assert cells[1][6] == 'Yes, by Simon Tatham'
         group = _findings_group(window, 'Executables')
-        assert group is not None and group.text(0) == 'Executables (1)'
+        # The tree lists every executable, as the tab does: one number.
+        tabs = window.triage_panel.tabs
+        listed = next(tabs.tabText(i) for i in range(tabs.count())
+                      if tabs.tabText(i).startswith('Executables'))
+        assert group is not None and group.text(0) == listed
         assert [leaf.text(0) for leaf in _leaves(group)][0].startswith(
             'svchost.exe')
     finally:
@@ -2270,7 +2374,8 @@ def test_sigma_detections_are_a_triage_tab_and_findings(qapp, window):
         assert table.item(0, 2).text() == 'High'
         assert 'SubjectUserName: admin' in table.item(0, 8).text()
         group = _findings_group(window, 'Sigma detections')
-        assert group is not None and group.text(0) == 'Sigma detections (2)'
+        assert group is not None and \
+            group.text(0) == f"Sigma detections ({table.rowCount()})"
     finally:
         window.case.clear_findings(evidence, 'sigma')
         window.refresh_analysis_views()
@@ -2321,8 +2426,17 @@ def test_media_says_what_it_is_and_switches_after_playing(qapp):
         player.jump(60000)                           # held at the end
         assert pump(qapp, 3,
                     lambda: player.media_player.position() < 3300)
-        player.speed_combo.setCurrentIndex(player.speed_combo.findData(2.0))
+        player.speed_actions[2.0].trigger()
         assert player.media_player.playbackRate() == 2.0
+        assert player.speed_button.text() == '2×'
+        # The speed's label fits its button (the combo box it replaced
+        # drew cut off in the toolbar).
+        player.speed_actions[0.25].trigger()
+        pump(qapp, 0.1)
+        button = player.speed_button
+        assert button.fontMetrics().horizontalAdvance('0.25×') < \
+            button.width()
+        player.speed_actions[2.0].trigger()
         player.loop_action.trigger()
         assert player.media_player.loops() == -1     # QMediaPlayer.Infinite
         player.loop_action.trigger()
@@ -2728,3 +2842,63 @@ def test_every_triage_tab_with_rows_has_its_group_in_the_tree(
             assert tabs.tabText(tabs.currentIndex()).startswith(tab), label
     finally:
         close_window(win)
+
+
+def test_the_tree_and_the_tabs_count_alike(qapp, window):
+    """A tree group and the tab showing the same thing give one number:
+    the tree counted persistence by file (5) where its tab listed every
+    entry (15); the NTFS tab left out $LogFile and the change journal; the
+    Findings root left out half its groups."""
+    import re
+    from PySide6.QtCore import Qt
+    window.refresh_analysis_views()
+    ntfs = getattr(window.triage_panel, '_ntfs_panel', None)
+    pump(qapp, 30, lambda: ntfs is None or not ntfs.loading)
+    pump(qapp, 2)
+
+    def number(text):
+        found = re.search(r'\(([\d,]+)\)\s*$', text)
+        return int(found.group(1).replace(',', '')) if found else None
+
+    def label(text):
+        return re.sub(r'\s*\([\d,]+\)\s*$', '', text)
+
+    triage = window.triage_panel.tabs
+    tabs = {label(triage.tabText(i)): number(triage.tabText(i))
+            for i in range(triage.count())}
+    tree = window.tree_viewer
+    roots = {label(tree.topLevelItem(i).text(0)): tree.topLevelItem(i)
+             for i in range(tree.topLevelItemCount())}
+    findings = roots.get('Findings')
+    if findings is not None:
+        groups = {label(findings.child(j).text(0)):
+                  number(findings.child(j).text(0))
+                  for j in range(findings.childCount())}
+        assert number(findings.text(0)) == sum(groups.values())
+        same = {'Persistence': 'Persistence', 'Photos': 'Photos',
+                'Executables': 'Executables', 'Sigma detections': 'Sigma',
+                'Hidden data': 'Hidden data', 'Duplicates': 'Duplicates',
+                'Type mismatches': 'Type mismatches',
+                'High entropy': 'High entropy',
+                'Document authors': 'Authors', 'YARA matches': 'YARA',
+                'Carved files': 'Carved files',
+                'Thumbnail cache pictures': 'Thumbnails',
+                'Deleted files': 'Deleted files',
+                'Similar pictures': 'Similar pictures'}
+        for group, tab in same.items():
+            if group in groups:
+                assert groups[group] == tabs[tab], (group, groups[group],
+                                                    tabs[tab])
+        ntfs = sum(groups.get(g, 0) for g in (
+            'Timestomping', 'Streams and downloads', 'Index slack entries',
+            '$LogFile records', 'Change journal records'))
+        assert tabs['NTFS'] == ntfs
+    activity = roots.get('Activity')
+    if activity is not None:
+        panel = window.activity_panel.tabs
+        kinds = {label(panel.tabText(i)): number(panel.tabText(i))
+                 for i in range(panel.count())}
+        assert number(activity.text(0)) == kinds['All']
+        for j in range(activity.childCount()):
+            child = activity.child(j).text(0)
+            assert number(child) == kinds[label(child)], child

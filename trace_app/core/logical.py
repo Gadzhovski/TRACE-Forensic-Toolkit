@@ -22,6 +22,8 @@ them, which the source keeps stable, so artifact refs survive reopening.
 
 import logging
 import posixpath
+from collections.abc import Mapping
+from functools import partial
 
 import pytsk3
 
@@ -32,6 +34,10 @@ BLOCK_SIZE = 512
 
 #: The time slots TRACE reads, as TSK names them.
 TIMES = ('mtime', 'atime', 'ctime', 'crtime')
+#: A listing's time columns (core/folder_listing.TIME_SLOTS) and its "no
+#: such time".
+TIMES_KEPT = TIMES
+MISSING_TIME = -(2 ** 63)
 
 
 class Node:
@@ -51,6 +57,87 @@ class Node:
         #: What the source records about the file beyond TSK's fields
         #: (stored hashes, attributes, the original path...).
         self.facts = facts or {}
+
+
+class ListedNodes(Mapping):
+    """`LogicalFileSystem.nodes` over a folder's listing in columns
+    (core/folder_listing.Listing): a Node is made the first time it is
+    asked for and kept. 1.3 million Nodes made at once took 5.5 s; most
+    openings ask for a few thousand."""
+
+    def __init__(self, listing, reader):
+        self._listing = listing
+        self._reader = reader               # reader(inode, offset, length)
+        self._made = {}
+        self._size = len(listing)
+
+    def __len__(self):
+        return self._size + sum(1 for inode in self._made
+                                if inode > self._size)
+
+    def __iter__(self):
+        yield from range(1, self._size + 1)
+        yield from sorted(i for i in self._made if i > self._size)
+
+    def __contains__(self, inode):
+        return (isinstance(inode, int) and 1 <= inode <= self._size) or \
+            inode in self._made
+
+    def __getitem__(self, inode):
+        node = self._made.get(inode)
+        if node is None:
+            if not isinstance(inode, int) or not 1 <= inode <= self._size:
+                raise KeyError(inode)
+            node = self._made[inode] = self._make(inode)
+        return node
+
+    def __setitem__(self, inode, node):
+        self._made[inode] = node
+
+    def values(self):
+        made, make = self._made, self._make
+        for inode in self:
+            node = made.get(inode)
+            if node is None:
+                node = made[inode] = make(inode)
+            yield node
+
+    def items(self):
+        for node in self.values():
+            yield node.inode, node
+
+    def file_names(self):
+        """Every file's name, from the columns: no node is made."""
+        names = self._listing.names
+        return (names[index] for index, kind in
+                enumerate(self._listing.kinds) if not kind)
+
+    def _make(self, inode):
+        listing, index = self._listing, inode - 1
+        mtimes, atimes, ctimes, crtimes = listing.times
+        times = {}
+        value = mtimes[index]
+        if value != MISSING_TIME:
+            times['mtime'] = divmod(value, 1_000_000_000)
+        value = atimes[index]
+        if value != MISSING_TIME:
+            times['atime'] = divmod(value, 1_000_000_000)
+        value = ctimes[index]
+        if value != MISSING_TIME:
+            times['ctime'] = divmod(value, 1_000_000_000)
+        value = crtimes[index]
+        if value != MISSING_TIME:
+            times['crtime'] = divmod(value, 1_000_000_000)
+        if listing.kinds[index] != 1:
+            return Node(inode, listing.parents[index], listing.names[index],
+                        False, listing.sizes[index], times,
+                        partial(self._reader, inode))
+        node = Node(inode, listing.parents[index], listing.names[index],
+                    True, 0, times)
+        first, names = listing.first[index], listing.names
+        node.children = {names[child - 1]: child for child in
+                         range(first, first + listing.count[index])}
+        return node
 
 
 class _Name:
@@ -163,7 +250,7 @@ class LogicalFileSystem:
         self.nodes = {ROOT: Node(ROOT, ROOT, '', True)}
         self.info = _FsInfo(self)
         #: Things the source records about itself (stored image hashes,
-        #: the acquiring tool, the device...), for Image Information.
+        #: the acquiring tool, the device...), for Evidence Information.
         self.facts = {}
         #: What could not be read, and why.
         self.problems = []
@@ -244,7 +331,56 @@ class LogicalFileSystem:
         return LogicalFile(self, node)
 
     def total_size(self):
+        listing = getattr(self, 'listing', None)
+        if listing is not None:
+            return sum(size for size, kind in zip(listing.sizes,
+                                                  listing.kinds) if not kind)
         return sum(n.size for n in self.nodes.values() if not n.is_dir)
+
+    def file_names(self):
+        """Every file's name (folders' not), without making nodes where
+        the source keeps them as columns (a folder's listing)."""
+        if isinstance(self.nodes, ListedNodes):
+            return self.nodes.file_names()
+        return (n.name for n in self.nodes.values() if not n.is_dir)
+
+    def file_rows(self):
+        """(folder path, name, size) of every live file -- folder '' at the
+        root, else '/a/b' -- in source order. Over a folder's listing no
+        node is made and each folder's path is built once: a node and a
+        path_of per file took 20 s on a Mac folder's 1.3 million."""
+        nodes = self.nodes
+        if isinstance(nodes, ListedNodes):
+            listing = nodes._listing
+            names, parents, kinds, sizes = (listing.names, listing.parents,
+                                            listing.kinds, listing.sizes)
+            # A folder is numbered when its parent is listed, so its
+            # parent's path is always known first.
+            folders = {ROOT: ''}
+            for index, kind in enumerate(kinds):
+                if index + 1 == ROOT:
+                    continue
+                parent = folders.get(parents[index])
+                if parent is None:
+                    continue
+                if kind == 1:
+                    folders[index + 1] = f"{parent}/{names[index]}"
+                else:
+                    yield parent, names[index], sizes[index]
+            # Nodes added past the listing (none for a plain folder).
+            extra = [node for inode, node in nodes._made.items()
+                     if inode > len(listing)]
+        else:
+            extra = nodes.values()
+        paths = {}
+        for node in extra:
+            if node.is_dir or node.deleted:
+                continue
+            folder = paths.get(node.parent)
+            if folder is None:
+                folder = self.path_of(node.parent)
+                folder = paths[node.parent] = '' if folder == '/' else folder
+            yield folder, node.name, node.size
 
     def close(self):
         closer = self.facts.pop('_close', None)

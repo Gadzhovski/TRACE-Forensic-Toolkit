@@ -26,6 +26,8 @@ _TSKDATA = ("https://raw.githubusercontent.com/sleuthkit/sleuthkit_test_data/"
             "abcb05bd7f01313115d213dcd83826989fe93535/")
 _FEDORA = ("https://download.fedoraproject.org/pub/fedora/linux/releases/44/"
            "Cloud/x86_64/images/")
+_MAGNET = ("https://digitalcorpora.s3.amazonaws.com/corpora/scenarios/"
+           "magnet/")
 
 #: The CI set: downloaded by every CI run that needs it (cached between
 #: runs, tools/testdata/fetch.py). Most of these are mostly zeros and pack
@@ -149,6 +151,21 @@ LOCAL = {
     'Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2': (
         _FEDORA + 'Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2', 'raw',
         '28680fe5b371a5a82ebf43a31926e086a168e59949d03969c5093e7071f90b7f'),
+    # Magnet Forensics' 2022 CTF iPhone 8 (iOS 15) full file system, a
+    # GrayKey extraction zip (Digital Corpora; 4.7 GB download, 8.7 GB zip):
+    # CoreSpotlight stores, Biome, NoteStore, Screen Time, URL caches.
+    # The download also holds a keychain plist and GrayKey's report PDF
+    # (core/graykey.py: its hashes are this zip's, its device the phone).
+    'fb028ddefa8af7df5b12d3e729f075d150637a31_files_full.zip': (
+        _MAGNET + '2022%20CTF%20-%20iOS%20Full%20File%20System.zip', 'zip',
+        'a6d180aff36c9b37ec9a3819f3d98af46efc9c47b36a8a7b58cde791049b38c2'),
+    # Magnet Forensics' 2021 CTF Mac mini, macOS 11.2.1 (20D74): a logical
+    # collection, stored zip of the file system (Digital Corpora; 81 GB).
+    # The volume's own Spotlight store, CoreSpotlight, TCC (auth_value),
+    # Terminal and Finder saved state, Trash .DS_Store, keychains.
+    'magnet-2021-ctf-macos.zip': (
+        _MAGNET + '2021%20CTF%20-%20MacOS.zip', 'raw',
+        '5da6eb8013353980f445e602a7937841ccb615d7a3ac5c422ae0c647053e807e'),
 }
 
 #: No public source: checked when present, never fetched, never in CI.
@@ -247,6 +264,31 @@ BUILT = {
     'ubifs-fanout4.ubifs': 'make_ubifs.py',
     'ubi-multi.ubi': 'make_ubifs.py',
     'ubifs-kernel.ubi': 'make_ubifs.py',
+    # QNX4 (qnx4_writer.py), cramfs, romfs, and the Linux kernel's reading
+    # of them and of the QNX4/QNX6/cramfs/romfs samples (QEMU guest).
+    'kernel-fs-key.json': 'make_kernel_keys.py',
+    'qnx4-tree.img': 'make_kernel_keys.py',
+    'cramfs-le.cramfs': 'make_kernel_keys.py',
+    'cramfs-be.cramfs': 'make_kernel_keys.py',
+    'romfs.img': 'make_kernel_keys.py',
+    # LittleFS (littlefs-python = littlefs's C code) and U-Boot
+    # environments (mkenvimage), each with its own tool's reading.
+    'littlefs-key.json': 'make_littlefs.py',
+    'lfs-512.img': 'make_littlefs.py',
+    'lfs-4096.img': 'make_littlefs.py',
+    'uboot-env-key.json': 'make_uboot_env.py',
+    'uboot-env.bin': 'make_uboot_env.py',
+    'uboot-env-be.bin': 'make_uboot_env.py',
+    'uboot-env-64k.bin': 'make_uboot_env.py',
+    'uboot-env-redundant.bin': 'make_uboot_env.py',
+    # QNX IFS: openqnx's real image stored every way mkifs stores one, and
+    # QNX's dumpifs reading of each.
+    'ifs-key.json': 'make_ifs_images.py',
+    'ifs-ucl.ifs': 'make_ifs_images.py',
+    'ifs-plain.ifs': 'make_ifs_images.py',
+    'ifs-zlib.ifs': 'make_ifs_images.py',
+    'ifs-lzo.ifs': 'make_ifs_images.py',
+    'ifs-imagefs.ifs': 'make_ifs_images.py',
     # SquashFS, EROFS, UDF, classic HFS and JFFS2, by their own tools.
     'fs-images-key.json': 'make_fs_images.py',
     'erofs-chunk.img': 'make_fs_images.py',

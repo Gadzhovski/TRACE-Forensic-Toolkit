@@ -93,12 +93,22 @@ MODULE_THUMBNAILS = 'thumbnails'
 #: and measures how much of each is left.
 MODULE_DELETED = 'deleted'
 
+#: External tools (core/modules), installed by the examiner (Tools ▸
+#: External Modules): run on files staged from the image. Their keys are
+#: the tools' ids -- every spec in core/modules/spec.TOOLS, so a new LEAPP
+#: is a spec, not a change here.
+from trace_app.core.modules.spec import TOOLS as _TOOLS
+MODULE_ILEAPP = 'ileapp'
+MODULE_ALEAPP = 'aleapp'
+EXTERNAL_MODULES = tuple(_TOOLS)
+
 #: The modules that are jobs of their own, each a boolean in a choice; the
 #: rest (analysis.MODULES) are listed under 'modules'.
 JOB_MODULES = (MODULE_INDEX, MODULE_INDEX_FREE, MODULE_ACTIVITY, MODULE_NTFS, MODULE_FSTIMES,
                MODULE_HASHSETS,
                MODULE_YARA, MODULE_SIGMA, MODULE_PERSISTENCE,
-               MODULE_KEYWORDS, MODULE_THUMBNAILS, MODULE_DELETED)
+               MODULE_KEYWORDS, MODULE_THUMBNAILS, MODULE_DELETED,
+               *EXTERNAL_MODULES)
 
 #: What a module costs, as the badge beside it says.
 FAST, EVERY_FILE, WHOLE_IMAGE = 'fast', 'every file', 'whole image'
@@ -256,6 +266,30 @@ DESCRIPTIONS = {
         WHOLE_IMAGE),
 }
 
+DESCRIPTIONS[MODULE_ILEAPP] = (
+    "iLEAPP (iOS)",
+    "iPhone and iPad extractions and backups parsed by iLEAPP: messages, "
+    "calls, apps, accounts, locations, media -- under Extractions from "
+    "Modules, in the Timeline and in Search. A tool by its own authors, "
+    "installed from Tools ▸ External Modules.",
+    "Copies the files it reads out of the image, then runs it.", FAST)
+DESCRIPTIONS[MODULE_ALEAPP] = (
+    "aLEAPP (Android)",
+    "Android extractions parsed by aLEAPP: messages, calls, apps, "
+    "accounts, locations, media -- under Extractions from Modules, in the "
+    "Timeline and in Search. A tool by its own authors, installed from "
+    "Tools ▸ External Modules.",
+    "Copies the files it reads out of the image, then runs it.", FAST)
+
+for _spec in _TOOLS.values():
+    # The other LEAPPs: what they read, from their specs.
+    DESCRIPTIONS.setdefault(_spec.id, (
+        f"{_spec.name} ({_spec.reads or 'its own evidence'})",
+        f"{_spec.description} Under Extractions from Modules, in the "
+        f"Timeline and in Search. A tool by its own authors, installed "
+        f"from Tools ▸ External Modules.",
+        "Copies the files it reads out of the image, then runs it.", FAST))
+
 #: How the list is grouped, in the order shown.
 GROUPS = (
     ("File analysis", (MODULE_MAGIC, MODULE_HASH, MODULE_ENTROPY,
@@ -266,6 +300,9 @@ GROUPS = (
     ("Rules and lists", (MODULE_HASHSETS, MODULE_YARA, MODULE_SIGMA,
                          MODULE_KEYWORDS)),
     ("Recovery", (MODULE_DELETED, MODULE_INDEX_FREE, MODULE_CARVE)),
+    # In no profile: each reads one kind of evidence, and is chosen for
+    # it.
+    ("External tools", EXTERNAL_MODULES),
 )
 
 #: Profiles: what each ticks. Modules that cannot run are left unticked
@@ -320,6 +357,23 @@ def default_choice(modules=None):
             'persistence': bool(modules), 'thumbnails': bool(modules),
             'deleted': bool(modules),
             'carve_types': [], 'unallocated_only': True}
+
+
+def combine_not_applicable(items, keys):
+    """One selection for several images: [(name, {module: why})] ->
+    (reasons, partly) for ModuleSelector.set_not_applicable -- a module
+    none of them can use is greyed out, one some cannot use is noted
+    ("Skipped on ..."). The wizard and the Analysis Modules dialog alike."""
+    reasons, partly = {}, {}
+    for key in keys:
+        missing = [(name, why[key]) for name, why in items if key in why]
+        if missing and len(missing) == len(items):
+            reasons[key] = missing[0][1] if len(items) == 1 else (
+                "Applies to none of the selected images: " + missing[0][1])
+        elif missing:
+            partly[key] = "Skipped on " + '; '.join(
+                f"{name} ({why.rstrip('.')})" for name, why in missing)
+    return reasons, partly
 
 
 def selected_keys(choice):
@@ -378,6 +432,12 @@ def availability(case=None, libraries=None):
     else:
         unavailable[MODULE_KEYWORDS] = ("No keyword lists in use — Tools ▸ "
                                         "Keyword Lists.")
+    from trace_app.core.modules import install
+    from trace_app.core.modules.spec import TOOLS
+    for key in EXTERNAL_MODULES:
+        if install.installed(TOOLS[key]) is None:
+            unavailable[key] = (f"{TOOLS[key].name} is not installed — "
+                                f"Tools ▸ External Modules.")
     return unavailable, in_use
 
 
@@ -972,19 +1032,9 @@ class AnalysisModulesDialog(QDialog):
             return
         if self.same_box.isChecked():
             ids = self.checked_ids() or [e[0] for e in self.evidence]
-            reasons, partly = {}, {}
-            for key in self.selector.boxes:
-                missing = [i for i in ids if key in self.not_applicable[i]]
-                if missing and len(missing) == len(ids):
-                    reasons[key] = self.not_applicable[ids[0]][key] \
-                        if len(ids) == 1 else (
-                            "Applies to none of the selected images: "
-                            + self.not_applicable[ids[0]][key])
-                elif missing:
-                    partly[key] = "Skipped on " + '; '.join(
-                        f"{names[i]} "
-                        f"({self.not_applicable[i][key].rstrip('.')})"
-                        for i in missing)
+            reasons, partly = combine_not_applicable(
+                [(names[i], self.not_applicable[i]) for i in ids],
+                self.selector.boxes)
             self.selector.set_not_applicable(reasons, partly)
             self.modules_heading.setText(
                 f"Modules for the {len(ids)} ticked image"

@@ -58,11 +58,37 @@ def use_wal(connection):
 #: 3: phone, card and IBAN indicators. 4: entities carry their evidence id,
 #: so counting indicators per image needs no join to the items (and their
 #: text): the Indicators tab's refresh took up to 3 s against a growing index.
-INDEX_VERSION = 6
+INDEX_VERSION = 7
+def _recheck_ipv4(db):
+    """Re-find the IPv4 addresses of every item that has some, from its
+    stored text (the text they were found in), under today's rules."""
+    items = [r[0] for r in db.execute(
+        "SELECT DISTINCT item_id FROM entities WHERE kind = 'ip'")]
+    for item_id in items:
+        row = db.execute("SELECT i.body, e.evidence_id FROM indexed_items i "
+                         "JOIN entities e ON e.item_id = i.id "
+                         "WHERE i.id = ? AND e.kind = 'ip' LIMIT 1",
+                         (item_id,)).fetchone()
+        if row is None:
+            continue
+        body, evidence_id = row
+        pattern = _ENTITY_PATTERNS['ip']
+        keep = {v for v in (_ipv4_in_context(body or '', m.start(), m.end())
+                            for m in pattern.finditer(body or '')) if v}
+        db.execute("DELETE FROM entities WHERE item_id = ? AND kind = 'ip'",
+                   (item_id,))
+        db.executemany(
+            "INSERT INTO entities (item_id, evidence_id, kind, value) "
+            "VALUES (?, ?, 'ip', ?)",
+            [(item_id, evidence_id, value) for value in sorted(keep)])
+
+
 #: Versions upgraded in place rather than discarded, one step at a time:
 #: 4 -> 5 added index_state's scope and free-space columns (resumable runs);
 #: 5 -> 6 stores hashes in lower case (one value, however it was written)
-#: and drops the runs no digest is: all decimal digits, or one character.
+#: and drops the runs no digest is: all decimal digits, or one character;
+#: 6 -> 7 judges IPv4 addresses in context (_ipv4_in_context), re-read from
+#: each item's stored text -- a callable step, given the connection.
 _MIGRATIONS = {4: (
     "ALTER TABLE index_state ADD COLUMN scope TEXT",
     "ALTER TABLE index_state ADD COLUMN free_status TEXT",
@@ -78,7 +104,7 @@ _MIGRATIONS = {4: (
     "DELETE FROM entities WHERE kind = 'hash' AND rowid NOT IN ("
     "SELECT min(rowid) FROM entities WHERE kind = 'hash' "
     "GROUP BY item_id, value)",
-)}
+), 6: (lambda db: _recheck_ipv4(db),)}
 #: Kinds of row free-space indexing writes (`index_free_space`).
 FREE_KINDS = ('unallocated', 'memory')
 
@@ -127,35 +153,57 @@ def unfinished_note(state, active=False):
 # Deliberately conservative. A pattern that matches too much fills the index
 # with noise an examiner then has to dismiss by hand, which is worse than
 # missing an unusual form.
+#
+# Where it can, a pattern opens with its first character (or a lookahead on
+# it) rather than a lookbehind or \b: the regex engine then skips straight
+# to where that character is instead of trying the pattern at every
+# position of a binary's strings. `x(?<!\wx)` is \bx written that way,
+# `(?=\d)(?<![\d\-])` is (?<![\d\-]) before a digit. Same matches;
+# indicators took a tenth of indexing a Windows image, the card and IPv4
+# patterns most of it (each 2.5-18x faster now). Email keeps its \b: its
+# first character may be one \b treats differently ('.', '%', '+', '-').
+
+_HEX = r'[0-9a-fA-F]'
+_OCTET = r'(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)'
 
 _ENTITY_PATTERNS = {
     'email': re.compile(
         r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,24}\b'),
     'url': re.compile(
-        r'\bhttps?://[^\s<>"\'\)\]]{4,400}'),
+        r'h(?<!\wh)ttps?://[^\s<>"\'\)\]]{4,400}'),
+    # Four octets standing alone: not four numbers out of a longer dotted
+    # run (an OID 1.3.6.1.4.1.311, a version 2.11.92.0.12, SVG path data,
+    # in-addr.arpa) nor joined to a word (c3p0-0.9.5.5, v1.2.3.4). The
+    # rest is judged in context by _ipv4_in_context.
     'ip': re.compile(
-        r'\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}'
-        r'(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b'),
+        r'(?=\d)(?<![\w.\-])(?:' + _OCTET + r'\.){3}' + _OCTET +
+        r'(?![\w\-]|\.\w)'),
     'ipv6': re.compile(
-        r'\b(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\b'),
+        _HEX + r'(?<!\w' + _HEX + r')' + _HEX + r'{0,3}:(?:' + _HEX +
+        r'{1,4}:){6}' + _HEX + r'{1,4}\b'),
+    # 32, 40 or 64 hex digits standing alone.
     'hash': re.compile(
-        r'\b(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})\b'),
+        _HEX + r'(?<!\w' + _HEX + r')(?:' + _HEX + r'{31}|' + _HEX +
+        r'{39}|' + _HEX + r'{63})\b'),
+    # bc1... (bech32) or 1.../3... (base58).
     'btc': re.compile(
-        r'\b(?:bc1[a-z0-9]{25,62}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b'),
+        r'[13b](?<!\w[13b])(?:(?<=b)c1[a-z0-9]{25,62}'
+        r'|(?<=[13])[a-km-zA-HJ-NP-Z1-9]{25,34})\b'),
     # International form only (a leading +): national formats differ by
     # country and, unanchored, match every other number in a document.
     'phone': re.compile(
-        r'(?<![\w+])\+\d{1,3}(?:[ .\-]?\(?\d{1,4}\)?){2,5}(?![\w])'),
+        r'\+(?<![\w+]\+)\d{1,3}(?:[ .\-]?\(?\d{1,4}\)?){2,5}(?![\w])'),
     # 13-19 digits, alone or in groups of four; kept only if Luhn-valid and
     # issued under a known scheme's prefix (_valid_card).
     'card': re.compile(
-        r'(?<![\d\-])(?:\d{4}[ \-]){3}\d{1,7}(?![\d\-])'
-        r'|(?<![\d\-])\d{13,19}(?![\d\-])'),
+        r'(?=\d)(?<![\d\-])(?:(?:\d{4}[ \-]){3}\d{1,7}(?![\d\-])'
+        r'|\d{13,19}(?![\d\-]))'),
     # Upper-case country code, two check digits, then the account in groups of
     # four or run together; kept only if its length is right for the country
     # and the mod-97 check holds (_valid_iban).
     'iban': re.compile(
-        r'\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b'),
+        r'[A-Z](?<!\w[A-Z])[A-Z]\d{2}(?: ?[A-Z0-9]{4}){2,7}'
+        r'(?: ?[A-Z0-9]{1,3})?\b'),
 }
 
 #: A character each match must contain: no such character, no match.
@@ -246,6 +294,63 @@ def _valid_hash(text):
     return value
 
 
+#: A version number just before: 'Version=4.0.0.0', 'FileVersion' and
+#: its value on the next line, 'build 2.0.1.7', 'SQLite ... including'.
+_VERSION_BEFORE = re.compile(
+    r'(?i)(?:\b(?:v|ver|version|[a-z_]*version|build|release|'
+    r'rev|revision|including|section|sqlite|doxyfile)|~)'
+    r'[\s\x00=:"\'(,]*$')
+#: ... or after: 'VirtualDubMod 1.5.4.1 (build 2178', '11.1.6.31 or later',
+#: '6.1.4.4 - MIT', an assembly's ', Culture='.
+_VERSION_AFTER = re.compile(
+    r'(?i)^[\s"\',]*(?:\(build|or (?:later|newer|earlier|above|higher)|'
+    r'- (?:mit|bsd|apache|gpl)|culture=|publickeytoken=)')
+#: Addresses whose octets are all single digits are almost never a host in
+#: text -- they are versions (3.0.0.0, 6.1.5.3) -- but for these well-known
+#: public resolvers.
+_KNOWN_SHORT = frozenset(('1.1.1.1', '1.0.0.1', '8.8.8.8', '8.8.4.4',
+                          '9.9.9.9', '4.2.2.1', '4.2.2.2', '4.2.2.3',
+                          '4.2.2.4', '4.2.2.5', '4.2.2.6'))
+
+
+#: X.500 / X.509 object identifier arcs, which certificate code names in
+#: dotted form (2.5.29.15 = key usage): not addresses there.
+_OID_ARCS = ('2.5.4.', '2.5.29.')
+
+
+def _ipv4_in_context(text, start, end):
+    """The address text[start:end] if it reads as one, else None.
+
+    Most dotted quads in evidence are not addresses: .NET assembly and file
+    versions, package versions, numbering. Kept: a host address (first
+    octet 1-239: not 'this network' 0.x, nor reserved/broadcast 240+,
+    which is where netmasks 255.x fall), not a network address x.y.z.0
+    unless written as a CIDR range, not all single digits (but known
+    resolvers), with no version wording before or after it."""
+    value = text[start:end]
+    octets = [int(o) for o in value.split('.')]
+    if not 1 <= octets[0] <= 239:
+        return None
+    if octets[3] == 0 and text[end:end + 1] != '/':
+        return None
+    if all(o < 10 for o in octets) and value not in _KNOWN_SHORT:
+        return None
+    if value.startswith(_OID_ARCS):
+        return None
+    # A folder of a path (...\packagemanagement\1.0.0.1\): a version. A UNC
+    # host (\\10.0.0.5\share) or a URL's (//1.2.3.4/) has two separators
+    # before it.
+    before = text[max(0, start - 2):start]
+    if before[-1:] in ('\\', '/') and before[:1] not in ('\\', '/') and (
+            before[-1:] == '\\' or text[end:end + 1] in ('\\', '/')):
+        return None
+    if _VERSION_BEFORE.search(text, max(0, start - 40), start):
+        return None
+    if _VERSION_AFTER.match(text[end:end + 30]):
+        return None
+    return value
+
+
 #: Normalises a match to the value stored, or rejects it (None). Kinds not
 #: listed are stored as matched.
 _ENTITY_CHECKS = {'card': _valid_card, 'iban': _valid_iban,
@@ -293,6 +398,12 @@ def entities_of(text):
             continue
         needed = _ENTITY_NEEDS.get(kind)
         if needed is not None and needed not in text:
+            continue
+        if kind == 'ip':
+            for match in pattern.finditer(text):
+                value = _ipv4_in_context(text, match.start(), match.end())
+                if value:
+                    found.add((kind, value))
             continue
         check = _ENTITY_CHECKS.get(kind)
         for match in pattern.findall(text):
@@ -345,7 +456,10 @@ class SearchIndex:
             for step in range(version, INDEX_VERSION):
                 for statement in _MIGRATIONS[step]:
                     try:
-                        self._db.execute(statement)
+                        if callable(statement):
+                            statement(self._db)
+                        else:
+                            self._db.execute(statement)
                     except sqlite3.OperationalError as exc:
                         logger.debug("Index migration: %s", exc)
             self._db.execute(f"PRAGMA user_version = {INDEX_VERSION}")
@@ -493,16 +607,33 @@ class SearchIndex:
     def commit(self):
         self._db.commit()
 
-    def clear_evidence(self, evidence_id, keep_free=False):
+    def clear_evidence(self, evidence_id, keep_free=False,
+                       keep_modules=True):
         """Drop everything indexed for one piece of evidence, before a
         re-run -- but its free-space rows when `keep_free` (they are their
-        own job's, `index_free_space`)."""
-        if keep_free:
-            marks = ', '.join('?' for _ in FREE_KINDS)
+        own job's, `index_free_space`), and the rows external modules
+        extracted unless `keep_modules` is False (they are their runs':
+        removing the evidence drops them, re-indexing it does not)."""
+        kept = (FREE_KINDS if keep_free else ()) + \
+            (('module',) if keep_modules else ())
+        if kept:
+            marks = ', '.join('?' for _ in kept)
             self._clear(f"evidence_id = ? AND kind NOT IN ({marks})",
-                        (evidence_id, *FREE_KINDS))
+                        (evidence_id, *kept))
         else:
             self._clear("evidence_id = ?", (evidence_id,))
+
+    def clear_module_run(self, run_id):
+        """Drop the rows one external module run extracted."""
+        self._clear("kind = 'module' AND artifact_ref LIKE ?",
+                    (f"mod:{int(run_id)}:%",))
+
+    def clear_module_artifact(self, run_id, tablename):
+        """Drop one artifact's rows of a run (its import limit changed).
+        By prefix, not LIKE: '_' in a table name is a LIKE wildcard."""
+        prefix = f"mod:{int(run_id)}:{tablename}:"
+        self._clear("kind = 'module' AND substr(artifact_ref, 1, ?) = ?",
+                    (len(prefix), prefix))
 
     def clear_carved(self, evidence_id):
         """Drop one image's carved files and the members found in them,
@@ -581,15 +712,15 @@ class SearchIndex:
         through the same queue), so everything from the last file's own
         row on belongs to the file being read when the run stopped -- some
         of its members or slack may be missing. Those rows go, and that
-        file is read again. Carved and free-space rows are their own
-        steps' and are left alone."""
+        file is read again. Carved, free-space and external modules' rows
+        are their own steps' and are left alone."""
         last = self._db.execute(
             "SELECT max(id) FROM indexed_items WHERE evidence_id = ? AND "
             "kind = 'file'", (evidence_id,)).fetchone()[0]
         if last is not None:
             self._clear(
                 "evidence_id = ? AND id >= ? AND kind NOT IN "
-                "('carved', 'unallocated', 'memory') AND "
+                "('carved', 'unallocated', 'memory', 'module') AND "
                 "coalesce(path, '') NOT LIKE '[carved]/%'",
                 (evidence_id, last))
         return {row[0] for row in self._db.execute(
@@ -647,18 +778,24 @@ class SearchIndex:
         return f"{prefix} {column} = ?", [evidence_id]
 
     def indicator_summary(self, evidence_id=None):
-        """{kind: distinct values} -- the whole case, or one image."""
+        """{kind: distinct values} -- the whole case, or one image; only
+        the kinds the case setting extracts (a kind turned off is hidden
+        at once, though the index keeps it)."""
         where, params = self._evidence_clause(evidence_id, 'evidence_id')
         rows = self._db.execute(
             "SELECT kind, count(DISTINCT value) FROM entities" + where
             + " GROUP BY kind", params).fetchall()
-        return {row[0]: row[1] for row in rows}
+        return {row[0]: row[1] for row in rows
+                if row[0] in ENABLED_INDICATORS}
 
     def indicators(self, kind=None, evidence_id=None, contains='',
                    limit=5000):
         """One row per distinct value: kind, value, files (how many items
         hold it) and evidence_ids (which images). Most widespread first."""
-        clauses, params = [], []
+        enabled = sorted(ENABLED_INDICATORS)
+        clauses = [f"kind IN ({','.join('?' * len(enabled))})"] if enabled \
+            else ["0"]
+        params = list(enabled)
         if kind:
             clauses.append("kind = ?")
             params.append(kind)
@@ -668,7 +805,7 @@ class SearchIndex:
         if contains:
             clauses.append("value LIKE ?")
             params.append(f'%{contains}%')
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ''
+        where = " WHERE " + " AND ".join(clauses)
         rows = self._db.execute(
             "SELECT kind, value, count(DISTINCT item_id) AS files, "
             "group_concat(DISTINCT evidence_id) AS images FROM entities"

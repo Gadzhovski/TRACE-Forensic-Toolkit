@@ -245,6 +245,43 @@ def test_a_yes_fetches_the_tiles_on_screen_only(qapp, tmp_path, tile_server):
         case.close()
 
 
+def test_choosing_a_map_shows_it(qapp, tmp_path, tile_server):
+    """Picking a map in the list while the offline map is shown turns
+    Online Map on -- after the one question -- instead of waiting for the
+    button; a no leaves the offline map and the list as they were."""
+    from trace_app.core import geo
+    hits, url = tile_server
+    case, _first, _second = make_case(tmp_path)
+    panel = _panel(qapp, case, url)
+    try:
+        assert not panel.canvas.tiles_enabled
+        shown = panel.style_combo.currentData()
+        other = next(k for k, s in geo.TILE_STYLES.items()
+                     if s['host'] != geo.TILE_STYLES[shown]['host']
+                     and s.get('provider') != 'google')
+        panel.ask = lambda style: False
+        panel.style_combo.setCurrentIndex(panel.style_combo.findData(other))
+        panel.style_combo.activated.emit(panel.style_combo.currentIndex())
+        assert not panel.canvas.tiles_enabled
+        assert not panel.tiles_button.isChecked()
+        assert panel.style_combo.currentData() == shown
+        pump(qapp, 0.3)
+        assert hits == []
+        asked = []
+        panel.ask = lambda style: asked.append(style) or True
+        panel.style_combo.setCurrentIndex(panel.style_combo.findData(other))
+        panel.style_combo.activated.emit(panel.style_combo.currentIndex())
+        assert asked == [other]                    # once, not twice
+        assert panel.canvas.style == other
+        assert panel.canvas.tiles_enabled and panel.tiles_button.isChecked()
+        panel.canvas.grab()
+        pump(qapp, 5, lambda: hits)
+        assert hits
+    finally:
+        panel.shutdown()
+        case.close()
+
+
 def test_landing_on_a_point_previews_it(qapp, tmp_path):
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtTest import QTest
@@ -274,3 +311,160 @@ def test_landing_on_a_point_previews_it(qapp, tmp_path):
     finally:
         panel.shutdown()
         case.close()
+
+
+
+# --- the offline map (Natural Earth) and Google's tiles --------------------
+
+def test_the_offline_map_is_bundled_and_drawn(qapp):
+    import time
+    from trace_app.ui.viewers.map_offline import OfflineMap, lod_for
+    from trace_app.ui.viewers.map_panel import MapCanvas
+    offline = OfflineMap()
+    data = offline.data()
+    assert len(data['places']) > 7000 and len(data['countries']) > 200
+    for layer in ('land', 'borders', 'states', 'lakes', 'rivers'):
+        assert all(data[layer][str(lod)] for lod in range(3)), layer
+    assert [lod_for(z) for z in (2, 5, 8, 12)] == [0, 1, 2, 2]
+    canvas = MapCanvas()
+    canvas.resize(800, 500)
+    from trace_app.core import geo
+    for zoom in (2, 6, 9):
+        canvas.zoom = zoom
+        # Over the North Sea coast: land, sea and borders all on screen.
+        canvas.cx, canvas.cy = geo.project(53.0, 6.0, zoom)
+        started = time.perf_counter()
+        image = canvas.grab().toImage()
+        assert time.perf_counter() - started < 3
+        # Land and sea, not one flat colour.
+        colours = {image.pixel(x, y) for x in range(0, 800, 40)
+                   for y in range(0, 500, 40)}
+        assert len(colours) > 2, zoom
+
+
+@pytest.fixture
+def google_server(monkeypatch):
+    """A stand-in for Google's Map Tiles API: createSession (refused for
+    the key 'bad'), tiles, viewport -- and every request it saw."""
+    import json as _json
+    from io import BytesIO
+    from PIL import Image
+    from trace_app.core import google_tiles
+    png = BytesIO()
+    Image.new('RGB', (256, 256), (80, 120, 60)).save(png, 'PNG')
+    seen = []
+
+    class Google(BaseHTTPRequestHandler):
+        def _send(self, status, kind, body):
+            self.send_response(status)
+            self.send_header('Content-Type', kind)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            length = int(self.headers.get('Content-Length') or 0)
+            body = _json.loads(self.rfile.read(length) or b'{}')
+            seen.append(('POST', self.path, body))
+            if 'key=bad' in self.path:
+                self._send(403, 'application/json', _json.dumps(
+                    {'error': {'code': 403, 'message':
+                               'Map Tiles API has not been used'}}).encode())
+                return
+            self._send(200, 'application/json', _json.dumps(
+                {'session': 'S-' + body['mapType'], 'expiry': '9999999999',
+                 'tileWidth': 256, 'imageFormat': 'png'}).encode())
+
+        def do_GET(self):
+            seen.append(('GET', self.path, None))
+            if self.path.startswith('/tile/v1/viewport'):
+                self._send(200, 'application/json', _json.dumps(
+                    {'copyright': 'Map data ©2026 Google'}).encode())
+            else:
+                self._send(200, 'image/png', png.getvalue())
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Google)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(google_tiles, 'BASE',
+                        f'http://127.0.0.1:{server.server_address[1]}')
+    yield seen
+    server.shutdown()
+
+
+def _google_panel(key):
+    from trace_app.ui.viewers.map_panel import MapPanel
+    panel = MapPanel()
+    panel.resize(900, 700)
+    panel.canvas.resize(900, 400)
+    panel.google_key = lambda: key
+    panel.refresh_styles()
+    return panel
+
+
+def test_google_is_offered_only_with_a_key(qapp):
+    from PySide6.QtCore import Qt
+    panel = _google_panel('')
+    try:
+        model = panel.style_combo.model()
+        index = panel.style_combo.findData('google_satellite')
+        assert not model.item(index).isEnabled()
+        assert 'API Keys' in panel.style_combo.itemData(index, Qt.ToolTipRole)
+        panel.google_key = lambda: 'KEY'
+        panel.refresh_styles()
+        assert model.item(index).isEnabled()
+    finally:
+        panel.shutdown()
+
+
+def test_google_tiles_need_a_yes_then_a_session(qapp, google_server):
+    panel = _google_panel('KEY')
+    try:
+        panel._style_chosen = True
+        panel._set_style('google_hybrid')
+        panel.canvas.grab()
+        pump(qapp, 0.3)
+        assert google_server == []                 # nothing before a yes
+        panel.ask = lambda style: True
+        panel.tiles_button.setChecked(True)
+        pump(qapp, 5, lambda: panel.canvas.google is not None)
+        method, path, body = google_server[0]
+        assert method == 'POST' and 'key=KEY' in path
+        assert body['mapType'] == 'satellite' and \
+            body['layerTypes'] == ['layerRoadmap']
+        panel.canvas.grab()
+        pump(qapp, 5, lambda: any(p.startswith('/v1/2dtiles/')
+                                  for _m, p, _b in google_server)
+             and not panel.canvas._pending)
+        tiles = [p for _m, p, _b in google_server
+                 if p.startswith('/v1/2dtiles/')]
+        assert tiles and all('session=S-satellite' in p and 'key=KEY' in p
+                             for p in tiles)
+        pump(qapp, 3, lambda: 'Google' in panel.canvas.attribution()
+             and '©2026' in panel.canvas.attribution())
+        assert panel.canvas.attribution() == 'Google · Map data ©2026 Google'
+    finally:
+        panel.shutdown()
+
+
+def test_a_refused_google_key_goes_back_offline(qapp, google_server,
+                                                 monkeypatch):
+    from trace_app.ui.dialogs import message
+    warned = []
+    monkeypatch.setattr(message, 'warning',
+                        lambda *a, **k: warned.append(a))
+    panel = _google_panel('bad')
+    try:
+        panel._style_chosen = True
+        panel._set_style('google_roadmap')
+        panel.ask = lambda style: True
+        panel.tiles_button.setChecked(True)
+        pump(qapp, 5, lambda: warned)
+        assert 'Map Tiles API has not been used' in warned[0][3]
+        assert not panel.tiles_button.isChecked()
+        assert not panel.canvas.tiles_enabled
+        assert not any(p.startswith('/v1/2dtiles/')
+                       for _m, p, _b in google_server)
+    finally:
+        panel.shutdown()

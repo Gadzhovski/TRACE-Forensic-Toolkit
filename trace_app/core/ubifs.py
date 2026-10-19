@@ -40,7 +40,7 @@ import stat
 import struct
 import zlib
 
-from trace_app.core.libyal_fs import LibyalFileSystem
+from trace_app.core.libyal_fs import LibyalFileSystem, PathLookup
 from trace_app.core.ubi import crc32
 
 logger = logging.getLogger('TRACE.UBIFS')
@@ -483,7 +483,7 @@ class UbifsEntry:
         return self._volume.content(self.identifier, offset, length)
 
 
-class _Volume:
+class _Volume(PathLookup):
     """libyal's volume vocabulary over a UbifsVolume."""
 
     def __init__(self, volume):
@@ -505,16 +505,9 @@ class _Volume:
         return UbifsEntry(self.volume, inum,
                           name.decode('utf-8', 'surrogateescape'), parent)
 
-    def get_file_entry_by_path(self, path):
-        entry = self.get_root_directory()
-        for part in [p for p in path.replace('\\', '/').split('/') if p]:
-            for index, (name, _inum, _dtype) in enumerate(entry._list()):
-                if name.decode('utf-8', 'surrogateescape') == part:
-                    entry = entry.get_sub_file_entry(index)
-                    break
-            else:
-                return None
-        return entry
+    def _names_in(self, entry):
+        return [name.decode('utf-8', 'surrogateescape')
+                for name, *_ in entry._list()]
 
     def close(self):
         pass
@@ -566,5 +559,3 @@ def open_ubifs(source):
         return None
 
 
-def is_ubifs_fs(fs):
-    return isinstance(fs, UbifsFileSystem)

@@ -26,6 +26,7 @@ import logging
 import pytsk3
 
 from trace_app.core.case import make_artifact_ref
+from trace_app.core.tsk_names import entry_name
 
 logger = logging.getLogger('TRACE.FsTimes')
 
@@ -105,7 +106,7 @@ def _walk(fs, directory, path, depth, visited, should_stop):
         info = entry.info
         if info.name is None or info.meta is None:
             continue
-        name = info.name.name.decode('utf-8', 'replace')
+        name = entry_name(entry, fs)
         if name in ('.', '..'):
             continue
         meta = info.meta

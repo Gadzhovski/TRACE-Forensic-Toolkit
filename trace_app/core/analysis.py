@@ -37,6 +37,7 @@ from PIL import Image
 from trace_app.core import content_checks
 from trace_app.core import scope as scope_module
 from trace_app.core.case import make_artifact_ref
+from trace_app.core.tsk_names import entry_name
 from trace_app.core.content_checks import (MODULE_AUTHORS,
                                            MODULE_EXECUTABLES, MODULE_HIDDEN,
                                            MODULE_PHOTO)
@@ -52,16 +53,6 @@ MODULE_HASH = 'hash'
 MODULES = (MODULE_MAGIC, MODULE_ENTROPY, MODULE_HASH, MODULE_HIDDEN,
            MODULE_PHOTO, MODULE_AUTHORS, MODULE_EXECUTABLES)
 
-#: How each module reads in a dialog and a progress line.
-MODULE_LABELS = {
-    MODULE_MAGIC: "File type detection",
-    MODULE_ENTROPY: "Entropy analysis",
-    MODULE_HASH: "File hashes and duplicates",
-    MODULE_HIDDEN: "Hidden data",
-    MODULE_PHOTO: "Photo metadata",
-    MODULE_AUTHORS: "Document authors",
-    MODULE_EXECUTABLES: "Executables",
-}
 
 #: Modules whose checks live in content_checks.
 _CONTENT_MODULES = (MODULE_HIDDEN, MODULE_PHOTO, MODULE_AUTHORS,
@@ -484,10 +475,22 @@ def analyse_bytes(name, data, modules, magic=None, size=None):
 _PHASH_FAMILIES = {'jpeg', 'png', 'tiff', 'webp', 'heif'}
 
 
-def _add_findings(result, name, data, modules, size):
-    """Run the content checks and attach what they find to `result`."""
+def _add_findings(result, name, data, modules, size, read=None, head=None):
+    """Run the content checks and attach what they find to `result`.
+    `read(offset, length)` reads the file when `data` is not all of it:
+    a video's metadata is read box by box (core/media_metadata.py),
+    whatever its size."""
     if not any(m in modules for m in _CONTENT_MODULES):
         return
+    if MODULE_PHOTO in modules:
+        if read is None and data:
+            read = (lambda offset, length:
+                    bytes(data[offset:offset + length]))
+        if read is not None:
+            finding = content_checks.video_finding(
+                head if head is not None else read(0, 64), read, size)
+            if finding is not None:
+                result.setdefault('findings', []).append(finding.as_row())
     if MODULE_PHOTO in modules and data and \
             content_checks.family(data[:64]) in _PHASH_FAMILIES:
         # The photo module has the whole picture in hand: what it looks like
@@ -501,7 +504,8 @@ def _add_findings(result, name, data, modules, size):
         if volume is not None:
             findings.append(volume)
     if findings:
-        result['findings'] = [f.as_row() for f in findings]
+        result.setdefault('findings', []).extend(
+            f.as_row() for f in findings)
 
 
 def _analyse_stream(file_object, size, name, modules, magic):
@@ -538,15 +542,20 @@ def _analyse_stream(file_object, size, name, modules, magic):
                      and size <= content_checks.MAX_INSPECT_BYTES
                      and content_checks.wants_full_read(head, modules))
 
+    # A video's metadata is read box by box, whatever its size.
+    def read(offset, length):
+        return file_object.read_random(offset, min(length, size - offset)) \
+            if 0 <= offset < size else b''
+
     if not (wants_entropy or wants_hash or wants_content):
-        _add_findings(result, name, None, modules, size)
+        _add_findings(result, name, None, modules, size, read, head)
         return result
 
     if size > MAX_ANALYSIS_BYTES:
         # Recorded, with its type, but not scored: one enormous file should
         # not consume the run that is meant to triage the rest.
         result['note'] = 'too large to hash or score'
-        _add_findings(result, name, None, modules, size)
+        _add_findings(result, name, None, modules, size, read, head)
         return result
 
     meter = Entropy() if wants_entropy else None
@@ -578,7 +587,7 @@ def _analyse_stream(file_object, size, name, modules, magic):
     for name, hasher in hashers.items():
         result[name] = hasher.hexdigest()
     _add_findings(result, name, b''.join(kept) if kept is not None else None,
-                  modules, size)
+                  modules, size, read, head)
     return result
 
 
@@ -738,7 +747,7 @@ def _list_files(image_handler, offset, should_stop, matcher=None):
                 raise AnalysisCancelled()
             if entry.info.name is None or entry.info.meta is None:
                 continue
-            name = entry.info.name.name.decode('utf-8', 'replace')
+            name = entry_name(entry, fs_info)
             if name in ('.', '..'):
                 continue
 
@@ -758,7 +767,8 @@ def _list_files(image_handler, offset, should_stop, matcher=None):
                     walk(entry.as_directory(), child_path, depth + 1)
                 except AnalysisCancelled:
                     raise
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Folder %s not walked: %s", child_path, exc)
                     continue
                 continue
 

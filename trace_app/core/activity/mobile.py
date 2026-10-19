@@ -338,7 +338,119 @@ def ios(volume, step):
             out += reader(volume.read(entry), entry.path, volume.ref(entry))
         except Exception as exc:
             logger.debug("%s unreadable: %s", entry.path, exc)
+    out += _ios_databases(volume, step)
+    out += _ios_url_caches(volume, step)
     return out
+
+
+def _ios_url_caches(volume, step):
+    """Each iOS app's CFURL cache: Library/Caches/<bundle>/Cache.db in
+    the app's data container (and the system's own Library/Caches)."""
+    from trace_app.core.activity import macos_sqlite
+    out = []
+    folders = []
+    containers = volume.find('private', 'var', 'mobile', 'Containers',
+                             'Data', 'Application')
+    for app in volume.children(containers, dirs=True) \
+            if containers is not None and containers.is_dir else ():
+        folders.append(volume.find(*_split(app.path), 'Library', 'Caches'))
+    folders.append(volume.find('private', 'var', 'mobile', 'Library',
+                               'Caches'))
+    for folder in folders:
+        if folder is None or not folder.is_dir:
+            continue
+        for bundle in volume.children(folder, dirs=True):
+            entry = volume.find(*_split(bundle.path), 'Cache.db')
+            if entry is None or entry.is_dir:
+                continue
+            step(entry.path)
+            data, wal = _database(volume, entry)
+            if data[:16] != b'SQLite format 3\x00':
+                continue
+            try:
+                out += macos_sqlite.cfurl_cache(data, wal, 'mobile',
+                                                entry.path, volume.ref(entry),
+                                                app=bundle.name)
+            except Exception as exc:
+                logger.debug("%s unreadable: %s", entry.path, exc)
+    return out
+
+
+#: iOS system databases read by the macOS/iOS SQLite readers
+#: (activity/macos_sqlite). Paths differ a little by iOS version, so each
+#: is also looked for by name under /private/var if it is not where named.
+_IOS_DATABASES = (
+    (('wireless', 'Library', 'Databases', 'DataUsage.sqlite'),
+     'DataUsage.sqlite', 'datausage'),
+    (('networkd', 'netusage.sqlite'), 'netusage.sqlite', 'netusage'),
+    (('networkd', 'db', 'netusage.sqlite'), 'netusage.sqlite', 'netusage'),
+    (('mobile', 'Library', 'Application Support',
+      'com.apple.remotemanagementd', 'RMAdminStore-Local.sqlite'),
+     'RMAdminStore-Local.sqlite', 'screen_time'),
+    (('mobile', 'Library', 'Application Support',
+      'com.apple.remotemanagementd', 'RMAdminStore-Cloud.sqlite'),
+     'RMAdminStore-Cloud.sqlite', 'screen_time'),
+    (('Managed Preferences', 'mobile',
+      'RMAdminStore-Local.sqlite'), 'RMAdminStore-Local.sqlite',
+     'screen_time'),
+    (('mobile', 'Library', 'Notes', 'notes.sqlite'), 'NoteStore.sqlite',
+     'ios_notes'),
+)
+
+
+def _ios_databases(volume, step):
+    """Read each iOS system database with its macos_sqlite reader (raw
+    bytes, so nothing is written). Looked for where it usually is, else by
+    name under /private/var."""
+    out = []
+    seen = set()
+    for parts, name, reader in _IOS_DATABASES:
+        entries = [volume.find('private', 'var', *parts)]
+        if name == 'NoteStore.sqlite':
+            # iOS 9+ keeps NoteStore in an AppGroup folder; an old
+            # notes.sqlite can stay beside it (empty on iOS 15): read both.
+            entries.append(_find_under(
+                volume, ('private', 'var', 'mobile', 'Containers', 'Shared',
+                         'AppGroup'), name))
+        for entry in entries:
+            out += _ios_database(volume, entry, reader, seen, step)
+    return out
+
+
+def _ios_database(volume, entry, reader, seen, step):
+    """Records of one iOS database (once per path) through its
+    macos_sqlite reader; [] when absent or not SQLite."""
+    from trace_app.core.activity import macos_sqlite
+    if entry is None or entry.is_dir or entry.path in seen:
+        return []
+    seen.add(entry.path)
+    step(entry.path)
+    data, wal = _database(volume, entry)
+    if data[:16] != b'SQLite format 3\x00':
+        return []
+    try:
+        return getattr(macos_sqlite, reader)(
+            data, wal, 'mobile', entry.path, volume.ref(entry))
+    except Exception as exc:
+        logger.debug("%s unreadable: %s", entry.path, exc)
+        return []
+
+
+def _find_under(volume, parts, name, depth=0):
+    """The first file called `name` at or below `parts` (a shallow walk --
+    iOS keeps NoteStore under an AppGroup UUID folder)."""
+    root = volume.find(*parts)
+    if root is None or not root.is_dir or depth > 3:
+        return None
+    for child in volume.children(root, dirs=True):
+        hit = volume.find(*_split(child.path), name)
+        if hit is not None and not hit.is_dir:
+            return hit
+    for child in volume.children(root, dirs=True):
+        hit = _find_under(volume, _split(child.path), name, depth + 1)
+        if hit is not None:
+            return hit
+    return None
 
 
 def _split(path):
@@ -357,7 +469,25 @@ def android_base(volume):
     if volume.find('system', 'packages.xml') is not None or \
             volume.find('data', 'com.android.providers.telephony') is not None:
         return ()
+    # A Chromebook's Android apps (ARC++): android-data/data is their
+    # /data, under the user's root home -- or the extraction's top.
+    for prefix in _arc_roots(volume):
+        if volume.find(*prefix, 'data', 'data') is not None or \
+                volume.find(*prefix, 'data', 'system') is not None:
+            return (*prefix, 'data')
     return None
+
+
+def _arc_roots(volume):
+    from trace_app.core.activity import _split
+    yield ('android-data',)
+    yield ('root', 'android-data')
+    yield ('mount', 'root', 'android-data')
+    for parts in (('home', 'root'), ('home', '.shadow')):
+        top = volume.find(*parts)
+        for child in volume.children(top, dirs=True) if top else ():
+            yield (*_split(child.path), 'android-data')
+            yield (*_split(child.path), 'mount', 'root', 'android-data')
 
 
 def _app(volume, base, package, *parts):

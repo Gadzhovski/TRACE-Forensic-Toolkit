@@ -13,20 +13,17 @@ more than once.
 import logging
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHeaderView,
-                               QPushButton, QSizePolicy,
-                               QTableWidget, QToolBar,
-                               QTableWidgetItem, QVBoxLayout,
-                               QWidget)
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QPushButton,
+                               QSizePolicy, QToolBar, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from trace_app.core.case import (REPORTED_FINDING_GRADES, REPORTED_MISMATCHES,
                                  SIGMA_SHOWN)
-from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
-from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tables import finding_table
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.section_nav import SectionNav
 from trace_app.ui.widgets.table_columns import fit_columns
@@ -230,19 +227,7 @@ class TriagePanel(QWidget):
         # Every finding says which image it came from, second after its name:
         # with several devices in a case, a file name alone is not a location.
         headers = [headers[0], 'Evidence'] + list(headers[1:])
-        table = QTableWidget()
-        table.setObjectName("triageTable")
-        table.setColumnCount(len(headers))
-        table.setHorizontalHeaderLabels(headers)
-        table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        # Paints the severity colours, which the theme's item colour would
-        # otherwise override.
-        table.setItemDelegate(NoFocusDelegate(table))
-        table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Interactive)
+        table = finding_table(headers, QAbstractItemView.ExtendedSelection)
         table.itemDoubleClicked.connect(self._activate)
         connect_row_preview(table, self.finding_selected.emit)
         table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -630,7 +615,9 @@ class TriagePanel(QWidget):
                         if 'latitude' in facts else '')
             values = [
                 row.get('name') or '',
-                facts.get('taken') or facts.get('modified') or '',
+                facts.get('taken') or facts.get('modified') or (
+                    f"{facts['recorded']} UTC" if facts.get('recorded')
+                    else ''),
                 camera,
                 location,
                 facts.get('software') or '',

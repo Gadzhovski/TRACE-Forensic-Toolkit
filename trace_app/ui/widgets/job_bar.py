@@ -29,10 +29,11 @@ import logging
 import time
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QProgressBar,
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu,
                                QToolButton, QWidget)
 
 from trace_app.infra.constants import CONTROL_HEIGHT
+from trace_app.ui.widgets.progress_card import SlimBar
 from trace_app.ui import icons
 
 logger = logging.getLogger('TRACE.JobBar')
@@ -218,7 +219,9 @@ class JobBar(QWidget):
 
     @staticmethod
     def _progress_bar(width):
-        bar = QProgressBar()
+        # The progress cards' bar (ui/widgets/progress_card.py), the
+        # percentage beside it.
+        bar = SlimBar()
         bar.setObjectName("jobBarProgress")
         bar.setFixedWidth(width)
         bar.setFixedHeight(CONTROL_HEIGHT - 6)
@@ -310,6 +313,8 @@ class JobBar(QWidget):
             job.reported = (done, total, detail)
             if total:
                 _show_progress(self.side_progress, done, total)
+            else:
+                self.side_progress.setRange(0, 0)
             self._refresh_side(detail)
             return
         if self._current is None:
@@ -317,6 +322,10 @@ class JobBar(QWidget):
         self._current.reported = (done, total, detail)
         if total:
             _show_progress(self.progress, done, total)
+        else:
+            # A step that cannot say how far it is (an external tool
+            # starting): busy, not the last step's 99% standing still.
+            self.progress.setRange(0, 0)
         self.eta_label.setText(_remaining(self._current, done, total,
                                           detail))
         self._refresh_label(detail)
@@ -354,15 +363,18 @@ class JobBar(QWidget):
         than being terminated. A killed thread halfway through a write leaves
         the case holding a half-written row.
         """
-        if self._current is None:
+        self._cancel(self._current, self.label, LABEL_WIDTH)
+
+    def _cancel(self, job, label, width):
+        if job is None:
             return
-        self._current.cancelled = True
-        self._set_text(self.label, LABEL_WIDTH, "Cancelling…")
-        if self._current.stop and self._current.worker is not None:
+        job.cancelled = True
+        self._set_text(label, width, "Cancelling…")
+        if job.stop and job.worker is not None:
             try:
-                self._current.stop(self._current.worker)
+                job.stop(job.worker)
             except Exception as exc:
-                logger.error("Could not cancel %s: %s", self._current.key, exc)
+                logger.error("Could not cancel %s: %s", job.key, exc)
 
     def cancel_all(self):
         """Drop the queues and stop what is running. For window close."""
@@ -374,15 +386,7 @@ class JobBar(QWidget):
 
     def cancel_side(self):
         """Ask the side lane's job to stop (cooperatively, like the main)."""
-        if self._side is None:
-            return
-        self._side.cancelled = True
-        self._set_text(self.side_label, SIDE_LABEL_WIDTH, "Cancelling…")
-        if self._side.stop and self._side.worker is not None:
-            try:
-                self._side.stop(self._side.worker)
-            except Exception as exc:
-                logger.error("Could not cancel %s: %s", self._side.key, exc)
+        self._cancel(self._side, self.side_label, SIDE_LABEL_WIDTH)
 
     @property
     def busy(self):

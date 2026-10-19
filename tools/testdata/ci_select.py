@@ -239,7 +239,8 @@ LINUX_BUILT = ('btrfs-deleted', 'md-raid', 'luks-lvm', 'luks1-lvm',
                'luks2-lvm', 'vc-key.json', 'f2fs-key.json',
                'fs-images-key.json', 'container-images-key.json',
                'chromium-storage', 'vbox-snapshots-key.json',
-               'ubifs-key.json', 'zfs-key.json')
+               'ubifs-key.json', 'zfs-key.json', 'kernel-fs-key.json',
+               'ifs-key.json', 'littlefs-key.json', 'uboot-env-key.json')
 
 
 def needs(test_files, graph):

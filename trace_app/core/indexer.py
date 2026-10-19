@@ -22,6 +22,7 @@ from trace_app.core.search_index import (INDEX_CANCELLED, INDEX_DONE,
                                          INDEX_FAILED, INDEX_RUNNING,
                                          MAX_FILE_BYTES, MAX_TEXT_PER_FILE)
 from trace_app.core.text_extract import extract_text, packed_kind
+from trace_app.core.tsk_names import entry_name
 from trace_app.core.text_pool import (MIN_FILES, TextPipeline,
                                       default_workers)
 
@@ -233,7 +234,7 @@ def _count_files(image_handler, offset, should_stop, matcher=None):
                 raise IndexerCancelled()
             if entry.info.name is None or entry.info.meta is None:
                 continue
-            name = entry.info.name.name.decode('utf-8', 'replace')
+            name = entry_name(entry, fs_info)
             if name in ('.', '..'):
                 continue
             child_path = f"{path}/{name}"
@@ -245,7 +246,8 @@ def _count_files(image_handler, offset, should_stop, matcher=None):
                     walk(entry.as_directory(), child_path, depth + 1)
                 except IndexerCancelled:
                     raise
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Folder %s not walked: %s", child_path, exc)
                     continue
             elif entry.info.meta.size:
                 count += 1
@@ -281,7 +283,7 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
                 raise IndexerCancelled()
             if entry.info.name is None or entry.info.meta is None:
                 continue
-            name = entry.info.name.name.decode('utf-8', 'replace')
+            name = entry_name(entry, fs_info)
             if name in ('.', '..'):
                 continue
 
@@ -301,7 +303,8 @@ def _index_partition(image_handler, index, evidence_id, offset, done, total,
                     walk(entry.as_directory(), child_path, depth + 1)
                 except IndexerCancelled:
                     raise
-                except Exception:
+                except Exception as exc:
+                    logger.debug("Folder %s not walked: %s", child_path, exc)
                     continue
                 continue
 

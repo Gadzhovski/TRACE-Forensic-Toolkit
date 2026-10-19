@@ -996,7 +996,8 @@ def _main_size(entry):
 def _entry_stream_reader(fs, index):
     try:
         tsk_entry = fs.open_meta(inode=index)
-    except Exception:
+    except Exception as exc:
+        logger.debug("MFT entry %s not opened: %s", index, exc)
         return None
 
     def read(name, length):
@@ -1006,7 +1007,8 @@ def _entry_stream_reader(fs, index):
         reader, size, _first = found
         try:
             return reader(0, min(length, size)) if size else b''
-        except Exception:
+        except Exception as exc:
+            logger.debug("Stream %s not read: %s", name or '(unnamed)', exc)
             return None
     return read
 

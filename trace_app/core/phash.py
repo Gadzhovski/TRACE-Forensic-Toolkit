@@ -26,6 +26,7 @@ import io
 import logging
 import math
 import os
+from operator import mul
 
 logger = logging.getLogger('TRACE.PHash')
 
@@ -76,14 +77,16 @@ def _hash_pixels(pixels):
     rows = [pixels[y * _N:(y + 1) * _N] for y in range(_N)]
     # Separable 2-D DCT, keeping the 8 lowest frequencies each way: along
     # each row, then down each of those 8 columns.
-    along = [[sum(c * p for c, p in zip(_COS[u], row)) for u in range(_LOW)]
+    # sum(map(mul, ...)): the same products added in the same order as a
+    # generator would -- the same hash -- in half the time.
+    along = [[sum(map(mul, _COS[u], row)) for u in range(_LOW)]
              for row in rows]
+    columns = [[along[y][u] for y in range(_N)] for u in range(_LOW)]
     coefficients = []
     for v in range(_LOW):
         cos_v = _COS[v]
         for u in range(_LOW):
-            coefficients.append(sum(cos_v[y] * along[y][u]
-                                    for y in range(_N)))
+            coefficients.append(sum(map(mul, cos_v, columns[u])))
     # The DC term is the picture's mean brightness: left out of the median
     # so a lighter copy compares like the original.
     ranked = sorted(coefficients[1:])

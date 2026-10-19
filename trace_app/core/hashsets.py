@@ -23,14 +23,16 @@ per (file, set). No Qt here.
 
 import csv
 import datetime
-import hashlib
 import io
-import json
 import logging
 import os
 import re
 import sqlite3
 import uuid
+
+from trace_app.core.evidence_hash import sha256_file
+from trace_app.infra.sqlite_uri import connect_read_only
+from trace_app.core import library as library_module
 
 logger = logging.getLogger('TRACE.HashSets')
 
@@ -53,7 +55,6 @@ _HEX = re.compile(r'(?<![0-9A-Fa-f])([0-9A-Fa-f]{64}|[0-9A-Fa-f]{40}|'
 #: Digests written per transaction while importing.
 BATCH = 50_000
 
-LIBRARY_FILE = 'library.json'
 
 
 class HashSetError(Exception):
@@ -76,110 +77,48 @@ def default_options():
 
 
 def case_options(case, library=None):
-    """The case's options, defaults filled in. Hash sets start switched on
-    once the library has any: importing one is asking to use it."""
-    stored = case.setting('hashsets') if case is not None else None
-    options = default_options()
-    if stored:
-        options.update(stored)
-    elif library is not None and library.sets():
-        options['enabled'] = True
-    return options
+    """The case's options, defaults filled in (core/library)."""
+    return library_module.case_options(case, 'hashsets', default_options(),
+                                       library)
 
 
 def set_enabled_in(options, entry):
     """Is library set `entry` used under these case options?"""
-    chosen = (options.get('sets') or {}).get(entry['id'])
-    return entry.get('enabled_by_default', True) if chosen is None \
-        else bool(chosen)
+    return library_module.enabled_in(options, entry)
 
 
 # --- the library ----------------------------------------------------------------
 
-class Library:
+class Library(library_module.Library):
     """The examiner's hash sets, in one folder."""
 
-    def __init__(self, folder=None):
-        if folder is None:
-            from trace_app.infra.paths import user_data_dir
-            folder = os.path.join(user_data_dir(), 'hashsets')
-        self.folder = folder
-        os.makedirs(folder, exist_ok=True)
-        self._path = os.path.join(folder, LIBRARY_FILE)
-
-    # --- the manifest -------------------------------------------------------
-
-    def _load(self):
-        try:
-            with open(self._path, encoding='utf-8') as handle:
-                data = json.load(handle)
-        except FileNotFoundError:
-            return {'sets': []}
-        except (OSError, ValueError) as exc:
-            logger.error("Hash set library unreadable: %s", exc)
-            return {'sets': []}
-        data.setdefault('sets', [])
-        return data
-
-    def _save(self, data):
-        temporary = self._path + '.tmp'
-        with open(temporary, 'w', encoding='utf-8') as handle:
-            json.dump(data, handle, indent=2)
-        os.replace(temporary, self._path)
+    SUBFOLDER = 'hashsets'
+    LABEL = 'Hash set'
+    FIELDS = frozenset({'name', 'category', 'description',
+                        'enabled_by_default'})
+    CHOICES = {'category': CATEGORIES}
+    ERROR = HashSetError
+    MISSING = "No such hash set"
+    NOT_A_FIELD = "Not a hash set field: {fields}"
 
     def sets(self):
         """Every set, as dicts, in the order they were added."""
-        out = []
-        for entry in self._load()['sets']:
-            entry = dict(entry)
-            entry['available'] = os.path.exists(self.database_path(entry))
-            out.append(entry)
-        return out
+        return self.entries()
 
-    def get(self, set_id):
-        for entry in self.sets():
-            if entry['id'] == set_id:
-                return entry
-        return None
+    def _describe(self, entry):
+        entry['available'] = os.path.exists(self.database_path(entry))
 
-    def update(self, set_id, **fields):
-        allowed = {'name', 'category', 'description', 'enabled_by_default'}
-        unknown = set(fields) - allowed
-        if unknown:
-            raise ValueError(f"Not a hash set field: {', '.join(unknown)}")
-        if 'category' in fields and fields['category'] not in CATEGORIES:
-            raise ValueError(f"Unknown category {fields['category']}")
-        data = self._load()
-        for entry in data['sets']:
-            if entry['id'] == set_id:
-                entry.update(fields)
-                self._save(data)
-                return entry
-        raise HashSetError("No such hash set")
-
-    def remove(self, set_id):
-        data = self._load()
-        keep = [e for e in data['sets'] if e['id'] != set_id]
-        gone = [e for e in data['sets'] if e['id'] == set_id]
-        data['sets'] = keep
-        self._save(data)
-        for entry in gone:
-            if entry.get('kind') == 'imported':
-                try:
-                    os.remove(self.database_path(entry))
-                except OSError:
-                    pass
+    def _discard(self, entry):
+        if entry.get('kind') == 'imported':
+            try:
+                os.remove(self.database_path(entry))
+            except OSError:
+                pass
 
     def database_path(self, entry):
         if entry.get('kind') == 'linked':
             return entry['path']
         return os.path.join(self.folder, entry['file'])
-
-    def _add(self, entry):
-        data = self._load()
-        data['sets'].append(entry)
-        self._save(data)
-        return entry
 
     # --- importing ------------------------------------------------------------
 
@@ -598,16 +537,7 @@ def _new_set_database(path):
 
 
 def _open_read_only(path):
-    uri = 'file:' + _uri_path(os.path.abspath(path)) + '?mode=ro'
-    return sqlite3.connect(uri, uri=True, timeout=10)
-
-
-def _uri_path(path):
-    from urllib.parse import quote
-    path = path.replace('\\', '/')
-    if not path.startswith('/'):
-        path = '/' + path
-    return quote(path, safe='/:')
+    return connect_read_only(path)
 
 
 def _nsrl_layout(connection, need_index=True):
@@ -649,16 +579,7 @@ def _version_count(connection, row):
 
 
 def _file_sha256(path, should_stop=None):
-    digest = hashlib.sha256()
-    with open(path, 'rb') as handle:
-        while True:
-            block = handle.read(1 << 20)
-            if not block:
-                break
-            digest.update(block)
-            if should_stop and should_stop():
-                raise ImportCancelled()
-    return digest.hexdigest()
+    return sha256_file(path, should_stop, ImportCancelled)
 
 
 def _remove_quietly(path):

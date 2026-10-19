@@ -583,3 +583,28 @@ def test_none_is_a_profile_and_the_case_opens_for_browsing(qapp):
         assert selector.profile() == NONE
     finally:
         selector.deleteLater()
+
+
+def test_the_intake_checks_evidence_in_a_child_process(qapp, tmp_path):
+    """A big folder's check is Python from end to end (the listing, the
+    tools' patterns): on a thread it froze the window for seconds. It runs
+    as background job 'probe' and the row fills from its answer."""
+    from trace_app.ui.process_worker import ProcessWorker
+    from trace_app.ui.widgets.evidence_intake import EvidenceIntake
+    folder = tmp_path / 'collection'
+    (folder / 'Users' / 'kim').mkdir(parents=True)
+    (folder / 'Users' / 'kim' / 'notes.txt').write_text('hello')
+    intake = EvidenceIntake()
+    try:
+        intake.add_paths([str(folder)])
+        workers = list(intake._workers.values())
+        assert len(workers) == 1 and isinstance(workers[0], ProcessWorker)
+        assert workers[0].kind == 'probe'
+        assert pump(qapp, 60, lambda: not intake.pending())
+        result = intake.items[0]['result']
+        assert result['status'] != 'error', result
+        assert result['format'] == 'Folder'
+        assert result['contents'].startswith('3 items')
+    finally:
+        intake.stop()
+        intake.deleteLater()

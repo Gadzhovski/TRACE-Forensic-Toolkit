@@ -8,42 +8,41 @@ be used, with the same reason as its tooltip.
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox,
-                               QHeaderView, QLabel, QTreeWidget,
-                               QTreeWidgetItem, QVBoxLayout)
+from PySide6.QtWidgets import (QAbstractItemView, QDialogButtonBox,
+                               QHeaderView, QTreeWidgetItem)
 
 from trace_app.infra import capabilities
 from trace_app.ui import icons
 from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.dialog_page import PageDialog, badge
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 
 
-class SupportedFeaturesDialog(QDialog):
+class SupportedFeaturesDialog(PageDialog):
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Supported Features")
-        self.setObjectName("supportedFeaturesDialog")
-        self.setWindowIcon(icons.icon(icons.LOGO))
-        self.setMinimumSize(900, 600)
-        layout = QVBoxLayout(self)
-
-        summary = ' · '.join(f"{label} {value}" for label, value
-                             in capabilities.system_summary())
         missing = [c for c in capabilities.CAPABILITIES if not c.available]
-        heading = QLabel(
-            f"<b>{len(capabilities.CAPABILITIES) - len(missing)} of "
-            f"{len(capabilities.CAPABILITIES)} features are available on "
-            f"this system.</b>" + (
+        available = len(capabilities.CAPABILITIES) - len(missing)
+        super().__init__(
+            "Supported Features",
+            "What this installation of TRACE can do, the library providing "
+            "each feature and its version." + (
                 " The unavailable ones are greyed out where they would be "
                 "used." if missing else
-                " Everything TRACE can do works here.")
-            + f"<br><span>{summary}</span>")
-        heading.setObjectName("analysisModulesIntro")
-        heading.setTextFormat(Qt.RichText)
-        heading.setWordWrap(True)
-        layout.addWidget(heading)
+                " Everything TRACE can do works here."),
+            icon=icons.VERIFY_OK, parent=parent, scroll=False,
+            object_name="supportedFeaturesDialog")
+        self.setMinimumSize(900, 600)
+        self.header_tail.addWidget(badge(
+            f"{available} of {len(capabilities.CAPABILITIES)} available",
+            'warn' if missing else 'ok'), 0, Qt.AlignTop)
+        self.set_footer_hint(' · '.join(
+            f"{label} {value}" for label, value
+            in capabilities.system_summary()))
+        layout = self.body
+        layout.setContentsMargins(24, 8, 24, 16)
 
-        self.tree = QTreeWidget()
+        self.tree = BranchTreeWidget()
         self.tree.setObjectName("supportedFeatures")
         self.tree.setColumnCount(4)
         self.tree.setHeaderLabels(['Feature', 'Status', 'Provided by',
@@ -68,15 +67,23 @@ class SupportedFeaturesDialog(QDialog):
                 if capability.group != group:
                     continue
                 ok = capability.available
+                # A tool the examiner installs is not missing until then,
+                # just not installed: said so, not in the colour of a fault.
+                on_request = capability.key in capabilities.ON_REQUEST
                 item = QTreeWidgetItem(parent, [
                     capability.feature,
-                    "Available" if ok else "Unavailable",
+                    "Available" if ok else
+                    "Not installed" if on_request else "Unavailable",
                     capability.component, capability.version])
                 item.setToolTip(0, capability.feature)
-                item.setIcon(1, icons.icon(icons.VERIFY_OK if ok
-                                           else icons.FINDINGS))
-                item.setForeground(1, verdict_brush('clean' if ok
-                                                    else 'malicious'))
+                if on_request:
+                    item.setIcon(0, icons.module_logo(capability.key))
+                item.setIcon(1, icons.icon(
+                    icons.VERIFY_OK if ok else
+                    icons.MODULES if on_request else icons.FINDINGS))
+                item.setForeground(1, verdict_brush(
+                    'clean' if ok else 'unknown' if on_request
+                    else 'malicious'))
                 if not ok:
                     item.setToolTip(0, capability.reason())
                     note = QTreeWidgetItem(item, [capability.reason()])
@@ -94,4 +101,4 @@ class SupportedFeaturesDialog(QDialog):
             capabilities.report_text()))
         close = buttons.addButton(QDialogButtonBox.Close)
         close.clicked.connect(self.accept)
-        layout.addWidget(buttons)
+        self.add_button(buttons)

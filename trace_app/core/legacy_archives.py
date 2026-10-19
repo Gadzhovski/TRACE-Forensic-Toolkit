@@ -67,6 +67,31 @@ def members(data, kind):
             for m in _members(data, kind)]
 
 
+def iter_members(data, kind, limit=None):
+    """(member, bytes or the LegacyError reading it raised) for every
+    member, the archive parsed once. Reading each member through `read`
+    parsed it again every time -- and decompressed a cabinet's MSZIP
+    folder again for every file in it: a Windows driver cabinet of
+    thousands of files took minutes to index."""
+    for member in _members(data, kind):
+        public = {key: value for key, value in member.items()
+                  if not key.startswith('_')}
+        if member['is_dir'] or member['encrypted']:
+            yield public, None
+            continue
+        if limit is not None and member['size'] > limit:
+            yield public, LegacyError(
+                f"{member['name']} is {member['size']:,} bytes, over the "
+                f"{limit:,}-byte limit")
+            continue
+        try:
+            yield public, member['_read']()
+        except (LegacyError, struct.error, ValueError, IndexError, OSError,
+                EOFError, zlib.error) as exc:
+            yield public, (exc if isinstance(exc, LegacyError)
+                           else LegacyError(str(exc)))
+
+
 def read(data, kind, name, limit=None):
     """The bytes of member `name` (the only one, for uue/compress)."""
     found = _members(data, kind)
@@ -110,11 +135,12 @@ def _dos_time(value):
     local wall-clock time, as the archive recorded it."""
     date, time = value >> 16, value & 0xFFFF
     try:
-        return datetime.datetime(
+        moment = datetime.datetime(
             1980 + (date >> 9), (date >> 5) & 15, date & 31, time >> 11,
-            (time >> 5) & 63, (time & 31) * 2).strftime('%Y-%m-%d %H:%M:%S')
+            (time >> 5) & 63, (time & 31) * 2)
     except ValueError:
         return ''
+    return str(moment)          # 'YYYY-MM-DD HH:MM:SS' (seconds are even)
 
 
 # --- Microsoft Cabinet ---------------------------------------------------

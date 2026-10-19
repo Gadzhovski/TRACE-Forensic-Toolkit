@@ -15,11 +15,12 @@ attachment as a member ('attachments/<name>'), an attached message as its
 own page.
 """
 
-import datetime
 import html
 import io
 import re
 import struct
+
+from trace_app.core.timeconv import filetime_text
 
 OLE_MAGIC = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
 MAX_ATTACHMENT = 256 * 1024 * 1024
@@ -121,15 +122,7 @@ class _Node:
         value = self.fixed.get(pid << 16 | PT_SYSTIME)
         if not value:
             return ''
-        ticks = struct.unpack('<Q', value)[0]
-        if not ticks:
-            return ''
-        try:
-            moment = datetime.datetime(1601, 1, 1) + datetime.timedelta(
-                microseconds=ticks // 10)
-        except OverflowError:
-            return ''
-        return moment.strftime('%Y-%m-%d %H:%M:%S')
+        return filetime_text(struct.unpack('<Q', value)[0]) or ''
 
 
 def _decode8(raw, codepage):

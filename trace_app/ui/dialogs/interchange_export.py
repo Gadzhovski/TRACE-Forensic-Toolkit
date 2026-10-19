@@ -4,17 +4,17 @@ JSON-LD (the case, its evidence, files and findings), core/interchange.
 Written on a thread behind a progress dialog, from a read-only
 connection of its own; the file's SHA-256 is audited."""
 
-import hashlib
 import logging
 import os
-import sqlite3
 
 from PySide6.QtWidgets import QFileDialog, QInputDialog
 
 from trace_app import __version__
 from trace_app.core import interchange
+from trace_app.core.evidence_hash import sha256_file
 from trace_app.ui.dialogs import message
 from trace_app.ui.dialogs.case_archive import _run
+from trace_app.infra.sqlite_uri import connect_read_only
 
 logger = logging.getLogger('TRACE.Interchange')
 
@@ -25,14 +25,6 @@ KINDS = {
     'case': ("CASE/UCO JSON-LD (Case, Files and Findings)…",
              "Export CASE/UCO", '.jsonld', "JSON-LD (*.jsonld *.json)"),
 }
-
-
-def _sha256(path):
-    digest = hashlib.sha256()
-    with open(path, 'rb') as handle:
-        for block in iter(lambda: handle.read(1 << 20), b''):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _choose_evidence(parent, case):
@@ -73,8 +65,7 @@ def export_for_tools(parent, case, kind, path=None, evidence=None):
 
     def work(progress, should_stop):
         progress(0, 1, os.path.basename(path))
-        connection = sqlite3.connect(f'file:{database}?mode=ro', uri=True,
-                                     timeout=10)
+        connection = connect_read_only(database)
         try:
             if kind == 'dfxml':
                 return interchange.write_dfxml(connection, evidence['id'],
@@ -99,7 +90,7 @@ def export_for_tools(parent, case, kind, path=None, evidence=None):
     label = 'DFXML' if kind == 'dfxml' else 'CASE/UCO'
     case.record_event(f"exported as {label}",
                       f"{what}files={count} path={path} "
-                      f"sha256={_sha256(path)}")
+                      f"sha256={sha256_file(path)}")
     message.information(parent, title,
                         f"{count:,} file(s) written to {path}.")
     return path

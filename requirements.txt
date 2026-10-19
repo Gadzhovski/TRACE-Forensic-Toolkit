@@ -53,7 +53,9 @@ PyMuPDF>=1.24.3          # PDF rendering, validation and metadata; 1.24.3
                          # deprecated and slated for removal)
 Pillow>=11.3.0           # image decoding and EXIF; 11.3 is the first whose
                          # wheels decode AVIF, which the Application tab shows
-chardet>=5.2.0           # text encoding detection
+charset-normalizer>=3.3.0 # text encoding: which code page a file was
+                         # written in (core/text_encoding.py). MIT; pure
+                         # Python, compiled wheels where offered
 olefile>=0.46            # legacy Office (.doc/.xls/.ppt): authors and encryption
 py7zr>=1.0.0             # 7z archives: browsing, and spotting encrypted ones.
                          # Wheels for every platform; resolves to 1.0 on

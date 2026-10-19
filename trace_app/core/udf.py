@@ -943,5 +943,3 @@ def open_udf(source):
         return None
 
 
-def is_udf_fs(fs):
-    return isinstance(fs, UdfFileSystem)

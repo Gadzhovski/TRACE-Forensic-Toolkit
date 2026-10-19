@@ -11,6 +11,7 @@ import logging
 import pytsk3
 
 from trace_app.core.case import make_artifact_ref
+from trace_app.core.tsk_names import entry_name
 
 logger = logging.getLogger('TRACE.Walk')
 
@@ -46,6 +47,23 @@ class FileEntry:
         return handle.read_random(start, length)
 
 
+def volume_names(image_handler, offsets, fallback='volume {offset}'):
+    """{offset: label safe as a folder name} when the image has more than
+    one volume (a path alone would not say which), else {}. `fallback`
+    names a volume with no label."""
+    from trace_app.core.evidence_export import safe_component
+    if len(offsets) < 2:
+        return {}
+    names = {}
+    for offset in offsets:
+        try:
+            label = image_handler.partition_label(offset)
+        except Exception:
+            label = ''
+        names[offset] = safe_component(label, fallback.format(offset=offset))
+    return names
+
+
 def volume_offsets(image_handler):
     """Every file system to read: partitions, and the logical and APFS
     volumes inside LVM and APFS partitions (ImageHandler.volume_offsets)."""
@@ -56,14 +74,18 @@ def volume_offsets(image_handler):
 
 
 def iter_files(image_handler, should_stop=None, offsets=None,
-               every_name=None, scope=None):
+               every_name=None, scope=None, max_depth=MAX_DEPTH):
     """FileEntry for every regular file with content, on every volume
     (every one in `scope`, core/scope.Scope, when given: an out-of-scope
     folder is not gone into).
 
     `every_name(offset, path, deleted, ref)`, when given, is called for
     every name the walk passes -- folders and empty files too, which are
-    not yielded -- for a caller that needs to know what exists."""
+    not yielded -- for a caller that needs to know what exists.
+
+    `max_depth` 0 = files at a volume's top only, 1 = and one folder
+    down... -- for a caller that looks no deeper, so a folder of a
+    million files is not walked to find a few near the top."""
     for offset in dict.fromkeys(offsets or volume_offsets(image_handler)):
         fs = image_handler.get_fs_info(offset)
         if fs is None:
@@ -71,7 +93,7 @@ def iter_files(image_handler, should_stop=None, offsets=None,
         visited = set()
         matcher = scope.matcher(fs) if scope is not None else None
         yield from _walk(fs, fs.open_dir(path='/'), '', 0, offset, visited,
-                         should_stop, every_name, matcher)
+                         should_stop, every_name, matcher, max_depth)
 
 
 def count_files(image_handler, should_stop=None, scope=None):
@@ -80,8 +102,8 @@ def count_files(image_handler, should_stop=None, scope=None):
 
 
 def _walk(fs, directory, path, depth, offset, visited, should_stop,
-          every_name=None, matcher=None):
-    if depth > MAX_DEPTH:
+          every_name=None, matcher=None, max_depth=MAX_DEPTH):
+    if depth > max_depth:
         return
     for entry in directory:
         if should_stop and should_stop():
@@ -89,7 +111,7 @@ def _walk(fs, directory, path, depth, offset, visited, should_stop,
         info = entry.info
         if info.name is None or info.meta is None:
             continue
-        name = info.name.name.decode('utf-8', 'replace')
+        name = entry_name(entry, fs)
         if name in ('.', '..'):
             continue
         meta = info.meta
@@ -111,7 +133,7 @@ def _walk(fs, directory, path, depth, offset, visited, should_stop,
             try:
                 yield from _walk(fs, entry.as_directory(), child, depth + 1,
                                  offset, visited, should_stop, every_name,
-                                 matcher)
+                                 matcher, max_depth)
             except WalkCancelled:
                 raise
             except Exception as exc:

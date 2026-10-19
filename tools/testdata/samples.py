@@ -48,6 +48,8 @@ SHA-256 before it is kept:
 * libarchive's encrypted archives (BSD-2-Clause test files): WinZip
   AES-128/256 ZIPs in every compression, a ZipCrypto ZIP and 7z AES with
   data or names encrypted -- passwords and contents from its tests
+* ExifTool's test videos and sounds (QuickTime .mov / .m4a, RIFF .wav /
+  .avi, Matroska), with exiftool's own output for each as the key
 * Microsoft's documented WLAN profile samples (MicrosoftDocs/win32,
   NativeWiFi), the schema Wlansvc/Profiles files are written in
 * Windows 11 Notepad tab state files (TabState/*.bin) Notepad wrote:
@@ -84,6 +86,8 @@ _WIN32_DOCS = ('https://raw.githubusercontent.com/MicrosoftDocs/win32/'
                'NativeWiFi/')
 _LIBARCHIVE = ('https://raw.githubusercontent.com/libarchive/libarchive/'
                '7197234b80b9983bbcaea86776555ecca66d968b/libarchive/test/')
+_EXIFTOOL = ('https://raw.githubusercontent.com/exiftool/exiftool/'
+             '2200871d9cef988051d2a99d67df3bda6cbb30a8/t/images/')
 _NSL = ('https://raw.githubusercontent.com/ogmini/Notepad-State-Library/'
         'ce53f9d66de4551fa78f3cb19df90d7820f08d94/')
 _NOTEPAD_RS = ('https://raw.githubusercontent.com/AbdulRhmanAlfaifi/'
@@ -91,6 +95,23 @@ _NOTEPAD_RS = ('https://raw.githubusercontent.com/AbdulRhmanAlfaifi/'
 _IPED = ('https://raw.githubusercontent.com/sepinf-inc/IPED/'
          '75bc5cafe2094e8caaa3a5c6266df50f1ae7d9eb/iped-engine/src/test/'
          'resources/')
+_QNXMOUNT = ('https://raw.githubusercontent.com/NetherlandsForensicInstitute/'
+             'qnxmount/11c8a7f9ee9b945d584263743f6ea8524e8776d2')
+_OPENQNX = ('https://raw.githubusercontent.com/vocho/openqnx/'
+            'cc95df3543a1c481d4f8ad387e29f0d1ff0c87fe')
+_UNBLOB = ('https://media.githubusercontent.com/media/onekey-sec/unblob/'
+           '5dbc0fe665d1a9fa60476686e973cf88b3b3ab2c/tests/integration')
+_QNXPROBE = ('https://raw.githubusercontent.com/abrignoni/qnxprobe/'
+             '08cbd7b53c7d51dab47f2cc5dd8dfde86c064465/tests/fixtures')
+# macOS: keychainbreaker's test keychain (Apache-2.0; password
+# 'keychainbreaker-test', its tests list every item) and segb-forensic's
+# real Biome SEGB streams (Apache-2.0; iOS 17.3 and macOS 26 Tahoe, record
+# counts reconciled with ccl-segb).
+_KEYCHAINBREAKER = ('https://raw.githubusercontent.com/moond4rk/'
+                    'keychainbreaker/b5ef3a65008e469aded6de6b4c2c962f09539930/'
+                    'testdata/')
+_SEGB = ('https://raw.githubusercontent.com/SecurityRonin/segb-forensic/'
+         'ba0ce6c02d449f746af800d15d362c9a4a2436d5/tests/data/biome/')
 _DFVFS = ('https://raw.githubusercontent.com/log2timeline/dfvfs/'
           '917cefc9426d6ded2687d2b55164ded25b44fcb7/test_data/')
 _POI = ('https://raw.githubusercontent.com/apache/poi/'
@@ -201,6 +222,52 @@ SAMPLES = {
     'chromium-TopSites.v5.sql': (
         _CHROMIUM + 'history/TopSites.v5.sql',
         '6586038a90ad2fdb052f91c1b2edae687f8c24f2c84fa3c2bc92689635a1bcf2'),
+    # lLEAPP / cLEAPP's items (tests/test_linux_extras.py,
+    # tests/test_chromeos.py): plaso's own files and expected values,
+    # Chromium's omnibox fixture.
+    'chromium-Shortcuts.v1.sql': (
+        _CHROMIUM + 'omnibox/Shortcuts.v1.sql',
+        '2e785c192ec3b7554f5d3d45e75af9b7ee94c53d40548afcf622c98f91683996'),
+    'plaso-viminfo': (
+        _PLASO + '.viminfo',
+        '4019145f47f8cae5b307595be5dab4309d55d09f0cc2cbab21a57331228a85ad'),
+    'plaso-viminfo_alt': (
+        _PLASO + '.viminfo_alt',
+        'f2942d998efdf9770e3f5af023d20b84d3555ebe6b57d8dc93dd933767119f53'),
+    'plaso-apache_access.log': (
+        _PLASO + 'apache_access.log',
+        '62ba15cfe14ccef60ee370837e5c695a045da1edd08c59304de2533389aab079'),
+    'plaso-firefox_2_cookies.sqlite': (
+        _PLASO + 'firefox/firefox_2_cookies.sqlite',
+        '0b2cc4f0bb782b0be5160bbcf425d12d382903c1ae029b00bf2bfe4333205a95'),
+    'plaso-firefox_10_cookies.sqlite': (
+        _PLASO + 'firefox/firefox_10_cookies.sqlite',
+        'fc6feee4809542a2eb90ef2a33e37a169ba867ad601214cac86258d64c5a8a16'),
+    'plaso-syslog_chromeos': (
+        _PLASO + 'syslog/syslog_chromeos',
+        '49cf6c23a5dff644bf98a0da19ca6d6053def262464e62e68e97c4b14e04b844'),
+    'plaso-chrome-Preferences': (
+        _PLASO + 'Preferences',
+        'a7f71e7c543f9b007fb91ed6f1ef2d9f17046e605a9945c3845b49637c56588a'),
+    # Video and audio containers from ExifTool's own test images (Artistic
+    # / GPL test data, downloaded, never committed); exiftool's output for
+    # each (t/*.out) is what tests/expected/media_metadata_exiftool.json
+    # was written from (tests/test_media_metadata.py).
+    'exiftool-QuickTime.mov': (
+        _EXIFTOOL + 'QuickTime.mov',
+        'eea529609b6026e0cd7b3d9188b997889f905cd89a93421ad7a9063c670449ec'),
+    'exiftool-QuickTime.m4a': (
+        _EXIFTOOL + 'QuickTime.m4a',
+        '3861cf38151d9d831697c74fc75be585a06eef524ed49476d794d92a7f9512ae'),
+    'exiftool-RIFF.wav': (
+        _EXIFTOOL + 'RIFF.wav',
+        '9cb1dcc30bd66f13642d39bea9b29d2c763480b1600bcc3a5b6c73cb3de61b8c'),
+    'exiftool-RIFF.avi': (
+        _EXIFTOOL + 'RIFF.avi',
+        '7c03b77d115118e3293833e6c1b5d5795c998051d145674368e0b97f02719d4b'),
+    'exiftool-Matroska.mkv': (
+        _EXIFTOOL + 'Matroska.mkv',
+        '9781505f6fd4262f045e0e4ec28e9ce93b9a1d5fa27a05e76f3fe7e26e0f0710'),
     # Encrypted archives libarchive's own tests read (uuencoded, as
     # libarchive keeps them; tests/test_encrypted_archives.py).
     'libarchive-7zip_encryption.7z.uu': (
@@ -372,6 +439,157 @@ SAMPLES = {
         'https://sourceforge.net/p/sevenzip/patches/389/attachment/'
         'udf_tests.7z',
         '31630b5b1b39dac2255741f2afd93c656290aebd01e69b184f021b2ecfef3398'),
+    # The LEAPPs' own test fixtures (MIT): an iOS 15 full file system's
+    # SMS database with its attachments (Josh Hickman's public image), and
+    # an Android 15 mmssms.db -- what tests/test_modules_real.py runs the
+    # installed iLEAPP and aLEAPP on.
+    'ileapp-sms-josh_ios15_ffs.zip': (
+        'https://raw.githubusercontent.com/abrignoni/iLEAPP/'
+        '4ed4bc79a4d9df47fe6511c1c6ff313051c74fbf/admin/test/cases/data/'
+        'sms/testdata.sms.sms.josh_ios15_ffs.zip',
+        '218e8f770add0a09345dd5b92831caad5640a8a65f42644832ebeed22eae500a'),
+    'aleapp-smsmms-anne_a15.zip': (
+        'https://raw.githubusercontent.com/abrignoni/ALEAPP/'
+        '285fe70b7e3e83f37bdfdb2ede69a4ee62d0670b/admin/test/cases/data/'
+        'smsmms/testdata.smsmms.get_sms_mms.anne_a15.zip',
+        '9d227a6c54ad58cf9d4b26a4746c91890cd29910e10a88d8368bb3f46b64c5e9'),
+    # RLEAPP's synthetic Synchronoss/Verizon Cloud return (its generator
+    # fabricates every value: a real return is subscriber PII) and
+    # VLEAPP's Ford SYNC 4 PAS logs -- the zips as a provider or a
+    # vehicle tool hands them over.
+    'rleapp-synchronoss-messages.zip': (
+        'https://raw.githubusercontent.com/abrignoni/RLEAPP/'
+        'ea4012236f334e5390cbf551507c63e7279f4409/admin/test/cases/data/'
+        'synchronoss/testdata.synchronoss.synchronoss_messages.'
+        'caseSYNTH001.zip',
+        'd02a04fc452d01481f226a2801403b97f00b7ba284a020f0111f009cf308f99c'),
+    'vleapp-pasdegeo-sync4.zip': (
+        'https://raw.githubusercontent.com/abrignoni/VLEAPP/'
+        'ce3561cafb33fa88315b4acf2b1bb1d9b085985f/admin/test/cases/data/'
+        'pasDeGeo/testdata.pasDeGeo.pasDeGeoVehicle.caseSync4.zip',
+        '2e6d6db7265e0c8410876366c96e7d891c01ac5c83a21ebe4eaac7fc33154f3b'),
+    # QNX file systems made by QNX's own tools (mkqnx6fs, mkefs, mketfs) with
+    # the tar of the files put on each -- NetherlandsForensicInstitute/
+    # qnxmount's test data (Apache-2.0): what tests/test_qnx.py holds
+    # TRACE's readers to.
+    **{f"qnxmount-{kind}-{name}": (
+        f"{_QNXMOUNT}/tests/{folder}/test_data/{name}", digest)
+       for kind, folder, name, digest in (
+           ('qnx6', 'qnx6', 'test_image.bin',
+            '7dc3b4f771d9c74af6df0643124c18450357cdb9b01c892d48613b11dc3a3554'),
+           ('qnx6', 'qnx6', 'test_image.tar.gz',
+            'c0e9a2c9cc2eda05ff02589e75179ae590773da3b2477f67ee28cd7b1983b0a0'),
+           ('etfs', 'qnx_etfs', 'test_image.bin',
+            'de727e05990e87389df137f0e8c53f1923b64ed2cbb8440b5978a04b89367e1a'),
+           ('etfs', 'qnx_etfs', 'old_test_image.bin',
+            '2eefcd2737074a09dc8b9adb966042322a7c6cba12a1a62f8b31aabfebfac5a5'),
+           ('etfs', 'qnx_etfs', 'test_image.tar.gz',
+            '6602a25801754102738166c24d898927e7b7fc1134316503612add3fb3a30729'),
+           ('efs', 'qnx_efs', 'test_image.bin',
+            '0b0dc3a5b95320f20721093fadf3a08f52f80227e1ec60db5e1fbaf2877f92b3'),
+           ('efs', 'qnx_efs', 'test_image.tar.gz',
+            'dd60372bad552278770de8c8ea0716ec6dfb5031d09e90cd2e5f5d20b8e5a1ac'),
+       )},
+    # qnxprobe's EFS flash images (MIT): two partitions each, little- and
+    # big-endian, a decoy boot signature before them, and the contents
+    # recorded in efs.known.json.
+    'qnxprobe-efs-le.img.gz': (
+        f"{_QNXPROBE}/efs-le.img.gz",
+        '74b2e343180f6073f6e1fe7d57ac723e7ab6a8937c236fba189f879f86726f74'),
+    'qnxprobe-efs-be.img.gz': (
+        f"{_QNXPROBE}/efs-be.img.gz",
+        'd44bfdeb97d1c79b76f9a7dac48d9cee2cba07753eb7f171cc7a7354176034f6'),
+    'qnxprobe-efs.known.json': (
+        f"{_QNXPROBE}/efs.known.json",
+        '5a792cba318b4bf0243576305a6247325bfa6499138e72fad66caa0b895f9bcc'),
+    # qnxprobe's YAFFS images (MIT): Aleph One's mkyaffsimage /
+    # mkyaffs2image (little-endian, big-endian headers, tags two bytes
+    # into the spare), and YAFFS's own code writing history -- overwrites,
+    # a shrink and regrow, holes, a deletion, renames, a hard link, garbage
+    # collection, power cuts -- with the files' hashes and stat lines.
+    'qnxprobe-yaffs1.img.gz': (
+        f"{_QNXPROBE}/yaffs1.img.gz",
+        '34b605cb1a767a577528c79fdf1ffd620093356116a806d7b757385a201bed14'),
+    'qnxprobe-yaffs1-history.img.gz': (
+        f"{_QNXPROBE}/yaffs1-history.img.gz",
+        '3f59d8ed9ffab9e447b0c7ccfa87f3d1966daffad9a886b0d31043c7dbbf5afe'),
+    'qnxprobe-yaffs1cut-history.img.gz': (
+        f"{_QNXPROBE}/yaffs1cut-history.img.gz",
+        '6a7436982a57852ed4b13e161bc39e2f0e2ae93553f28e92c9d1c58191fb1536'),
+    'qnxprobe-yaffs2-le.img.gz': (
+        f"{_QNXPROBE}/yaffs2-le.img.gz",
+        'eda4f750537d3432ddcdc678e2e5b5213f6aa003d65b79547395d8142911a736'),
+    'qnxprobe-yaffs2-be.img.gz': (
+        f"{_QNXPROBE}/yaffs2-be.img.gz",
+        'c0192dcda66135d63dd0b25f1365e324b36ea7c0347aa37447ad200bf54566b1'),
+    'qnxprobe-yaffs2-oob2.img.gz': (
+        f"{_QNXPROBE}/yaffs2-oob2.img.gz",
+        '8f80fe834e1dfdfe5ea922de4029eb3ebcd1b01c1bfaf8f7ece0976b6db708cb'),
+    'qnxprobe-yaffs2-history.img.gz': (
+        f"{_QNXPROBE}/yaffs2-history.img.gz",
+        '7bb6dc4c70613f030d6da07bc0eb1df161201b140c2375e146c7c0bb292859c3'),
+    'qnxprobe-yaffs.src.sha256': (
+        f"{_QNXPROBE}/yaffs.src.sha256",
+        '1fd3bb55cf8622e3f50c370816b1496338c4f814580a60c7beb431cd2c4f8af2'),
+    'qnxprobe-yaffs.src.stat': (
+        f"{_QNXPROBE}/yaffs.src.stat",
+        '881f0c3c941712a914695d4a272d8e9042bd8356a5e4a14adef17577794fcc79'),
+    'qnxprobe-yaffs1.history.sha256': (
+        f"{_QNXPROBE}/yaffs1.history.sha256",
+        '30fe6779ef60ba0bed03e743f0763c6f4cd0880e86854e87b4915fa5f22ef39f'),
+    'qnxprobe-yaffs1.history.stat': (
+        f"{_QNXPROBE}/yaffs1.history.stat",
+        '39b6fce00c370553b3e6e376973b5a519e69ed3d302a74b8210c61eea5c474fa'),
+    'qnxprobe-yaffs1cut.history.sha256': (
+        f"{_QNXPROBE}/yaffs1cut.history.sha256",
+        'e64eb3df3a847583b8cc63770b6af82c97dfda8c21f327bb0a40a7bf9c4ab288'),
+    'qnxprobe-yaffs1cut.history.stat': (
+        f"{_QNXPROBE}/yaffs1cut.history.stat",
+        '232f9537f6ff99d08a0a929c39aef6c9e57dc6833544a94253da32f2af549958'),
+    'qnxprobe-yaffs2.history.sha256': (
+        f"{_QNXPROBE}/yaffs2.history.sha256",
+        'ff3ef769b0f2538ccaf99ec72869f42ea17d780e70ec27f2d24f4875f5ea56aa'),
+    'qnxprobe-yaffs2.history.stat': (
+        f"{_QNXPROBE}/yaffs2.history.stat",
+        '98858c395acfd4fda63bcf1236af1c3d84e5a98373fa2ce9df7fd76edfd3ee40'),
+    # openqnx (QNX's source release, 2007-2009): a real QNX4 floppy made
+    # by QNX's tools, whose .boot is the real IFS boot image beside it.
+    'openqnx-qnxfs.img': (
+        f"{_OPENQNX}/qnxfs.img",
+        '9571161f47c059124a1fca8427c1a3322bebfc7032e186bcbf585d2c5f94a6db'),
+    'openqnx-qnx.ifs': (
+        f"{_OPENQNX}/qnx.ifs",
+        'b169376e9a9cc914035068a7133c4e6a1d66d5755f498775532f1cd0a300cdb6'),
+    # unblob's cramfs (both byte orders, the old layout) and romfs test
+    # images (MIT); what unblob extracted from them is
+    # tests/expected/unblob_cramfs_romfs.json.
+    'unblob-fruits.romfs': (
+        f"{_UNBLOB}/filesystem/romfs/__input__/fruits.romfs",
+        '9839fae63043a9a97581761a35053a5a606be3855201e09a24637b7383070959'),
+    'unblob-fruits.cramfs_le': (
+        f"{_UNBLOB}/filesystem/cramfs/little_endian/__input__/"
+        f"fruits.cramfs_le",
+        '8e594657cd8a394eb7abb2a10041681a925edb95e829d37a7a4ac5168f026b9e'),
+    'unblob-fruits.old.cramfs_le': (
+        f"{_UNBLOB}/filesystem/cramfs/little_endian/__input__/"
+        f"fruits.old.cramfs_le",
+        '9bd27287c45ce34df662963e1541f5f13cf8b22f30e14942031dabd80a1596ea'),
+    'unblob-fruits.cramfs_be': (
+        f"{_UNBLOB}/filesystem/cramfs/big_endian/__input__/"
+        f"fruits.cramfs_be",
+        'de1d6be79d816470ff54836760a0a1574fba6c2efa9ed13108f0669eb329d749'),
+    'unblob-fruits.old.cramfs_be': (
+        f"{_UNBLOB}/filesystem/cramfs/big_endian/__input__/"
+        f"fruits.old.cramfs_be",
+        'ad4972ed94445a852d88ecee148fe34699b417d9885a84e47d328a300c0d7a37'),
+    # A Project VICS 2.0 export written by Griffeye Analyze DI 22.1.3.0
+    # (lemnet/VICS-Gallery-Maker's test file, GPL-3.0 test data:
+    # downloaded, never committed) -- the shape tests/test_vics.py holds
+    # TRACE's export to.
+    'griffeye-vics-TEST.json': (
+        'https://raw.githubusercontent.com/lemnet/VICS-Gallery-Maker/'
+        'ed8298e74053141059c1715e69ff1aae399c80f5/test_files/TEST.json',
+        'e06567d392149a8ce19a92f6b2a041d86c82da01e94ee8e300a9b5b1bec9e171'),
     # Physical Analyzer's report.xml, as IPED's tests keep it.
     'ufed-model-chat.xml': (
         _IPED + 'ufed-model-chat.xml',
@@ -1211,6 +1429,101 @@ SAMPLES = {
     'tsk-xfs-xfs-raw-2GB.E01': (
         _TSKDATA_LFS + 'xfs/xfs-raw-2GB.E01',
         '48397462ad7af18d4ac74534769fcbbe081712080918a0ca16e7063f62d5d772'),
+    # macOS artifacts (core/activity/macos_*, core/spotlight, core/biome,
+    # core/keychain): plaso's files with its expected values, and the two above.
+    'spotlight-859631-store.db': (
+        _PLASO + '859631-store.db',
+        '38a3fa9b183a4ed2d890aabde84c9926ba28c68c2bde188978d87d8b31d50b48'),
+    'spotlight.10.13.dmg': (
+        _PLASO + 'spotlight.10.13.dmg',
+        'd5931df39ab099890aa01c4a99bf378b3060854eb930416cfea74ff2d420452e'),
+    'spotlight.12.dmg': (
+        _PLASO + 'spotlight.12.dmg',
+        '69593b344df7ba5704488128a6bf43faba6dd0f282843c6555d47b8733db2aba'),
+    'login.keychain': (
+        _PLASO + 'login.keychain',
+        'c18c01687fcbc4cc9a4bf0e4c5bffa0f55ba80dc3746a9caf34e01d2f6bdb690'),
+    'mac_notificationcenter.db': (
+        _PLASO + 'mac_notificationcenter.db',
+        'c32d7afb0d1f63d430a6fa5ecf2cff2cea6300ec61a9f3bb9aad561ae14b8ae9'),
+    'NotesV7.storedata': (
+        _PLASO + 'macos/NotesV7.storedata',
+        'a383e583e81a9615b44397615dc78549939aedea5b9408057f4103741393cb4c'),
+    'TCC-test.db': (
+        _PLASO + 'macos/TCC-test.db',
+        '028e38156a1c2aaa3c50e1b0c0a6a3d2b5071d4e12b2e4b27b7659c9b1ff54f5'),
+    'application_usage.sqlite': (
+        _PLASO + 'macos/application_usage.sqlite',
+        '3fae92c5b7851b0c14b55014f93702515ea9fb5e2f83e97e2ee2ba0c44a295ee'),
+    'document_versions.sql': (
+        _PLASO + 'macos/document_versions.sql',
+        '1160023277e56a2c33e8099c7e7167ada0bd965e5134b8ab2eb83da7df64524e'),
+    'mac_cups_ipp': (
+        _PLASO + 'mac_cups_ipp',
+        '63c5d7ca4a84cb0134559f8266cc1db5423841f487c410707cddf97e10de03fb'),
+    'applesystemlog.asl': (
+        _PLASO + 'applesystemlog.asl',
+        '82eaa74197b995f5511cc8192112617babbd2d5c928f70ced5f13648f51b0d59'),
+    '2019.09.26.asl': (
+        _PLASO + '2019.09.26.asl',
+        '4e813589afc3c907a4f14fcff9ea68f74409106a3e9b5082e30213bc0d5a4b6a'),
+    'Cookies.binarycookies': (
+        _PLASO + 'Cookies.binarycookies',
+        'fdb592b5cf52cffdca11bd5740564f7172d19435a89f5396ddeed7364564a9a5'),
+    'com.apple.airport.preferences.plist': (
+        _PLASO + 'plist/com.apple.airport.preferences.plist',
+        '1ebebba60d78b89032ec28f63a83cea4f0c2b2b4e1aa9dee15a7bab297fb7fc7'),
+    'com.apple.bluetooth.plist': (
+        _PLASO + 'plist/com.apple.bluetooth.plist',
+        '21cdf076cf0cf777c92ef024c1f99fa6c265460d8e309ac319d00dd4eb649fff'),
+    'loginwindow.plist': (
+        _PLASO + 'plist/loginwindow.plist',
+        '27ab0a420b39f1b9a27504f705ad7392f3c3f6ae60361f0fcc8a9fe9c6e82446'),
+    'user.plist': (
+        _PLASO + 'plist/user.plist',
+        '8cd9a6cade5bd3d6b75110a43095aa40506205bec3e21a20f37642dca8dae322'),
+    'com.apple.iPod.plist': (
+        _PLASO + 'plist/com.apple.iPod.plist',
+        'bb117d6b9ca4a6ead1c6053be0c33c82dd0a99eb831c4a8b81b110808e15cca2'),
+    'com.apple.spotlight.plist': (
+        _PLASO + 'plist/com.apple.spotlight.plist',
+        '10ee78c07176052492476b2ef262d384f0bff0bb54e25aad3cd37f276a646031'),
+    'VolumeConfiguration.plist': (
+        _PLASO + 'plist/VolumeConfiguration.plist',
+        '480874ef63bd92dd07b4b4b8c96ad929a060fe13cd1de8c5c9d75297024aaa9d'),
+    'com.apple.coreservices.appleidauthenticationinfo.ABC0ABC1-ABC0-ABC0-ABC0-ABC0ABC1ABC2.plist': (
+        _PLASO + 'plist/com.apple.coreservices.appleidauthenticationinfo.ABC0ABC1-ABC0-ABC0-ABC0-ABC0ABC1ABC2.plist',
+        'a5179e60561651a414433cfe322a55ee16251a3df2647ace5e20f516c32fbb87'),
+    'com.apple.TimeMachine.plist': (
+        _PLASO + 'plist/com.apple.TimeMachine.plist',
+        '0c8dad3aabfc867907b9afebb2683b4862dfb03d3ecd3d94481a09f5bfcf8d58'),
+    'com.apple.SoftwareUpdate.plist': (
+        _PLASO + 'plist/com.apple.SoftwareUpdate.plist',
+        '892a4dfb22241395e76443fa833bf076acb1edd69110e37f558592ac7181c64c'),
+    'RMAdminStore-Local.sqlite': (
+        _PLASO + 'ios/RMAdminStore-Local.sqlite',
+        '1e2abf220a297d1dde99a3e09d4c60976df537134631a56b701db133975a2536'),
+    'netusage.sqlite': (
+        _PLASO + 'ios/netusage.sqlite',
+        '82019719a0f546dd7630f24c95c49e9d133ade28aaf0fb1fd6c055186d7dfe8c'),
+    'DataUsage.sqlite': (
+        _PLASO + 'ios/DataUsage.sqlite',
+        'fd2ab89c454c71fa2dd95b77dca245d097975c25b7581f0d6e588c2e98d02b13'),
+    'NoteStore.sqlite': (
+        _PLASO + 'ios/NoteStore.sqlite',
+        '2915789e7e19b66a2fa6247c26345c47b97d68921a0a6509686f0882e0c1f739'),
+    'keychainbreaker-test.keychain-db': (
+        _KEYCHAINBREAKER + 'test.keychain-db',
+        '026c5ac3116ba417104cb525a9dcb178198cc5d2fbefd31f6e090b4b128ccdf5'),
+    'segb-Device.Power.LowPowerMode.v1.segb': (
+        _SEGB + 'Device.Power.LowPowerMode.v1.segb',
+        'ce1893318c6d2fbecd26ceada628357321fda6a0a4f3e03bed7a22f0af998831'),
+    'segb-Device.Display.TrueTone.v2.segb': (
+        _SEGB + 'Device.Display.TrueTone.v2.segb',
+        '64e278ca9fab928b9934b2a45ee1a77cfb051f28b0b4ed1dd9faa5c10be1d47f'),
+    'segb-Device.Display.Backlight.tahoe26.v2.segb': (
+        _SEGB + 'Device.Display.Backlight.tahoe26.v2.segb',
+        '0436a34405a976a2dd86f9e217f413733499e050e500cde335f577054465ba82'),
 }
 
 

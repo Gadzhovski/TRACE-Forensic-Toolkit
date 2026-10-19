@@ -12,6 +12,8 @@ Two practical consequences:
   serves both light and dark. Raster icons are returned unchanged.
 """
 
+import functools
+import os
 import logging
 from weakref import WeakKeyDictionary
 
@@ -61,6 +63,8 @@ IMAGE_INFO = "Icons/tabler/disc.svg"
 #: (themes, panel toggles) do not, since Qt draws their tick in that column.
 EXIT = "Icons/tabler/logout.svg"
 CASE_PROPERTIES = "Icons/tabler/briefcase.svg"
+#: File ▸ Switch Case: the welcome screen from the window.
+SWITCH_CASE = "Icons/tabler/folders.svg"
 OPEN_FOLDER = "Icons/tabler/folder-open.svg"
 RUN = "Icons/tabler/player-play.svg"
 CANCEL = "Icons/tabler/player-stop.svg"
@@ -122,6 +126,10 @@ SHADOW_COPY = "Icons/tabler/clock.svg"
 JOB_WAITING = "Icons/tabler/clock.svg"
 #: Tags: the examiner's own verdicts on files.
 TAG = "Icons/tabler/tag.svg"
+#: External modules (iLEAPP, aLEAPP...) and what they extracted.
+MODULES = "Icons/tabler/puzzle.svg"
+#: The status bar's notice of a newer TRACE (the check at start).
+UPDATE_AVAILABLE = "Icons/tabler/sparkles.svg"
 #: Triage > Conversations: messages and calls as threads.
 CONVERSATIONS = "Icons/tabler/trace/activity-messages.svg"
 #: A whole case in one file (Case > Export / Open Case Archive).
@@ -145,6 +153,9 @@ ACTIVITY_CATEGORIES = {
     'locations': "Icons/tabler/map-pin.svg",
     'cloud': "Icons/tabler/trace/activity-cloud.svg",
     'antivirus': "Icons/tabler/trace/activity-antivirus.svg",
+    'accounts': "Icons/tabler/user-circle.svg",
+    'calendar': "Icons/tabler/calendar.svg",
+    'records': "Icons/tabler/list-details.svg",
 }
 
 #: Panel logos for the Search and Triage tabs, drawn in the same style so the
@@ -174,7 +185,6 @@ FRAME_BACK = "Icons/tabler/player-track-prev.svg"
 FRAME_FORWARD = "Icons/tabler/player-track-next.svg"
 LOOP = "Icons/tabler/repeat.svg"
 SNAPSHOT = "Icons/tabler/camera.svg"
-AUDIO = "Icons/tabler/music.svg"
 
 # --- View / zoom -----------------------------------------------------------
 ZOOM_IN = "Icons/tabler/zoom-in.svg"
@@ -182,6 +192,11 @@ ZOOM_OUT = "Icons/tabler/zoom-out.svg"
 ZOOM_ACTUAL = "Icons/tabler/zoom-reset.svg"
 FIT_WIDTH = "Icons/tabler/arrows-horizontal.svg"
 FIT_WINDOW = "Icons/tabler/arrows-maximize.svg"
+TIMELINE_CALENDAR = "Icons/tabler/calendar.svg"
+TIMELINE_CLOCK = "Icons/tabler/clock.svg"
+TIMELINE_FILTER = "Icons/tabler/filter.svg"
+TIMELINE_COLLAPSE = "Icons/tabler/stack-2.svg"
+TIMELINE_STAR = "Icons/tabler/star.svg"
 #: The Listing's view modes, as Windows Explorer names them.
 VIEW_DETAILS = "Icons/tabler/table.svg"
 VIEW_LIST = "Icons/tabler/list.svg"
@@ -189,6 +204,7 @@ VIEW_SMALL_ICONS = "Icons/tabler/grid-dots.svg"
 VIEW_MEDIUM_ICONS = "Icons/tabler/layout-grid.svg"
 VIEW_LARGE_ICONS = "Icons/tabler/layout-2.svg"
 VIEW_EXTRA_LARGE_ICONS = "Icons/tabler/photo.svg"
+VIEW_THUMBNAILS = "Icons/tabler/library-photo.svg"
 VIEW_STATISTICS = "Icons/tabler/chart-bar.svg"
 INSPECTOR = "Icons/tabler/list-details.svg"
 VIEW_OPTIONS = "Icons/tabler/adjustments-horizontal.svg"
@@ -219,9 +235,6 @@ DELETE = "Icons/tabler/trash.svg"
 VIRUSTOTAL_MENU = "Icons/tabler/world-search.svg"
 CODE = "Icons/tabler/code.svg"
 SEARCH = "Icons/tabler/search.svg"
-ICONS_SMALL = "Icons/tabler/layout-grid.svg"
-ICONS_MEDIUM = "Icons/tabler/layout-grid.svg"
-ICONS_LARGE = "Icons/tabler/layout-board.svg"
 
 # --- Editing / actions -----------------------------------------------------
 ROTATE_LEFT = "Icons/tabler/rotate-2.svg"
@@ -231,13 +244,27 @@ PRINT = "Icons/tabler/printer.svg"
 SAVE_AS = "Icons/tabler/device-floppy.svg"
 SEARCH_BROWSER = "Icons/tabler/world-search.svg"
 PAN = "Icons/tabler/hand-move.svg"
+# The picture and video players' forensic tools.
+IMAGE_ADJUST = "Icons/tabler/adjustments-horizontal.svg"
+IMAGE_ELA = "Icons/tabler/layers-difference.svg"
+IMAGE_UPRIGHT = "Icons/tabler/rotate-dot.svg"
+IMAGE_INSPECT = "Icons/tabler/photo-scan.svg"
+IMAGE_PIXEL = "Icons/tabler/color-picker.svg"
+IMAGE_REGION = "Icons/tabler/marquee-2.svg"
+MEDIA_MARKER = "Icons/tabler/keyframe.svg"
+MEDIA_MARKERS = "Icons/tabler/keyframes.svg"
+CONTACT_SHEET = "Icons/tabler/grid-pattern.svg"
+WAVEFORM = "Icons/tabler/wave-sine.svg"
+MEDIA_INFO = "Icons/tabler/info-circle.svg"
+MEDIA_GO_TO = "Icons/tabler/clock-search.svg"
+MEDIA_MAP = "Icons/tabler/map-pin.svg"
+MEDIA_EXPORT_FRAMES = "Icons/tabler/photo-down.svg"
 
 # --- Domain ----------------------------------------------------------------
 REFRESH = "Icons/tabler/refresh.svg"
 UPLOAD = "Icons/tabler/upload.svg"
 EXTERNAL_LINK = "Icons/tabler/external-link.svg"
 CLOSE = "Icons/tabler/x.svg"
-CARVING = "Icons/tabler/file-search.svg"
 REGISTRY = "Icons/tabler/database.svg"
 # The viewer dock's tabs.
 TAB_HEX = "Icons/tabler/binary.svg"
@@ -252,7 +279,6 @@ REGISTRY_KEY = "Icons/tabler/key.svg"
 REGISTRY_VALUE = "Icons/tabler/tag.svg"
 
 # --- Generic fallbacks (resolved through the icon database elsewhere) ------
-FILE_UNKNOWN = "Icons/mimetypes/application-x-zerosize.svg"
 FILE_ARCHIVE = "Icons/mimetypes/application-zip.svg"
 FILE_AUDIO = "Icons/mimetypes/audio-x-generic.svg"
 FILE_VIDEO = "Icons/mimetypes/video-x-generic.svg"
@@ -261,7 +287,6 @@ FILE_VIDEO = "Icons/mimetypes/video-x-generic.svg"
 #: glyph stands for the family.
 FILE_DOC = "Icons/mimetypes/application-vnd.ms-word.svg"
 FILE_HTML = "Icons/mimetypes/text-x-html.svg"
-WEB_BROWSER = "Icons/apps/internet-web-browser.svg"
 
 # Operating systems' marks (core/os_identity: its logo keys). Simple Icons
 # (CC0) and Tabler's filled Windows mark (MIT): Icons/ATTRIBUTION.md. Each
@@ -278,7 +303,7 @@ OS_LOGOS = {
     'centos': None, 'rockylinux': '#10B981', 'almalinux': None,
     'redhat': '#EE0000', 'opensuse': '#73BA25', 'suse': None,
     'manjaro': '#35BFA4', 'archlinux': '#1793D1', 'gentoo': '#54487A',
-    'alpinelinux': '#0D597F', 'nixos': '#5277C3',
+    'alpinelinux': '#0D597F', 'nixos': '#5277C3', 'chromeos': '#4285F4',
 }
 
 
@@ -346,13 +371,6 @@ def apply_to(action, name):
     action.setIcon(icon(name))
     _tracked_actions[action] = name
     return action
-
-
-def apply_pixmap(label, name, size):
-    """Set a label's pixmap and keep it in step with later theme changes."""
-    label.setPixmap(icon(name).pixmap(size, size))
-    _tracked_labels[label] = (name, size)
-    return label
 
 
 def action(name, text, parent=None):
@@ -634,6 +652,21 @@ def clear_cache():
     _cache.clear()
 
 
+#: File-type, folder and device pictures by path (never tinted, so a theme
+#: change keeps them).
+_path_icons = {}
+
+
+def cached_icon(icon_path):
+    """The QIcon of a picture file, made once. A QIcon is implicitly
+    shared, so every row holding it costs nothing; QIcon(path) per row
+    re-read the file each time -- 0.66 s of a 3,656-row Listing fill."""
+    icon = _path_icons.get(icon_path)
+    if icon is None:
+        icon = _path_icons[icon_path] = QIcon(icon_path)
+    return icon
+
+
 class DotEngine(QIconEngine):
     """A filled dot drawn as a shape at whatever size and pixel ratio is
     asked for. Never draw a coloured dot into a small QPixmap: a 125%
@@ -682,3 +715,89 @@ class DotEngine(QIconEngine):
 def dot_icon(colour):
     """A filled dot in `colour`, sharp at any size and display scale."""
     return QIcon(DotEngine(colour))
+
+
+# --- external modules ------------------------------------------------------------
+
+_module_logos = {}
+
+
+def module_logo(tool):
+    """A tool's own logo, by its id or its name ('iLEAPP'): the copy TRACE
+    ships (Icons/modules/<id>.png -- shown before the tool is installed),
+    else read from the installed program (core/modules/logo), else the
+    modules icon."""
+    from trace_app.core.modules.spec import TOOLS
+    spec = TOOLS.get(tool) or next(
+        (s for s in TOOLS.values() if s.name.lower() == (tool or '').lower()),
+        None)
+    if spec is None:
+        return icon(MODULES)
+    if spec.id not in _module_logos:
+        bundled = resource_path(f"Icons/modules/{spec.id}.png")
+        if os.path.isfile(bundled):
+            path = bundled
+        else:
+            from trace_app.core.modules.logo import tool_logo
+            path = tool_logo(spec)
+        _module_logos[spec.id] = QIcon(path) if path else None
+    return _module_logos[spec.id] or icon(MODULES)
+
+
+#: A LEAPP artifact's icon (the Feather names its modules give,
+#: `artifact_icon`) -> the TRACE icon for the same kind of thing. Only
+#: categories show one (the first of their artifacts that maps): an icon on
+#: every artifact made the list harder to read, not easier.
+#: LEAPP artifact icons (each artifact's `artifact_icon`) are Feather or
+#: Tabler names; Tabler, TRACE's own set, has nearly every Feather icon --
+#: these are the ones it draws under another name. Every name the
+#: installed iLEAPP and aLEAPP use (263) resolves to a Tabler file of the
+#: tag TRACE pins (Icons/ATTRIBUTION.md). They used to be folded onto a
+#: dozen TRACE categories: battery, CPU and settings drew one icon, and a
+#: name outside the table (IOS Build's) drew none.
+_LEAPP_RENAMED = {
+    'airplay': 'cast', 'align-justify': 'align-justified',
+    'bar-chart-2': 'chart-bar', 'book-open': 'book',
+    'check-circle': 'circle-check', 'check-square': 'square-check',
+    'device-washing-machine': 'wash-machine', 'dollar-sign':
+    'currency-dollar', 'edit-3': 'edit', 'film': 'movie',
+    'garage': 'car-garage', 'grid': 'layout-grid', 'hard-drive': 'server-2',
+    'image': 'photo', 'info': 'info-circle', 'layers': 'stack-2',
+    'log-in': 'login', 'message-square': 'message', 'mic': 'microphone',
+    'play-circle': 'player-play', 'refresh-cw': 'refresh',
+    'rotate-ccw': 'rotate', 'rotate-clock': 'rotate-clockwise',
+    'sidebar': 'layout-sidebar', 'sliders': 'adjustments-horizontal',
+    'smartphone': 'device-mobile', 'smile': 'mood-smile',
+    'speaker': 'device-speaker', 'thumbs-up': 'thumb-up', 'trash-2': 'trash',
+    'type': 'typography', 'unlock': 'lock-open',
+    'upload-cloud': 'cloud-upload', 'voicemail': 'phone-call',
+    'watch': 'device-watch', 'x-square': 'square-x', 'zap': 'bolt',
+    'zap-off': 'bolt-off'}
+#: An artifact whose icon TRACE has no drawing for (a newer LEAPP's).
+LEAPP_ARTIFACT = "Icons/tabler/table.svg"
+
+
+@functools.lru_cache(maxsize=None)
+def leapp_icon_name(artifact_icon):
+    """The Tabler file for a LEAPP artifact's icon name, else the generic
+    artifact icon."""
+    name = (artifact_icon or '').strip().lower()
+    name = _LEAPP_RENAMED.get(name, name)
+    path = f"Icons/tabler/{name}.svg"
+    if name and os.path.isfile(resource_path(path)):
+        return path
+    return LEAPP_ARTIFACT
+
+
+def leapp_icon(artifact):
+    """A LEAPP artifact's own icon."""
+    return icon(leapp_icon_name(artifact.get('icon')))
+
+
+def leapp_category_icon(artifacts):
+    """A LEAPP category's icon: the one most of its artifacts use (the
+    first's on a tie)."""
+    names = [leapp_icon_name(a.get('icon')) for a in artifacts]
+    if not names:
+        return None
+    return icon(max(dict.fromkeys(names), key=names.count))

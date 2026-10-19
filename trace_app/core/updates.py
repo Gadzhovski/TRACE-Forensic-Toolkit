@@ -1,5 +1,6 @@
-"""Is there a newer TRACE? Asked of GitHub's releases, only when the
-examiner clicks Check for Updates in About (no Qt).
+"""Is there a newer TRACE? Asked of GitHub's releases when the examiner
+clicks Check for Updates in About, and once a few seconds after the window
+opens unless that is turned off (`start_refusal`; no Qt).
 
 One request, to the public API, carrying nothing but TRACE's version in
 its User-Agent: no evidence, no case, no account. It is refused when the
@@ -53,6 +54,14 @@ def refusal():
         return ("Checking for new versions is turned off (Options ▸ "
                 "Settings ▸ Privacy & Network).")
     return settings.network_refusal()
+
+
+def start_refusal():
+    """Why the check made at start may not be made, or None."""
+    from trace_app.core import settings
+    if not settings.user('check_updates_at_start'):
+        return "Checking at start is turned off."
+    return refusal()
 
 
 def latest(session=None):

@@ -34,6 +34,7 @@ import struct
 import time
 import zipfile
 import zlib
+from collections.abc import Callable
 
 from trace_app.core import carve_verify
 from trace_app.core import carving_formats as formats
@@ -129,7 +130,6 @@ JPG_FOOTER = b'\xFF\xD9'
 PNG_HEADER = b'\x89PNG\r\n\x1a\n'
 #: IEND carries no data, so its CRC is a constant and forms part of the footer.
 PNG_FOOTER = b'IEND\xAE\x42\x60\x82'
-WAV_HEADER = b'RIFF'
 PDF_HEADER = b'%PDF-'
 PDF_FOOTER = b'%%EOF'
 ZIP_LOCAL_HEADER = b'PK\x03\x04'
@@ -582,8 +582,14 @@ class Carver:
         """
         self._carve_atom_chain(chunk, base_offset)
 
-    #: The atom names a QuickTime/MP4 file can open with, found in one pass.
-    _ATOM_ANCHOR_RE = re.compile(rb'(?=(ftyp|moov|mdat|free|skip|wide|pnot))')
+    #: The atom names a QuickTime/MP4 file can open with, found in one pass:
+    #: match.start() is where a name begins. Written to begin with a
+    #: literal character: a pattern opening with a lookahead turns off
+    #: re's fast scan for its first character, and the engine tried every
+    #: byte (46% of a whole-image carve). Only the first byte is consumed,
+    #: so overlapping names ('skipnot') are each found.
+    _ATOM_ANCHOR_RE = re.compile(
+        rb'f(?=typ|ree)|m(?=oov|dat)|s(?=kip)|w(?=ide)|p(?=not)')
 
     def _carve_atom_chain(self, chunk, base_offset):
         """Walk every plausible atom chain in the chunk, in order.
@@ -1048,7 +1054,21 @@ class Carver:
         """
         source = formats.Source(chunk, base_offset, self._reader,
                                 self._end(base_offset))
+        family = self._family(measure)
+        step = self.alignment if aligned else 1
         for signature in signatures:
+            if step > 1:
+                # Only a sector start can begin a file: look there, rather
+                # than find every occurrence in the chunk and discard those
+                # that are not (8x fewer bytes compared on 4 MB; the same
+                # candidates in the same order).
+                first = -base_offset % step + signature_at
+                for hit in range(first, len(chunk) - len(signature) + 1,
+                                 step):
+                    if chunk.startswith(signature, hit):
+                        self._try_carve(source, base_offset + hit -
+                                        signature_at, measure, args, family)
+                continue
             cursor = 0
             while True:
                 hit = chunk.find(signature, cursor)
@@ -1061,8 +1081,7 @@ class Carver:
                 offset = base_offset + start
                 if aligned and not self._starts_a_file(offset):
                     continue
-                self._try_carve(source, offset, measure, args,
-                                self._family(measure))
+                self._try_carve(source, offset, measure, args, family)
 
     def _try_carve(self, source, offset, measure, args, family):
         """Measure, read, validate and keep one candidate at `offset`."""
@@ -1294,7 +1313,6 @@ class Carver:
     }
 
 
-
 #: The order carvers run in, per chunk. Containers before what they contain:
 #: a video's audio, an archive's members and an executable's resources are
 #: then recognised as inside a file already carved, rather than carved again
@@ -1505,6 +1523,39 @@ def _note_done(image_handler, carver, families, allocated, begin_span,
                                        limit=end - begin)
 
 
+class _ReadAhead:
+    """The scan's reads, sharing what consecutive reads have in common.
+
+    Each 4 MB step reads CARVE_OVERLAP (32 MB) on past its end, so a file
+    crossing the step's end is whole in one buffer -- and the next step's
+    read starts 4 MB later over the same bytes. Read anew, every byte of
+    the image was read (from an E01: decompressed) about nine times. Here
+    the part already read is kept and only what follows is read: the
+    same bytes, read once. A read that came back short is never reused
+    (the image may have ended, or a damaged region begun)."""
+
+    def __init__(self, read):
+        self._read = read
+        self._begin, self._data = None, b''
+
+    def __call__(self, begin, end):
+        cached_end = (self._begin or 0) + len(self._data)
+        if self._begin is not None and self._begin <= begin < cached_end:
+            kept = self._data[begin - self._begin:end - self._begin]
+            if end > cached_end:
+                more = self._read(cached_end, end - cached_end)
+                data = kept + more if more else kept
+            else:
+                data = kept
+        else:
+            data = self._read(begin, end - begin)
+        if data and len(data) == end - begin:
+            self._begin, self._data = begin, data
+        else:
+            self._begin, self._data = None, b''
+        return data
+
+
 def _carve_span(image_handler, carver, families, allocated, run, begin_span,
                 end_span, position, walked, resume, progress, should_stop):
     """Carve [begin_span, end_span) -- the image, or one volume in its own
@@ -1514,6 +1565,7 @@ def _carve_span(image_handler, carver, families, allocated, run, begin_span,
     if offset > begin_span:
         _note_done(image_handler, carver, families, allocated, begin_span,
                    offset, should_stop)
+    read = _ReadAhead(image_handler.read)
     while offset < end_span:
         if should_stop and should_stop():
             raise CarvingCancelled()
@@ -1534,7 +1586,7 @@ def _carve_span(image_handler, carver, families, allocated, run, begin_span,
             read_end = min(chunk_end + CARVE_OVERLAP, end_span)
             if limit is not None:
                 read_end = min(read_end, limit)
-            chunk = image_handler.read(begin, read_end - begin)
+            chunk = read(begin, read_end)
             if not chunk:
                 continue
             # Where this read's own range ends and the read-ahead begins
@@ -1604,7 +1656,8 @@ def free_ranges(begin, end, allocated):
     return out
 
 
-def read_carved(read, offset, size, fragments=None):
+def read_carved(read: Callable[[int, int], bytes], offset: int, size: int,
+                fragments: list | None = None) -> bytes | None:
     """A carved file's bytes, read back from the image with `read(offset,
     length)`: the run at `offset`, or -- for a file rebuilt from fragments --
     each piece in turn. None if the image no longer gives them all."""
@@ -1971,7 +2024,9 @@ def pair_wal_files(read, case, evidence_id):
             try:
                 data = read_carved(read, int(row['offset']), int(row['size']),
                                    row.get('fragments'))
-            except Exception:
+            except Exception as exc:
+                logger.debug("Carved database at %s not read back: %s",
+                             row['offset'], exc)
                 continue
             if _wal_mode_page_size(data):
                 databases.append((row, data))

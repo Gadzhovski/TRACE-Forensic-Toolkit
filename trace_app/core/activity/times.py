@@ -12,6 +12,7 @@ UTC = datetime.timezone.utc
 _FILETIME_EPOCH = datetime.datetime(1601, 1, 1, tzinfo=UTC)
 _UNIX_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=UTC)
 _MAC_EPOCH = datetime.datetime(2001, 1, 1, tzinfo=UTC)
+_HFS_EPOCH = datetime.datetime(1904, 1, 1, tzinfo=UTC)
 
 #: Anything outside this is a misread field, not a date.
 _EARLIEST = datetime.datetime(1980, 1, 1, tzinfo=UTC)
@@ -70,6 +71,16 @@ def mac_absolute(value):
     try:
         return _checked(_MAC_EPOCH + datetime.timedelta(seconds=value))
     except OverflowError:
+        return None
+
+
+def hfs(value):
+    """Seconds since 1904 (HFS, the Dock's file dates)."""
+    if not value or value < 0:
+        return None
+    try:
+        return _checked(_HFS_EPOCH + datetime.timedelta(seconds=value))
+    except (OverflowError, ValueError):
         return None
 
 

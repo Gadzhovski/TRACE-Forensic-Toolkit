@@ -333,7 +333,3 @@ except ImportError:                                   # pragma: no cover
     MdImgInfo = None
 
 
-def member_read(read, size):
-    """(Member, read) for one device, or None."""
-    member = superblock(read, size)
-    return (member, read) if member is not None else None

@@ -309,6 +309,11 @@ QToolBar {
     padding: 3px;
     spacing: 6px;
 }
+/* Spacers between toolbar groups (toolbars.spacer / stretch) never paint. */
+QWidget#toolbarGap {
+    background: transparent;
+}
+
 QToolBar::item:hover {
     background-color: #4C4C4C;
 }
@@ -834,19 +839,6 @@ QProgressBar::chunk {
     border-radius: 4px;
 }
 
-QProgressBar#verifyProgress {
-    border: 1px solid #3C3C3C;
-    border-radius: 4px;
-    text-align: center;
-    background-color: #262626;
-    color: #E0E0E0;
-}
-
-QProgressBar#verifyProgress::chunk {
-    background-color: #3B7DD8;
-    border-radius: 4px;
-}
-
 QTextEdit#borderlessView {
     border: 0px;
 }
@@ -980,6 +972,14 @@ QToolButton#tabCloseButton:hover {
 }
 
 /* ==================== Metadata pane ==================== */
+/* A result panel's holder (widgets/result_docks.py): it scrolls only
+   when the dock is shorter than the panel can be. */
+QScrollArea#resultPanelScroll,
+QScrollArea#resultPanelScroll > QWidget#qt_scrollarea_viewport {
+    background-color: #2E2E2E;
+    border: none;
+}
+
 /* One scroll area holding the property table and the low-level dump, so the
    pane has a single scrollbar instead of two competing ones. */
 
@@ -1515,20 +1515,6 @@ QLabel#jobBarLabel {
     padding-right: 4px;
 }
 
-QProgressBar#jobBarProgress {
-    border: 1px solid #3C3C3C;
-    border-radius: 3px;
-    text-align: center;
-    background-color: #262626;
-    color: #E0E0E0;
-    font-size: 11px;
-}
-
-QProgressBar#jobBarProgress::chunk {
-    background-color: #3B7DD8;
-    border-radius: 3px;
-}
-
 /* Cancel: a stop icon and the word, beside the bar it stops. */
 QToolButton#jobBarCancel {
     color: #B0B0B0;
@@ -1625,14 +1611,18 @@ QLabel#carvedStatus {
     padding: 2px 6px;
 }
 
-/* Why a BitLocker key was refused. */
-QLabel#bitlockerError {
+/* Why a BitLocker key or a keychain unlock was refused. */
+QLabel#bitlockerError,
+QLabel#keychainError {
     color: #F47067;
+}
+
+QLabel#keychainError[ok="true"] {
+    color: #57AB5A;
 }
 
 /* --- Hash sets and report dialogs: titled groups --------------------- */
 
-QDialog#hashSetsDialog QGroupBox,
 QDialog#hashSetImportDialog QGroupBox,
 QDialog#reportDialog QGroupBox {
     border: 1px solid #4A4A4A;
@@ -1640,7 +1630,6 @@ QDialog#reportDialog QGroupBox {
     margin-top: 16px;
     padding: 12px 8px 6px 8px;
 }
-QDialog#hashSetsDialog QGroupBox::title,
 QDialog#hashSetImportDialog QGroupBox::title,
 QDialog#reportDialog QGroupBox::title {
     subcontrol-origin: margin;
@@ -1661,6 +1650,74 @@ QToolButton#timelinePivotChip {
     border: 1px solid #4A4A4A;
     border-radius: 10px;
     padding: 2px 10px;
+}
+
+/* Timeline controls: flat icon buttons, sources as pills (filled when
+   shown), active filters as chips, the column filter row. */
+QToolButton#timelineTool {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 3px;
+}
+QToolButton#timelineTool:hover {
+    background-color: #3a3a3a;
+    border-color: #4A4A4A;
+}
+QToolButton#timelineTool:pressed {
+    background-color: #444444;
+}
+QToolButton#timelineSourceChip {
+    border: 1px solid #4A4A4A;
+    border-radius: 11px;
+    padding: 2px 10px 2px 6px;
+    color: #9aa4b0;
+    background-color: transparent;
+}
+QToolButton#timelineSourceChip:hover {
+    background-color: #3a3a3a;
+}
+QToolButton#timelineSourceChip:checked {
+    color: #E0E0E0;
+    background-color: #2f3b4d;
+    border-color: #4b6a94;
+}
+QToolButton#timelinePivotChip {
+    background-color: #2f3b4d;
+    border-color: #4b6a94;
+}
+QToolButton#timelineClearChips {
+    border: none;
+    color: #6cb0ff;
+    padding: 2px 6px;
+}
+QToolButton#timelineClearChips:hover {
+    text-decoration: underline;
+}
+QWidget#timelineColumnFilters {
+    background-color: #2E2E2E;
+}
+QLineEdit#timelineColumnFilter {
+    font-size: 11px;
+    padding: 0px 4px;
+    min-height: 0px;
+    border-radius: 3px;
+}
+QWidget#timelineRangePopup {
+    background-color: transparent;
+}
+
+QToolButton#timelineViewSwitch {
+    border: 1px solid #4A4A4A;
+    padding: 3px 12px;
+    background-color: transparent;
+}
+QToolButton#timelineViewSwitch:hover {
+    background-color: #3a3a3a;
+}
+QToolButton#timelineViewSwitch:checked {
+    background-color: #2f3b4d;
+    border-color: #4b6a94;
+    color: #E0E0E0;
 }
 
 /* Menu buttons (Views, Range, the Listing's View): the same chevron as a
@@ -1862,21 +1919,142 @@ QLabel#moduleSummary {
     border-top: 1px solid #5A5A5A;
 }
 
-/* What the media player has loaded: 'Video · 00:58 · 352×240 · ready'. */
-QLabel#mediaStatusLine {
-    color: #9aa4b0;
-    font-size: 11px;
-    padding: 4px 6px 0px 6px;
-}
-
-/* The media player: a black picture area, times that do not jiggle as they count. */
+/* The media player (ui/viewers/media/audiovideo.py): the picture on
+   black; under it one panel -- the position across the whole width with
+   the times either side, then the toolbar, whose line says what is
+   loaded ('Video · 00:58 · 352×240 · ready'). */
 FrameView#mediaVideo {
     background-color: #000000;
 }
-QLabel#mediaTime {
+QWidget#mediaControls {
+    background-color: #2B2B2B;
+    border-top: 1px solid #3C3C3C;
+}
+QToolBar#mediaToolbar {
+    background: transparent;
+    border: none;
+}
+QLabel#mediaStatusLine {
+    color: #9aa4b0;
+    font-size: 11px;
+    padding: 0px;
+}
+QLabel#mediaTime, QLabel#mediaTotalTime {
     font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
     font-size: 12px;
-    padding: 0px 4px;
+}
+QLabel#mediaTime {
+    color: #F0F0F0;
+}
+QLabel#mediaTotalTime {
+    color: #9aa4b0;
+}
+/* Speed: a framed button opening a menu, sized to its longest label
+   ('0.25×') and the chevron. */
+QToolBar QToolButton#mediaSpeed {
+    border: 1px solid #5A5A5A;
+    border-radius: 4px;
+    padding: 0px 22px 0px 8px;
+    min-width: 30px;
+    max-width: 70px;
+    color: #E0E0E0;
+}
+QToolBar QToolButton#mediaSpeed:hover {
+    background-color: #3a3a3a;
+}
+QToolBar QToolButton#mediaSpeed::menu-indicator {
+    image: url('Icons/tabler/themed/chevron-down-dark.svg');
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 14px;
+    height: 14px;
+    right: 5px;
+}
+
+/* The side panels of the player and the picture viewer: flat tabs
+   underlined when chosen, sharing the panel's width. */
+QTabWidget#mediaSidePanel::pane {
+    border: none;
+    border-left: 1px solid #3C3C3C;
+    background-color: #2E2E2E;
+}
+QTabWidget#mediaSidePanel QTabBar,
+QTabWidget#pictureSidePanel QTabBar {
+    background-color: #2B2B2B;
+    border-left: 1px solid #3C3C3C;
+    border-bottom: 1px solid #3C3C3C;
+}
+QTabWidget#mediaSidePanel QTabBar::tab,
+QTabWidget#pictureSidePanel QTabBar::tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0px;
+    margin: 0px;
+    padding: 6px 12px;
+    color: #9aa4b0;
+}
+QTabWidget#mediaSidePanel QTabBar::tab:hover,
+QTabWidget#pictureSidePanel QTabBar::tab:hover {
+    color: #E0E0E0;
+    background: #3a3a3a;
+}
+QTabWidget#mediaSidePanel QTabBar::tab:selected,
+QTabWidget#pictureSidePanel QTabBar::tab:selected {
+    color: #F0F0F0;
+    font-weight: 600;
+    border-bottom: 2px solid #B8BCC2;
+}
+QWidget#mediaSidePage {
+    background-color: #2E2E2E;
+}
+QScrollArea#mediaSideScroll,
+QScrollArea#mediaSideScroll > QWidget#qt_scrollarea_viewport {
+    background-color: #2E2E2E;
+    border: none;
+}
+QLabel#mediaInfoTitle {
+    color: #F0F0F0;
+    font-size: 13px;
+    font-weight: 600;
+}
+QLabel#mediaInfoSummary {
+    color: #9aa4b0;
+    font-size: 11px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #3C3C3C;
+}
+QTableWidget#mediaInfoTable {
+    background-color: #2E2E2E;
+    border: none;
+}
+QToolBar#mediaMarkerTools {
+    background-color: #2E2E2E;
+    border-bottom: 1px solid #3C3C3C;
+}
+QListWidget#mediaMarkerList {
+    background-color: #2E2E2E;
+    border: none;
+    font-family: 'Consolas', 'Menlo', 'DejaVu Sans Mono', monospace;
+    font-size: 12px;
+}
+QListWidget#mediaMarkerList::item {
+    padding: 6px 10px;
+    border-bottom: 1px solid #3C3C3C;
+}
+QListWidget#mediaMarkerList::item:hover {
+    background-color: #3a3a3a;
+}
+QListWidget#mediaMarkerList::item:selected {
+    background-color: #3E4247;
+    color: #F0F0F0;
+}
+QLabel#mediaEmptyHint {
+    color: #9aa4b0;
+    padding: 24px 18px;
+}
+QPushButton#mediaMapButton, QPushButton#mediaSaveAdjusted {
+    min-width: 0px;
 }
 
 /* --- Media player sliders: a slim track, the played part filled in the
@@ -1884,7 +2062,7 @@ QLabel#mediaTime {
    the rest of the application -- no accent colour. --- */
 QSlider#mediaPosition,
 QSlider#mediaVolume {
-    min-height: 18px;
+    min-height: 20px;
     background: transparent;
 }
 QSlider#mediaPosition::groove:horizontal,
@@ -2086,6 +2264,15 @@ QLabel#settingsSection {
 QLabel#settingsLabel {
     color: #E0E0E0;
 }
+/* Settings: All / None beside a list of ticks. */
+QPushButton#settingsSmallButton {
+    min-width: 0px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0px 10px;
+    margin-left: 0px;
+    margin-right: 0px;
+}
 QLabel#settingsHint {
     color: #9aa4b0;
     font-size: 11px;
@@ -2104,6 +2291,131 @@ QLabel#settingsScopeTag {
     border: 1px solid #5A5A5A;
     border-radius: 3px;
     padding: 0px 5px;
+}
+
+/* The status bar's notice of a newer TRACE (the check at start). */
+QToolButton#updateNotice {
+    color: #6CB4FF;
+    font-weight: 600;
+    border: none;
+    border-radius: 4px;
+    padding: 1px 8px;
+    background: transparent;
+}
+QToolButton#updateNotice:hover {
+    background-color: #3A3A3A;
+    text-decoration: underline;
+}
+
+/* ============ Pages in Settings' look (ui/widgets/dialog_page.py) ============ */
+/* External Modules, Supported Features, the libraries...: a header with an
+   icon, title and intro; sections, cards and help text; a footer with a
+   hint beside the buttons. Settings' own colours. */
+QDialog[page="true"],
+QFrame#pageHeader,
+QScrollArea#pageScroll,
+QWidget#pageBody {
+    background-color: #2E2E2E;
+    border: none;
+}
+QFrame#pageFooter {
+    border-top: 1px solid #5A5A5A;
+    background-color: #2E2E2E;
+}
+QLabel#pageTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #E0E0E0;
+}
+QLabel#pageIntro {
+    color: #9aa4b0;
+    padding-top: 3px;
+}
+QLabel#pageSection,
+QLabel#pageSectionFirst {
+    font-weight: 600;
+    color: #E0E0E0;
+    padding-top: 20px;
+    padding-bottom: 4px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid #454545;
+}
+QLabel#pageSectionFirst {
+    padding-top: 8px;
+}
+QLabel#pageHint {
+    color: #9aa4b0;
+    font-size: 11px;
+}
+QLabel#pageNote {
+    color: #9aa4b0;
+    background-color: #353535;
+    border: 1px solid #454545;
+    border-radius: 4px;
+    padding: 8px 10px;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+QFrame#pageCard {
+    background-color: #333333;
+    border: 1px solid #454545;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+QFrame#pageCard QLabel {
+    background-color: transparent;
+}
+QLabel#pageCardTitle {
+    font-size: 14px;
+    font-weight: 600;
+    color: #E0E0E0;
+}
+QLabel#pageCardFacts {
+    color: #E0E0E0;
+}
+/* Titled groups in a page (Hash Sets' "How this case uses them"). */
+QDialog[page="true"] QGroupBox {
+    background-color: #333333;
+    border: 1px solid #454545;
+    border-radius: 6px;
+    margin-top: 18px;
+    padding: 14px 10px 8px 10px;
+}
+QDialog[page="true"] QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 2px;
+    padding: 0px 2px;
+    font-weight: 600;
+    color: #B0B0B0;
+}
+QDialog[page="true"] QGroupBox QLabel,
+QDialog[page="true"] QGroupBox QCheckBox {
+    background-color: transparent;
+}
+QLabel#pageBadge {
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 7px;
+    padding: 2px 9px;
+    border: 1px solid #5A5A5A;
+    color: #9aa4b0;
+}
+QLabel#pageBadge[tone="ok"] {
+    color: #3FB950;
+    border-color: #3FB950;
+}
+QLabel#pageBadge[tone="warn"] {
+    color: #E3A008;
+    border-color: #E3A008;
+}
+QLabel#pageBadge[tone="bad"] {
+    color: #FF6B6B;
+    border-color: #FF6B6B;
+}
+QLabel#pageBadge[tone="info"] {
+    color: #6CB4FF;
+    border-color: #6CB4FF;
 }
 
 
@@ -2484,4 +2796,69 @@ QAbstractItemView[textZoom="6"], QPlainTextEdit[textZoom="6"], QTextEdit[textZoo
 #listingTable[textZoom="6"], QTableView#activityTable[textZoom="6"],
 QPlainTextEdit#monoDetailView[textZoom="6"] {
     font-size: 28px;
+}
+
+/* Activity's Charts and Items views (ui/viewers/record_views.py): the
+   charts paint in the palette's colours; these frame them as the table. */
+QScrollArea#recordOverview, QListView#recordCards, QWidget#artifactChart {
+    border: 1px solid #5A5A5A;
+    border-radius: 4px;
+}
+QLabel#recordChartTitle {
+    font-weight: 600;
+    color: #E0E0E0;
+    padding-top: 10px;
+    padding-bottom: 2px;
+}
+
+/* The picture viewer's examiner tools (ui/viewers/media/picture.py) and
+   the Adjust controls shared with the player (ui/widgets/image_adjust.py).
+   The badge says when a view is not the file's pixels. */
+QWidget#pictureInfoStrip {
+    background-color: #2B2B2B;
+    border-top: 1px solid #3C3C3C;
+}
+QLabel#pictureFacts, QLabel#picturePixelReadout {
+    color: #B8BEC6;
+    font-size: 11px;
+}
+QLabel#picturePixelReadout {
+    font-family: "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+}
+QLabel#pictureZoomLabel, QLabel#pictureFrameLabel {
+    color: #B8BEC6;
+    padding: 0px 4px;
+}
+QLabel#pictureViewBadge {
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 7px;
+    padding: 1px 8px;
+    border: 1px solid #6CB4FF;
+    color: #6CB4FF;
+}
+QLabel#pictureViewBadge[tone="warn"] {
+    color: #E3A008;
+    border-color: #E3A008;
+}
+QTabWidget#pictureSidePanel::pane {
+    border-left: 1px solid #3C3C3C;
+}
+QLabel#adjustReadout {
+    color: #B8BEC6;
+    font-family: "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+}
+QLabel#adjustNote {
+    color: #9aa4b0;
+    font-size: 11px;
+}
+QLabel#thumbnailVerdict[tone="ok"] {
+    color: #3FB950;
+}
+QLabel#thumbnailVerdict[tone="warn"] {
+    color: #E3A008;
+}
+QLabel#embeddedThumbnail {
+    border: 1px solid #5A5A5A;
+    padding: 4px;
 }

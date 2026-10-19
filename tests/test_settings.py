@@ -298,11 +298,212 @@ def test_window_refuses_virustotal_when_offline(qapp, case, monkeypatch):
     try:
         settings.save_case(case, {'offline': True})
         asked = []
-        monkeypatch.setattr(window, 'show_api_key_dialog',
+        monkeypatch.setattr(window, 'show_api_keys',
                             lambda: asked.append(True))
         window.vt_submit([{'name': 'a.exe'}], 'lookup')
         assert told and 'offline' in told[-1]
         assert not asked              # refused before anything else
         pump(qapp, 0.1)
+    finally:
+        close_window(window)
+
+
+# --- a change reaches what is already read ---------------------------------
+
+def test_which_changes_need_the_evidence_read_again():
+    from trace_app.core import settings
+    needs = settings.rerun_needed({
+        'hash_md5': (False, True), 'hash_sha1': (True, False),
+        'max_inspect_mb': (64, 128), 'display_zone': ('', 'Europe/Sofia'),
+        'indicators': (['email', 'url'], ['email']),
+        'index_unallocated': (False, True), 'high_entropy': (7.5, 7.0)})
+    assert needs == {'analysis': ['MD5', 'Content checks read up to (MB)'],
+                     'index_free': ['Index text in unallocated space']}
+    # A kind added needs the index; a kind removed is hidden at once.
+    assert settings.rerun_needed(
+        {'indicators': (['email'], ['email', 'phone'])}) == \
+        {'index': ['Indicators extracted']}
+
+
+def test_the_entropy_threshold_regrades_what_is_stored(case):
+    from trace_app.core import analysis, settings
+    evidence = case.add_evidence(__file__)
+    case.add_analysis_batch(evidence, [
+        ('p0:i5:s1', 'secret.docx', '/secret.docx', False,
+         {'mime': 'application/octet-stream', 'extension': 'docx',
+          'entropy': 7.2, 'mismatch': analysis.classify_mismatch(
+              'docx', 'application/octet-stream', 7.2)}),
+        ('p0:i6:s1', 'photo.jpg', '/photo.jpg', False,
+         {'mime': 'image/jpeg', 'extension': 'jpg', 'entropy': 7.9,
+          'mismatch': analysis.MISMATCH_NONE})])
+    before = {r['name']: r['mismatch'] for r in case._db.execute(
+        "SELECT name, mismatch FROM file_analysis")}
+    assert before['secret.docx'] == analysis.MISMATCH_BENIGN   # 7.2 < 7.5
+    settings.save_case(case, {'high_entropy': 7.0})
+    assert case.regrade_mismatches() == 1
+    after = {r['name']: r['mismatch'] for r in case._db.execute(
+        "SELECT name, mismatch FROM file_analysis")}
+    assert after == {'secret.docx': analysis.MISMATCH_NOTABLE,
+                     'photo.jpg': analysis.MISMATCH_NONE}
+    assert case.regrade_mismatches() == 0
+    assert any(a['action'] == 'type mismatches graded again'
+               for a in case.activity())
+
+
+def test_an_indicator_kind_turned_off_is_hidden_at_once(case):
+    from trace_app.core import settings
+    from trace_app.core.search_index import SearchIndex
+    index = SearchIndex(case.folder)
+    try:
+        index.add_item(1, 'p0:i5:s1', 'file', 'a.txt', '/a.txt',
+                       'mail me at someone@example.org or +442071234567')
+        index.commit()
+        assert {'email', 'phone'} <= set(index.indicator_summary())
+        settings.save_case(case, {'indicators': ['email', 'domain']})
+        assert 'phone' not in index.indicator_summary()
+        assert not [r for r in index.indicators() if r['kind'] == 'phone']
+        settings.save_case(case, {'indicators': settings.CASE[
+            'indicators'][0]})
+        assert 'phone' in index.indicator_summary()
+    finally:
+        index.close()
+
+
+def test_the_window_offers_to_read_again_with_each_images_modules(
+        qapp, case, monkeypatch):
+    from trace_app.ui.dialogs import message
+    from trace_app.ui.main_window import MainWindow
+    for name in ('information', 'warning', 'critical'):
+        monkeypatch.setattr(message, name, lambda *a, **k: None)
+    asked = []
+    monkeypatch.setattr(message, 'question',
+                        lambda *a, **k: asked.append(a) or True)
+    evidence = case.add_evidence(__file__)
+    case.set_analysis_state(evidence, 'done', modules='magic,entropy,hash')
+    window = MainWindow(case=case)
+    try:
+        queued = []
+        monkeypatch.setattr(window, 'queue_analysis',
+                            lambda rows, modules: queued.append(
+                                ([r['id'] for r in rows], modules)))
+        plan = window.offer_rerun_for_settings({'hash_md5': (False, True)})
+        assert queued == [([evidence], ['magic', 'entropy', 'hash'])]
+        assert 'File analysis on 1 image(s) -- for MD5' in asked[0][3]
+        assert plan
+        # Nothing read yet, or nothing that needs it: nothing asked.
+        asked.clear()
+        assert window.offer_rerun_for_settings(
+            {'display_zone': ('', 'UTC')}) == {}
+        assert window.offer_rerun_for_settings(
+            {'index_unallocated': (False, True)}) == {}   # never indexed
+        assert not asked
+    finally:
+        close_window(window)
+
+
+# --- Results: what is kept and where it shows ----------------------------------
+
+@pytest.mark.ui
+def test_the_results_page_reads_back_what_was_ticked(qapp, case):
+    from trace_app.core import settings
+    from trace_app.core.modules import destinations
+    from trace_app.ui.dialogs.settings import PAGES, SettingsDialog
+    assert any(page[0] == 'Results' for page in PAGES)
+    dialog = SettingsDialog(case)
+    assert dialog.show_page_named('Results')
+    editors = dialog.editors
+    # Every kind ticked is "all" ([]), so kinds added later are kept too.
+    kinds, read_kinds = editors[('case', 'activity_categories')]
+    assert all(box.isChecked() for box in kinds.boxes.values())
+    assert read_kinds() == []
+    kinds.boxes['files'].setChecked(False)
+    sources, _read = editors[('case', 'timeline_sources')]
+    assert not sources.boxes['case'].isChecked()     # the audit trail
+    grid, _read = editors[('case', 'module_destinations')]
+    assert grid.boxes[('evidence', 'report')].isChecked()
+    assert not grid.boxes[('telemetry', 'timeline')].isChecked()
+    grid.boxes[('telemetry', 'search')].setChecked(True)
+    dialog.accept()
+    stored = settings.for_case(case)
+    assert 'files' not in stored['activity_categories']
+    assert 'programs' in stored['activity_categories']
+    assert stored['timeline_sources'] == []           # unchanged
+    assert stored['module_destinations']['telemetry'] == ['activity',
+                                                          'search']
+    assert set(dialog.changed) == {'activity_categories',
+                                   'module_destinations'}
+    audit = [a for a in case.activity() if a['action'] == 'settings changed']
+    assert 'Device telemetry: Activity & Triage, Search' in \
+        audit[-1]['detail']
+    assert destinations.places('telemetry') == {'activity', 'search'}
+    assert any('Device telemetry: Activity & Triage, Search' in line
+               for line in settings.statement(stored))
+
+
+def test_activity_keeps_only_the_kinds_the_case_wants(case, monkeypatch):
+    from trace_app.core import activity, settings
+    from trace_app.core.activity import record
+    from datetime import datetime, timezone
+    moment = datetime(2020, 4, 11, tzinfo=timezone.utc)
+    records = [record('programs', 'Prefetch', moment, 'Run', 'a.exe'),
+               record('files', 'FSEvents', moment, 'Created', '/x'),
+               record('files', 'FSEvents', moment, 'Created', '/y')]
+    monkeypatch.setattr(activity, 'collect', lambda *a, **k: list(records))
+    evidence = case.add_evidence(__file__)
+    assert activity.run_evidence(None, case, evidence) == 3
+    settings.save_case(case, {'activity_categories': ['programs']})
+    assert settings.rerun_needed(
+        {'activity_categories': ([], ['programs'])}) == \
+        {'activity': ['Activity kept']}
+    assert activity.run_evidence(None, case, evidence) == 1
+    assert [r['category'] for r in case.user_activity(evidence)] == \
+        ['programs']
+
+
+def test_the_timeline_opens_with_the_cases_choices(case):
+    from trace_app.core import settings, timeline
+    from trace_app.core.activity import record
+    from datetime import datetime, timezone
+    evidence = case.add_evidence(__file__)
+    moment = datetime(2020, 4, 11, tzinfo=timezone.utc)
+    case.add_user_activity(evidence, [
+        record('programs', 'Prefetch', moment, 'Run', 'a.exe'),
+        record('files', 'FSEvents', moment, 'Created', '/x')])
+    case.commit()
+
+    def kinds():
+        return sorted(row['kind'] for row in timeline.events_after(
+            case._db, timeline.default_filters(), limit=50)
+            if row['source'] == 'activity')
+    assert kinds() == ['files', 'programs']
+    assert 'case' not in timeline.default_filters()['sources']
+    settings.save_case(case, {'timeline_activity_categories': ['programs'],
+                              'timeline_sources': ['activity', 'case']})
+    assert kinds() == ['programs']
+    assert timeline.default_filters()['sources'] == ['activity', 'case']
+    # The Activity tab still lists every kind.
+    assert len(case.user_activity(evidence)) == 2
+
+
+@pytest.mark.ui
+def test_the_window_offers_activity_again_for_kinds_changed(
+        qapp, case, monkeypatch):
+    from trace_app.ui.dialogs import message
+    from trace_app.ui.main_window import MainWindow
+    for name in ('information', 'warning', 'critical'):
+        monkeypatch.setattr(message, name, lambda *a, **k: None)
+    monkeypatch.setattr(message, 'question', lambda *a, **k: True)
+    read = case.add_evidence(__file__)
+    case.add_evidence(os.path.dirname(__file__))    # never read
+    case.set_user_activity_state(read, 'done', records=3)
+    window = MainWindow(case=case)
+    try:
+        queued = []
+        monkeypatch.setattr(window, 'queue_activity',
+                            lambda rows: queued.append(
+                                [r['id'] for r in rows]))
+        window.offer_rerun_for_settings(
+            {'activity_categories': ([], ['programs'])})
+        assert queued == [[read]]
     finally:
         close_window(window)

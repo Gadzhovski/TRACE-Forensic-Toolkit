@@ -25,15 +25,25 @@ from collections import OrderedDict
 
 #: Rows that are not part of a conversation.
 _SKIPPED_PREFIXES = ('Skype account', 'Contact')
-#: Apps whose records live in one store on the device.
+#: Apps whose records live in one store on the device: the phone's own
+#: messages and calls, whoever read them (TRACE names its readers 'Android
+#: SMS', 'iOS call history'; the LEAPPs' maps say 'SMS', 'Phone').
 _SAME_APP = {'iMessage': 'Messages', 'SMS': 'Messages',
-             'iOS messages': 'Messages'}
+             'iOS messages': 'Messages', 'Android SMS': 'Messages',
+             'Android call log': 'Phone', 'iOS call history': 'Phone'}
 SEPARATOR = '\x1f'
 MATCH_DIGITS = 9
 
 
+#: What a reader adds after an app's name -- '(iOS)', '(Android)',
+#: '(UFDR)', '(carved)' -- says where a record came from, not another app:
+#: TRACE's WhatsApp messages and iLEAPP's are one conversation.
+_ORIGIN = re.compile(r'(\s*\([^()]*\))+\s*$')
+
+
 def app_of(row):
-    source = row.get('source') or ''
+    source = _ORIGIN.sub('', row.get('source') or '') or \
+        (row.get('source') or '')
     return _SAME_APP.get(source, source)
 
 
@@ -161,9 +171,36 @@ def _title(key, rows, names):
         (name or party or value)
 
 
+def readers_of(row):
+    """Who read a record, TRACE first: ['TRACE'], ['iLEAPP'], ['TRACE',
+    'iLEAPP'] (one record both read -- Case.relink_matches)."""
+    readers = list(row.get('read_by') or [row.get('reader') or 'TRACE'])
+    return sorted(dict.fromkeys(readers), key=lambda r: (r != 'TRACE', r))
+
+
+def readers_text(row_or_readers):
+    """'TRACE, iLEAPP' -- how every view names a record's readers."""
+    readers = row_or_readers if isinstance(row_or_readers, (list, tuple)) \
+        else readers_of(row_or_readers)
+    return ', '.join(readers) or 'TRACE'
+
+
+def source_text(row):
+    """A row's source with the tool that read it when that is not TRACE
+    ('Location Services (iLEAPP)'); TRACE's own sources as they are."""
+    source = row.get('source') or ''
+    tools = [r for r in readers_of(row) if r != 'TRACE']
+    if row.get('reader') in (None, 'TRACE') or not tools:
+        return source
+    tool = row['reader']
+    return source if tool.lower() in source.lower() else \
+        f"{source} ({tool})".strip()
+
+
 def threads(rows):
     """[{'key', 'app', 'title', 'party', 'messages', 'calls', 'files',
-    'recovered', 'first', 'last', 'evidence_ids'}], most recent first."""
+    'recovered', 'first', 'last', 'evidence_ids', 'readers'}], most
+    recent first."""
     names = contact_names(rows)
     grouped = OrderedDict()
     for row in rows:
@@ -184,7 +221,10 @@ def threads(rows):
             'first': stamps[0] if stamps else None,
             'last': stamps[-1] if stamps else None,
             'evidence_ids': sorted({r.get('evidence_id') for r in members
-                                    if r.get('evidence_id') is not None})})
+                                    if r.get('evidence_id') is not None}),
+            'readers': sorted({reader for r in members
+                               for reader in readers_of(r)},
+                              key=lambda r: (r != 'TRACE', r))})
     out.sort(key=lambda t: t['last'] or '', reverse=True)
     return out
 

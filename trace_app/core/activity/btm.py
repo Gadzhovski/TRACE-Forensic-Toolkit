@@ -66,7 +66,10 @@ def unarchive(data):
             value = objects[index]
         if isinstance(value, dict):
             if 'NS.keys' in value:
-                return {walk(k, open_objects): walk(v, open_objects)
+                # A key can be any object (Terminal keys a dictionary by
+                # dictionaries): one Python cannot hash is kept as text.
+                return {_hashable(walk(k, open_objects)):
+                        walk(v, open_objects)
                         for k, v in zip(value['NS.keys'],
                                         value['NS.objects'])}
             if 'NS.objects' in value:
@@ -100,6 +103,14 @@ def unarchive(data):
 
     return {key: walk(value, frozenset())
             for key, value in archive.get('$top', {}).items()}
+
+
+def _hashable(key):
+    try:
+        hash(key)
+    except TypeError:
+        return repr(key)
+    return key
 
 
 class _Relative(str):

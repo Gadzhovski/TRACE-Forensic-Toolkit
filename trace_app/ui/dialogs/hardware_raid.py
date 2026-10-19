@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFormLayout,
 
 from trace_app.core import assembly, hwraid
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
+from trace_app.ui.widgets.kept_threads import release
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.HardwareRaid')
@@ -247,9 +248,13 @@ class HardwareRaidPanel(QWidget):
         worker = _Detect(members, [os.path.basename(p) for p in paths], self)
         worker.progress.connect(self._progress)
         worker.done.connect(self._detected)
-        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._detect_ended)
         self._worker = worker
         worker.start()
+
+    @Slot()
+    def _detect_ended(self):
+        release(self.sender())
 
     @Slot(int, int)
     def _progress(self, done, total):
@@ -258,6 +263,11 @@ class HardwareRaidPanel(QWidget):
 
     @Slot(list)
     def _detected(self, ranked):
+        # `done` is emitted at the end of run(), before the thread has
+        # returned: wait for it before letting go of its last reference
+        # (a collected running QThread is an access violation).
+        if self._worker is not None:
+            self._worker.wait()
         self._worker = None
         self.detect_button.setEnabled(True)
         self._ranked = ranked

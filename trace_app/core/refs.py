@@ -598,5 +598,3 @@ def open_refs(source):
         return None
 
 
-def is_refs_fs(fs):
-    return isinstance(fs, RefsFileSystem)

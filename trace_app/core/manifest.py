@@ -17,6 +17,8 @@ import os
 
 import pytsk3
 
+from trace_app.core.tsk_names import entry_name
+
 #: Files larger than this are listed but not hashed, to keep a walk of a 1 GB
 #: image to seconds. Every test image's files are well under it.
 MAX_HASH_BYTES = 64 * 1024 * 1024
@@ -91,7 +93,7 @@ def _walk(fs):
         for entry in directory:
             if entry.info.name is None:
                 continue
-            name = entry.info.name.name.decode('utf-8', 'replace')
+            name = entry_name(entry, fs)
             if name in ('.', '..'):
                 continue
             child = f"{path}/{name}"

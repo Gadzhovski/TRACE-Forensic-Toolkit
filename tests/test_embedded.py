@@ -231,6 +231,46 @@ def test_the_index_finds_text_inside_embedded_files(disk, tmp_path):
         handler.close_resources()
 
 
+def test_a_file_that_embeds_nothing_says_so_in_a_dialog(qapp, tmp_path,
+                                                        monkeypatch):
+    """Most photos and documents embed nothing: a status line alone read
+    as Show Embedded Files not working, so a dialog says what was looked
+    for, and the Listing stays as it was."""
+    import io
+    from PIL import Image
+    from trace_app.core.image_handler import ImageHandler
+    from trace_app.ui.dialogs import message
+    from trace_app.ui.main_window import MainWindow
+    told = []
+    monkeypatch.setattr(message, 'information',
+                        lambda *a, **k: told.append(a))
+    monkeypatch.setattr(message, 'warning', lambda *a, **k: None)
+    out = io.BytesIO()
+    Image.new('RGB', (16, 16), 'red').save(out, 'JPEG')     # no EXIF
+    image, _placed, _free = fat16_volume([('PLAIN.JPG', out.getvalue())])
+    path = tmp_path / 'plain.dd'
+    path.write_bytes(image)
+    window = MainWindow()
+    try:
+        assert window.open_evidence_image(str(path))
+        handler = ImageHandler(str(path))
+        handler.load_image()
+        entry = next(e for e in handler.get_directory_contents(
+            0, handler.get_root_inode(0)) if e['name'] == 'PLAIN.JPG')
+        handler.close_resources()
+        assert not window.show_embedded_files(
+            {'type': 'file', 'name': 'PLAIN.JPG',
+             'inode_number': entry['inode_number'], 'start_offset': 0})
+        assert len(told) == 1
+        _parent, title, text, detail = told[0]
+        assert title == "Show Embedded Files"
+        assert text == "PLAIN.JPG has no embedded files."
+        assert 'EXIF' in detail and 'PDF' in detail
+        assert window._archive_stack == []
+    finally:
+        close_window(window)
+
+
 def test_the_listing_shows_a_documents_embedded_files(qapp, disk,
                                                      monkeypatch):
     from PySide6.QtCore import Qt

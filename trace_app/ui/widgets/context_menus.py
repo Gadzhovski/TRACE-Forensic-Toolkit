@@ -268,6 +268,18 @@ def set_key_hook(hook):
     _key_hook = hook
 
 
+#: category_hook(view, key) -> handled: Alt+0..5 on a list's selection
+#: (Project VIC categories; 5 = Uncategorized).
+_category_key_hook = None
+_CATEGORY_KEYS = (Qt.Key_0, Qt.Key_1, Qt.Key_2, Qt.Key_3, Qt.Key_4,
+                  Qt.Key_5)
+
+
+def set_category_key_hook(hook):
+    global _category_key_hook
+    _category_key_hook = hook
+
+
 def selected_payloads(view, row=None):
     """Column 0's UserRole data of a list's selected rows -- or of `row`
     alone, when the row clicked is not among them."""
@@ -308,9 +320,16 @@ def show_menu(menu, global_pos, view=None):
 
 # --- every view: Ctrl+C, and a menu where there is none ----------------------------------
 
+# Every event of the application passes the filter: anything else leaves
+# at once (a set lookup; comparing with QEvent's attributes costs 3x as much).
+_WATCHED = frozenset((QEvent.KeyPress, QEvent.ContextMenu))
+
+
 class _Copier(QObject):
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind not in _WATCHED:
+            return False
         if kind == QEvent.KeyPress and _key_hook is not None and \
                 isinstance(watched, QAbstractItemView) and \
                 not event.modifiers() & ~Qt.KeypadModifier and \
@@ -320,6 +339,15 @@ class _Copier(QObject):
                     return True
             except Exception as exc:
                 logger.debug("Key hook failed: %s", exc)
+        if kind == QEvent.KeyPress and _category_key_hook is not None and \
+                isinstance(watched, QAbstractItemView) and \
+                event.modifiers() & ~Qt.KeypadModifier == Qt.AltModifier \
+                and event.key() in _CATEGORY_KEYS:
+            try:
+                if _category_key_hook(watched, event.key()):
+                    return True
+            except Exception as exc:
+                logger.debug("Category key hook failed: %s", exc)
         if kind == QEvent.KeyPress and event.matches(QKeySequence.Copy):
             view = watched if isinstance(watched, QAbstractItemView) else None
             if view is not None and not view.property(OWN_COPY) and \

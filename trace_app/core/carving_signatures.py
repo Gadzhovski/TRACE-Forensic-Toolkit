@@ -46,7 +46,7 @@ _OLE_SIGNATURE = bytes.fromhex('D0CF11E0A1B11AE1')
 def is_valid_file(data, file_type):
     """Does this buffer actually parse as the format it claims to be?
 
-    A signature match is not evidence: `BM`, `RIFF` and `PK` occur
+    A signature match is not evidence: `BM`, `RIFF` and `PK\x03\x04` occur
     constantly in random data, and a carve that merely starts with the right
     bytes is a fragment presented as a file. Every supported type is parsed
     here, because the alternative -- returning True for the types nobody wrote
@@ -119,7 +119,10 @@ def is_valid_file(data, file_type):
     except (IOError, OSError, UnidentifiedImageError, ValueError, RuntimeError,
             struct.error, zipfile.BadZipFile, SyntaxError, EOFError,
             IndexError, KeyError, sqlite3.Error, tarfile.TarError,
-            lzma.LZMAError, UnicodeDecodeError) as exc:
+            lzma.LZMAError, UnicodeDecodeError, zlib.error) as exc:
+        # zlib.error: a ZIP member whose deflate stream is damaged
+        # (testzip decompresses). Uncaught, it ended the ZIP carver for the
+        # rest of the read, skipping every ZIP after it in the chunk.
         logger.debug("Rejected %s candidate: %s: %s",
                      file_type, type(exc).__name__, exc)
         return False

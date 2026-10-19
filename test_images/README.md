@@ -15,7 +15,7 @@ is pinned by SHA-256 in `tools/testdata/` (`catalog.py`, `samples.py`,
 | `samples/` | artifact files (hives, logs, databases, small images) | yes | `... --group samples` |
 | `corpus/` | carving corpus sources + `carve-corpus.dd` | yes | `... --group corpus` |
 | `built/` | made by the Linux kernel's tools | Linux | `tools/testdata/build/make_*.py` |
-| `local/` | public, big or slow (DFRWS, NPS domexusers, ubnist1, Fedora) | no | `... --group local` |
+| `local/` | public, big or slow (DFRWS, NPS domexusers, ubnist1, Fedora, Magnet's iPhone and MacBook) | no | `... --group local` |
 | `nist/` | NIST CFReDS sets | no | `... --group nist` |
 | `private/` | no public source | never | copied by hand |
 | `sources/` | whole upstream test-data repositories (dfvfs, sleuthkit_test_data) | no | reference only |
@@ -232,6 +232,20 @@ What the Fedora image established:
 | `BXS-1.E01` | 152 MB | NTFS, E01. The image the I/O constants work was measured against. |
 | `Op Archway AXA-1.E01` | 123 MB | NTFS, E01. |
 
+## Apple devices (local, Magnet Forensics CTFs on Digital Corpora)
+
+Public scenario images by Magnet Forensics, hosted by
+[Digital Corpora](https://digitalcorpora.org/) under
+`corpora/scenarios/magnet/` (README there names the authors). They are what
+`tests/test_apple_artifacts.py` reads the Apple artifacts from; the expected
+values come from other tools (ydkhatri's spotlight_parser, ccl-segb), in
+`tests/expected/apple/ios15_reference.json` and `macos11_reference.json`.
+
+| File | Size | What it is |
+|---|---|---|
+| `fb028ddefa8af7df5b12d3e729f075d150637a31_files_full.zip` | 8.7 GB | 2022 CTF iPhone 8, iOS 15 full file system (Elcomsoft-style zip; open it as evidence): 3 CoreSpotlight stores with their dbStr maps, 32 Biome SEGB files, NoteStore, Screen Time, netusage, 86 URL caches. Comes from `2022 CTF - iOS Full File System.zip` (4.7 GB), which also holds a report PDF, the keychain as a plist and recovered passwords -- kept in `local/magnet-2022-ios15/` |
+| `magnet-2021-ctf-macos.zip` | 81 GB | 2021 CTF Mac mini, macOS 11.2.1 (20D74), user `eliflatt`: a logical collection, a *stored* zip of the file system (open it as evidence; downloaded as `2021 CTF - MacOS.zip`). The volume's own Spotlight store (14,930 items), CoreSpotlight and help stores, TCC (macOS 11 schema), Terminal / Finder / Installer saved state, Trash `.DS_Store`, KnowledgeC, keychains, Safari, FSEvents, ASL. No unified log (`.tracev3`) and no Notes or Messages content in this collection |
+
 ## Video
 
 For the media player's tests (first frame, frame stepping, Save Frame): small
@@ -288,6 +302,8 @@ d6739c45d652c0eb67e59536e7b9c02b25ca99aaabf500fe9c374bb7f2ae8bc3  10-ntfs-part1.
 2badead91bef56c80155d7731671ad1d93c08f32cd4ce17566fdf02d5769feea  ntfs1-gen2.E01
 beb7795dd6d1a5319f9c20101855ffff9665fcc11c6b23de822d50c0d1e388ee  image.gen1.dmg
 f2ad970ab2c8ed41e2d26d0c7e821aaee0bb6fe71063ae17bea894306a8e55ff  ubnist1.casper-rw.gen3.E01
+a6d180aff36c9b37ec9a3819f3d98af46efc9c47b36a8a7b58cde791049b38c2  fb028ddefa8af7df5b12d3e729f075d150637a31_files_full.zip
+5da6eb8013353980f445e602a7937841ccb615d7a3ac5c422ae0c647053e807e  magnet-2021-ctf-macos.zip
 bb3755982959e189d7cfc7a4819553406e5c64e67a11d6b875ea1d4f23fa745b  dfr-01-xfat.dd
 06e997b4a341854495ced8e201fa3b63fdfe0ba042c62fb8fa4e98283d430b6d  dfr-01-osx.dd
 855e7dfdc3a807beae3dadd519243f1c047d9a7bd2c08a4e70e7a8eda8f75901  dfr-01-ext.dd

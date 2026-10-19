@@ -18,16 +18,16 @@ import logging
 
 from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QGuiApplication
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout,
-                               QHeaderView, QLabel, QLineEdit, QMenu, QSizePolicy,
-                               QSplitter, QTableWidget, QTableWidgetItem,
+from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit,
+                               QMenu, QSizePolicy, QSplitter, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
 from trace_app.core import hash_indicators, hashsets
 from trace_app.core.search_index import INDICATOR_KINDS, SearchIndex
-from trace_app.infra.constants import CONTROL_HEIGHT, TABLE_ROW_HEIGHT
+from trace_app.infra.constants import CONTROL_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
-from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.kept_threads import KeptThreads
+from trace_app.ui.widgets.tables import finding_table
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.context_menus import show_menu
@@ -80,7 +80,7 @@ class IndicatorsPanel(QWidget):
         self._names = {}
         #: Reads of the index in flight, by (what, generation), and the
         #: latest generation asked for of each.
-        self._queries = {}
+        self._queries = KeptThreads(self)
         self._generation = {}
         self.icon_resolver = None
 
@@ -124,7 +124,7 @@ class IndicatorsPanel(QWidget):
         splitter.setObjectName("indicatorSplitter")
         layout.addWidget(splitter, 1)
 
-        self.values_table = self._table(['Value', 'Kind', 'Matches', 'Files',
+        self.values_table = finding_table(['Value', 'Kind', 'Matches', 'Files',
                                          'Evidence'])
         self.values_table.itemSelectionChanged.connect(self._fill_files)
         self.values_table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -132,7 +132,7 @@ class IndicatorsPanel(QWidget):
             self._values_menu)
         splitter.addWidget(self.values_table)
 
-        self.files_table = self._table(['Name', 'Evidence', 'Context', 'Size',
+        self.files_table = finding_table(['Name', 'Evidence', 'Context', 'Size',
                                         'Modified', 'Path'])
         connect_row_preview(self.files_table, self.file_selected.emit)
         self.files_table.itemDoubleClicked.connect(self._activate_file)
@@ -142,23 +142,6 @@ class IndicatorsPanel(QWidget):
         splitter.setSizes([300, 200])
 
         self._fill_kinds({})
-
-    @staticmethod
-    def _table(headers):
-        table = QTableWidget()
-        table.setObjectName("triageTable")
-        table.setColumnCount(len(headers))
-        table.setHorizontalHeaderLabels(headers)
-        table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setItemDelegate(NoFocusDelegate(table))
-        table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Interactive)
-        table.horizontalHeader().setStretchLastSection(True)
-        return table
 
     # --- what to show -----------------------------------------------------
 
@@ -225,12 +208,10 @@ class IndicatorsPanel(QWidget):
         query = _Query(self.case.folder, what, self._generation[what], work,
                        self)
         query.answered.connect(self._answered)
-        query.finished.connect(query.deleteLater)
         self._queries[(what, self._generation[what])] = query
         query.start()
 
     def _answered(self, what, generation, result):
-        self._queries.pop((what, generation), None)
         if generation != self._generation.get(what) or \
                 isinstance(result, Exception):
             return
@@ -465,8 +446,6 @@ class IndicatorsPanel(QWidget):
             self.file_activated.emit(row)
 
     def shutdown(self):
-        for query in list(self._queries.values()):
-            query.wait(5000)
         self._queries.clear()
         if self.index is not None:
             self.index.close()

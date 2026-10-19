@@ -302,17 +302,6 @@ class CarvedFilesPanel(QWidget):
         self.resume_button.hide()
         bar.addWidget(self.resume_button)
         self._duplicates = {}
-
-        spacer = QWidget()
-        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        bar.addWidget(spacer)
-
-        # The Listing's View dropdown: Details, List, the icon sizes (with
-        # thumbnails from Medium up), and the carve runs' Statistics.
-        self.view_button = ViewButton(extra=(
-            (STATISTICS, "Statistics", icons.VIEW_STATISTICS),))
-        self.view_button.chosen.connect(self.set_view)
-        bar.addWidget(self.view_button)
         align_controls(bar)
         layout.addWidget(bar)
 
@@ -343,6 +332,12 @@ class CarvedFilesPanel(QWidget):
         self.status_filter.currentIndexChanged.connect(
             lambda _index: self._show(self._rows))
         filters.addWidget(self.status_filter)
+        # The types carved, with how many of each; offered only once found.
+        self.kind_filter = MultiSelectButton([], self, noun="types",
+                                             categories=CARVE_CATEGORIES)
+        self.kind_filter.selectionChanged.connect(
+            lambda _types: self._show(self._rows))
+        filters.addWidget(self.kind_filter)
         self.named_box = QCheckBox("Named only")
         self.named_box.setToolTip("Only carves found to be a deleted file "
                                   "the file system still names")
@@ -363,6 +358,17 @@ class CarvedFilesPanel(QWidget):
         self.min_size.currentIndexChanged.connect(
             lambda _index: self._show(self._rows))
         filters.addWidget(self.min_size)
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        filters.addWidget(spacer)
+        # The Listing's View dropdown: Details, List, the icon sizes (with
+        # thumbnails from Medium up), and the carve runs' Statistics. On
+        # this shorter row: at the end of the carve controls it went into
+        # the toolbar's overflow menu in a narrow dock, out of sight.
+        self.view_button = ViewButton(extra=(
+            (STATISTICS, "Statistics", icons.VIEW_STATISTICS),))
+        self.view_button.chosen.connect(self.set_view)
+        filters.addWidget(self.view_button)
         align_controls(filters)
         layout.addWidget(filters)
 
@@ -525,6 +531,7 @@ class CarvedFilesPanel(QWidget):
         """Draw the carves that arrived since the last batch: one sort and
         one status line for all of them."""
         pending, self._pending = self._pending, []
+        self._update_kinds()
         shown = self._filtered(pending)
         if shown:
             sorting = self.table.isSortingEnabled()
@@ -552,9 +559,12 @@ class CarvedFilesPanel(QWidget):
     def _filtered(self, rows):
         status = self.status_filter.currentData()
         smallest = self.min_size.currentData() or 0
+        kinds = None if self.kind_filter.all_selected() else             set(self.kind_filter.selected())
         seen, out = set(), []
         for row in rows:
             if status and row.get('status') != status:
+                continue
+            if kinds is not None and _kind(row) not in kinds:
                 continue
             if self.named_box.isChecked() and not row.get('origin'):
                 continue
@@ -568,6 +578,18 @@ class CarvedFilesPanel(QWidget):
             out.append(row)
         return out
 
+    def _update_kinds(self):
+        """Offer the types among the carves, each with its count."""
+        counts = {}
+        for row in self._rows:
+            kind = _kind(row)
+            counts[kind] = counts.get(kind, 0) + 1
+        order = {t: n for n, t in enumerate(CARVABLE_TYPES)}
+        kinds = sorted(counts, key=lambda k: (order.get(k, len(order)), k))
+        self.kind_filter.set_options(
+            kinds, CARVE_CATEGORIES,
+            {k: f"{k}  ({counts[k]:,})" for k in kinds})
+
     def _count_copies(self, rows):
         counts = {}
         for row in rows:
@@ -580,12 +602,18 @@ class CarvedFilesPanel(QWidget):
         self._pending = []
         self._flush_timer.stop()
         self._count_copies(rows)
+        self._update_kinds()
         shown = self._filtered(rows)
         self._visible = shown
         self.table.setSortingEnabled(False)
-        self.table.setRowCount(0)
-        for row in shown:
-            self._add_table_row(row, fit=False)
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.setRowCount(0)
+            self.table.setRowCount(len(shown))
+            for position, row in enumerate(shown):
+                self._add_table_row(row, fit=False, position=position)
+        finally:
+            self.table.setUpdatesEnabled(True)
         self.table.setSortingEnabled(True)
         if shown:
             fit_columns(self.table, _FIT)
@@ -645,6 +673,9 @@ class CarvedFilesPanel(QWidget):
             if copies:
                 text += f"; {copies:,} identical cop{'y' if copies == 1 else 'ies'}"
             text += '.'
+            shown = self.table.rowCount()
+            if shown != count:
+                text += f" {shown:,} shown by the filters."
             runs = self._latest_runs()
             if runs:
                 candidates = rejected = 0
@@ -699,11 +730,15 @@ class CarvedFilesPanel(QWidget):
                          f"{(stats.get('rejected') or {}).get(kind, 0):,}")
         return '\n'.join(lines)
 
-    def _add_table_row(self, row, fit=True):
+    def _add_table_row(self, row, fit=True, position=None):
+        """Show one carve: in a new last row, or in row `position` of a
+        table already sized (`_show` sizes it once: a row inserted at a
+        time is a model signal each, which the icon views answer)."""
         sorting = self.table.isSortingEnabled()
         self.table.setSortingEnabled(False)
-        position = self.table.rowCount()
-        self.table.insertRow(position)
+        if position is None:
+            position = self.table.rowCount()
+            self.table.insertRow(position)
         size = int(row.get('size') or 0)
         offset = int(row.get('offset') or 0)
         date = row.get('embedded_date') or UNKNOWN_DATE
@@ -730,7 +765,8 @@ class CarvedFilesPanel(QWidget):
             QTableWidgetItem(self._shown_path(row.get('path') or '')
                              or 'Not saved'),
         ]
-        values[_STATUS].setToolTip(checks_text(row))
+        checks = checks_text(row)
+        values[_STATUS].setToolTip(checks)
         tone = _STATUS_TONE.get(row.get('status'))
         if tone:
             values[_STATUS].setForeground(verdict_brush(tone))
@@ -754,7 +790,7 @@ class CarvedFilesPanel(QWidget):
                 "own data, and a carved file has no file-system record to "
                 "read one from.")
         values[_PIECES].setToolTip(pieces_tip)
-        values[_DIGEST].setToolTip(checks_text(row))
+        values[_DIGEST].setToolTip(checks)
         values[_SAVED].setToolTip(
             row.get('path') or "Kept as a reference: read from the image at "
             "its offset whenever it is shown. Right-click ▸ Export writes "
@@ -877,6 +913,11 @@ _THUMBNAIL_KINDS = {
     **{t: thumbs.DOCUMENT for t in ('docx', 'xlsx', 'pptx', 'vsdx', 'odt',
                                     'ods', 'odp', 'odg')},
 }
+
+
+def _kind(row):
+    """A carve's type as the filter names it ('JPG')."""
+    return (row.get('type') or 'unknown').upper()
 
 
 def carved_item(row):

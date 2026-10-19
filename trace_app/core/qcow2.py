@@ -22,7 +22,6 @@ external data file, extended L2 entries -- raises Qcow2Error at open, and
 those images stay with libqcow.
 """
 
-import os
 import struct
 import zlib
 from collections import OrderedDict

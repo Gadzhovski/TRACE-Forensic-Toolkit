@@ -27,7 +27,7 @@ import logging
 import stat
 import struct
 
-from trace_app.core.libyal_fs import LibyalFileSystem
+from trace_app.core.libyal_fs import LibyalFileSystem, PathLookup
 
 logger = logging.getLogger('TRACE.HFS')
 
@@ -306,9 +306,6 @@ class HfsEntry:
     def get_creation_time_as_integer(self):
         return self._time(self._record['created'])
 
-    def get_backup_time_as_integer(self):
-        return self._time(self._record['backup'])
-
     symbolic_link_target = ''
 
     def _children(self):
@@ -328,7 +325,7 @@ class HfsEntry:
         return self._fork.read(offset, length)
 
 
-class _Volume:
+class _Volume(PathLookup):
     """libyal's volume vocabulary over an HfsVolume."""
 
     def __init__(self, volume):
@@ -344,18 +341,6 @@ class _Volume:
     def entry(self, identifier):
         record = self.hfs.catalog().get(identifier)
         return HfsEntry(self.hfs, record) if record else None
-
-    def get_file_entry_by_path(self, path):
-        entry = self.get_root_directory()
-        for part in [p for p in path.replace('\\', '/').split('/') if p]:
-            for index in range(entry.number_of_sub_file_entries):
-                child = entry.get_sub_file_entry(index)
-                if child.name == part:
-                    entry = child
-                    break
-            else:
-                return None
-        return entry
 
     def close(self):
         self.hfs._catalog = None
@@ -413,5 +398,3 @@ def open_hfs(source):
         return None
 
 
-def is_hfs_fs(fs):
-    return isinstance(fs, HfsFileSystem)

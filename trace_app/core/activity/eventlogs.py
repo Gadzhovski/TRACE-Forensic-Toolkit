@@ -70,6 +70,41 @@ def _is_machine(data):
                                 'UMFD-1'))
 
 
+#: A clock set by less than this is the time service keeping it right, not
+#: the time being changed: those are not listed.
+CLOCK_SHIFT_SECONDS = 60
+
+
+def _event_time(text):
+    """An event log's ISO time ('2015-06-19T19:01:22.3600000Z'), or None."""
+    import datetime
+    text = (text or '').strip().rstrip('Z').replace('T', ' ')
+    try:
+        return datetime.datetime.strptime(text[:19], '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+
+
+def _clock_change(previous, new, user, process):
+    """('System time changed', ...) for a clock set by a minute or more,
+    else None."""
+    before, after = _event_time(previous), _event_time(new)
+    if before is None or after is None:
+        return None
+    shift = (after - before).total_seconds()
+    if abs(shift) < CLOCK_SHIFT_SECONDS:
+        return None
+    sign = '+' if shift > 0 else '-'
+    minutes, seconds = divmod(int(abs(shift)), 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    span = (f"{days}d " if days else '') + f"{hours:02d}:{minutes:02d}:"         f"{seconds:02d}"
+    return ('System time changed', user,
+            {'from': f"{before:%Y-%m-%d %H:%M:%S} UTC",
+             'to': f"{after:%Y-%m-%d %H:%M:%S} UTC",
+             'shift': f"{sign}{span}", 'process': process})
+
+
 def describe(event):
     """(what, subject, detail) for an event worth listing, or None."""
     eid = event['event_id']
@@ -134,11 +169,18 @@ def describe(event):
             return ('Service installed', data.get('ServiceName', ''),
                     {'file': data.get('ServiceFileName', ''),
                      'by': _user(data, 'Subject')})
+        if eid == 4616:
+            return _clock_change(data.get('PreviousTime'),
+                                 data.get('NewTime'), _user(data, 'Subject'),
+                                 data.get('ProcessName', ''))
         if eid == 1102:
             return ('Security log cleared', data.get('SubjectUserName', ''),
                     {'domain': data.get('SubjectDomainName', '')})
         return None
 
+    if eid == 1 and 'Kernel-General' in provider:
+        return _clock_change(data.get('OldTime'), data.get('NewTime'), '',
+                             '')
     if eid == 7045 and 'Service Control Manager' in provider:
         return ('Service installed', data.get('ServiceName', ''),
                 {'file': data.get('ImagePath', ''),

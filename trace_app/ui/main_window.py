@@ -1,4 +1,3 @@
-import configparser
 import datetime
 import gc
 import logging
@@ -17,20 +16,21 @@ from PySide6.QtGui import (QIcon, QPalette, QAction, QActionGroup, QColor, QCurs
                            QDesktopServices)
 from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidget, QTabWidget, QFileDialog,
                                QTreeWidgetItem, QTableWidget, QTableWidgetItem, QDialog, QVBoxLayout,
-                               QInputDialog, QDialogButtonBox, QHeaderView, QLabel, QLineEdit, QFormLayout, QApplication,
-                               QWidget, QProgressDialog, QSizePolicy, QTabBar, QToolButton,
+                               QInputDialog, QHeaderView, QLabel, QLineEdit, QApplication,
+                               QWidget, QSizePolicy, QTabBar, QToolButton,
                                QStackedWidget, QComboBox)
 
+from trace_app.ui.widgets.progress_card import ProgressDialog
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.result_docks import ResultDocks
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
 from trace_app.ui.dialogs.about import AboutDialog
-from trace_app.infra.constants import (API_DIALOG_WIDTH, COLUMN_WIDTHS, GROUP_SPACING,
+from trace_app.infra.constants import (COLUMN_WIDTHS, GROUP_SPACING,
                                        UNKNOWN_DATE, TABLE_ROW_HEIGHT,
                                        DEFAULT_WINDOW_HEIGHT,
                                        DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y,
-                                       INPUT_FIELD_MIN_WIDTH, PROGRESS_MIN_DURATION,
+                                       PROGRESS_MIN_DURATION,
                                        TABLE_BATCH_SIZE, TABLE_ICON_SIZE, TREE_ICON_SIZE,
                                        TREE_INDENTATION, VIEWER_DOCK_MIN_HEIGHT)
 from trace_app import __version__
@@ -47,7 +47,8 @@ from trace_app.core.case import (REPORTED_FINDING_GRADES,
                                  make_span_ref, parse_artifact_ref)
 from trace_app.core.image_handler import ImageHandler
 from trace_app.ui.viewers.metadata import MetadataViewer
-from trace_app.infra.paths import config_file, resource_path
+from trace_app.infra import api_keys
+from trace_app.infra.paths import resource_path
 from trace_app.ui import icons
 from trace_app.ui.widgets import item_views
 from trace_app.core import settings as case_settings
@@ -114,6 +115,9 @@ CARVED_ARCHIVE_TYPES = frozenset({'zip', 'gz', 'bz2', 'xz', 'tar', '7z', 'rar',
                                   'mbox'})
 #: File names the tree offers to expand as archives (the content decides
 #: when one is clicked or expanded; a name only earns the arrow).
+#: _load_archive's answer while a big archive's index is being built
+#: in the background (core/archive_index): it opens when done.
+_INDEXING = object()
 TREE_ARCHIVE_SUFFIXES = ('.zip', '.7z', '.rar', '.tar', '.gz', '.tgz',
                          '.bz2', '.tbz', '.tbz2', '.xz', '.txz', '.jar',
                          '.apk', '.pst', '.ost', '.mbox', '.cpio', '.lzma',
@@ -131,6 +135,9 @@ def _unwrapped(row):
 
 #: Files listed under each tag in the tree; the rest are in Triage > Tags.
 TREE_TAGGED_SHOWN = 200
+#: Files read (4 KB each) to tell whether they are pictures or videos
+#: before a Project VIC category is given; past it the name decides.
+MEDIA_HEADS_READ = 2000
 #: ...and those that are archives inside but documents to an examiner: a
 #: double-click shows the document; "Browse Archive" opens its parts.
 CARVED_BROWSABLE_DOCUMENTS = frozenset({'docx', 'xlsx', 'pptx', 'vsdx', 'odt',
@@ -149,36 +156,87 @@ class _HandlerOpener(QThread):
         self.handler = None
         self.error = None
         self.done = threading.Event()
+        #: (fraction of the opening, step) -- set here, read by the window's
+        #: timer for its progress card. One tuple, replaced whole.
+        self.status = (0.02, "Opening the image…")
+
+    def _report(self, fraction, step):
+        self.status = (fraction, step)
 
     def run(self):
         try:
-            self.handler = ImageHandler(self.image_path)
+            if os.path.isdir(self.image_path):
+                # Folder evidence: a listing found different by the last
+                # background check (core/folder_listing) is taken up now,
+                # never while this session's jobs read the old numbering.
+                from trace_app.core import folder_listing, logical_sources
+                folder_listing.promote(self.image_path)
+                with logical_sources.reporting(
+                        lambda entries: self._report(
+                            0.04, f"Listing the folder: {entries:,} "
+                                 f"items…")):
+                    self.handler = ImageHandler(self.image_path)
+            else:
+                self.handler = ImageHandler(self.image_path)
             if self.handler.loaded:
-                self._warm(self.handler)
+                self._warm(self.handler, self._report)
         except Exception as exc:
             self.error = exc
         finally:
             self.done.set()
 
-    @staticmethod
-    def _warm(handler):
+    #: The share of the card's bar the opening takes; the window's own steps
+    #: (case, tree) take the rest.
+    SHARE = 0.8
+
+    @classmethod
+    def _warm(cls, handler, report=lambda fraction, step: None):
         """What load_partitions_into_tree asks first, so its answers are
-        cached: a failure here is the tree's to report, not this."""
+        cached: a failure here is the tree's to report, not this. Each step
+        is reported as it starts -- a big NTFS volume's root listing reads
+        its whole MFT, and the card says that is what it is waiting on."""
+        def step(fraction, text):
+            report(fraction * cls.SHARE, text)
         try:
+            step(0.08, "Reading the partition table…")
             partitions = handler.get_partitions()
-            starts = [p[2] for p in partitions] if partitions else [0]
-            for start in starts:
+            volumes = [(p[2], p[1]) for p in partitions] if partitions \
+                else [(0, None)]
+            for number, (start, description) in enumerate(volumes, 1):
+                try:
+                    name = handler.partition_label(start, description)
+                except Exception:
+                    name = f"@ {start}"
+                # TSK's slots, tables included ('Protective MBR'): the
+                # tree's partitions, so the count is the tree's too.
+                where = f"Partition {number} of {len(volumes)}"
+                share = 0.12 + 0.68 * (number - 1) / len(volumes)
+                step(share, f"{where}: checking {name}…")
                 handler.volume_kind(start)
                 handler.encryption(start)
+                step(share, f"{where}: opening the file system of {name}…")
                 if handler.get_fs_info(start) is not None:
+                    step(share + 0.3 / len(volumes),
+                         f"{where}: listing the root folder of {name}…")
                     handler.get_directory_contents(start, None)
             # Searched here, off the UI thread: the tree shows them.
+            step(0.82, "Searching for lost partitions…")
             handler.lost_partitions()
             # The system on each volume (a hive or a release file read),
-            # for the tree's and Image Information's logos.
-            from trace_app.core import os_identity
+            # for the tree's and Evidence Information's logos.
+            step(0.88, "Identifying the operating systems…")
+            from trace_app.core import evidence_profile, os_identity
             for key in handler.volume_offsets():
                 os_identity.identify(handler, key)
+            # Which external modules suit it (the Modules tab's tools).
+            step(0.95, "Checking which modules suit it…")
+            evidence_profile.tool_systems(handler)
+            # A folder, extraction or backup: what Evidence Information
+            # shows, ready before it is asked for (kept on the handler).
+            if getattr(handler, 'logical_fs', None) is not None:
+                step(0.97, "Summarising its contents…")
+                from trace_app.core import evidence_overview
+                evidence_overview.overview(handler)
         except Exception as exc:
             logger.debug("Warming %s: %s", handler.image_path, exc)
 
@@ -193,8 +251,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     #: `result_area` (1 had them in this window, with no central widget).
     LAYOUT_VERSION = 2
 
-    def __init__(self, case=None):
+    def __init__(self, case=None, progress=None):
         super().__init__()
+        #: `progress(fraction, step)` while the window is built -- the
+        #: opening card's bar (ui/widgets/opening_splash.py).
+        self._progress = progress
         # Every table, tree and list scrolls by pixels and fills its width
         # (ui/widgets/item_views.py). Also done at startup for the launcher;
         # here too so a window built without app.py (tests) behaves alike.
@@ -229,15 +290,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._history_index = -1  # Current position in history (-1 = no history)
         self._navigating_history = False  # Flag to prevent adding to history during Back/Forward
 
-        # Load configuration
-        self.api_keys = configparser.ConfigParser()
-        try:
-            # Read from the per-user config dir. 'config.ini' is also read so a
-            # config left in the working directory by an older version still
-            # applies; the next save writes to the user dir.
-            self.api_keys.read([config_file(), 'config.ini'])
-        except Exception as e:
-            logger.error(f"Error loading configuration: {e}")
+        # API keys left in plain text by an older TRACE: into the system's
+        # store (infra/api_keys.py).
+        api_keys.protect_stored()
 
         # Initialize instance attributes
         self.current_offset = None
@@ -274,6 +329,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: image even after another one became active.
         self._listing_image = None
         self._evidence_profiles = {}
+        #: (evidence path, backup path on it) -> an encrypted backup's
+        #: password, for external modules: this session only, never stored.
+        self._backup_passwords = {}
 
         #: The last verification outcome per image path: {'outcome':
         #: {status, detail, ...}, 'results': the hashing run or None,
@@ -378,17 +436,57 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         row = _unwrapped(row)
         data = self._file_data_for(row)
         if data is None:
+            # A carve: no file to export or bookmark from here (its own
+            # menu has those), but it can be tagged and categorised.
+            if self._carved_mark_row(row) is not None or (
+                    isinstance(row, dict) and row.get('is_module_row')):
+                self._add_mark_menus(menu, row, view)
             return
         try:
             self._file_menu_extras(menu, row, data)
         finally:
-            if self.case is not None and not any(
-                    action.text().replace('&', '') == 'Tag'
-                    for action in menu.actions()):
-                rows = self._tag_rows(view, row)
-                if rows:
-                    menu.addSeparator()
-                    self.add_tag_menu(menu, rows)
+            self._add_mark_menus(menu, row, view)
+
+    def _add_mark_menus(self, menu, row, view):
+        """Tag ▸ and Project VIC Category ▸ for the files a menu acts on,
+        with removing what they carry offered first (it is the correction
+        an examiner looks for)."""
+        if self.case is None or any(
+                action.text().replace('&', '') == 'Tag'
+                for action in menu.actions()):
+            return
+        rows = self._tag_rows(view, row)
+        if not rows:
+            return
+        menu.addSeparator()
+        self.add_removal_actions(menu, rows, row)
+        self.add_tag_menu(menu, rows)
+        self.add_vic_menu(menu, rows)
+
+    def _carved_mark_row(self, payload, evidence_id=None):
+        """A carve as a row tags and categories take -- by its byte span
+        (make_span_ref, as the case stores it) -- or None. Carves are marked
+        in a case only."""
+        if not isinstance(payload, dict):
+            return None
+        evidence_id = payload.get('evidence_id', evidence_id)
+        ref = payload.get('artifact_ref')
+        if parse_artifact_ref(ref).get('kind') != 'span':
+            if payload.get('inode_number') is not None or \
+                    payload.get('offset') is None or \
+                    not payload.get('type') or not payload.get('size'):
+                return None
+            offset = int(payload['offset'])
+            ref = make_span_ref(0, offset, offset + int(payload['size']))
+        if evidence_id is None:
+            return None
+        name = payload.get('name') or ref
+        return {'evidence_id': evidence_id, 'artifact_ref': ref,
+                'name': name, 'path': f"[carved]/{name}",
+                'carved': {'type': payload.get('type') or '',
+                           'offset': payload.get('offset'),
+                           'size': payload.get('size'),
+                           'fragments': payload.get('fragments')}}
 
     def _file_menu_extras(self, menu, row, data):
         texts = [action.text().replace('&', '').lower()
@@ -415,10 +513,46 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     data, QFileDialog.getExistingDirectory(
                         self, "Select Destination Directory",
                         case_settings.export_dir())))))
+        if (data.get('name') or '').lower().endswith(
+                ('.keychain', '.keychain-db')) and \
+                not any('keychain' in t for t in texts):
+            extras.append(("Open Keychain…", lambda: on_image(
+                lambda: self.open_keychain(data))))
         if extras and menu.actions():
             menu.addSeparator()
         for label, slot in extras:
             menu.addAction(label).triggered.connect(slot)
+
+    def open_keychain(self, data):
+        """The keychain dialog for a .keychain / .keychain-db on the active
+        image: its items, and -- with a password, master key or the
+        image's own SystemKey -- their secrets, shown and never stored."""
+        from trace_app.core import keychain
+        from trace_app.ui.dialogs.keychain import (SYSTEM_KEY_PATH,
+                                                   KeychainDialog)
+        handler = self.image_handler
+        if handler is None:
+            return
+        try:
+            content, _meta = self._wait_for(
+                handler.get_file_content, data['inode_number'],
+                data['start_offset'])
+        except Exception as exc:
+            message.warning(self, "Keychain", f"The file could not be read: "
+                                            f"{exc}")
+            return
+        system_key = handler.read_path(data['start_offset'], SYSTEM_KEY_PATH)
+        record = self.case.record_event if self.case else None
+        try:
+            dialog = KeychainDialog(content or b'', data.get('name') or '',
+                                    path=data.get('path') or '',
+                                    system_key=system_key, record=record,
+                                    parent=self)
+        except keychain.KeychainError as exc:
+            message.warning(self, "Keychain", f"Not a keychain TRACE can read: "
+                                            f"{exc}")
+            return
+        dialog.exec()
 
     # --- tags ------------------------------------------------------------
 
@@ -453,10 +587,27 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             inner = _unwrapped(payload)
             if inner is not payload:
                 payload, evidence_id = inner, inner.get('evidence_id')
-            if not isinstance(payload, dict) or payload.get('is_carved'):
+            if not isinstance(payload, dict):
+                continue
+            if payload.get('is_module_row'):
+                ref = payload.get('artifact_ref')
+                if ref and (payload.get('evidence_id'), ref) not in seen:
+                    seen.add((payload.get('evidence_id'), ref))
+                    out.append({'evidence_id': payload.get('evidence_id'),
+                                'artifact_ref': ref,
+                                'name': payload.get('name') or '',
+                                'path': payload.get('path') or '',
+                                'module_source': payload.get('source'),
+                                'module_media': payload.get('media')})
                 continue
             data = self._file_data_for(payload)
             if data is None:
+                carved = self._carved_mark_row(payload, evidence_id)
+                if carved is not None and \
+                        (carved['evidence_id'], carved['artifact_ref']) \
+                        not in seen:
+                    seen.add((carved['evidence_id'], carved['artifact_ref']))
+                    out.append(carved)
                 continue
             ref = payload.get('artifact_ref') or self.artifact_ref_for(data)
             if not ref or (evidence_id, ref) in seen:
@@ -504,6 +655,230 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             .connect(self.show_manage_tags)
         return sub
 
+    # --- Project VIC categories --------------------------------------------
+
+    def _marks_on(self, rows):
+        """({tag id: tag} the files carry, {category: count} they carry)."""
+        tags, categories = {}, {}
+        for evidence_id in {r['evidence_id'] for r in rows}:
+            refs = [r['artifact_ref'] for r in rows
+                    if r['evidence_id'] == evidence_id]
+            for marks in self.case.tags_for(evidence_id, refs).values():
+                for mark in marks:
+                    tags[mark['id']] = mark
+            for category in self.case.vic_categories_for(
+                    evidence_id, refs).values():
+                categories[category] = categories.get(category, 0) + 1
+        return tags, categories
+
+    @staticmethod
+    def _vic_rows(rows):
+        """The files a Project VIC category is about: a file as it is; a
+        module row by the picture or video it carries (its media's evidence
+        file, from the run's manifest) -- a chat row without media has
+        none. So a LEAPP picture is categorised, and exported by VICS, as
+        the evidence file it is, never twice."""
+        out, seen = [], set()
+        for row in rows:
+            if 'module_source' in row:
+                source = row.get('module_source')
+                if not row.get('module_media') or not source:
+                    continue
+                row = source
+            key = (row.get('evidence_id'), row.get('artifact_ref'))
+            if key not in seen:
+                seen.add(key)
+                out.append(row)
+        return out
+
+    def add_removal_actions(self, menu, rows, clicked=None):
+        """'Remove Tag "Relevant"' and 'Remove Project VIC Category' on the
+        menu itself, for what the files carry -- inside Tag ▸ and as
+        "Uncategorized" they were there, but not where anyone looked. From
+        a tag's group in Triage ▸ Tags, that tag comes first."""
+        from trace_app.core import vics
+        from trace_app.ui.viewers.tags_panel import tag_icon
+        tags, _none = self._marks_on(rows)
+        vic_rows = self._vic_rows(rows)
+        _tags, categories = self._marks_on(vic_rows) if vic_rows \
+            else ({}, {})
+        first = (clicked or {}).get('tag_id') if isinstance(clicked, dict) \
+            else None
+        for tag in sorted(tags.values(),
+                          key=lambda t: (t['id'] != first, t['id'])):
+            action = menu.addAction(tag_icon(tag['colour']),
+                                    f"Remove Tag “{tag['name']}”")
+            action.triggered.connect(
+                lambda _=False, t=tag['id']: self.untag_rows(rows, t))
+        if categories:
+            only = next(iter(categories)) if len(categories) == 1 else None
+            label = (f"Remove Project VIC Category ({only} "
+                     f"{vics.CATEGORIES[only]})" if only is not None else
+                     "Remove Project VIC Categories")
+            action = menu.addAction(icons.icon(icons.DELETE), label)
+            action.triggered.connect(
+                lambda: self.categorise_rows(None, vic_rows))
+        return bool(tags or categories)
+
+    def remove_marks(self, rows):
+        """Delete in Triage ▸ Tags: each selected file loses the mark it
+        is listed under -- that tag, or its Project VIC category."""
+        if self.case is None:
+            return 0
+        removed = 0
+        by_tag = {}
+        for row in rows:
+            if row.get('tag_id') is not None:
+                by_tag.setdefault(row['tag_id'], []).append(row)
+        for tag_id, tagged in by_tag.items():
+            removed += self.case.untag(tagged, tag_id)
+        categorised = [row for row in rows
+                       if row.get('vic_category') is not None]
+        if categorised:
+            removed += self.case.clear_vic_category(categorised)
+        self.tags_changed()
+        if removed:
+            self.set_status(f"{removed:,} mark(s) removed")
+        return removed
+
+    def _media_rows(self, rows):
+        """The rows that are pictures or videos -- what a Project VIC
+        category is about. By name first (a carve by its proved type); a
+        name that does not say is read: the first 4 KB, judged as the VICS
+        export judges (vics.media_type), so a renamed JPEG counts and a
+        .jpg that is text does not."""
+        from trace_app.core import vics
+        from trace_app.core.carving import CARVE_CATEGORIES
+        from trace_app.core.filetypes import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+        carved_media = {t.lower() for group in ('Pictures', 'Camera raw',
+                                                'Video')
+                        for t in CARVE_CATEGORIES[group]}
+        named = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | carved_media
+        paths = {e['id']: e['path'] for e in self.case.evidence()} \
+            if self.case is not None else {}
+        out, read = [], 0
+        for row in rows:
+            carved = row.get('carved')
+            if carved is not None:
+                if (carved.get('type') or '').lower() in carved_media:
+                    out.append(row)
+                continue
+            name = row.get('name') or ''
+            extension = name.rsplit('.', 1)[-1].lower() if '.' in name \
+                else ''
+            head = None
+            if read < MEDIA_HEADS_READ:
+                read += 1
+                head = self._mark_row_head(row, paths)
+            if head:
+                if vics.media_type(head, name, self._magic()) is not None:
+                    out.append(row)
+            elif extension in named:
+                out.append(row)         # unreadable now: the name decides
+        return out
+
+    def _magic(self):
+        if not hasattr(self, '_magic_reader'):
+            from trace_app.core.analysis import magic_reader
+            self._magic_reader = magic_reader()
+        return self._magic_reader
+
+    def _mark_row_head(self, row, paths=None):
+        """A marked file's first 4 KB, from its own (already open) image."""
+        parsed = parse_artifact_ref(row.get('artifact_ref'))
+        if parsed.get('kind') != 'file' or self.case is None:
+            return None
+        if paths is None:
+            paths = {e['id']: e['path'] for e in self.case.evidence()}
+        path = paths.get(row.get('evidence_id'))
+        handler = self._open_handler_of({'evidence_path': path}) \
+            if path else None
+        if handler is None:
+            return None
+        try:
+            return handler.read_file_bytes(parsed['inode'],
+                                           parsed['start_offset'], 4096)
+        except Exception as exc:
+            logger.debug("%s not read: %s", row.get('name'), exc)
+            return None
+
+    def add_vic_menu(self, menu, rows):
+        """Project VIC Category ▸ on `menu`: 0-4 (Alt+digit) for the
+        pictures and videos among the files, the current one named, and
+        Remove Category (Alt+5) for any that carry one."""
+        from trace_app.core import vics
+        sub = menu.addMenu(icons.icon(icons.TAG), "Project VIC Category")
+        sub.setToolTipsVisible(True)
+        rows = self._vic_rows(rows)
+        media = self._media_rows(rows)
+        _tags, carried = self._marks_on(rows)
+        current = set(carried) | ({None} if sum(carried.values()) <
+                                  len(rows) else set())
+        only = next(iter(current)) if len(current) == 1 else 'mixed'
+        # The colour dots Griffeye uses, so not checkable (a checkable
+        # entry has no icon): the files' current category says so in text.
+        for category in sorted(vics.CATEGORIES, key=vics.SEVERITY.index):
+            mark = " (current)" if only == category else ''
+            action = sub.addAction(
+                icons.dot_icon(vics.CATEGORY_COLOURS[category]),
+                f"{vics.category_label(category)}{mark}\tAlt+{category}")
+            action.setEnabled(bool(media))
+            action.triggered.connect(
+                lambda _=False, c=category: self.categorise_rows(c, media))
+        if not media:
+            note = sub.addAction("Only pictures and videos are categorised")
+            note.setEnabled(False)
+        elif len(media) < len(rows):
+            note = sub.addAction(f"Applies to the {len(media):,} picture(s) "
+                                 f"and video(s) of {len(rows):,}")
+            note.setEnabled(False)
+        sub.addSeparator()
+        clear = sub.addAction(icons.icon(icons.DELETE),
+                              f"Remove Category (Uncategorized)\t"
+                              f"Alt+{vics.UNCATEGORIZED}")
+        clear.setEnabled(bool(carried))
+        clear.triggered.connect(lambda: self.categorise_rows(None, rows))
+        return sub
+
+    def categorise_rows(self, category, rows):
+        """Give files a Project VIC category (None: Uncategorized)."""
+        if self.case is None or not rows:
+            return 0
+        if category is None:
+            changed = self.case.clear_vic_category(rows)
+        else:
+            changed = self.case.set_vic_category(category, rows)
+        self.tags_changed()
+        return changed
+
+    def _category_key(self, view, key):
+        """Alt+0..4 give a list's selected files that Project VIC category,
+        Alt+5 makes them Uncategorized (the key hook of context_menus)."""
+        from trace_app.core import vics
+        if self.case is None or not self.case.is_open:
+            return False
+        rows = self._vic_rows(self._tag_rows(view))
+        if not rows:
+            return False
+        category = key - Qt.Key_0
+        if category == vics.UNCATEGORIZED:
+            category = None
+        elif category not in vics.CATEGORIES:
+            return False
+        chosen = rows if category is None else self._media_rows(rows)
+        if not chosen:
+            self.statusBar().showMessage(
+                "Only pictures and videos take a Project VIC category", 4000)
+            return True
+        self.categorise_rows(category, chosen)
+        skipped = len(rows) - len(chosen)
+        self.statusBar().showMessage(
+            f"{len(chosen):,} file(s): Project VIC "
+            f"{vics.category_label(category)}"
+            + (f" ({skipped:,} not pictures or videos, left as they were)"
+               if skipped else ''), 5000)
+        return True
+
     def tag_rows(self, tag_id, rows):
         if self.case is None or not rows:
             return 0
@@ -545,6 +920,43 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return True
 
     # --- conversations ------------------------------------------------------
+
+    @Slot(dict)
+    def show_in_conversation(self, row):
+        """An Activity message/call in its thread (Triage ▸
+        Conversations): the same record, grouped."""
+        self.show_triage('conversations')
+        self.conversations_panel.reveal(row.get('id'))
+
+    @Slot(dict)
+    def show_on_map(self, row):
+        """An Activity record with a position, on Triage ▸ Map."""
+        self.show_triage('map')
+        self.map_panel.reveal(row.get('id'))
+
+    def show_activity_row(self, row):
+        """A Triage record (a message, a map point) in the Activity tab."""
+        self.show_activity(row.get('category'))
+        self.activity_panel.reveal(row.get('id'), row.get('category'))
+
+    def open_message_menu(self, row, position):
+        menu = QMenu(self)
+        menu.addAction(icons.icon(icons.ACTIVITY), "Show in Activity") \
+            .triggered.connect(lambda: self.show_activity_row(row))
+        source = menu.addAction("Show Source File")
+        source.setEnabled(bool(row.get('source_ref')))
+        source.triggered.connect(lambda: self.open_activity_source(row))
+        show_menu(menu, position, False)
+
+    def open_located_menu(self, point, position):
+        """A map point's menu: its file's, plus Show in Activity for a
+        record."""
+        extras = []
+        if point['kind'] == 'activity':
+            extras.append(("Show in Activity",
+                           lambda: self.show_activity_row(point['row'])))
+        self.open_finding_menu(self._located_artifact(point), position,
+                               extras=extras)
 
     def open_conversation_menu(self, thread, rows, position):
         menu = QMenu(self)
@@ -674,12 +1086,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.tree_viewer.takeTopLevelItem(index)
         if not self.case or not self.case.is_open:
             return
+        from trace_app.core import vics
         rows = self.case.tagged()
-        if not rows:
+        categorised = self.case.vic_categories()
+        if not rows and not categorised:
             return
         root = QTreeWidgetItem()
+        # Files, as the Tags tab counts them: tagged or categorised.
         files = len({(r.get('evidence_id'), r['artifact_ref'])
-                     for r in rows})
+                     for r in rows + categorised})
         root.setText(0, f"Tags ({files:,})")
         root.setIcon(0, icons.icon(icons.TAG))
         root.setData(0, Qt.UserRole, {'is_tags_root': True})
@@ -690,15 +1105,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if data.get('is_bookmarks_root') or data.get('is_analysis_root'):
                 position = index + 1
         self.tree_viewer.insertTopLevelItem(position, root)
+        groups = []
+        for category in sorted(vics.CATEGORIES, key=vics.SEVERITY.index):
+            mine = [r for r in categorised if r['category'] == category]
+            groups.append((f"Project VIC {vics.category_label(category)}",
+                           icons.dot_icon(vics.CATEGORY_COLOURS[category]),
+                           None, mine))
         for tag in self.case.tags():
-            mine = [r for r in rows if r['tag_id'] == tag['id']]
+            groups.append((tag['name'], tag_icon(tag['colour']), tag['id'],
+                           [r for r in rows if r['tag_id'] == tag['id']]))
+        for label, icon, tag_id, mine in groups:
             if not mine:
                 continue
             group = QTreeWidgetItem(root)
-            group.setText(0, f"{tag['name']} ({len(mine):,})")
-            group.setIcon(0, tag_icon(tag['colour']))
+            group.setText(0, f"{label} ({len(mine):,})")
+            group.setIcon(0, icon)
             group.setData(0, Qt.UserRole, {'is_tags_group': True,
-                                           'tag_id': tag['id']})
+                                           'tag_id': tag_id})
             for row in mine[:TREE_TAGGED_SHOWN]:
                 child = QTreeWidgetItem(group)
                 name = row.get('name') or row['artifact_ref']
@@ -718,14 +1141,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 more.setText(0, f"… {len(mine) - TREE_TAGGED_SHOWN:,} more "
                                 f"in Triage ▸ Tags")
                 more.setData(0, Qt.UserRole, {'is_tags_group': True,
-                                              'tag_id': tag['id']})
+                                              'tag_id': tag_id})
         root.setExpanded(True)
 
     def _get_file_icon(self, file_extension: str) -> QIcon:
         """Get icon for file extension with caching."""
         if file_extension not in self._icon_cache:
             icon_path = self.db_manager.get_icon_path('file', file_extension)
-            self._icon_cache[file_extension] = QIcon(icon_path)
+            self._icon_cache[file_extension] = icons.cached_icon(icon_path)
         return self._icon_cache[file_extension]
 
     def _confirm_exit(self) -> bool:
@@ -751,14 +1174,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _setup_directory_tree_item(self, item: QTreeWidgetItem, entry: Dict[str, Any],
                                    start_offset: int) -> None:
-        """Configure tree item for a directory entry."""
-        # Check if directory has children
-        sub_entries = self.image_handler.get_directory_contents(start_offset, entry["inode_number"])
-        has_sub_entries = bool(sub_entries)
+        """Configure tree item for a directory entry.
 
-        # Set directory icon and data
-        icon_path = self.db_manager.get_icon_path('folder', 'folder')
-        item.setIcon(0, QIcon(icon_path))
+        A folder is not read until it is expanded: it gets an arrow, and
+        loses it on expanding if it turns out empty, as Explorer does.
+        Reading every subfolder to decide on the arrow made expanding
+        WINDOWS take 47 directory reads (2.3 s on the window's thread).
+        """
+        known = self.image_handler.cached_directory_contents(
+            start_offset, entry["inode_number"])
+        item.setIcon(0, icons.cached_icon(
+            self.db_manager.get_icon_path('folder', 'folder')))
         item.setData(0, Qt.UserRole, {
             "inode_number": entry["inode_number"],
             "type": 'directory',
@@ -767,15 +1193,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             "size": entry.get("size"),
             "is_deleted": entry.get("is_deleted", False),
             "is_recoverable": entry.get("is_recoverable", False),
-            # Already counted above; saves the status bar counting again.
-            "child_count": len(sub_entries),
+            # Known only once the folder has been read (status bar).
+            "child_count": len(known) if known is not None else None,
         })
-
-        # Set child indicator
         item.setChildIndicatorPolicy(
-            QTreeWidgetItem.ShowIndicator if has_sub_entries
-            else QTreeWidgetItem.DontShowIndicatorWhenChildless
-        )
+            QTreeWidgetItem.DontShowIndicatorWhenChildless
+            if known is not None and not known
+            else QTreeWidgetItem.ShowIndicator)
 
     def _setup_file_tree_item(self, item: QTreeWidgetItem, entry: Dict[str, Any],
                              start_offset: int) -> None:
@@ -901,12 +1325,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         Split into one method per region; this was a single 332-line method.
         """
+        self._starting(0.02, "Building the window…")
         self._build_window()
         self._build_menus()
         self._build_toolbar()
+        self._starting(0.06, "Building the evidence tree and listing…")
         self._build_central_widgets()
+        self._starting(0.62, "Building the viewers…")
         self._build_viewer_dock()
         self._quieten_table_headers()
+        self._starting(0.84, "Reading the case…" if self.case
+                       else "Preparing quick triage…")
+
+    def _starting(self, fraction, step):
+        """Report a step of building the window, if anyone is watching."""
+        progress = getattr(self, '_progress', None)
+        if progress is not None:
+            progress(fraction, step)
 
     def _quieten_table_headers(self):
         """Stop headers bolding the column of the selected cell.
@@ -1132,6 +1567,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # the selection context: one place to look for everything the
         # application is doing, rather than a progress bar per feature in a
         # different corner depending on what was started.
+        # A newer TRACE, found by the check at start: hidden until then.
+        self.update_notice = QToolButton(self)
+        self.update_notice.setObjectName("updateNotice")
+        self.update_notice.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.update_notice.setCursor(Qt.PointingHandCursor)
+        self.update_notice.setAutoRaise(True)
+        self.update_notice.setVisible(False)
+        self.update_notice.clicked.connect(self._open_update_page)
+        self._update_url = ''
+        status.addPermanentWidget(self.update_notice)
+
         self.job_bar = JobBar(self)
         self.job_bar.all_finished.connect(self._on_jobs_finished)
         status.addPermanentWidget(self.job_bar)
@@ -1141,6 +1587,54 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         status.addPermanentWidget(self.status_context)
 
         self.set_status_context("No evidence loaded")
+
+    #: The check at start waits this long after the window opens (ms), so
+    #: it never competes with opening the case.
+    UPDATE_CHECK_DELAY_MS = 4000
+
+    def check_for_update_at_start(self, delay=None):
+        """Ask GitHub for the newest release once, a few seconds from now,
+        unless the examiner turned it off or the case is offline
+        (`updates.start_refusal`). A newer one is named in the status bar;
+        anything else is only logged. Called by app.main, never by a test
+        window."""
+        from trace_app.core import updates
+        why = updates.start_refusal()
+        if why:
+            logger.info("No update check at start: %s", why)
+            return False
+        QTimer.singleShot(self.UPDATE_CHECK_DELAY_MS if delay is None
+                          else delay, self._start_update_check)
+        return True
+
+    def _start_update_check(self):
+        from trace_app.core import updates
+        from trace_app.ui.dialogs.about import UpdateCheck
+        if updates.start_refusal():         # a case set offline meanwhile
+            return
+        worker = UpdateCheck(self)
+        worker.answered.connect(self._update_answered)
+        self._retain_worker(worker)
+        worker.start()
+
+    @Slot(str, str, str)
+    def _update_answered(self, status, text, url):
+        logger.info("Update check at start: %s", text)
+        if status != 'newer':
+            return
+        version = text.split(' is available', 1)[0]
+        self._update_url = url
+        self.update_notice.setText(f"{version} is available")
+        icons.apply_to(self.update_notice, icons.UPDATE_AVAILABLE)
+        self.update_notice.setToolTip(
+            f"{text}\nClick to open its release page. Nothing is downloaded "
+            f"by TRACE.")
+        self.update_notice.setVisible(True)
+
+    def _open_update_page(self):
+        from trace_app.core import updates
+        QDesktopServices.openUrl(QUrl(self._update_url
+                                      or updates.RELEASES_PAGE))
 
     def set_status(self, message, timeout=0):
         """Show a transient message: what the application is doing now."""
@@ -1211,6 +1705,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         if kind == 'directory':
             count = data.get('child_count')
+            if count is None and self.image_handler is not None:
+                known = self.image_handler.cached_directory_contents(
+                    data.get('start_offset'), data.get('inode_number'))
+                count = len(known) if known is not None else None
             parts.append(f"Folder, {count} items" if count is not None else "Folder")
         elif kind == 'volume':
             parts.append("Volume")
@@ -1268,6 +1766,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # colour). Checkable entries -- themes, panel toggles -- have none:
         # Qt draws their tick where the icon goes.
         file_menu = QMenu('File', self)
+        # Another case, a new one or quick triage, without closing TRACE.
+        self.switch_case_action = icons.action(
+            icons.SWITCH_CASE, "Switch Case...", self)
+        self.switch_case_action.setShortcut("Ctrl+Shift+O")
+        self.switch_case_action.setToolTip(
+            "Open another case, start a new one or quick triage: TRACE "
+            "starts again on your choice, this case closing as on exit")
+        self.switch_case_action.triggered.connect(self.switch_case)
+        file_menu.addAction(self.switch_case_action)
+        file_menu.addSeparator()
         # In a case, evidence comes in through the Add Evidence wizard
         # (checked, described, analysed); quick triage keeps the plain file
         # pickers, since nothing there is recorded.
@@ -1341,6 +1849,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 lambda _=False, kind=kind: self.export_for_tools(kind))
             tools_menu.addAction(action)
             self.interchange_actions.append(action)
+        # Reads the evidence itself, so quick triage can use it too.
+        tools_menu.addSeparator()
+        self.vics_export_action = icons.action(
+            icons.EXPORT_FILE, "Project VICS (Pictures and Videos)…", self)
+        self.vics_export_action.setToolTip(
+            "The pictures and videos, copied out with a Project VICS JSON "
+            "file for Griffeye, AXIOM and other media review tools")
+        # Not connected directly: triggered(checked) would arrive as
+        # export_vics's `options`.
+        self.vics_export_action.triggered.connect(
+            lambda _checked=False: self.export_vics())
+        tools_menu.addAction(self.vics_export_action)
         open_archive_action = QAction(icons.icon(icons.ARCHIVE),
                                       "Open Case Archive...", self)
         open_archive_action.triggered.connect(self.open_case_archive)
@@ -1496,7 +2016,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Both entries open a picker when more than one image is loaded, so
         # they work the same way whether there is one image or several.
-        image_info_action = QAction("Image Information", self)
+        image_info_action = QAction("Evidence Information", self)
         image_info_action.triggered.connect(self.show_image_info_menu)
         tools_menu.addAction(image_info_action)
 
@@ -1524,6 +2044,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         tags_action = QAction(icons.icon(icons.TAG), "Manage Tags...", self)
         tags_action.triggered.connect(self.show_manage_tags)
         tools_menu.addAction(tags_action)
+        tools_menu.addSeparator()
+        modules_action = QAction(icons.icon(icons.MODULES),
+                                 "External Modules...", self)
+        modules_action.setToolTip("Install iLEAPP, aLEAPP and other parsers "
+                                  "TRACE runs on evidence")
+        modules_action.triggered.connect(self.show_external_modules)
+        tools_menu.addAction(modules_action)
 
         # Add "Options" menu for API key configuration
         options_menu = QMenu('Options', self)
@@ -1531,9 +2058,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self.show_settings)
         options_menu.addAction(settings_action)
-        api_key_action = QAction("API Keys", self)
-        api_key_action.triggered.connect(self.show_api_key_dialog)
-        options_menu.addAction(api_key_action)
         options_menu.addSeparator()
         features_action = QAction("Supported Features...", self)
         features_action.setToolTip("What this installation can do on this "
@@ -1577,7 +2101,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 (sigma_action, icons.SIGMA),
                 (keywords_action, icons.KEYWORDS),
                 (settings_action, icons.SETTINGS),
-                (api_key_action, icons.API_KEYS),
                 (features_action, icons.FEATURES),
                 (about_action, icons.HELP)):
             icons.apply_to(action, name)
@@ -1631,6 +2154,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """Tree viewer, listing table and its toolbar."""
         self.tree_viewer = BranchTreeWidget(self)
         self.tree_viewer.setObjectName("evidenceTree")
+        # Subfolders of an opened folder are read on a thread, so an empty
+        # one loses its arrow before it is clicked.
+        from trace_app.ui.widgets.folder_probe import FolderProbe
+        self._folder_probe = FolderProbe(self._folder_counted, self)
         self.tree_viewer.setIconSize(QSize(TREE_ICON_SIZE, TREE_ICON_SIZE))
         self.tree_viewer.setHeaderHidden(True)
         # No frame. A selected row runs the full width of the viewport, and the
@@ -1897,6 +2424,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Built here rather than with the viewer-dock panels: the tab below
         # needs it, and _build_central_widgets runs first.
+        self._starting(0.16, "Building Search and Triage…")
         self.search_panel = SearchPanel()
         self.search_panel.set_case(self.case)
         self.search_panel.result_selected.connect(self.preview_search_result)
@@ -2019,6 +2547,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.deleted_panel.file_activated.connect(self.open_finding)
         self.deleted_panel.file_menu_requested.connect(
             self.open_finding_menu)
+        self.deleted_panel.content_reader = self._deleted_bytes
+        self.deleted_panel.head_reader = self._deleted_head
         self.triage_panel.add_deleted_tab(self.deleted_panel)
 
         # Where located evidence was: photo GPS and records with a
@@ -2027,24 +2557,64 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.map_panel = MapPanel()
         self.map_panel.point_selected.connect(self.preview_located)
         self.map_panel.point_activated.connect(self.open_located)
-        self.map_panel.point_menu_requested.connect(
-            lambda point, position: self.open_finding_menu(
-                self._located_artifact(point), position))
+        self.map_panel.point_menu_requested.connect(self.open_located_menu)
+        self.map_panel.google_key = lambda: api_keys.get('google_maps')
+        self.map_panel.refresh_styles()
         self.triage_panel.add_map_tab(self.map_panel)
         self.result_viewer.addTab(self.triage_panel, 'Triage', icons.TRIAGE)
 
         # What the users did. A tab of its own rather than a Triage sub-tab:
         # it is a record of events across the case, not a list of flagged
         # files, and it is what a timeline grows from.
+        self._starting(0.42, "Building Activity, Modules and Timeline…")
         self.activity_panel = ActivityPanel()
         self.activity_panel.row_selected.connect(self.preview_activity_source)
         self.activity_panel.row_activated.connect(self.open_activity_source)
         self.activity_panel.deleted_requested.connect(self.show_deleted_file)
+        self.activity_panel.conversation_requested.connect(
+            self.show_in_conversation)
+        self.activity_panel.map_requested.connect(self.show_on_map)
+        # Its Others group: module rows read from the tools' own
+        # databases, handled as the Modules tab's rows are.
+        self.activity_panel.module_source_of = self._module_source
+        self.activity_panel.module_row_selected.connect(
+            self.preview_module_row)
+        self.activity_panel.module_row_activated.connect(
+            self.open_module_row)
+        self.activity_panel.module_row_menu_requested.connect(
+            lambda payload, position: self.open_module_row_menu(
+                payload, position,
+                self.activity_panel.views.currentWidget()))
         self.activity_panel.run_requested.connect(
             lambda: self.run_analysis_modules(self.activity_panel.evidence_id))
         self.activity_panel.set_case(self.case)
         self.result_viewer.addTab(self.activity_panel, 'Activity',
                                   icons.ACTIVITY)
+
+        # What external modules (iLEAPP, aLEAPP...) extracted: their runs
+        # and rows (core/modules, ui/viewers/modules_panel).
+        from trace_app.ui.viewers.modules_panel import ModulesPanel
+        self.modules_panel = ModulesPanel()
+        self.modules_panel.source_of = self._module_source
+        self.modules_panel.run_requested.connect(self.queue_leapp)
+        self.modules_panel.manage_requested.connect(
+            self.show_external_modules)
+        self.modules_panel.row_selected.connect(self.preview_module_row)
+        self.modules_panel.row_activated.connect(self.open_module_row)
+        self.modules_panel.row_menu_requested.connect(
+            self.open_module_row_menu)
+        self.modules_panel.delete_requested.connect(self.remove_module_run)
+        self.modules_panel.route_requested.connect(self.route_module_artifact)
+        self.modules_panel.show_requested.connect(self.show_module_artifact)
+        self.modules_panel.artifact_report_requested.connect(
+            self.add_module_artifact_to_report)
+        self.activity_panel.module_artifact_report_requested.connect(
+            self.add_module_artifact_to_report)
+        # Shown: the tools installed now (another window or session may have
+        # installed one) and the images open now.
+        self.modules_panel.shown.connect(self.refresh_modules)
+        self.result_viewer.addTab(self.modules_panel, 'Modules',
+                                  icons.MODULES)
 
         # Everything with a time, in one order: NTFS times and journal,
         # activity, photo and document dates, carved files' own dates, and
@@ -2069,10 +2639,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.hex_viewer.sector_size = lambda: int(
             getattr(self.image_handler, 'sector_size', 512) or 512)
         self.hex_viewer.bookmarks_enabled = lambda: self.case is not None
-        from trace_app.ui.widgets.context_menus import (set_key_hook,
-                                                         set_row_hook)
+        from trace_app.ui.widgets.context_menus import (
+            set_category_key_hook, set_key_hook, set_row_hook)
         set_row_hook(self._menu_extras)
         set_key_hook(self._tag_key)
+        set_category_key_hook(self._category_key)
         self.hex_viewer.bookmark_requested.connect(self.bookmark_byte_range)
         self.text_viewer = TextViewer(self)
         self.text_viewer.bookmark_requested.connect(
@@ -2108,6 +2679,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # it is.
         self.application_viewer.database_blob_opener = \
             self.open_database_cell
+        # Bookmark Region (pictures) / Bookmark Moment (video), and a
+        # video's recorded place on the Map.
+        self.application_viewer.bookmark_hook = self.bookmark_shown_file
+        self.application_viewer.show_place_hook = self.show_place_on_map
+        # A contact sheet goes into the report (a case's, not quick
+        # triage's: there is no report there).
+        self.application_viewer.contact_sheet_hook = \
+            self.add_contact_sheet_to_report if self.case else None
         self.viewer_adapters = [
             HexAdapter(self.hex_viewer),
             TextAdapter(self.text_viewer),
@@ -2159,6 +2738,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tags_panel.file_activated.connect(self.open_finding)
         self.tags_panel.file_menu_requested.connect(self.open_finding_menu)
         self.tags_panel.manage_requested.connect(self.show_manage_tags)
+        self.tags_panel.remove_requested.connect(self.remove_marks)
 
         # Messages and calls as conversations (ui/viewers/conversations_panel).
         from trace_app.ui.viewers.conversations_panel import \
@@ -2170,6 +2750,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.open_activity_source)
         self.conversations_panel.thread_menu_requested.connect(
             self.open_conversation_menu)
+        self.conversations_panel.message_menu_requested.connect(
+            self.open_message_menu)
         self.triage_panel.add_tags_tab(self.tags_panel)
         self.triage_panel.add_conversations_tab(self.conversations_panel)
 
@@ -2240,22 +2822,104 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
         self.restart()
 
-    def restart(self):
-        """Start TRACE again (the same case), then close this window the
-        ordinary way -- the case is saved and closed, its audit line
-        written."""
+    def restart(self, target=None, setup=None):
+        """Start TRACE again, then close this window the ordinary way --
+        the case is saved and closed, its audit line written.
+
+        `target`: None = the same case (or quick triage again), a case
+        folder, or case_launcher.TRIAGE. `setup` is what the New Case
+        wizard asked for (verification, modules), queued by the new
+        process once the case's evidence is open. Returns whether it
+        restarted."""
         from PySide6.QtCore import QProcess
+        from trace_app.ui.dialogs.case_launcher import TRIAGE
         program = sys.executable
         arguments = list(sys.argv[1:]) if getattr(sys, 'frozen', False) \
             else [os.path.abspath(sys.argv[0])] + list(sys.argv[1:])
-        if self.case is not None:
-            os.environ['TRACE_REOPEN_CASE'] = self.case.folder
-        if not QProcess.startDetached(program, arguments):
+        if target is None and self.case is not None:
+            target = self.case.folder
+        elif target is None:
+            target = TRIAGE
+        # The child inherits these; app.main takes them out again.
+        names = ('TRACE_REOPEN_CASE', 'TRACE_QUICK_TRIAGE', 'TRACE_CASE_SETUP')
+        before = {name: os.environ.get(name) for name in names}
+        if target == TRIAGE:
+            os.environ['TRACE_QUICK_TRIAGE'] = '1'
+        else:
+            os.environ['TRACE_REOPEN_CASE'] = target
+        if setup:
+            import json
+            os.environ['TRACE_CASE_SETUP'] = json.dumps(setup)
+        from trace_app import app as application
+        if application.has_console():
+            # Started from a terminal: this process closes, then waits for
+            # the next one (app.main), so the prompt comes back once, when
+            # TRACE is done. A detached start returned the prompt at once
+            # and the new TRACE went on logging under it.
+            self.restart_request = (program, arguments, dict(os.environ))
+            for name, value in before.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
+            self._restarting = True
+            self.close()
+            if self.isVisible():
+                # Closing was refused: no restart later either.
+                self.restart_request = None
+                self._restarting = False
+                return False
+            return True
+        started = QProcess.startDetached(program, arguments)
+        for name, value in before.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if not started:
             message.warning(self, "Could not restart",
                             "Start TRACE again to apply the change.")
-            return
+            return False
         self._restarting = True
         self.close()
+        return True
+
+    def switch_case(self):
+        """File ▸ Switch Case: the welcome screen, from the window. A case
+        opened or made there, or quick triage, is where TRACE starts again
+        (a clean start, as a theme or interface-size change makes); this
+        window closes the case it has the ordinary way. Cancelled: nothing
+        changes. Running jobs are asked about first -- closing cancels
+        them, and carving and indexing resume next time."""
+        from trace_app.ui.dialogs.case_launcher import TRIAGE, choose_case
+        if self.job_bar.busy and not message.question(
+                self, "Switch Case",
+                "Background jobs are still running. Cancel them and "
+                "switch?",
+                "Carving and indexing resume from where they stopped the "
+                "next time the case is opened; other jobs start again."):
+            return None
+        case, setup = choose_case(self)
+        if case is None:
+            return None
+        if case == TRIAGE:
+            target = TRIAGE
+        else:
+            target = case.folder
+            # The new process opens it again; this one lets go first.
+            try:
+                case.close()
+            except Exception as exc:
+                logger.warning("Closing %s before the switch: %s",
+                               target, exc)
+            if (self.case is not None and os.path.normcase(os.path.abspath(
+                    target)) == os.path.normcase(os.path.abspath(
+                    self.case.folder)) and not setup):
+                self.set_status("That case is already open", 5000)
+                return None
+        logger.info("Switching to %s", "quick triage" if target == TRIAGE
+                    else target)
+        return target if self.restart(target, setup) else None
 
     def apply_stylesheet(self, theme='light'):
         # 'system': light or dark as the system is, the choice itself kept.
@@ -2270,6 +2934,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # registry needs to know which theme is active before anything asks it
         # for an icon.
         icons.set_theme(theme)
+        # Windows draws the title bars: each open window's is recoloured.
+        from trace_app.ui.widgets import title_bar
+        title_bar.refresh(theme)
         if getattr(self, 'result_viewer', None) is not None:
             self.result_viewer.refresh()      # the tabs' icons
         self._tint_viewer_tabs()
@@ -2298,8 +2965,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         try:
             with open(qss_file, 'r') as f:
-                stylesheet = f.read()
-            QApplication.instance().setStyleSheet(self._resolve_qss_urls(stylesheet))
+                stylesheet = self._resolve_qss_urls(f.read())
+            # Only when it changes: setting the same sheet again still makes
+            # Qt unpolish and polish every widget in the application, and
+            # in a process that built windows before (the tests) that
+            # repolish crashed in Qt (access violation in setStyleSheet).
+            app = QApplication.instance()
+            if app.styleSheet() != stylesheet:
+                app.setStyleSheet(stylesheet)
         except Exception as e:
             logger.error(f"Error loading stylesheet {qss_file}: {e}")
 
@@ -2362,57 +3035,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         return cls._QSS_URL.sub(absolute, stylesheet)
 
-    def show_api_key_dialog(self):
-        # Create a dialog to get API keys from the user
-        dialog = QDialog(self)
-        dialog.setWindowTitle("API Key Configuration")
-        dialog.setFixedWidth(API_DIALOG_WIDTH)  # Set a fixed width to accommodate longer API keys
+    def show_api_keys(self):
+        """Settings ▸ API Keys (ui/dialogs/settings.py)."""
+        return self.show_settings(page="API Keys")
 
-        # Set layout as a form layout for better presentation
-        layout = QFormLayout()
-        layout.setSpacing(10)  # Add some spacing between fields
-        layout.setContentsMargins(15, 15, 15, 15)  # Set content margins for better visual aesthetics
-
-        # VirusTotal API Key
-        virus_total_label = QLabel("VirusTotal API Key:")
-        virus_total_input = QLineEdit()
-        virus_total_input.setEchoMode(QLineEdit.Password)
-        virus_total_input.setText(self.api_keys.get('API_KEYS', 'virustotal', fallback=''))
-        virus_total_input.setMinimumWidth(INPUT_FIELD_MIN_WIDTH)  # Set a minimum width for the input field
-        layout.addRow(virus_total_label, virus_total_input)
-
-        # Buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(
-            lambda: self.save_api_keys(virus_total_input.text(), dialog))
-        button_box.rejected.connect(dialog.reject)
-        layout.addRow(button_box)
-
-        # Set layout and execute dialog
-        dialog.setLayout(layout)
-        dialog.exec()
-
-    def save_api_keys(self, virus_total_key, dialog):
-        # Save the API keys in a configuration file
-        if not self.api_keys.has_section('API_KEYS'):
-            self.api_keys.add_section('API_KEYS')
-
-        self.api_keys.set('API_KEYS', 'virustotal', virus_total_key)
-
-        try:
-            with open(config_file(), 'w') as fh:
-                self.api_keys.write(fh)
-        except OSError as e:
-            # Previously this raised straight out of the button's slot.
-            logger.error(f"Could not save API keys: {e}")
-            message.warning(
-                self, "Could not save API key",
-                f"The API key could not be written to disk:\n{e}\n\n"
-                "It will be used for this session only.")
-
-        dialog.accept()
-
-        self.vt_panel.set_has_key(virus_total_key)
+    def _api_keys_changed(self, changed):
+        """What reads a key follows a new one at once."""
+        if getattr(self, 'map_panel', None) is not None:
+            self.map_panel.refresh_styles()
+        if 'virustotal' in changed and \
+                getattr(self, 'vt_panel', None) is not None:
+            self.vt_panel.set_has_key(changed['virustotal'])
 
     def handler_for(self, image_path):
         """An ImageHandler for `image_path`, reusing the loaded one if it fits.
@@ -2573,13 +3206,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             logger.error("Error closing handler for %s: %s", image_path, e)
 
     def show_image_info_menu(self):
-        """Tools > Image Information: pick an image when several are loaded.
+        """Tools > Evidence Information: pick an image when several are loaded.
 
         Same shape as show_verify_menu -- straight to the dialog for a single
         image, a picker otherwise.
         """
         if not self.evidence_files:
-            message.warning(self, "Image Information",
+            message.warning(self, "Evidence Information",
                             "No image is currently loaded.")
             return
 
@@ -2605,7 +3238,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         handler = self.handler_for(image_path)
         if handler is None:
-            message.warning(self, "Image Information",
+            message.warning(self, "Evidence Information",
                             f"Could not open {image_path}.")
             return
 
@@ -2818,6 +3451,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         panel = getattr(self, 'carved_panel', None)
         if panel is not None:
             panel.set_targets(self._carving_targets())
+        # The Modules tab offers the same images: it was filled only when a
+        # run finished or a tool was installed, so after opening evidence
+        # (and always in quick triage) its lists stood empty.
+        if getattr(self, 'modules_panel', None) is not None:
+            self.refresh_modules()
 
     def resume_carving(self, evidence_id):
         """Carry on an interrupted carve, with the settings it ran with."""
@@ -2935,17 +3573,73 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _carved_bytes(self, row):
         """A carve's bytes from its image (fragments followed), quietly:
-        None if it cannot be read."""
+        None if it cannot be read.
+
+        Called on the thumbnail thread too, where the case database and
+        opening an image are off limits (SQLite refuses a connection from
+        another thread): every carve's thumbnail failed that way, silently.
+        A row read from the case says its fragments (None = contiguous),
+        and its image is one the window has open."""
+        on_gui = QThread.currentThread() is self.thread()
         try:
             fragments = row.get('fragments')
-            if fragments is None and self.case is not None and \
+            if 'fragments' not in row and on_gui and \
+                    self.case is not None and \
                     row.get('evidence_id') is not None:
                 fragments = self.case.carved_fragments(row['evidence_id'],
                                                        int(row['offset']))
-            return read_carved(self._carved_reader(row), int(row['offset']),
+            if on_gui:
+                read = self._carved_reader(row)
+            else:
+                handler = self._open_handler_of(
+                    {'evidence_path': row.get('image_path')})
+                if handler is None:
+                    return None
+                read = handler.read
+            return read_carved(read, int(row['offset']),
                                int(row['size']), fragments)
         except Exception as exc:
             logger.debug("Carve at %s not read: %s", row.get('offset'), exc)
+            return None
+
+    def _open_handler_of(self, row):
+        """The open image a row's `evidence_path` names, or None. Never
+        opens one: thumbnails read on their own thread."""
+        path = row.get('evidence_path')
+        if not path:
+            return None
+        return self._image_handlers.get(path) or \
+            self._image_handlers.get(os.path.normpath(path))
+
+    def _deleted_bytes(self, row):
+        """A deleted file's content as the file system still describes it
+        (what its preview shows), for a thumbnail; None if unreadable."""
+        handler = self._open_handler_of(row)
+        parsed = parse_artifact_ref(row.get('artifact_ref'))
+        if handler is None or parsed.get('kind') != 'file':
+            return None
+        try:
+            content, _meta = handler.get_file_content(
+                parsed['inode'], parsed['start_offset'])
+            return content
+        except Exception as exc:
+            logger.debug("Deleted file %s not read: %s",
+                         row.get('name'), exc)
+            return None
+
+    def _deleted_head(self, row):
+        """A deleted file's first bytes, to tell a picture by content."""
+        from trace_app.ui.widgets.thumbnails import HEAD_BYTES
+        handler = self._open_handler_of(row)
+        parsed = parse_artifact_ref(row.get('artifact_ref'))
+        if handler is None or parsed.get('kind') != 'file':
+            return None
+        try:
+            return handler.read_file_bytes(parsed['inode'],
+                                           parsed['start_offset'], HEAD_BYTES)
+        except Exception as exc:
+            logger.debug("Deleted file %s not read: %s",
+                         row.get('name'), exc)
             return None
 
     def export_carved_rows(self, rows, folder=None):
@@ -2981,9 +3675,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             lambda row: readers[row.get('evidence_id') if row.get(
                 'evidence_id') is not None else row.get('image_path')],
             self)
-        progress = QProgressDialog("Exporting carved files...", "Cancel", 0,
-                                   len(rows), self)
-        progress.setWindowTitle("Export")
+        progress = ProgressDialog("Exporting and checking each file…",
+                                  "Cancel", 0, len(rows), self)
+        progress.setWindowTitle(f"Exporting {len(rows):,} carved file(s)")
+        progress.set_about(folder)
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(PROGRESS_MIN_DURATION)
         progress.canceled.connect(worker.stop)
@@ -3177,13 +3872,192 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         Returns True when it did, so the caller can stop. Reading the bytes is
         the expensive part and happens once here; navigating inside the
-        archive afterwards is all in memory.
+        archive afterwards is all in memory. An archive being indexed in the
+        background opens when its index is done.
         """
         loaded = self._load_archive(data)
         if loaded is None:
             return False
+        if loaded is _INDEXING:
+            return True
         self._archive_stack = [loaded]
         return self.show_archive_level()
+
+    def _file_size(self, inode, offset):
+        """A file's size from the image, or 0."""
+        try:
+            stream = self.image_handler.open_file_object(inode, offset)
+            if stream is None:
+                return 0
+            return stream.seek(0, os.SEEK_END) or stream.tell()
+        except Exception:
+            return 0
+
+    def _archive_index_dir(self):
+        from trace_app.infra.paths import user_data_dir
+        if self.case is not None:
+            return os.path.join(self.case.folder, 'archive_index')
+        return os.path.join(user_data_dir(), 'archive_index')
+
+    def _big_archive(self, data, name, size):
+        """An archive too big to read whole: (name, IndexedArchive,
+        source) when its index is built, _INDEXING when the index is being
+        built now (it opens when done), None when it is no tar or ZIP."""
+        from trace_app.core import archive_index
+        inode, offset = data['inode_number'], data['start_offset']
+        handler = self.image_handler
+        try:
+            stream = handler.open_file_object(inode, offset)
+            kind = archives.detect_archive(stream.read(512)) if stream \
+                else None
+        except Exception as exc:
+            logger.debug("Could not read %s: %s", name, exc)
+            return None
+        if kind not in archive_index.KINDS:
+            return None
+        target = archive_index.index_file(
+            self._archive_index_dir(), handler.image_path, offset, inode,
+            size, str(data.get('modified') or ''))
+        if archive_index.is_complete(target):
+            opened = archive_index.IndexedArchive(
+                target, lambda: handler.open_file_object(inode, offset),
+                name)
+            return (name, opened, dict(data))
+        self._queue_archive_index(data, name, kind, target, size)
+        return _INDEXING
+
+    def _queue_archive_index(self, data, name, kind, target, size):
+        from trace_app.ui.process_worker import ProcessWorker
+        from trace_app.ui.widgets.job_bar import SIDE
+        handler = self.image_handler
+        params = {'image_path': handler.image_path,
+                  'unlock': self._unlocks_for(handler.image_path),
+                  'start_offset': data['start_offset'],
+                  'inode': data['inode_number'], 'kind': kind,
+                  'target': target}
+        source = dict(data)
+        image_path = handler.image_path
+
+        def start(job):
+            class ArchiveIndexWorker(ProcessWorker):
+                kind = 'archive_index'
+            worker = ArchiveIndexWorker(params, self)
+            worker.job_progress.connect(
+                lambda payload, job=job: self.job_bar.report(
+                    payload[0], payload[1], str(payload[2])[:160], job=job))
+            worker.job_done.connect(
+                lambda count, error, job=job: self._archive_indexed(
+                    job, image_path, source, name, target, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        self.job_bar.submit(Job(key=f"archive-index:{target}",
+                                title=f"Listing {name}", start=start,
+                                stop=lambda worker: worker.stop()),
+                            lane=SIDE)
+        self.set_status(f"{name} is {self._readable(size)}: its members are "
+                        f"being listed in the background -- it opens in the "
+                        f"Listing when they are", 8000)
+
+    def _queue_folder_check(self, image_path, handler):
+        """Folder evidence opened from its kept listing (core/
+        folder_listing) is walked again beside the examiner's work, once a
+        session: a change since the listing was made is found and said."""
+        fs = getattr(handler, 'logical_fs', None)
+        if not getattr(fs, 'listing_kept', False):
+            return
+        checked = self.__dict__.setdefault('_folder_checks', set())
+        if image_path in checked:
+            return
+        checked.add(image_path)
+        from trace_app.ui.process_worker import ProcessWorker
+        from trace_app.ui.widgets.job_bar import SIDE
+        name = os.path.basename(os.path.normpath(image_path)) or image_path
+        found = []
+
+        def start(job):
+            class FolderCheckWorker(ProcessWorker):
+                kind = 'folder_check'
+            worker = FolderCheckWorker({'image_path': image_path}, self)
+            worker.job_progress.connect(
+                lambda payload, job=job: self.job_bar.report(
+                    payload[0], payload[1], str(payload[2])[:160], job=job))
+            worker.job_item.connect(found.append)
+            worker.job_done.connect(
+                lambda count, error, job=job: self._folder_checked(
+                    job, image_path, name, found, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        self.job_bar.submit(Job(key=f"folder-check:{image_path}",
+                                title=f"Checking the listing of {name}",
+                                start=start,
+                                stop=lambda worker: worker.stop()),
+                            lane=SIDE)
+
+    def _folder_checked(self, job, image_path, name, found, error):
+        """The background walk of folder evidence is done: said in the
+        status bar when nothing changed; a warning and an audit line when
+        the folder is no longer what the listing shows."""
+        self.job_bar.job_finished(job, error=error)
+        if error:
+            logger.warning("Folder listing of %s not checked: %s",
+                           image_path, error)
+            return
+        if not found:
+            return                      # cancelled, or no listing kept
+        result = found[-1]
+        added, removed, changed = (int(result.get(key) or 0) for key in
+                                   ('added', 'removed', 'changed'))
+        if not (added or removed or changed):
+            self.set_status(f"{name}: unchanged since it was listed "
+                            f"({int(result.get('checked') or 0):,} items "
+                            f"checked)", 8000)
+            return
+        counts = ", ".join(f"{count:,} {what}" for count, what in
+                           ((added, "added"), (removed, "removed"),
+                            (changed, "changed")) if count)
+        detail = (f"{image_path}: listed {result.get('saved') or '?'} UTC; "
+                  f"since then {counts}")
+        if self.case:
+            try:
+                self.case.record_event('folder evidence changed since listed',
+                                       detail)
+            except Exception as exc:
+                logger.warning("Audit line not written: %s", exc)
+        message.warning(
+            self, "Folder evidence has changed",
+            f"{name} was opened from the listing TRACE made of it "
+            f"{result.get('saved') or 'earlier'} UTC. Walking it again "
+            f"found {counts}.\n\nWhat is shown now is the folder as it was "
+            f"listed. Close and open the evidence again to see it as it is "
+            f"now.",
+            "\n".join(result.get('examples') or ()))
+
+    def _archive_indexed(self, job, image_path, source, name, target, error):
+        """An archive's index is built: open it in the Listing, as the
+        double-click that asked for it would have."""
+        from trace_app.core import archive_index
+        self.job_bar.job_finished(job, error=error)
+        if error:
+            message.warning(self, "Could not list the archive",
+                            f"{name} could not be listed.", str(error))
+            return
+        if not archive_index.is_complete(target):
+            self.set_status(f"Listing {name} was cancelled", 6000)
+            return
+        if image_path not in self._image_handlers and \
+                os.path.normpath(image_path) not in self._image_handlers:
+            return                      # the evidence was closed meanwhile
+        self.activate_image(image_path)
+        loaded = self._load_archive(source)
+        if loaded is None or loaded is _INDEXING:
+            return
+        self._archive_stack = [loaded]
+        if self.show_archive_level():
+            self.result_viewer.setCurrentWidget(self.listing_widget)
 
     def _load_archive(self, data):
         """(name, content, source) when the file `data` names is an archive
@@ -3196,8 +4070,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         name = data.get('name') or ''
         size = data.get('size') or 0
-        if isinstance(size, str):
-            size = 0
+        if not isinstance(size, int) or not size:
+            # A Listing row carries its size as text ('15.15 GB'): taken for
+            # 0, no limit applied, and a 16 GB tar was read whole into
+            # memory on this thread. Ask the file.
+            size = self._file_size(inode, offset)
 
         # A mailbox is browsed from the image as it is read, not from
         # memory: a PST, an OST or an mbox (Thunderbird's have no extension)
@@ -3210,10 +4087,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.set_status(f"Opening the mailbox {name}…")
                 return (name, stream, dict(data))
 
-        # Reading a large file to find out it is not an archive is wasted
-        # work; the extension and a header read settle it far more cheaply.
+        # Too big to read whole: a tar or ZIP is indexed and browsed from
+        # the index (core/archive_index); anything else is not opened.
         if size and size > archives.MAX_MEMBER_BYTES:
-            return None
+            return self._big_archive(data, name, size)
 
         try:
             header = self.image_handler.read_file_bytes(inode, offset, 512) \
@@ -3232,7 +4109,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         self.set_status(f"Opening {name}…")
         try:
-            content, _meta = self.image_handler.get_file_content(inode, offset)
+            content, _meta = self._wait_for(
+                self.image_handler.get_file_content, inode, offset)
         except Exception as exc:
             logger.debug("Could not read %s: %s", name, exc)
             self.clear_status()
@@ -3268,8 +4146,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         cached = self._tree_archives.pop(key, None)
         if cached is None:
             cached = self._load_archive(root_data)
-            if cached is None:
-                return None
+            if cached is None or cached is _INDEXING:
+                return cached
             # The path the tree knows, for the archive trail.
             cached[2].setdefault('path', self._tree_item_path(root_item))
         self._tree_archives[key] = cached
@@ -3304,7 +4182,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             parent_path, _sep, leaf = path.rpartition('/')
             node = QTreeWidgetItem(folder(parent_path))
             node.setText(0, leaf)
-            node.setIcon(0, QIcon(self.db_manager.get_icon_path('folder',
+            node.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path('folder',
                                                                 'folder')))
             node.setData(0, Qt.UserRole, {
                 'type': 'archive-member', 'name': leaf, 'is_directory': True,
@@ -3349,6 +4227,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 item.setChildIndicatorPolicy(
                     QTreeWidgetItem.DontShowIndicatorWhenChildless)
                 return False
+            from trace_app.core.archive_index import IndexedArchive
+            if stack is _INDEXING or isinstance(stack[-1][1],
+                                                IndexedArchive):
+                # Too big for the tree: browsed in the Listing, a folder
+                # at a time.
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.DontShowIndicatorWhenChildless)
+                return False
             chain = list(data.get('archive_chain') or ())
             content = stack[-1][1]
             if data.get('type') == 'archive-member':
@@ -3386,6 +4272,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             item.setChildIndicatorPolicy(
                 QTreeWidgetItem.DontShowIndicatorWhenChildless)
             return False
+        if stack is _INDEXING:
+            return True                 # listed in the background
         self._archive_stack = stack
         if data.get('type') != 'archive-member':
             if self.show_archive_level():
@@ -3413,15 +4301,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """The members directly inside `folder` of the archive on top of
         the stack, in the Listing."""
         _name, content, source = self._archive_stack[-1]
-        try:
-            members = archives.list_members(content)
-        except archives.ArchiveError as exc:
-            message.warning(self, "Could not read the archive", str(exc))
-            return
-        prefix = folder.strip('/') + '/'
-        inside = [member for member in members
-                  if member['name'].strip('/').startswith(prefix)
-                  and '/' not in member['name'].strip('/')[len(prefix):]]
+        from trace_app.core.archive_index import IndexedArchive
+        if isinstance(content, IndexedArchive):
+            inside = content.level(folder)
+        else:
+            try:
+                members = archives.list_members(content)
+            except archives.ArchiveError as exc:
+                message.warning(self, "Could not read the archive", str(exc))
+                return
+            prefix = folder.strip('/') + '/'
+            inside = [member for member in members
+                      if member['name'].strip('/').startswith(prefix)
+                      and '/' not in member['name'].strip('/')[len(prefix):]]
+        self._archive_folder = folder.strip('/')
         entries = self._archive_entries(inside, source)
         for entry in entries:
             entry['name'] = entry['name'].strip('/').rsplit('/', 1)[-1]
@@ -3437,6 +4330,23 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return False
 
         name, content, source = self._archive_stack[-1]
+        self._archive_folder = ''
+        from trace_app.core.archive_index import IndexedArchive
+        if isinstance(content, IndexedArchive):
+            # One folder at a time: 342,453 rows flat in one table was
+            # what an indexed archive is built to avoid.
+            entries = self._archive_entries(content.level(''), source)
+            for entry in entries:
+                entry['name'] = entry['name'].rsplit('/', 1)[-1]
+            self.current_path = self.archive_trail()
+            self.update_directory_up_button()
+            if not self.show_listing_entries(
+                    entries, source.get('start_offset', 0), name):
+                self._archive_stack.pop()
+                return False
+            self.set_status(f"{self.archive_trail()} — {content.count:,} "
+                            f"members; {len(entries)} at the top")
+            return True
         try:
             members = archives.list_members(content)
         except archives.EncryptedArchive:
@@ -3545,13 +4455,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         _name, content, source = self._archive_stack[-1]
         member_name = data.get('archive_member') or data.get('name')
 
+        from trace_app.core.archive_index import IndexedArchive
+        indexed = isinstance(content, IndexedArchive)
         if data.get('is_directory'):
             # Archive directories are prefixes rather than real entries; the
-            # flat listing already shows their contents by full name.
+            # flat listing already shows their contents by full name. An
+            # indexed archive is listed a folder at a time: step in.
+            if indexed and navigate:
+                self._show_archive_folder(member_name)
             return
 
         member_bytes = self._read_with_password(
-            member_name, lambda: archives.read_member(content, member_name))
+            member_name, lambda: content.read(member_name) if indexed
+            else archives.read_member(content, member_name))
         if member_bytes is None:
             return
 
@@ -3591,6 +4507,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self._archive_stack:
             return False
 
+        folder = getattr(self, '_archive_folder', '')
+        if folder:
+            # Inside a folder of an indexed archive: up one folder.
+            parent = posixpath.dirname(folder)
+            if parent:
+                self._show_archive_folder(parent)
+            else:
+                self.show_archive_level()
+            return True
+
         base = self._archive_stack[0][2]
         self._archive_stack.pop()
         if self._archive_stack:
@@ -3611,7 +4537,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         offset = parent.get('start_offset', self.current_offset or 0)
         try:
             inode = self.image_handler.get_root_inode(offset)
-            entries = self.image_handler.get_directory_contents(offset, inode)
+            entries = self._directory_contents(offset, inode)
             self.show_listing_entries(entries, offset, 'This volume')
         except Exception as exc:
             logger.debug("Could not return to the filesystem: %s", exc)
@@ -3747,59 +4673,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.mark_bookmarked_tree_items(child, evidence_id)
 
     # --- analysis modules -------------------------------------------
-
-    def offer_analysis_modules(self):
-        """Ask what to analyse, when a case has just been opened.
-
-        Separate from run_analysis_modules because the two have different
-        manners. This one is an offer made without being asked, so it stays
-        quiet when there is nothing to offer -- no case, no evidence, or a
-        run whose findings are already recorded. The menu entry always asks,
-        because there the examiner went looking for it.
-        """
-        if not self.case:
-            return
-        if getattr(self, '_loading_case_evidence', False):
-            # Still opening the evidence -- this was reached from inside the
-            # load's own event loop, and a modal dialog here held the
-            # loading bar at 20% until it was answered. Asked once the load
-            # is done (load_case_evidence).
-            self._pending_offer = True
-            return
-
-        rows = self.case.evidence()
-        if not rows:
-            # A new case with no evidence yet: the offer belongs at the point
-            # an image is added, not here.
-            return
-
-        # Something was already run: re-offering on every reopen would train
-        # an examiner to dismiss the dialog without reading it.
-        if any(self._modules_have_run(row['id']) for row in rows):
-            self.refresh_analysis_views()
-            return
-
-        self._ask_and_queue(rows)
-
-    def _modules_have_run(self, evidence_id):
-        """Whether any module was run on the evidence (finished or not): the
-        examiner has chosen what to run, so the reopen offer stays quiet.
-        It used to count only the file analysis, so a case that was only
-        indexed was asked again at every reopen."""
-        case = self.case
-        for state in (case.analysis_state, case.user_activity_state,
-                      case.ntfs_state, case.carving_state):
-            try:
-                if state(evidence_id):
-                    return True
-            except Exception as exc:
-                logger.debug("Module state of %s: %s", evidence_id, exc)
-        index = getattr(getattr(self, 'search_panel', None), 'index', None)
-        try:
-            return bool(index is not None and index.state(evidence_id))
-        except Exception as exc:
-            logger.debug("Index state of %s: %s", evidence_id, exc)
-            return False
 
     def run_analysis_modules(self, evidence_id=None):
         """Ask which modules to run, then queue a run per piece of evidence.
@@ -4023,6 +4896,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.start_carving([row['id'] for row in chosen],
                                choice['carve_types'],
                                choice['unallocated_only'])
+        from trace_app.core.modules.spec import TOOLS
+        for tool in TOOLS:
+            if choice.get(tool):
+                # External tools last: they stage copies of what they read.
+                for row in chosen:
+                    if os.path.exists(row['path']):
+                        self.queue_leapp(row['id'], tool)
 
     # --- case setup (the wizards) -------------------------------------------
 
@@ -4135,6 +5015,1039 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.ui.dialogs.interchange_export import export_for_tools
         return export_for_tools(self, self.case, kind)
 
+    # --- Project VICS -----------------------------------------------------
+
+    def _vics_evidence(self):
+        """The evidence a VICS export can read: [{'key', 'name',
+        'source_id', 'path'}] -- the case's (by id) or, in quick triage,
+        the images open in this session (by path)."""
+        if self.case is not None:
+            out = []
+            for row in self.case.evidence():
+                if not os.path.exists(row['path']):
+                    continue
+                name = row.get('display_name') or os.path.basename(
+                    row['path'])
+                out.append({'key': row['id'], 'name': name,
+                            'source_id': row.get('exhibit_number') or name,
+                            'path': row['path']})
+            return out
+        return [{'key': path, 'name': os.path.basename(path),
+                 'source_id': os.path.basename(path), 'path': path}
+                for path, handler in self._image_handlers.items()
+                if handler is not None and handler.loaded]
+
+    def _vics_carved(self, key):
+        """The carves of one image, as the export reads them back."""
+        if self.case is not None:
+            rows = self.case.carved_files(key)
+        else:
+            panel = getattr(self, 'carved_panel', None)
+            rows = [r for r in getattr(panel, '_session', ())
+                    if os.path.normpath(str(r.get('evidence_key') or ''))
+                    == os.path.normpath(key)]
+        return [{'name': r.get('name') or '', 'offset': int(r['offset']),
+                 'size': int(r['size']), 'type': r.get('type') or '',
+                 'fragments': r.get('fragments') or None,
+                 # The ref tags and categories were put on: a rebuilt
+                 # carve's spans its pieces, not offset + size.
+                 'artifact_ref': r.get('artifact_ref') or ''}
+                for r in rows if r.get('offset') is not None]
+
+    def _vics_marks(self, key):
+        """The examiner's Project VIC categories and the bookmark labels
+        and notes (as Comments) of one image -- none in quick triage."""
+        if self.case is None:
+            return {}
+        return {'categories': self.case.vic_categories_for(key),
+                'comments': self.case.vics_comments(key)}
+
+    def export_vics(self, options=None):
+        """Case > Export for Other Tools > Project VICS: ask, then export
+        as a job. Returns the queued job, or None."""
+        evidence = self._vics_evidence()
+        if not evidence:
+            message.information(self, "Export Project VICS",
+                                "Open evidence first: the export reads "
+                                "the pictures and videos from it.")
+            return None
+        if options is None:
+            from trace_app.ui.dialogs.vics_export import VicsExportDialog
+            user = case_settings.read_user()
+            defaults = {
+                'folder': (self.case.exports_dir if self.case is not None
+                           else os.path.expanduser('~')),
+                # Quick triage has no case: the first image's name, which
+                # Griffeye shows as the case and the export names its
+                # folders by (an empty one gave 'Files.TRACE').
+                'case_number': (self.case.number or self.case.name)
+                if self.case is not None else
+                os.path.splitext(evidence[0]['name'])[0],
+                'ContactName': user.get('examiner') or (
+                    self.case.examiner if self.case is not None else ''),
+                'ContactOrganization': user.get('organisation') or ''}
+            if self.case is not None:
+                from trace_app.core import scope as scope_module
+                scope = scope_module.setting_value(self.case)
+                if not scope.everything:
+                    defaults['scope'] = scope.describe(short=True)
+            dialog = VicsExportDialog(evidence, defaults, self)
+            if dialog.exec() != QDialog.Accepted:
+                return None
+            options = dialog.options
+        return self.queue_vics(options)
+
+    def queue_vics(self, options):
+        from trace_app.core import vics
+        from trace_app.ui.dialogs.vics_export import VicsWorker
+        from trace_app import __version__
+        folder = vics.export_folder(options['parent_folder'],
+                                    options.get('case_number', ''))
+        os.makedirs(folder, exist_ok=True)
+        sources = [(row['source_id'], row['path'],
+                    self._unlocks_for(row['path']),
+                    self._vics_carved(row['key'])
+                    if options.get('include_carved', True) else [],
+                    self._vics_marks(row['key']))
+                   for row in options['evidence']]
+        params = {'sources': sources, 'folder': folder,
+                  'case_number': options.get('case_number', ''),
+                  'contact': options.get('contact') or {},
+                  'model': options.get('model') or vics.DEFAULT_MODEL,
+                  'version': __version__,
+                  'include_deleted': options.get('include_deleted', True),
+                  'include_carved': options.get('include_carved', True),
+                  'min_size': options.get('min_size', 0)}
+        if self.case is not None:
+            params['case_folder'] = self.case.folder
+            params['scope'] = self._job_scope()
+        summaries = []
+
+        def progressed(examined, copied, what):
+            self.job_bar.report(
+                0, 0, f"{examined:,} files looked at, "
+                f"{FileSystemUtils.get_readable_size(copied)} copied"
+                + (f" -- {what}" if what else ''))
+
+        def start(job):
+            worker = VicsWorker(params, self)
+            worker.progressed.connect(progressed)
+            worker.summary_ready.connect(summaries.append)
+            worker.finished_export.connect(
+                lambda count, error: self._vics_finished(
+                    summaries, error, folder))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f'vics:{folder}', title="Exporting Project VICS",
+            start=start, stop=lambda worker: worker.stop()))
+
+    def _vics_finished(self, summaries, error, folder):
+        self.job_bar.job_finished(error=error)
+        summary = summaries[-1] if summaries else None
+        self.last_vics_export = summary
+        if error or summary is None:
+            self.set_status(f"The VICS export failed: {error}")
+            if getattr(self, '_report_dialogs', True):
+                message.warning(self, "Project VICS export failed",
+                                "The export could not be completed.",
+                                error or "The job ended without a result.")
+            return
+        detail = (f"folder={folder} media={summary['media']} "
+                  f"files={summary['media_files']} "
+                  f"categorised={summary.get('categorised', 0)} "
+                  f"category_conflicts={summary.get('conflicts', 0)} "
+                  f"bytes={summary['bytes']} model={summary['model']} "
+                  f"manifest_sha256={summary['manifest_sha256']}")
+        if summary['cancelled']:
+            if self.case is not None:
+                self.case.record_event("Project VICS export cancelled",
+                                       detail + " (no JSON written)")
+            self.set_status("VICS export cancelled: no JSON written")
+            return
+        detail += f" json={summary['json']} sha256={summary['json_sha256']}"
+        if summary['problems']:
+            detail += f" problems={len(summary['problems'])}"
+        if self.case is not None:
+            self.case.record_event("exported as Project VICS", detail)
+        text = (f"{summary['media']:,} picture(s) and video(s) from "
+                f"{summary['media_files']:,} place(s) written to {folder}.")
+        if summary.get('categorised'):
+            text += (f"\n\n{summary['categorised']:,} carry the Project VIC "
+                     "category you gave them")
+            text += (f"; {summary['conflicts']:,} had copies categorised "
+                     "differently -- the most serious was written (see "
+                     "vics-export.log)." if summary.get('conflicts') else ".")
+        if summary['local_times_omitted']:
+            text += (f"\n\n{summary['local_times_omitted']:,} had FAT times "
+                     "with no zone; they are in the manifest, not the JSON.")
+        if summary['problems']:
+            text += (f"\n\n{len(summary['problems']):,} could not be "
+                     "exported; see vics-export.log.")
+        self.set_status(f"VICS export written: {summary['media']:,} media")
+        if getattr(self, '_report_dialogs', True):
+            message.information(self, "Project VICS export", text)
+
+    # --- external modules (core/modules: iLEAPP, aLEAPP) -----------------
+
+    def show_external_modules(self):
+        """Tools > External Modules: install, update, remove."""
+        from trace_app.core.evidence_export import record
+        from trace_app.ui.dialogs.external_modules import \
+            ExternalModulesDialog
+        dialog = ExternalModulesDialog(self, recorder=record)
+        dialog.exec()
+        if dialog.changed:
+            self.refresh_modules()
+
+    def _module_targets(self):
+        """[(key, label, systems, icon)] the Modules tab can run on: the
+        case's open evidence (by id), or quick triage's images (by path);
+        systems ('ios', 'android') choose the tools; icon is the evidence's
+        own in the tree (its system's logo)."""
+        out = []
+        for row in self._vics_evidence():
+            path = row['path']
+            handler = self._image_handlers.get(os.path.normpath(path))
+            out.append((row['key'], row['name'],
+                        self._mobile_systems(path, handler),
+                        self._evidence_tree_icon(path)))
+        return out
+
+    def _evidence_tree_icon(self, path):
+        """The icon the tree gives the evidence at `path` (its system's
+        logo once known), or None."""
+        tree = getattr(self, 'tree_viewer', None)
+        if tree is None:
+            return None
+        wanted = os.path.normpath(path)
+        for index in range(tree.topLevelItemCount()):
+            item = tree.topLevelItem(index)
+            data = item.data(0, Qt.UserRole) or {}
+            if isinstance(data, dict) and data.get('image_path') and \
+                    os.path.normpath(data['image_path']) == wanted:
+                icon = item.icon(0)
+                return None if icon.isNull() else icon
+        return None
+
+    def _mobile_systems(self, path, handler):
+        """Which phone systems an image holds, cheaply: an iOS or Android
+        backup by its kind, else what os_identity found on its volumes
+        ('iPhone OS' in SystemVersion.plist, Android's build.prop)."""
+        from trace_app.core import evidence_profile, logical_sources
+        if handler is None or not handler.loaded:
+            kind = logical_sources.kind_of(path) or ''
+            return {'ios_backup': ['ios'],
+                    'android_backup': ['android']}.get(kind, [])
+        # What the image's opening found (never read here: a phone packed
+        # in a 16 GB tar is found header by header).
+        return evidence_profile.tool_systems(handler, read=False)
+
+    def _module_runs(self):
+        """The runs the Modules tab and the tree show: the case's, or quick
+        triage's session runs -- as panel dicts."""
+        from trace_app.core.modules import lava, stage
+        runs = []
+        if self.case is not None:
+            names = {row['key']: row['name'] for row in self._vics_evidence()}
+            for run in self.case.module_runs():
+                runs.append({
+                    'key': run['id'], 'run_id': run['id'],
+                    'tool': run['tool'], 'version': run['version'] or '',
+                    'evidence_id': run['evidence_id'],
+                    'evidence': names.get(run['evidence_id'],
+                                          f"evidence {run['evidence_id']}"),
+                    'started': run['started_utc'] or '',
+                    'status': run['status'], 'message': run['message'] or '',
+                    'input': (run['params'].get('input') or {}),
+                    'coverage': run['params'].get('coverage'),
+                    'not_imported': run['params'].get('not_imported'),
+                    'folder': run['path'],
+                    'report': os.path.join(run['path'], 'report'),
+                    'manifest': os.path.join(run['path'], stage.MANIFEST),
+                    'artifacts': [dict(a, record_count=a['row_count'])
+                                  for a in self.case.module_artifacts(
+                                      run['id'])]})
+            return runs
+        for summary in getattr(self, '_session_module_runs', []):
+            artifacts = []
+            if summary.get('status') == 'complete':
+                try:
+                    artifacts = lava.load(summary['report'])['artifacts']
+                except lava.LavaError:
+                    artifacts = []
+            runs.append({
+                'key': summary['folder'], 'run_id': None,
+                'tool': summary['tool'], 'version': summary['version'],
+                'evidence_id': None, 'evidence': summary.get('evidence', ''),
+                'started': summary.get('started', ''),
+                'status': summary.get('status', ''),
+                'message': summary.get('message', ''),
+                'input': {'label': summary.get('input', '')},
+                'coverage': summary.get('coverage'),
+                'not_imported': summary.get('not_imported'),
+                'folder': summary['folder'],
+                'report': os.path.join(summary['folder'], 'report'),
+                'manifest': os.path.join(summary['folder'], stage.MANIFEST),
+                'artifacts': artifacts})
+        return runs
+
+    def refresh_modules(self):
+        """Redraw the Modules tab and the tree's Extractions from Modules
+        node from the runs there are."""
+        from trace_app.core.modules import install
+        from trace_app.core.modules.spec import TOOLS
+        panel = getattr(self, 'modules_panel', None)
+        runs = self._module_runs()
+        if panel is not None:
+            tools = [(spec.id, f"{spec.name} {record['version']}", spec.suits)
+                     for spec in TOOLS.values()
+                     for record in [install.installed(spec)] if record]
+            panel.set_targets(self._module_targets(), tools)
+            panel.set_runs(runs)
+        if getattr(self, 'activity_panel', None) is not None:
+            self.activity_panel.set_module_runs(runs)
+        if getattr(self, 'map_panel', None) is not None:
+            self.map_panel.set_hidden_note(self._unmapped_note(runs))
+        self.refresh_modules_tree(runs)
+        self._ensure_module_fit()
+        self._ensure_module_bridge()
+        self._ensure_module_import_limit()
+
+    @Slot(dict, dict, object)
+    def route_module_artifact(self, run, artifact, role):
+        """The examiner sorts an artifact: kept in the case (setting
+        'module_routes', audited), and every run of that tool sorted
+        again for it."""
+        if self.case is None:
+            return
+        from trace_app.core.modules import routes
+        key = routes.override_key(run['tool'], artifact)
+        overrides = dict(self.case.setting('module_routes') or {})
+        before = overrides.get(key)
+        if role is None:
+            overrides.pop(key, None)
+        else:
+            overrides[key] = role
+        if overrides.get(key) == before:
+            return
+        self.case.set_setting('module_routes', overrides)
+        self.case._record_activity(
+            'external module artifact sorted',
+            f"{run['tool']} {artifact.get('name')} ({key}): "
+            f"{before or 'TRACE default'} -> {role or 'TRACE default'}")
+        wanted = artifact.get('artifact_key') or artifact.get('tablename')
+        for other in self.case.module_runs():
+            if other['tool'] != run['tool'] or other['status'] != 'complete':
+                continue
+            ids = [a['id'] for a in self.case.module_artifacts(other['id'])
+                   if (a.get('artifact_key') or a['tablename']) == wanted]
+            if ids:
+                self.queue_module_bridge(other['id'], ids)
+
+    @Slot(dict, dict, str)
+    def show_module_artifact(self, run, artifact, where):
+        """Where an artifact's rows went: the Activity tab or the Timeline,
+        filtered to it."""
+        name = artifact.get('name') or ''
+        if where == 'activity' and getattr(self, 'activity_panel', None):
+            self.show_activity(None, run.get('evidence_id'))
+            self.activity_panel.filter_input.setText(name)
+        elif getattr(self, 'timeline_panel', None):
+            self.result_viewer.setCurrentWidget(self.timeline_panel)
+            self.timeline_panel.text_input.setText(name)
+
+    def _ensure_module_bridge(self):
+        """Sort external modules' runs the case has not sorted yet into
+        Activity, Triage and the Timeline (core/modules/bridge): runs
+        imported before this existed, or before ROUTES_VERSION changed.
+        A job on the side lane; each run is tried once a session (a run
+        whose folder is gone stays as it is)."""
+        if self.case is None:
+            return
+        try:
+            runs = self.case.unbridged_module_runs()
+        except Exception as exc:
+            logger.debug("No module runs to sort: %s", exc)
+            return
+        tried = self.__dict__.setdefault('_bridge_tried', set())
+        runs = [run for run in runs if run not in tried]
+        if not runs:
+            return
+        tried.update(runs)
+        self.queue_module_bridge()
+
+    def queue_module_bridge(self, run_id=None, artifact_ids=None):
+        """The 'module_bridge' job: the case's unsorted runs, or one run's
+        artifacts again (an examiner's override)."""
+        if self.case is None:
+            return False
+        from trace_app.ui.process_worker import ProcessWorker
+        from trace_app.ui.widgets.job_bar import SIDE
+
+        class BridgeWorker(ProcessWorker):
+            kind = 'module_bridge'
+
+        params = {'case_folder': self.case.folder, 'run_id': run_id,
+                  'artifact_ids': list(artifact_ids or ())}
+
+        def start(job):
+            worker = BridgeWorker(params, self)
+            worker.job_progress.connect(self._bridge_progress)
+            worker.job_done.connect(self._bridge_done)
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        key = f"module-bridge:{run_id or 'all'}:" + \
+            ','.join(map(str, sorted(artifact_ids or ())))
+        return self.job_bar.submit(Job(
+            key=key, title="Sorting external modules' results",
+            start=start, stop=lambda worker: worker.stop()), lane=SIDE)
+
+    @Slot(object)
+    def _bridge_progress(self, payload):
+        done, total, text = (tuple(payload) + (0, 0, ''))[:3]
+        job = self._bridge_job()
+        if job is not None:        # never the main lane's job
+            self.job_bar.report(done, total, text, job=job)
+
+    def _bridge_job(self):
+        side = getattr(self.job_bar, '_side', None)
+        return side if side is not None and \
+            str(side.key).startswith('module-bridge') else None
+
+    @Slot(int, str)
+    def _bridge_done(self, rows, error):
+        if error:
+            logger.warning("Sorting external modules' results: %s", error)
+            self.set_status(f"Sorting external modules' results failed: "
+                            f"{error}")
+        elif rows:
+            self.set_status(f"{rows:,} record(s) from external modules in "
+                            f"Activity, Conversations, the Map and the "
+                            f"Timeline")
+        job = self._bridge_job()
+        if job is not None:        # never the main lane's job
+            self.job_bar.job_finished(job, error=error)
+        self.refresh_analysis_views()
+
+    def _ensure_module_fit(self):
+        """Count, in a background job (core/background.job_module_fit),
+        what the installed pattern-fitted tools -- RLEAPP's warrant returns,
+        VLEAPP's cars, which have no system for TRACE to find -- have to
+        read on each open image not counted yet. Each image and set of
+        tools is tried once: an image that cannot be listed is not asked
+        again and again."""
+        from trace_app.core import evidence_profile
+        from trace_app.core.modules import install
+        from trace_app.core.modules.spec import TOOLS
+        if getattr(self, '_fit_worker', None) is not None:
+            return
+        tools = tuple(spec.id for spec in TOOLS.values()
+                      if set(spec.suits) & set(evidence_profile.PATTERN_KINDS)
+                      and install.installed(spec) is not None)
+        if not tools:
+            return
+        tried = self.__dict__.setdefault('_fit_tried', set())
+        images = []
+        for row in self._vics_evidence():
+            key = os.path.normpath(row['path'])
+            handler = self._image_handlers.get(key)
+            if handler is None or not handler.loaded or \
+                    (key, tools) in tried:
+                continue
+            known = evidence_profile.module_fit(handler)
+            if known is not None and all(tool in known for tool in tools):
+                continue
+            tried.add((key, tools))
+            images.append({'path': row['path'],
+                           'unlock': self._unlocks_for(row['path'])})
+        if not images:
+            return
+        from trace_app.ui.process_worker import ProcessWorker
+
+        class FitWorker(ProcessWorker):
+            kind = 'module_fit'
+        worker = FitWorker({'images': images, 'tools': list(tools)}, self)
+        worker.job_item.connect(self._module_fit_counted)
+        worker.job_done.connect(self._module_fit_done)
+        self._fit_worker = worker
+        self._retain_worker(worker)
+        worker.start()
+
+    @Slot(dict)
+    def _module_fit_counted(self, record):
+        from trace_app.core import evidence_profile
+        key = os.path.normpath(record['path'])
+        handler = self._image_handlers.get(key)
+        if handler is None:
+            return
+        evidence_profile.set_module_fit(handler, record['fit'])
+        handler.__dict__['_module_fit_examples'] = record.get('examples', {})
+        self._evidence_profiles.pop(key, None)
+        self._evidence_profiles.pop(record['path'], None)
+
+    @Slot(int, str)
+    def _module_fit_done(self, _count, error):
+        if error:
+            logger.warning("Counting what the external tools read: %s",
+                           error)
+        self._fit_worker = None
+        if getattr(self, 'modules_panel', None) is not None:
+            self.refresh_modules()
+
+    def _module_source(self, run, staged_path):
+        """The evidence file a staged path came from (the run's staging
+        manifest), as a row previews and the Listing take."""
+        from trace_app.core.modules import stage
+        cache = self.__dict__.setdefault('_module_manifests', {})
+        key = run['manifest']
+        if key not in cache:
+            try:
+                cache[key] = stage.read_manifest(run['manifest'])
+            except OSError:
+                cache[key] = {}
+        path = staged_path.replace('\\', '/').strip('/')
+        row = cache[key].get(path.lower())
+        if (not row or not row.get('artifact_ref')) and \
+                (run.get('input') or {}).get('kind') not in (None, 'staged'):
+            # Read out of a packed extraction or a backup: the file is a
+            # member of that archive. Pointed at, never read from here (a
+            # tar can be 16 GB): the archive is the evidence file.
+            container = next(iter(cache[key].values()), None)
+            if container and container.get('artifact_ref'):
+                try:
+                    evidence_id = int(container['evidence_id'])
+                except (TypeError, ValueError):
+                    evidence_id = None
+                return {'evidence_id': evidence_id,
+                        'artifact_ref': container['artifact_ref'],
+                        'name': os.path.basename(path),
+                        'path': f"{container['source_path']}!/{path}",
+                        'in_archive': True,
+                        'archive': container['source_path']}
+            return None
+        if not row or not row.get('artifact_ref'):
+            return None
+        try:
+            evidence_id = int(row['evidence_id'])
+        except (TypeError, ValueError):
+            evidence_id = None
+        return {'evidence_id': evidence_id,
+                'artifact_ref': row['artifact_ref'],
+                'name': os.path.basename(row['source_path']),
+                'path': row['source_path']}
+
+    def queue_leapp(self, key, tool_id, only=None):
+        """Run an installed tool on one image, as a job: staged, run,
+        read, recorded. `key` is the evidence id (case) or path (triage).
+        `only` limits it to those packed inputs (an encrypted backup once
+        its password is known); passwords given this session go along."""
+        from trace_app.core.modules import install
+        from trace_app.core.modules.spec import TOOLS
+        spec = TOOLS[tool_id]
+        if install.installed(spec) is None:
+            message.information(self, "External Modules",
+                                f"{spec.name} is not installed.",
+                                "Tools ▸ External Modules installs it.")
+            return None
+        row = next((r for r in self._vics_evidence() if r['key'] == key),
+                   None)
+        if row is None:
+            return None
+        from trace_app.core import evidence_profile
+        handler = self._image_handlers.get(os.path.normpath(row['path']))
+        why = evidence_profile.tool_reason(
+            spec, self._mobile_systems(row['path'], handler))
+        if why is not None and handler is not None and handler.loaded:
+            message.information(self, "External Modules",
+                                f"{spec.name} cannot run on {row['name']}.",
+                                why)
+            return None
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+            '%Y%m%d-%H%M%S')
+        from trace_app.core.evidence_export import safe_component
+        name = safe_component(f"{stamp} {spec.name} {row['name']}", stamp)
+        if self.case is not None:
+            base = os.path.join(self.case.folder, 'modules')
+        else:
+            from trace_app.infra.paths import user_data_dir
+            base = os.path.join(user_data_dir(), 'module_runs')
+        os.makedirs(base, exist_ok=True)
+        from trace_app.core.evidence_export import unique_path
+        folder = unique_path(base, name)
+        params = {'tool': tool_id, 'image_path': row['path'],
+                  'unlock': self._unlocks_for(row['path']),
+                  'folder': folder, 'evidence_name': row['name']}
+        evidence_path = os.path.normpath(row['path'])
+        passwords = {backup: password for (path, backup), password
+                     in self._backup_passwords.items()
+                     if path == evidence_path}
+        if passwords:
+            params['backup_passwords'] = passwords
+        keys = {secret: value for (path, tool, secret), value
+                in self.__dict__.get('_tool_keys', {}).items()
+                if path == evidence_path and tool == tool_id}
+        if keys:
+            params['tool_keys'] = keys
+        if only is not None:
+            params['only_inputs'] = list(only)
+        if self.case is not None:
+            params.update(case_folder=self.case.folder, evidence_id=key,
+                          scope=self._job_scope())
+        results = []
+
+        def start(job):
+            from trace_app.ui.process_worker import ProcessWorker
+
+            class LeappWorker(ProcessWorker):
+                kind = 'leapp'
+            worker = LeappWorker(params, self)
+            worker.job_progress.connect(
+                lambda payload: self.job_bar.report(
+                    payload[0], payload[1], str(payload[2])[:160]))
+            worker.job_item.connect(results.append)
+            worker.job_done.connect(
+                lambda count, error: self._leapp_finished(
+                    spec, row, results, error))
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f'leapp:{tool_id}:{key}' + (':' + '|'.join(only)
+                                            if only else ''),
+            title=f"{spec.name} on {row['name']}", start=start,
+            stop=lambda worker: worker.stop()))
+
+    def _leapp_finished(self, spec, row, results, error):
+        """A tool's job ended: one result per input it was run on (the
+        loose files, each packed extraction, each zipped backup)."""
+        self.job_bar.job_finished(error=error)
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+            '%Y-%m-%d %H:%M')
+        for summary in results:
+            summary.setdefault('evidence', row['name'])
+            summary.setdefault('started', stamp)
+            if self.case is None and summary.get('status') == 'complete' \
+                    and summary.get('backup'):
+                # Quick triage: a backup read with its password drops the
+                # session's runs that could not read it (a case does this
+                # in the job: Case.supersede_password_runs).
+                self._session_module_runs = [
+                    s for s in getattr(self, '_session_module_runs', [])
+                    if not (s.get('needs_password')
+                            and s.get('input') == summary.get('input')
+                            and s.get('evidence') == summary['evidence'])]
+            if self.case is None and summary.get('folder'):
+                self.__dict__.setdefault('_session_module_runs', []).insert(
+                    0, summary)
+        self.refresh_modules()
+        if error:
+            self.set_status(f"{spec.name} failed: {error}")
+            if getattr(self, '_report_dialogs', True):
+                message.warning(self, spec.name, f"{spec.name} could not "
+                                f"run on {row['name']}.", error)
+            return
+        complete = [s for s in results if s.get('status') == 'complete']
+        # An encrypted backup with no (or a wrong) password is asked for,
+        # not reported as a failure.
+        locked = [s for s in results if s.get('needs_password')]
+        failed = [s for s in results if s.get('status') == 'failed'
+                  and s not in locked]
+        skipped = [s for s in results if s.get('status') == 'skipped'
+                   and s not in locked]
+        if locked:
+            QTimer.singleShot(0, lambda: self._ask_backup_passwords(
+                spec, row, locked))
+        wanted = sorted({secret for s in results
+                         for secret in s.get('secrets_wanted') or ()})
+        if wanted and not locked:
+            QTimer.singleShot(0, lambda: self._ask_tool_keys(
+                spec, row, wanted))
+        if complete:
+            rows = sum(s.get('rows', 0) for s in complete)
+            self.set_status(
+                f"{spec.name} on {row['name']}: {len(complete)} input(s) "
+                f"read, {rows:,} row(s)"
+                + (f"; {len(failed)} failed" if failed else '')
+                + (f"; {len(skipped) + len(locked)} skipped" if skipped
+                   or locked else ''))
+            self.result_viewer.setCurrentWidget(self.modules_panel)
+            first = complete[0]
+            self.modules_panel.select(first.get('run_id') or
+                                      first.get('folder'))
+            if getattr(self, 'timeline_panel', None) is not None:
+                self.timeline_panel.set_case(self.case)
+        if (failed or skipped) and getattr(self, '_report_dialogs', True):
+            message.warning(
+                self, spec.name,
+                f"{spec.name} could not read "
+                + ("anything on" if not complete else "every input of")
+                + f" {row['name']}.",
+                '\n\n'.join(f"{s.get('input') or row['name']}: "
+                              f"{s.get('message')}"
+                              for s in failed + skipped))
+        if (skipped or locked) and not complete and not failed:
+            self.set_status(f"{spec.name}: nothing it could read on "
+                            f"{row['name']} yet "
+                            f"({len(skipped) + len(locked)} skipped)")
+        elif not complete and not failed:
+            self.set_status(f"{spec.name} cancelled")
+
+    def ask_backup_password(self, tool, evidence, backup, wrong=''):
+        """The password of an encrypted backup, or None (cancelled).
+        Replaced in tests."""
+        from trace_app.ui.dialogs.backup_password import BackupPasswordDialog
+        dialog = BackupPasswordDialog(tool, evidence, backup, wrong, self)
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.password() or None
+
+    def ask_tool_key(self, tool, evidence, what, found):
+        """A key a tool wants (spec.secrets), or None. Replaced in tests."""
+        from trace_app.ui.dialogs.backup_password import BackupPasswordDialog
+        dialog = BackupPasswordDialog(tool, evidence, found, '', self,
+                                      what=what, title=f"{tool} Needs a Key")
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.password() or None
+
+    def _ask_tool_keys(self, spec, row, wanted):
+        """The keys a run found it needed (DLEAPP: a Signal Desktop
+        profile, a Threema one): asked, kept for the session, and the tool
+        run again with them -- the run without them is then forgotten
+        (Case.supersede_keyless_runs)."""
+        evidence_path = os.path.normpath(row['path'])
+        keys = self.__dict__.setdefault('_tool_keys', {})
+        given = False
+        for secret in spec.secrets:
+            if secret.id not in wanted:
+                continue
+            value = self.ask_tool_key(
+                spec.name, row['name'], secret.label,
+                f"a {secret.id.capitalize()} Desktop profile")
+            if value:
+                keys[(evidence_path, spec.id, secret.id)] = value
+                given = True
+        if given:
+            self.queue_leapp(row['key'], spec.id)
+
+    def _ask_backup_passwords(self, spec, row, locked):
+        """Each encrypted backup a run could not read: its password, then
+        the tool again on those backups alone."""
+        evidence_path = os.path.normpath(row['path'])
+        again = []
+        for summary in locked:
+            backup = summary.get('backup')
+            if not backup:
+                continue
+            wrong = summary['message'] if summary.get('status') == 'failed' \
+                else ''
+            password = self.ask_backup_password(
+                spec.name, row['name'], backup.rsplit('/', 1)[-1], wrong)
+            if not password:
+                self._backup_passwords.pop((evidence_path, backup), None)
+                continue
+            self._backup_passwords[(evidence_path, backup)] = password
+            again.append(backup)
+        if again:
+            self.queue_leapp(row['key'], spec.id, only=again)
+
+    def remove_module_run(self, run):
+        """Delete Run: the case forgets it (audited) and its folder goes."""
+        if getattr(self, '_report_dialogs', True) and not message.question(
+                self, "Delete Run", f"Delete this {run['tool']} run?",
+                f"Its folder -- the files copied for it and {run['tool']}'s "
+                f"report -- is deleted: {run['folder']}"):
+            return False
+        import shutil
+        # The tabs may hold the run's database open: Windows deletes no
+        # open file, so they let go first.
+        self._release_module_databases()
+        if self.case is not None and run.get('run_id'):
+            self.case.remove_module_run(run['run_id'])
+            inside = os.path.realpath(run['folder']).startswith(
+                os.path.realpath(self.case.folder) + os.sep)
+        else:
+            sessions = getattr(self, '_session_module_runs', [])
+            self._session_module_runs = [s for s in sessions
+                                         if s.get('folder') != run['folder']]
+            inside = True
+        if inside:
+            shutil.rmtree(run['folder'], ignore_errors=True)
+            if os.path.exists(run['folder']):
+                logger.warning("Run folder not all removed: %s",
+                               run['folder'])
+                self.set_status(f"Some of {run['folder']} could not be "
+                                f"deleted (a file is in use).", 8000)
+        self.__dict__.get('_module_manifests', {}).pop(run['manifest'], None)
+        self.refresh_modules()
+        if getattr(self, 'timeline_panel', None) is not None:
+            self.timeline_panel.set_case(self.case)
+        return True
+
+    def _module_ref_source(self, parsed):
+        """The evidence file a module row came from (a 'mod:' ref -- from
+        the Timeline, a tag, a bookmark), or None."""
+        from trace_app.core.modules import lava
+        run = next((r for r in self._module_runs()
+                    if r.get('run_id') == parsed['run_id']), None)
+        artifact = next((a for a in (run or {}).get('artifacts', ())
+                         if a['tablename'] == parsed['table']), None)
+        if artifact is None:
+            return None
+        try:
+            connection = lava.connect(run['report'])
+            try:
+                values = lava.row(connection, artifact, parsed['rowid'])
+                media = lava.media(connection)
+            finally:
+                connection.close()
+        except Exception as exc:
+            logger.debug("Module row %s not read: %s", parsed['ref'], exc)
+            return None
+        if values is None:
+            return None
+        path = lava.source_path(artifact, values, media)
+        return self._module_source(run, path) if path else None
+
+    def show_module_ref(self, parsed):
+        """A 'mod:' ref opened deliberately: its row in the Modules tab."""
+        self.result_viewer.setCurrentWidget(self.modules_panel)
+        return self.modules_panel.select_row(parsed['run_id'],
+                                             parsed['table'],
+                                             parsed['rowid'])
+
+    def preview_module_row(self, payload):
+        """A click on a row previews the file it came from: its media (the
+        attachment), else the database or plist the artifact read."""
+        source = payload.get('source')
+        if source and source.get('in_archive'):
+            self.set_status(f"From inside {source['archive']}: "
+                            f"{source['path'].split('!/', 1)[-1]} -- "
+                            f"right-click to open the tool's copy", 8000)
+        elif source:
+            self.preview_artifact(source)
+
+    def open_module_row(self, payload):
+        source = payload.get('source')
+        if source:
+            # A member of a packed extraction: its archive, in the Listing.
+            self.open_finding(source)
+
+    def _module_row_values(self, payload):
+        """{label: text} of a module row, read from its run's database."""
+        from trace_app.core.modules import lava
+        parsed = parse_artifact_ref(payload.get('artifact_ref'))
+        if parsed.get('kind') != 'module':
+            return {}
+        run = next((r for r in self._module_runs()
+                    if r.get('run_id') == parsed['run_id']), None)
+        artifact = next((a for a in (run or {}).get('artifacts', ())
+                         if a['tablename'] == parsed['table']), None)
+        if artifact is None:
+            return {}
+        connection = lava.connect(run['report'])
+        try:
+            values = lava.row(connection, artifact, parsed['rowid']) or {}
+            media = lava.media(connection)
+        finally:
+            connection.close()
+        return {column['label']: lava.display(
+            column, values.get(column['name']), media)
+            for column in artifact['columns']}
+
+    @Slot(dict, dict)
+    def add_module_artifact_to_report(self, run, artifact):
+        """A whole artifact into the report (report_items kind
+        'module_artifact'): its rows are read from the tool's database when
+        the report is made, as many as the report's row limit."""
+        if self.case is None or not run.get('run_id'):
+            self.set_status("The report is made from a case", 6000)
+            return 0
+        added = self.case.add_report_items('module_artifact', [{
+            'evidence_id': run.get('evidence_id'),
+            'artifact_ref': f"modart:{run['run_id']}:{artifact['tablename']}",
+            'time': None,
+            'title': f"{run['tool']} · {artifact['category']} · "
+                     f"{artifact['name']}",
+            'detail': {'run_id': run['run_id'],
+                       'tablename': artifact['tablename'],
+                       'rows': artifact.get('record_count')}}])
+        self.set_status(f"{artifact['name']} added to the report" if added
+                        else f"{artifact['name']} is already in the report")
+        return added
+
+    def add_module_rows_to_report(self, payloads):
+        if self.case is None:
+            return 0
+        items = []
+        for payload in payloads:
+            if not payload.get('artifact_ref'):
+                continue
+            values = self._module_row_values(payload)
+            items.append({'evidence_id': payload.get('evidence_id'),
+                          'artifact_ref': payload['artifact_ref'],
+                          'time': None, 'title': payload.get('name') or '',
+                          'detail': {'tool': payload.get('path', '')
+                                     .split(']')[0].lstrip('['),
+                                     'path': payload.get('path'),
+                                     'values': values}})
+        added = self.case.add_report_items('module_row', items)
+        self.set_status(f"{added:,} row(s) added to the report" if added
+                        else "Those rows are already in the report")
+        return added
+
+    def bookmark_module_row(self, payload):
+        if self.case is None or not payload.get('artifact_ref'):
+            return None
+        label, ok = QInputDialog.getText(
+            self, "Add bookmark", "Label:", text=payload.get('name') or '')
+        if not ok or not label.strip():
+            return None
+        bookmark = self.case.add_bookmark(
+            payload.get('evidence_id'), payload['artifact_ref'],
+            label.strip(), artifact_name=payload.get('name') or '',
+            artifact_path=payload.get('path') or '')
+        self.refresh_bookmarks()
+        self.set_status(f"Bookmarked {label.strip()}")
+        return bookmark
+
+    def _release_module_databases(self):
+        """Close every tool database a tab holds open: the Modules tab's
+        and the Activity tab's Others views."""
+        panel = getattr(self, 'modules_panel', None)
+        if panel is not None:
+            panel.model.show(None, None)
+        for view in getattr(getattr(self, 'activity_panel', None),
+                            'module_views', ()):
+            view.shutdown()
+
+    @staticmethod
+    def _unmapped_note(runs):
+        """'iLEAPP also read 90,412 rows with positions not on the map
+        (telemetry, other records) -- Activity ▸ Others', or ''."""
+        from trace_app.core.modules import routes
+        from trace_app.ui.viewers.module_records import hidden_artifacts
+        rows, kinds, tools = 0, set(), set()
+        for run in runs:
+            for artifact in hidden_artifacts(run, ('other', 'telemetry')):
+                if routes.has_location(artifact.get('columns') or []):
+                    rows += artifact.get('record_count') or 0
+                    kinds.add('telemetry' if artifact.get('role') ==
+                              'telemetry' else 'other records')
+                    tools.add(run['tool'])
+        if not rows:
+            return ''
+        return (f"{' and '.join(sorted(tools))} also read {rows:,} row(s) "
+                f"with positions not shown here ({', '.join(sorted(kinds))})"
+                f" -- Activity ▸ Others")
+
+    def open_module_row_menu(self, payload, position, view=None):
+        """A module row's menu -- the Modules tab's, or `view`'s (the
+        Activity tab's Others group)."""
+        view = view if hasattr(view, 'selected_payloads') else \
+            self.modules_panel
+        menu = QMenu(self)
+        source = payload.get('source')
+        show = menu.addAction("Show Source in Listing")
+        show.setEnabled(bool(source))
+        show.triggered.connect(lambda: self.open_finding(source))
+        if self.case is not None and payload.get('artifact_ref'):
+            chosen = view.selected_payloads() or [payload]
+            menu.addAction(icons.icon(icons.BOOKMARK),
+                           "Add Bookmark…").triggered.connect(
+                lambda: self.bookmark_module_row(payload))
+            menu.addAction(icons.icon(icons.REPORT),
+                           f"Add to Report ({len(chosen)})" if len(chosen) > 1
+                           else "Add to Report").triggered.connect(
+                lambda: self.add_module_rows_to_report(chosen))
+        media = payload.get('media')
+        if media and media.get('extraction_path'):
+            copy = os.path.join(media['report'],
+                                *media['extraction_path'].split('/'))
+            opened = menu.addAction("Open the Tool's Copy of the Media")
+            opened.setEnabled(os.path.isfile(copy))
+            opened.triggered.connect(
+                lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(copy)))
+        show_menu(menu, position)
+
+    def refresh_modules_tree(self, runs=None):
+        """'Extractions from Modules': run > category > artifact, absent
+        when nothing ran -- the same counts as the Modules tab."""
+        if not hasattr(self, 'tree_viewer'):
+            return
+        for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
+            data = self.tree_viewer.topLevelItem(index).data(
+                0, Qt.UserRole) or {}
+            if data.get('is_modules_root'):
+                self.tree_viewer.takeTopLevelItem(index)
+        runs = self._module_runs() if runs is None else runs
+        if not runs:
+            return
+        rows = sum(a.get('record_count') or 0 for run in runs
+                   for a in run['artifacts'])
+        root = QTreeWidgetItem()
+        root.setText(0, f"Extractions from Modules ({rows:,})")
+        root.setIcon(0, icons.icon(icons.MODULES))
+        root.setData(0, Qt.UserRole, {'is_modules_root': True})
+        position = 0
+        for index in range(self.tree_viewer.topLevelItemCount()):
+            data = self.tree_viewer.topLevelItem(index).data(
+                0, Qt.UserRole) or {}
+            if data.get('is_bookmarks_root') or data.get('is_analysis_root') \
+                    or data.get('is_tags_root') or \
+                    data.get('is_activity_root'):
+                position = index + 1
+        self.tree_viewer.insertTopLevelItem(position, root)
+        for run in runs:
+            count = sum(a.get('record_count') or 0 for a in run['artifacts'])
+            what = (run.get('input') or {}).get('label') or ''
+            node = QTreeWidgetItem(root)
+            # The tool's own logo (read from its installed program); the
+            # input it read, as one image can give several runs (loose
+            # files, a packed extraction, a zipped backup).
+            node.setText(0, f"{run['tool']} {run['version']} — "
+                            f"{run['evidence']}"
+                         + (f" · {what}" if what else '')
+                         + (f" ({count:,})" if run['status'] == 'complete'
+                            else f" — {run['status']}"))
+            node.setIcon(0, icons.module_logo(run['tool']))
+            node.setToolTip(0, run.get('message') or run['folder'])
+            node.setData(0, Qt.UserRole, {'is_modules_run': True,
+                                          'run_key': run['key']})
+            groups = {}
+            for artifact in run['artifacts']:
+                groups.setdefault(artifact['category'], []).append(artifact)
+            for category, members in groups.items():
+                total = sum(a.get('record_count') or 0 for a in members)
+                group = QTreeWidgetItem(node)
+                group.setText(0, f"{category} ({total:,})")
+                category_icon = icons.leapp_category_icon(members)
+                if category_icon is not None:
+                    group.setIcon(0, category_icon)
+                group.setData(0, Qt.UserRole, {'is_modules_run': True,
+                                               'run_key': run['key']})
+                for artifact in members:
+                    leaf = QTreeWidgetItem(group)
+                    leaf.setIcon(0, icons.leapp_icon(artifact))
+                    leaf.setText(0, f"{artifact['name']} "
+                                    f"({artifact.get('record_count') or 0:,})")
+                    leaf.setData(0, Qt.UserRole, {
+                        'is_modules_run': True, 'run_key': run['key'],
+                        'tablename': artifact['tablename']})
+
+    def show_module_node(self, data):
+        """A tree node under Extractions from Modules: the Modules tab, on
+        that run or artifact."""
+        self.result_viewer.setCurrentWidget(self.modules_panel)
+        if data.get('run_key') is not None:
+            self.modules_panel.select(data['run_key'], data.get('tablename'))
+
     def open_case_archive(self):
         """Unpack an archived case and switch to it: TRACE starts again on
         it (as an interface-size change does), this window closing the
@@ -4152,14 +6065,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         folder, name = case.folder, case.name
         case.close()
         remember_case(folder, name)
-        os.environ['TRACE_REOPEN_CASE'] = folder
-        current, self.case = self.case, None
-        try:
-            self.restart()
-        finally:
-            if not getattr(self, '_restarting', False):
-                self.case = current
-                os.environ.pop('TRACE_REOPEN_CASE', None)
+        self.restart(folder)
 
     def locate_evidence(self, row):
         """Point the case at evidence that has moved: the file chosen is
@@ -4440,36 +6346,43 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if not os.path.exists(row['path']):
                 logger.warning("Skipping activity of missing %s", row['path'])
                 continue
-            if self._queue_activity_job(row):
+            if self._queue_image_job(
+                    row, 'activity', "Reading activity",
+                    lambda row=row: ActivityWorker(
+                        row['path'], self.case.folder, row['id'], self),
+                    'finished_activity', self._activity_finished):
                 queued += 1
         if queued:
             self.set_status(f"Reading activity on {queued} image(s) in the "
                             f"background")
         return queued
 
-    def _queue_activity_job(self, row):
+    def _queue_image_job(self, row, key, title, make_worker, finished,
+                         on_finished, progress_text=os.path.basename):
+        """Submit one background job reading image `row`: `make_worker()`
+        builds its ProcessWorker (unlock keys are added here), its
+        `finished` signal (count, error) goes to `on_finished(name, count,
+        error)`, progress shows `progress_text(path)`. The job's key is
+        '<key>:<evidence id>' and its title '<title> on <name>'. Returns
+        whether the job bar took it (not already queued)."""
         evidence_id = row['id']
         name = row.get('display_name') or os.path.basename(row['path'])
 
         def start(job):
-            worker = ActivityWorker(row['path'], self.case.folder,
-                                    evidence_id, self)
+            worker = make_worker()
             worker.params['unlock'] = self._unlocks_for(row['path'])
             worker.progressed.connect(
                 lambda done, total, path: self.job_bar.report(
-                    done, total, os.path.basename(path)))
-            worker.finished_activity.connect(
-                lambda count, error: self._activity_finished(name, count,
-                                                             error))
+                    done, total, progress_text(path)))
+            getattr(worker, finished).connect(
+                lambda count, error: on_finished(name, count, error))
             self._retain_worker(worker)
             worker.start()
             return worker
 
         return self.job_bar.submit(Job(
-            key=f"activity:{evidence_id}",
-            title=f"Reading activity on {name}",
-            start=start,
-            stop=lambda worker: worker.stop()))
+            key=f"{key}:{evidence_id}", title=f"{title} on {name}",
+            start=start, stop=lambda worker: worker.stop()))
 
     def _activity_finished(self, name, count, error):
         if error:
@@ -4487,35 +6400,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if not os.path.exists(row['path']):
                 logger.warning("Skipping NTFS of missing %s", row['path'])
                 continue
-            if self._queue_ntfs_job(row):
+            if self._queue_image_job(
+                    row, 'ntfs', "Reading NTFS records",
+                    lambda row=row: NtfsWorker(
+                        row['path'], self.case.folder, row['id'], self),
+                    'finished_ntfs', self._ntfs_finished,
+                    progress_text=str):
                 queued += 1
         if queued:
             self.set_status(f"Reading NTFS records on {queued} image(s) in "
                             f"the background")
         return queued
-
-    def _queue_ntfs_job(self, row):
-        evidence_id = row['id']
-        name = row.get('display_name') or os.path.basename(row['path'])
-
-        def start(job):
-            worker = NtfsWorker(row['path'], self.case.folder, evidence_id,
-                                self)
-            worker.params['unlock'] = self._unlocks_for(row['path'])
-            worker.progressed.connect(
-                lambda done, total, what: self.job_bar.report(
-                    done, total, what))
-            worker.finished_ntfs.connect(
-                lambda count, error: self._ntfs_finished(name, count, error))
-            self._retain_worker(worker)
-            worker.start()
-            return worker
-
-        return self.job_bar.submit(Job(
-            key=f"ntfs:{evidence_id}",
-            title=f"Reading NTFS records on {name}",
-            start=start,
-            stop=lambda worker: worker.stop()))
 
     def queue_fs_times(self, rows):
         """One job per image: every non-NTFS file system's times, for the
@@ -4527,27 +6422,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for row in rows:
             if not os.path.exists(row['path']):
                 continue
-            evidence_id = row['id']
-            name = row.get('display_name') or os.path.basename(row['path'])
-
-            def start(job, row=row, evidence_id=evidence_id, name=name):
-                worker = FsTimesWorker(row['path'], self.case.folder,
-                                       evidence_id, self)
-                worker.params['unlock'] = self._unlocks_for(row['path'])
-                worker.progressed.connect(
-                    lambda done, total, path: self.job_bar.report(
-                        done, total, path))
-                worker.finished_fstimes.connect(
-                    lambda count, error: self._fs_times_finished(
-                        name, count, error))
-                self._retain_worker(worker)
-                worker.start()
-                return worker
-
-            if self.job_bar.submit(Job(
-                    key=f"fstimes:{evidence_id}",
-                    title=f"Reading file system times on {name}",
-                    start=start, stop=lambda worker: worker.stop())):
+            if self._queue_image_job(
+                    row, 'fstimes', "Reading file system times",
+                    lambda row=row: FsTimesWorker(
+                        row['path'], self.case.folder, row['id'], self),
+                    'finished_fstimes', self._fs_times_finished,
+                    progress_text=str):
                 queued += 1
         return queued
 
@@ -4576,15 +6456,324 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished(error=error)
         self.refresh_analysis_views()
 
-    def show_settings(self):
-        """Options > Settings: the examiner's preferences and this case's
-        settings (core/settings.py); what they change is redrawn."""
+    def show_settings(self, page=None):
+        """Options > Settings: the examiner's preferences, this case's
+        settings (core/settings.py) and the API keys; what they change is
+        redrawn. `page` names the page to open on."""
         from trace_app.ui.dialogs.settings import SettingsDialog
         dialog = SettingsDialog(self.case, self)
+        if page:
+            dialog.show_page_named(page)
         if dialog.exec() != QDialog.Accepted:
             return False
+        if dialog.keys_changed:
+            self._api_keys_changed(dialog.keys_changed)
+        changed = getattr(dialog, 'changed', None) or {}
+        if 'high_entropy' in changed and self.case is not None:
+            # Applied at once: the stored grades follow the threshold
+            # before the views are drawn again.
+            regraded = self.case.regrade_mismatches()
+            if regraded:
+                self.set_status(f"{regraded:,} type mismatch(es) graded "
+                                f"again at the new entropy threshold", 8000)
         self.apply_settings()
+        if 'module_import_rows' in changed or \
+                'module_destinations' in changed:
+            self.module_results_changed(changed)
+        if 'module_link_readings' in changed and self.case is not None:
+            # Set-wise SQL per image: quick even on a phone's case.
+            for row in self.case.evidence():
+                self.case.relink_matches(row['id'])
+            self.refresh_analysis_views()
+        if {'timeline_sources', 'timeline_activity_categories',
+                'module_destinations'} & set(changed) and \
+                getattr(self, 'timeline_panel', None) is not None:
+            self.timeline_panel.apply_case_settings()
+        self.offer_rerun_for_settings(changed)
         return True
+
+    def offer_rerun_for_settings(self, changed):
+        """Settings that change what is read from the evidence (hashes,
+        analysis and archive limits, indicator kinds, free space) apply to
+        what is read from now on. The evidence already read is offered a
+        run again of the modules concerned -- with the modules each image
+        had, so nothing it had is lost. Returns what was queued."""
+        from trace_app.core import settings as case_settings
+        from trace_app.core.search_index import SearchIndex
+        if self.case is None:
+            return {}
+        needs = case_settings.rerun_needed(changed)
+        if not needs:
+            return {}
+        rows = {row['id']: row for row in self.case.evidence()}
+        plan = {}
+        if 'analysis' in needs:
+            for evidence_id in rows:
+                state = self.case.analysis_state(evidence_id) or {}
+                modules = tuple(m for m in (state.get('modules') or '')
+                                .split(',') if m)
+                if modules:
+                    plan.setdefault('analysis', {}).setdefault(
+                        modules, []).append(rows[evidence_id])
+        if 'index' in needs or 'index_free' in needs:
+            try:
+                index = SearchIndex(self.case.folder)
+                try:
+                    states = index.states()
+                finally:
+                    index.close()
+            except Exception as exc:
+                logger.debug("No index state: %s", exc)
+                states = {}
+            if 'index' in needs:
+                plan['index'] = [rows[e] for e in rows if e in states]
+            if 'index_free' in needs:
+                # Every image with a file index: free space is indexed
+                # after it, whether or not it was before.
+                plan['index_free'] = [rows[e] for e in rows if e in states]
+        if 'activity' in needs:
+            plan['activity'] = [
+                rows[e] for e in rows
+                if (self.case.user_activity_state(e) or {}).get('status')
+                in ('done', 'cancelled', 'failed')]
+        plan = {k: v for k, v in plan.items() if v}
+        if not plan:
+            return {}
+        names = {'analysis': "File analysis", 'index': "Search index",
+                 'index_free': "Search free space and memory files",
+                 'activity': "Activity"}
+        lines = []
+        for module, labels in needs.items():
+            if module in plan:
+                count = sum(len(r) for r in plan[module].values()) \
+                    if module == 'analysis' else len(plan[module])
+                lines.append(f"{names[module]} on {count} image(s) -- for "
+                             f"{', '.join(labels)}")
+        if getattr(self, '_report_dialogs', True) and not message.question(
+                self, "Apply to the Evidence Already Read?",
+                "These settings change what is read from the evidence. "
+                "Run again now?",
+                '\n'.join(lines) + "\n\nThey apply to every run from now "
+                "on either way. A run again replaces that module's results "
+                "for those images, with the modules each one had."):
+            return {}
+        if 'analysis' in plan:
+            for modules, chosen in plan['analysis'].items():
+                self.queue_analysis(chosen, list(modules))
+        if 'index' in plan:
+            self.queue_indexing(plan['index'])
+        if 'index_free' in plan:
+            self.queue_free_indexing(plan['index_free'])
+        if 'activity' in plan:
+            self.queue_activity(plan['activity'])
+        return plan
+
+    #: Measured importing Josh Hickman's iPhone unified log (21,228,231
+    #: rows, 51 minutes): the Timeline took ~44,000 rows a second, Search
+    #: ~8,300; case.db grew ~395 bytes a row, search.db ~710. Used for the
+    #: estimate shown before a large import.
+    _EVENT_ROWS_PER_SECOND = 44_000
+    _SEARCH_ROWS_PER_SECOND = 8_300
+    _BYTES_PER_ROW = 395 + 710
+    #: Rows above which the examiner is asked first.
+    LARGE_IMPORT = 1_000_000
+
+    def module_import_limit_changed(self, old, new):
+        """The import limit alone changed (see module_results_changed)."""
+        return self.module_results_changed(
+            {'module_import_rows': (old, new)})
+
+    def module_results_changed(self, changed):
+        """Settings ▸ Results changed for external tools' results -- the
+        import limit (module_import_rows) and/or where each kind goes
+        (module_destinations): runs already in the case follow (job
+        module_import -- Timeline events and Search rows added from or
+        dropped back to the tools' databases; evidence sorted into
+        Activity again when that choice changed). Asks first when it adds
+        many rows; a no puts the settings back (audited), so they always
+        say what the case holds."""
+        from trace_app.core import settings as case_settings
+        from trace_app.core.modules import destinations, job
+        if self.case is None:
+            return False
+        old, new = changed.get('module_import_rows') or (
+            case_settings.current('module_import_rows'),) * 2
+        old, new = int(old or 0), int(new or 0)
+        places_old, places_new = changed.get('module_destinations') or (
+            destinations.current(),) * 2
+        rebridge = destinations.EVIDENCE in destinations.changed_places(
+            places_old, places_new).get('activity', ())
+        add = drop = 0
+        artifacts = []
+        for run in self.case.module_runs():
+            if run['status'] != 'complete':
+                continue
+            stored = self.case.module_artifacts(run['id'])
+            more, fewer = job.pending_rows(run, stored, new, places_new)
+            add += more
+            drop += fewer
+            artifacts += [(a['name'], a.get('row_count') or 0)
+                          for adding, _drop in job.pending(
+                              run, stored, new, places_new).values()
+                          for a in adding]
+        if not add and not drop and not rebridge:
+            self.set_status("External tools: nothing to add or take out "
+                            "with these settings", 8000)
+            return False
+        if add >= self.LARGE_IMPORT and getattr(self, '_report_dialogs',
+                                                True):
+            minutes = (add / self._EVENT_ROWS_PER_SECOND +
+                       add / self._SEARCH_ROWS_PER_SECOND) / 60
+            biggest = sorted(set(artifacts), key=lambda a: -a[1])[:4]
+            if not message.question(
+                    self, "Add Rows to the Timeline and Search",
+                    f"Add {add:,} rows from external modules to the "
+                    f"Timeline and Search?",
+                    f"Largest: {', '.join(f'{n} ({c:,})' for n, c in biggest)}"
+                    f". About {max(1, round(minutes)):,} minute(s) in the "
+                    f"background, and the case's databases grow by about "
+                    f"{add * self._BYTES_PER_ROW / 1e9:,.1f} GB. Every one "
+                    f"of these rows can already be browsed without this -- "
+                    f"Activity ▸ Others and the Modules tab read them from "
+                    f"the tool's own database.\n\nNo puts the settings "
+                    f"back as they were."):
+                case_settings.save_case(self.case, {
+                    'module_import_rows': old,
+                    'module_destinations': places_old})
+                self.set_status("External tools: settings put back", 8000)
+                return False
+        return self.queue_module_import(old, new, rebridge=rebridge)
+
+    def _ensure_module_import_limit(self):
+        """Runs that do not follow the case's import limit -- imported
+        under another, or the setting saved before a change applied to
+        runs already there: offered once a session, as a change would be."""
+        from trace_app.core import settings as case_settings
+        from trace_app.core.modules import job
+        if self.case is None or self.__dict__.get('_import_limit_checked'):
+            return
+        if getattr(self, 'job_bar', None) is None or \
+                any(str(getattr(j, 'key', '')).startswith('module-import')
+                    for j in getattr(self.job_bar, '_queue', ())):
+            return
+        if self.case.unbridged_module_runs():
+            return              # sorted first; the bridge job applies it
+        self._import_limit_checked = True
+        limit = int(case_settings.current('module_import_rows') or 0)
+        olds = []
+        for run in self.case.module_runs():
+            if run['status'] != 'complete':
+                continue
+            stored = self.case.module_artifacts(run['id'])
+            if any(job.pending_rows(run, stored, limit)):
+                olds.append(int(run['params'].get('import_limit',
+                                case_settings.CASE['module_import_rows'][0])
+                                or 0))
+        if not olds:
+            return
+        old = min(olds) if all(olds) else 0
+        stored = (self.case.setting('settings') or {})
+        if 'module_destinations' not in stored:
+            # A case imported before the places were chosen per role had
+            # everything in the Timeline and Search: asked once whether
+            # the new default (telemetry kept out) applies to it; a no
+            # records what it has.
+            from trace_app.core.modules import destinations
+            QTimer.singleShot(0, lambda: self._offer_module_defaults(
+                old, limit, destinations.EVERYWHERE))
+            return
+        QTimer.singleShot(0, lambda: self.module_import_limit_changed(
+            old, limit))
+
+    def _offer_module_defaults(self, old_limit, limit, before):
+        """An older case: its external tools' results are everywhere.
+        Keep out what the default now keeps out (device telemetry from
+        the Timeline and Search), or record the case as it is."""
+        from trace_app.core import settings as case_settings
+        from trace_app.core.modules import destinations, job
+        if self.case is None:
+            return False
+        now = destinations.current()
+        out = 0
+        for run in self.case.module_runs():
+            if run['status'] != 'complete':
+                continue
+            stored = self.case.module_artifacts(run['id'])
+            out += job.pending_rows(run, stored, limit, now)[1]
+        keep = True
+        if out and getattr(self, '_report_dialogs', True):
+            keep = message.question(
+                self, "External Tools' Telemetry",
+                f"Take {out:,} rows of device telemetry out of the Timeline "
+                f"and Search?",
+                "TRACE now keeps external tools' telemetry -- log lines, "
+                "battery and health samples -- out of the Timeline and "
+                "Search by default: on a large phone or Mac it is most of "
+                "the rows, and slows every view. It stays in the tools' "
+                "databases, browsed in Activity ▸ Others and the Modules "
+                "tab.\n\nNo keeps this case as it is. Either way, "
+                "Options ▸ Settings ▸ Results changes it.")
+        if not keep:
+            case_settings.save_case(self.case,
+                                    {'module_destinations': before})
+            self.set_status("External tools' results kept as they were",
+                            8000)
+            return False
+        case_settings.save_case(self.case, {'module_destinations': now})
+        return self.module_results_changed(
+            {'module_import_rows': (old_limit, limit),
+             'module_destinations': (before, now)})
+
+    def queue_module_import(self, old, new, rebridge=False):
+        from trace_app.ui.process_worker import ProcessWorker
+
+        class ImportWorker(ProcessWorker):
+            kind = 'module_import'
+
+        params = {'case_folder': self.case.folder, 'limit': new,
+                  'old_limit': old, 'rebridge': bool(rebridge)}
+
+        def start(job):
+            worker = ImportWorker(params, self)
+            worker.job_progress.connect(self._module_import_progress)
+            worker.job_done.connect(self._module_import_done)
+            self._retain_worker(worker)
+            worker.start()
+            return worker
+
+        return self.job_bar.submit(Job(
+            key=f"module-import:{new}:{self._destinations_key()}",
+            title="Applying where external tools' results go",
+            start=start, stop=lambda worker: worker.stop()))
+
+    @staticmethod
+    def _destinations_key():
+        from trace_app.core.modules import destinations
+        value = destinations.current()
+        return ','.join(f"{role}={'+'.join(value[role])}"
+                        for role in destinations.ROLE_KEYS)
+
+    @Slot(object)
+    def _module_import_progress(self, payload):
+        done, total, text = (tuple(payload) + (0, 0, ''))[:3]
+        self.job_bar.report(done, total, text)
+
+    @Slot(int, str)
+    def _module_import_done(self, rows, error):
+        if error:
+            logger.warning("Applying the external tool rows limit: %s",
+                           error)
+            self.set_status(f"Applying the external tool rows limit "
+                            f"failed: {error}")
+        else:
+            self.set_status(f"{rows:,} row(s) from external modules added "
+                            f"to the Timeline and Search" if rows else
+                            "External tool rows limit applied")
+        self.job_bar.job_finished(error=error)
+        if getattr(self, 'search_panel', None) is not None:
+            self.search_panel.reload_index()
+        self.refresh_modules()
+        self.refresh_analysis_views()
 
     def apply_settings(self):
         """Redraw what the settings shape: the listing (sizes, filters,
@@ -4646,8 +6835,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.job_bar.job_finished(error=error)
         if error:
             self.set_status(f"The report failed: {error}")
+            # A PDF MuPDF cannot lay out still leaves the other formats;
+            # the error names what was written.
             message.warning(self, "Report not created",
-                            "The report could not be written.", error)
+                            "The report could not be written in every "
+                            "format chosen.", error)
             return
         if not written:
             self.set_status("Report cancelled")
@@ -4765,17 +6957,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         if added else "Already in the report")
 
     def _timeline_exported(self, path, rows):
-        import hashlib
-        digest = hashlib.sha256()
+        from trace_app.core.evidence_hash import sha256_file
         try:
-            with open(path, 'rb') as handle:
-                for block in iter(lambda: handle.read(1 << 20), b''):
-                    digest.update(block)
+            sha256 = self._wait_for(sha256_file, path)
         except OSError:
             return
         self.case.record_event(
-            'timeline exported',
-            f"rows={rows} path={path} sha256={digest.hexdigest()}")
+            'timeline exported', f"rows={rows} path={path} sha256={sha256}")
 
     # --- persistence ---------------------------------------------------
 
@@ -4787,28 +6975,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for row in rows:
             if not os.path.exists(row['path']):
                 continue
-            evidence_id = row['id']
-            name = row.get('display_name') or os.path.basename(row['path'])
-
-            def start(job, row=row, evidence_id=evidence_id, name=name):
-                worker = PersistenceWorker(row['path'], self.case.folder,
-                                           evidence_id,
-                                           self.hash_library().folder, self)
-                worker.params['unlock'] = self._unlocks_for(row['path'])
-                worker.progressed.connect(
-                    lambda done, total, path: self.job_bar.report(
-                        done, total, os.path.basename(path)))
-                worker.finished_persistence.connect(
-                    lambda count, error: self._persistence_finished(
-                        name, count, error))
-                self._retain_worker(worker)
-                worker.start()
-                return worker
-
-            if self.job_bar.submit(Job(
-                    key=f"persistence:{evidence_id}",
-                    title=f"Reading autostarts on {name}", start=start,
-                    stop=lambda worker: worker.stop())):
+            if self._queue_image_job(
+                    row, 'persistence', "Reading autostarts",
+                    lambda row=row: PersistenceWorker(
+                        row['path'], self.case.folder, row['id'],
+                        self.hash_library().folder, self),
+                    'finished_persistence', self._persistence_finished):
                 queued += 1
         return queued
 
@@ -4995,28 +7167,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for row in rows:
             if not os.path.exists(row['path']):
                 continue
-            evidence_id = row['id']
-            name = row.get('display_name') or os.path.basename(row['path'])
 
-            def start(job, row=row, evidence_id=evidence_id, name=name):
+            def make_worker(row=row):
                 worker = DeletedWorker(row['path'], self.case.folder,
-                                       evidence_id, self)
-                worker.params['unlock'] = self._unlocks_for(row['path'])
+                                       row['id'], self)
                 worker.params['scope'] = scope
-                worker.progressed.connect(
-                    lambda done, total, path: self.job_bar.report(
-                        done, total, os.path.basename(path)))
-                worker.finished_deleted.connect(
-                    lambda count, error: self._deleted_finished(
-                        name, count, error))
-                self._retain_worker(worker)
-                worker.start()
                 return worker
 
-            if self.job_bar.submit(Job(
-                    key=f"deleted:{evidence_id}",
-                    title=f"Listing deleted files on {name}", start=start,
-                    stop=lambda worker: worker.stop())):
+            if self._queue_image_job(
+                    row, 'deleted', "Listing deleted files", make_worker,
+                    'finished_deleted', self._deleted_finished):
                 queued += 1
         return queued
 
@@ -5094,6 +7254,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 return None
             stream.seek(int(row['location']))
             return stream.read(int(row['size'] or 0))
+        if row['cache_kind'] == 'quicklook':
+            # One bitmap of a thumbnails.data that can run to GBs: read
+            # where it lies, then make it a PNG.
+            stream = handler.open_file_object(parsed['inode'],
+                                              parsed['start_offset'])
+            if stream is None:
+                return None
+            start, length = thumbnails.quicklook_span(row['location'])
+            stream.seek(start)
+            return thumbnails.quicklook_png(stream.read(length),
+                                            row['location'])
         key = (row['evidence_id'], row['cache_ref'])
         cached = getattr(self, '_thumbnail_cache_bytes', None)
         if not cached or cached[0] != key:
@@ -5409,6 +7580,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.timeline_panel.set_case(self.case)
         self.refresh_analysis_tree()
         self.refresh_activity_tree()
+        self.refresh_modules()
         self.mark_analysis_rows()
 
     # --- activity in the tree ---------------------------------------
@@ -5574,13 +7746,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
              summary['authors'],
              lambda: self._one_per_file(self.case.findings(evidence_id,
                                                            'authors'))),
-            # Executables only when something about them is worth a look;
-            # the full list is Triage's Executables tab.
+            # Every executable, as Triage's Executables tab lists them,
+            # the flagged ones first (a "flagged" group counted 4 where the
+            # tab said 18, and read as a contradiction).
             ('executables', 'Executables', icons.EXECUTABLE,
-             summary['executables_flagged'],
-             lambda: self._one_per_file(self.case.findings(
-                 evidence_id, 'executables',
-                 grades=REPORTED_FINDING_GRADES))),
+             summary['executables'],
+             lambda: self._worst_first(self._one_per_file(
+                 self.case.findings(evidence_id, 'executables',
+                                    limit=100000)))),
             ('carved', 'Carved files', icons.FINDING_CARVED,
              summary['carved'],
              lambda: [dict(row, is_carved=True, summary=(
@@ -5599,12 +7772,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
              lambda: self.case.ntfs_rows('streams', evidence_id)),
             # Hash sets: known bad first. Known good is the opposite of a
             # finding and stays in the Hash sets tab.
+            # Every flagged autostart entry, as Triage's Persistence tab
+            # lists them: one program started from a Run key and a task
+            # is two findings (it counted files: 5 where the tab said 15).
             ('persistence', 'Persistence', icons.PERSISTENCE,
-             len({(f['evidence_id'], f['artifact_ref']) for f in
-                  self.case.findings(evidence_id, 'persistence',
-                                     limit=100000)}),
-             lambda: self._one_per_file(self.case.findings(
-                 evidence_id, 'persistence', limit=100000))),
+             len(self.case.findings(evidence_id, 'persistence',
+                                    limit=100000)),
+             lambda: self.case.findings(evidence_id, 'persistence',
+                                        limit=100000)),
             # A Thumbs.db names each picture's file; the ones no longer
             # in their folder. One row per picture, not per Thumbs.db.
             ('thumbnails', 'Thumbnails of files gone', icons.THUMBNAILS,
@@ -5619,13 +7794,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                  evidence_id, 'yara', limit=100000))),
             # Each event a Sigma rule matched (medium and above): these
             # are events, so one row each, not one per log.
+            # Every detection the Sigma tab lists, the severe first.
             ('sigma', 'Sigma detections', icons.SIGMA,
-             len(self.case.findings(evidence_id, 'sigma',
-                                    grades=REPORTED_FINDING_GRADES,
-                                    limit=100000)),
-             lambda: self.case.findings(evidence_id, 'sigma',
-                                        grades=REPORTED_FINDING_GRADES,
-                                        limit=100000)),
+             summary['sigma'],
+             lambda: self._worst_first(self.case.findings(
+                 evidence_id, 'sigma', limit=summary['sigma']))),
             ('hash:known-bad', 'Known bad (hash sets)', icons.HASH_SETS,
              hashed.get(hashsets.KNOWN_BAD, 0),
              lambda: self._one_per_file(self.case.hash_matches(
@@ -5644,9 +7817,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return          # analysed, and nothing stood out: say nothing
 
         root = QTreeWidgetItem(self.tree_viewer)
+        # Everything under it, so the root and its groups add up (it left
+        # out the counted sections and deleted files: 5 over 7,561).
         total = sum(count for _, _, _, count, _ in groups) \
-            + sum(indicators.values()) + len(keyword_terms)
-        root.setText(0, f"Findings ({total})")
+            + sum(indicators.values()) + len(keyword_terms) \
+            + sum(deleted_states.values()) \
+            + sum(count for *_rest, count in counted)
+        root.setText(0, f"Findings ({total:,})")
         root.setIcon(0, icons.icon(icons.FINDINGS))
         root.setData(0, Qt.UserRole, {'is_analysis_root': True})
 
@@ -5667,8 +7844,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if not count:
                 continue
             group = QTreeWidgetItem(root)
-            group.setText(0, f"{label} ({count})")
+            group.setText(0, f"{label} ({count:,})")
             group.setIcon(0, icons.icon(glyph))
+            flagged = {'executables': summary.get('executables_flagged',
+                                                  0)}.get(key)
+            if flagged:
+                group.setToolTip(0, f"{flagged:,} flagged, listed first")
             group.setData(0, Qt.UserRole, {'is_analysis_group': True,
                                            'group': key,
                                            'findings_unfilled': True})
@@ -5794,6 +7975,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                       (f.get('detail') or {}))
 
     @staticmethod
+    def _worst_first(findings):
+        """Suspicious, then notable, then the rest -- in their order."""
+        rank = {'suspicious': 0, 'notable': 1}
+        return sorted(findings, key=lambda f: rank.get(f.get('grade'), 2))
+
+    @staticmethod
     def _one_per_file(findings):
         """The first (most serious) finding for each file: the tree lists
         files, and one file can have several findings."""
@@ -5835,8 +8022,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             'artifact_path': finding.get('path') or '',
         })
 
-    def open_finding_menu(self, finding, position):
-        """The same right-click menu findings deserve everywhere else."""
+    def open_finding_menu(self, finding, position, extras=()):
+        """The same right-click menu findings deserve everywhere else;
+        `extras` [(text, callable)] go first."""
         if finding.get('is_carved'):
             self.open_carved_menu(finding, position)
             return
@@ -5844,6 +8032,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not self.activate_evidence(finding.get('evidence_id')):
             return
         menu = QMenu(self)
+        for text, callback in extras:
+            menu.addAction(text).triggered.connect(
+                lambda _on=False, c=callback: c())
+        if extras:
+            menu.addSeparator()
         open_action = menu.addAction("Show in Listing")
         open_action.triggered.connect(lambda: self.open_finding(finding))
         if self.case and finding.get('artifact_ref'):
@@ -5883,7 +8076,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     # --- VirusTotal -------------------------------------------------
 
     def vt_api_key(self):
-        return self.api_keys.get('API_KEYS', 'virustotal', fallback='').strip()
+        return api_keys.get('virustotal')
 
     def _vt_target(self, data):
         """The file `data` names, in the shape the worker takes, or None.
@@ -5966,7 +8159,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             message.information(self, "VirusTotal", refusal)
             return
         if not self.vt_api_key():
-            self.show_api_key_dialog()
+            self.show_api_keys()
             if not self.vt_api_key():
                 return
 
@@ -6529,6 +8722,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if parsed['kind'] == 'span':
             self.preview_artifact(row)
             return
+        if parsed['kind'] == 'module':
+            # A row an external module extracted: shown where it lives.
+            self.show_module_ref(parsed)
+            return
         if parsed['kind'] != 'file':
             # Registry keys need their own viewer; say so rather than
             # silently doing nothing.
@@ -6545,7 +8742,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         offset, inode = parsed['start_offset'], parsed['inode']
         try:
-            content, metadata = self.image_handler.get_file_content(inode, offset)
+            content, metadata = self._wait_for(
+                self.image_handler.get_file_content, inode, offset)
         except Exception as exc:
             logger.error("Could not open bookmarked artifact: %s", exc)
             message.warning(self, "Could not open",
@@ -6609,6 +8807,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 'embedded_date': row.get('embedded_date'),
                 'date_source': row.get('date_source'),
             })
+            return
+        if parsed['kind'] == 'module':
+            # A row an external module extracted: the file it came from.
+            source = self._module_ref_source(parsed)
+            if source is not None:
+                self.preview_artifact(source)
+            else:
+                self.set_status(f"{name or 'This row'} came from no file "
+                                f"TRACE can show -- double-click to see the "
+                                f"row.", 5000)
             return
         if parsed['kind'] != 'file':
             self.set_status(
@@ -6719,8 +8927,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 archives.detect_archive(stream) in archives.STREAMED_KINDS:
             self._streamed_archive = (key, stream)
             return stream
-        content, _ = self.image_handler.get_file_content(
-            parsed['inode'], parsed['start_offset'])
+        content, _ = self._wait_for(self.image_handler.get_file_content,
+                                    parsed['inode'], parsed['start_offset'])
         return content
 
     def show_triage(self, group=None, evidence_id=None):
@@ -6759,7 +8967,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         artifact_path = (data.get('path') or '').replace('\\', '/')
         if fs_info is not None and artifact_path:
             try:
-                located = fs_info.open(artifact_path)
+                from trace_app.core.tsk_names import open_path
+                located = open_path(fs_info, artifact_path)
                 parent = getattr(located.info.name, 'par_addr', None)
             except Exception as exc:
                 logger.debug("Could not open %s by path: %s",
@@ -6788,7 +8997,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             parent = self.image_handler.get_root_inode(offset)
 
         try:
-            entries = self.image_handler.get_directory_contents(offset, parent)
+            entries = self._directory_contents(offset, parent)
         except Exception as exc:
             logger.debug("Could not list the parent directory: %s", exc)
             return
@@ -6855,9 +9064,6 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                None), None
         if pending:
             QTimer.singleShot(0, lambda: self.start_case_setup(pending))
-        if getattr(self, '_pending_offer', False):
-            self._pending_offer = False
-            QTimer.singleShot(0, self.offer_analysis_modules)
 
         if opened:
             self.set_status(
@@ -6994,7 +9200,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def create_tree_item(parent, text, icon_path, data):
         item = QTreeWidgetItem(parent)
         item.setText(0, text)
-        item.setIcon(0, QIcon(icon_path))
+        item.setIcon(0, icons.cached_icon(icon_path))
         item.setData(0, Qt.UserRole, data)
         return item
 
@@ -7313,20 +9519,22 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         try:
             image_path = os.path.normpath(image_path)
 
-            # Create a progress dialog to show loading status
-            progress = QProgressDialog("Loading image...", "Cancel", 0, 100, self)
-            progress.setWindowTitle("Loading Evidence")
+            # A progress card (ui/widgets/progress_card.py) naming the
+            # evidence and each step, shown if loading takes a moment.
+            progress = ProgressDialog("Opening the image…", None, 0, 1000,
+                                      self)
+            progress.setWindowTitle("Loading evidence")
+            progress.set_about(os.path.basename(image_path) or image_path)
+            progress.set_stages(self._loading_stages(
+                image_path, record_in_case and self.case is not None))
             progress.setWindowModality(Qt.WindowModal)
-            progress.setMinimumDuration(PROGRESS_MIN_DURATION)  # Show dialog only if operation takes more than threshold
+            progress.setMinimumDuration(PROGRESS_MIN_DURATION)
             progress.setValue(10)
 
             # The images already open stay open. Closing the previous handler
             # here is what left an earlier image's branch of the tree reading
             # whichever image had been loaded since -- wrong evidence under
             # the right name.
-            progress.setValue(20)
-            QApplication.processEvents()
-
             previous = self._image_handlers.pop(image_path, None)
             if previous is not None:
                 previous.close_resources()
@@ -7337,7 +9545,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     + (f": {handler.load_error}." if handler.load_error
                        else ". It may be corrupt, incomplete (a missing .E02 "
                             "segment, say), or an unsupported format."))
-            progress.setValue(50)
+            self._loading_step(progress, 0.82, "Adding it to the case…"
+                               if record_in_case and self.case
+                               else "Getting it ready…")
 
             self._image_handlers[image_path] = handler
 
@@ -7352,19 +9562,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if getattr(self, 'case_panel', None):
                 self.case_panel.refresh()
 
-            progress.setValue(70)
+            self._loading_step(progress, 0.86, "Making it the active image…")
             self.activate_image(image_path)
-            progress.setValue(80)
-
-            # Load partitions into tree view
-            QApplication.processEvents()
+            self._loading_step(progress, 0.92, "Building the evidence tree…")
             self.load_partitions_into_tree(image_path)
             # The evidence tree just grew a root; keep bookmarks above it.
             self.refresh_bookmarks_tree()
-            progress.setValue(100)
+            self._loading_step(progress, 1.0, "Done")
 
             # Enable all tabs since we have a valid image
             self.enable_tabs(True)
+            self._queue_folder_check(image_path, handler)
             return True
 
         except Exception as e:
@@ -7383,6 +9591,30 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 progress.close()
                 progress.deleteLater()
 
+    @staticmethod
+    def _loading_stages(image_path, into_case):
+        """The loading card's stage list: (name, the card's fraction where
+        it starts), from the steps `_HandlerOpener._warm` reports (scaled
+        by its SHARE) and the window's own after it."""
+        share = _HandlerOpener.SHARE
+        if os.path.isdir(image_path):
+            first = [("Listing the folder", 0.0),
+                     ("Reading what it holds", 0.08 * share)]
+        else:
+            first = [("Opening the image", 0.0),
+                     ("Reading partitions and file systems", 0.08 * share)]
+        return first + [
+            ("Identifying the operating systems", 0.82 * share),
+            ("Checking which modules suit it", 0.95 * share),
+            ("Adding it to the case" if into_case else "Getting it ready",
+             0.82),
+            ("Building the evidence tree", 0.92)]
+
+    @staticmethod
+    def _loading_step(progress, fraction, step):
+        progress.setValue(round(fraction * progress.maximum()))
+        progress.setLabelText(step)
+
     def _open_handler(self, image_path, progress):
         """An ImageHandler, opened on a thread with each volume's first
         reads done (partitions, file systems, root folders: cached, so the
@@ -7391,21 +9623,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         listing of a big NTFS volume reads its whole MFT through the
         helper -- and a large image did the same, more briefly."""
         from trace_app.core.live_disk import is_device_path
-        if is_device_path(image_path):
-            progress.setLabelText(
-                "Waiting for administrator approval, then reading the "
-                "disk's partitions and file systems...")
-        else:
-            progress.setLabelText("Reading partitions and file systems...")
         # Cancel cannot stop a read already under way.
         progress.setCancelButton(None)
         opener = _HandlerOpener(image_path)
+        if is_device_path(image_path):
+            opener.status = (0.02, "Waiting for administrator approval…")
         self._retain_worker(opener)
         loop = QEventLoop()
         timer = QTimer()
         timer.setInterval(50)
-        timer.timeout.connect(
-            lambda: loop.quit() if opener.done.is_set() else None)
+
+        def check():
+            if opener.done.is_set():
+                loop.quit()
+                return
+            fraction, step = opener.status
+            self._loading_step(progress, fraction, step)
+        timer.timeout.connect(check)
+        check()
         timer.start()
         opener.start()
         if not opener.done.is_set():
@@ -7414,6 +9649,66 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if opener.error is not None:
             raise opener.error
         return opener.handler
+
+    #: A folder read still going after this long is waited for with the
+    #: window painting (seconds).
+    SLOW_READ_AFTER = 0.15
+
+    def _directory_contents(self, start_offset, inode_number=None):
+        """The active image's folder, read off the window's thread when it
+        has not been read before (ImageHandler caches every folder). A big
+        NTFS folder on an E01 takes a second or more: on the window's
+        thread that froze it (Windows greys a window out after 5 s)."""
+        handler = self.image_handler
+        known = handler.cached_directory_contents(start_offset, inode_number)
+        if known is not None:
+            return known
+        return self._wait_for(handler.get_directory_contents, start_offset,
+                              inode_number)
+
+    def _wait_for(self, work, *args):
+        """work(*args) on a thread, returned (or raised) here. Quick work is
+        simply waited for; slower work is waited for in an event loop that
+        paints and runs timers but takes no input -- so the window never
+        hangs, and no click starts a second navigation half-way through
+        the first (input is handled once the read is done). Callers see a
+        plain call: nothing about navigation changes."""
+        import threading
+        if QThread.currentThread() is not QApplication.instance().thread():
+            return work(*args)          # already off the window's thread
+        result, error, done = [], [], threading.Event()
+
+        def run():
+            try:
+                result.append(work(*args))
+            except BaseException as exc:
+                error.append(exc)
+            finally:
+                done.set()
+        threading.Thread(target=run, name='window-read', daemon=True).start()
+        if not done.wait(self.SLOW_READ_AFTER):
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                loop = QEventLoop()
+                timer = QTimer()
+                timer.setInterval(20)
+                timer.timeout.connect(self._quit_when_done(loop, done))
+                timer.start()
+                if not done.is_set():
+                    loop.exec(QEventLoop.ExcludeUserInputEvents)
+                timer.stop()
+            finally:
+                QApplication.restoreOverrideCursor()
+        if error:
+            raise error[0]
+        return result[0]
+
+    @staticmethod
+    def _quit_when_done(loop, done):
+        def check():
+            if done.is_set():
+                loop.quit()
+        return check
 
     def _close_image_handlers(self):
         for path, handler in list(self._image_handlers.items()):
@@ -7718,6 +10013,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self._bitlocker_keys.pop(path, None)
         self.remove_from_tree_viewer(path)
         if self.case is not None and evidence_id is not None:
+            # Its module runs' folders go with it: let go of any database
+            # the Modules tab has open (Windows deletes no open file).
+            self._release_module_databases()
+            self.__dict__.pop('_module_manifests', None)
             try:
                 self.case.remove_evidence(evidence_id)
             except Exception as exc:
@@ -7769,6 +10068,35 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     image_path:
                 self._mark_system_volumes(root)
         self._record_systems(image_path)
+        self._repair_file_refs(image_path)
+        # The Modules tab's evidence list carries the logo just set.
+        if getattr(self, 'modules_panel', None) is not None:
+            self.refresh_modules()
+
+    def _repair_file_refs(self, image_path):
+        """Once per image a session: marks an older Listing put on deleted
+        files get the ref the rest of TRACE uses (core/ref_repair.py)."""
+        if self.case is None or self.image_handler is None:
+            return 0
+        done = self.__dict__.setdefault('_refs_repaired', set())
+        row = self.case.evidence_for_path(image_path or
+                                          self.current_image_path)
+        if row is None or row['id'] in done:
+            return 0
+        done.add(row['id'])
+        from trace_app.core.ref_repair import Resolver
+        try:
+            changed = self.case.repair_file_refs(
+                row['id'], Resolver(self.image_handler))
+        except Exception as exc:
+            logger.warning("File references not checked: %s", exc)
+            return 0
+        if changed:
+            logger.info("%d mark(s) on deleted files given the name "
+                        "entry's reference", changed)
+            self.tags_changed()
+            self.refresh_bookmarks()
+        return changed
 
     def _record_systems(self, image_path=None):
         """Keep the systems found on the image's volumes in the case
@@ -7922,7 +10250,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         sector_size = self.image_handler.sector_size
         # Free space and containers as the disk is laid out
-        # (core/disk_layout.py), the same regions Image Information draws:
+        # (core/disk_layout.py), the same regions Evidence Information draws:
         # TSK's 'Unallocated' slots overlap the partition tables, and an
         # extended partition contains volumes listed on their own.
         from trace_app.core import disk_layout
@@ -7936,7 +10264,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         def disk_order(slot):
             # Where what a slot shows begins: a free-space slot shows the
             # free run inside it (after the tables it overlaps), so the
-            # nodes come in disk order, as Image Information lists them.
+            # nodes come in disk order, as Evidence Information lists them.
             _addr, desc, start, length = slot
             text = desc.decode('utf-8', 'replace') \
                 if isinstance(desc, bytes) else str(desc)
@@ -7991,7 +10319,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     what = what[kind]
                 group.setText(0, f"{label} ({what}, {readable_size})")
                 group.setToolTip(0, where)
-                group.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                group.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                     'device', 'drive-harddisk')))
                 group.setData(0, Qt.UserRole, {
                     "inode_number": None, "start_offset": start,
@@ -8009,7 +10337,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 group = QTreeWidgetItem(root_item_tree)
                 group.setText(0, f"{label} ({len(layers)} file systems "
                                  f"layered, {readable_size})")
-                group.setIcon(0, QIcon(self.db_manager.get_icon_path(
+                group.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                     'device', 'drive-harddisk')))
                 group.setData(0, Qt.UserRole, {
                     "inode_number": None, "start_offset": start,
@@ -8058,7 +10386,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _add_free_space_node(self, parent, region, desc_str, addr):
         """A run of space no volume or table holds, named and sized as
-        Image Information shows it ('Unallocated Space @ 34')."""
+        Evidence Information shows it ('Unallocated Space @ 34')."""
         from trace_app.core import disk_layout
         first = region['start']
         last = first + region['sectors'] - 1
@@ -8251,7 +10579,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for volume in volumes:
             size = self.image_handler.get_readable_size(volume['size'])
             item = QTreeWidgetItem(parent)
-            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+            item.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                 'device', 'drive-harddisk')))
             if volume['readable']:
                 fs_type = self.image_handler.get_fs_type(volume['key'])
@@ -8294,7 +10622,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             item.setText(0, f"{volume['group']} / {volume['name']} (Size: "
                             f"{self.image_handler.get_readable_size(volume['size'])}"
                             f", FS: {fs_type})")
-            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+            item.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                 'device', 'drive-harddisk')))
             item.setData(0, Qt.UserRole, {
                 "inode_number": None, "start_offset": volume['key'],
@@ -8327,7 +10655,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 "no datasets"
             item.setText(0, f"ZFS pool not readable here: {problem} "
                             f"(File > Assemble RAID or Multi-Disk Volume)")
-            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+            item.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                 'device', 'drive-harddisk')))
             item.setData(0, Qt.UserRole, {"inode_number": None,
                                           "start_offset": None})
@@ -8338,7 +10666,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 'dataset'
             locked = ', encrypted (not read)' if dataset['encrypted'] else ''
             item.setText(0, f"{dataset['name']} (ZFS {what}{locked})")
-            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+            item.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                 'device', 'drive-harddisk')))
             item.setToolTip(0, f"ZFS {what} {dataset['name']}")
             item.setData(0, Qt.UserRole, {
@@ -8364,7 +10692,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for layer in layers:
             item = QTreeWidgetItem(parent)
             item.setText(0, f"{label} — {layer['name']} (layered)")
-            item.setIcon(0, QIcon(self.db_manager.get_icon_path(
+            item.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                 'device', 'drive-harddisk')))
             item.setData(0, Qt.UserRole, {
                 "inode_number": None, "start_offset": layer['key'],
@@ -8509,10 +10837,35 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if self.current_image_path is None:
             return
 
-        entries = self.image_handler.get_directory_contents(data["start_offset"], inode)
+        entries = self._directory_contents(data["start_offset"], inode)
 
+        unread = []
         for entry in entries:
-            self._create_tree_item_for_entry(item, entry, data["start_offset"])
+            child = self._create_tree_item_for_entry(item, entry,
+                                                     data["start_offset"])
+            known = (child.data(0, Qt.UserRole) or {}).get('child_count')
+            if entry["is_directory"] and known is None:
+                unread.append((child, entry["inode_number"]))
+        self._folder_probe.probe(self.image_handler, data["start_offset"],
+                                 unread)
+        if inode is not None and data.get('type') == 'directory':
+            # Now known: the count for the status bar, and no arrow on an
+            # empty folder.
+            item.setData(0, Qt.UserRole, dict(data, child_count=len(entries)))
+            if not entries:
+                item.setChildIndicatorPolicy(
+                    QTreeWidgetItem.DontShowIndicatorWhenChildless)
+
+    def _folder_counted(self, item, count):
+        """The folder probe read `item`'s folder: keep the count, and no
+        arrow when it is empty."""
+        data = item.data(0, Qt.UserRole) or {}
+        if data.get('type') != 'directory' or item.childCount():
+            return
+        item.setData(0, Qt.UserRole, dict(data, child_count=count))
+        if not count:
+            item.setChildIndicatorPolicy(
+                QTreeWidgetItem.DontShowIndicatorWhenChildless)
 
     def _fill_findings_group(self, group):
         """The files under a Findings group, fetched when it is opened."""
@@ -8540,7 +10893,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             unit = ' files' if key == 'duplicates' else ''
             node.setText(0, f"{names.get(image, f'#{image}')} "
                             f"({count_here}{unit})")
-            node.setIcon(0, QIcon(self.db_manager.get_icon_path(
+            node.setIcon(0, icons.cached_icon(self.db_manager.get_icon_path(
                 'device', 'drive-harddisk')))
             node.setData(0, Qt.UserRole, {'is_analysis_group': True,
                                           'is_image_group': True,
@@ -8745,6 +11098,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if data.get('is_activity_root') or data.get('is_activity_group'):
             self.show_activity(data.get('category'))
             return
+        if data.get('is_modules_root') or data.get('is_modules_run'):
+            self.show_module_node(data)
+            return
         if data.get('is_analysis_group'):
             self.show_triage(data.get('group'), data.get('evidence_id'))
             if data.get('group') == 'indicators':
@@ -8799,7 +11155,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.current_path = "/"
                     root_inode = self.image_handler.get_root_inode(0)
                     self.show_listing_entries(
-                        self.image_handler.get_directory_contents(0, root_inode),
+                        self._directory_contents(0, root_inode),
                         0, "This image")
                 self.clear_status()
                 return
@@ -8833,7 +11189,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                         self.update_status_for_selection(data)
 
                 # Handle directories - populate the listing synchronously
-                entries = self.image_handler.get_directory_contents(data["start_offset"], data.get("inode_number"))
+                entries = self._directory_contents(data["start_offset"], data.get("inode_number"))
 
                 # Update current path for directory navigation
                 if data.get("name"):
@@ -8862,13 +11218,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 if self._show_in_hex_from_image(data):
                     return
                 # Handle files in background
-                self.file_worker = self._retain_worker(self.FileContentWorker(
-                    self.image_handler, data["inode_number"], data["start_offset"]))
-                self.file_worker.completed.connect(
-                    lambda content, _: self.update_viewer_with_file_content(content, data))
-                self.file_worker.error.connect(
-                    lambda msg: (self.log_error(msg), self.clear_status()))
-                self.file_worker.start()
+                self._read_file_for(data, self.current_selected_data)
 
             elif data.get("start_offset") is not None:
                 # Handle partitions
@@ -8876,7 +11226,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # ext 2, Btrfs 256 -- never assumed.
                 root_inode = self.image_handler.get_root_inode(
                     data["start_offset"])
-                entries = self.image_handler.get_directory_contents(
+                entries = self._directory_contents(
                     data["start_offset"], root_inode)
 
                 # Reset path to root when viewing partitions
@@ -8947,7 +11297,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 return None
 
             # Get directory entries for the directory
-            entries = self.image_handler.get_directory_contents(start_offset, inode_number)
+            entries = self._directory_contents(start_offset, inode_number)
 
             # Look for parent directory entry (..)
             for entry in entries:
@@ -9009,7 +11359,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.current_path = "/"
 
             # Load the parent directory
-            entries = self.image_handler.get_directory_contents(
+            entries = self._directory_contents(
                 parent_data["start_offset"],
                 parent_data["inode_number"]
             )
@@ -9136,11 +11486,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
             if history_entry.get("type") == "volume":
                 # For volumes, list the root directory.
-                entries = self.image_handler.get_directory_contents(
+                entries = self._directory_contents(
                     start_offset, self.image_handler.get_root_inode(start_offset))
             else:
                 # For regular directories, use stored inode
-                entries = self.image_handler.get_directory_contents(start_offset, inode_number)
+                entries = self._directory_contents(start_offset, inode_number)
 
             # Update current selected data
             self.current_selected_data = history_entry.copy()
@@ -9294,7 +11644,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                                                  desc)
                 name_item = QTableWidgetItem(volume_name)
                 icon_path = self.db_manager.get_icon_path('device', 'drive-harddisk')
-                name_item.setIcon(QIcon(icon_path))
+                name_item.setIcon(icons.cached_icon(icon_path))
 
                 # Store volume data for potential future use
                 volume_data = {
@@ -9466,7 +11816,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """Insert a row into the listing table with proper caching and error handling."""
         try:
             icon_path = self.db_manager.get_icon_path(icon_type, icon_name)
-            icon = QIcon(icon_path)
+            icon = icons.cached_icon(icon_path)
             row_position = self.listing_table.rowCount() - 1  # Current row (rows are 0-indexed)
 
             # Calculate the full path for this item
@@ -9544,14 +11894,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not file_content and adapter.needs_content():
             from trace_app.ui.widgets.listing_views import size_in_bytes
             # Rows carry the Size column's text ('0.00 B') or a number.
+            name = (data or {}).get('name', 'File')
             if file_content is not None and \
                     size_in_bytes((data or {}).get('size')) == 0:
                 # An empty file, read correctly: nothing to show.
-                adapter.clear()
-                self.set_status(f"{(data or {}).get('name', 'File')}: "
-                                f"empty file (0 bytes)")
+                adapter.show_nothing("This file is empty (0 bytes).")
+                self.set_status(f"{name}: empty file (0 bytes)")
                 return
-            self.log_error("No content available to display")
+            # NTFS metadata files ($Secure, $Volume) keep their data in
+            # named streams; whatever the reason, the previous file must
+            # not stay on screen under this one.
+            adapter.show_nothing(
+                "Nothing could be read from this file's main data "
+                "stream.\nThe File Metadata tab describes it.")
+            self.log_error(f"{name}: no content available to display")
             return
 
         # Notes and bookmarks need to know which evidence row and which
@@ -9565,6 +11921,57 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.log_error(f"Error displaying content in viewer: {str(e)}")
 
 
+
+    def _without_record(self, data):
+        """A deleted name whose file record is gone (its MFT entry reused,
+        or the name never linked to one) has no bytes to read: the viewer
+        says so -- it used to log 'argument 1 must be int, not None' and
+        leave the previous file on screen. True when that was the case."""
+        if not data or data.get('type') != 'file' or \
+                data.get('inode_number') is not None or \
+                data.get('archive_member') or data.get('is_carved'):
+            return False
+        adapter = self.active_viewer_adapter()
+        if adapter is not None:
+            adapter.show_nothing(
+                "This deleted name has no file record left: the entry it "
+                "pointed to was reused or cleared, so the file system "
+                "keeps nothing of its content.\nCarving unallocated space "
+                "may still find it.")
+        self.set_status(f"{data.get('name', 'File')}: deleted, no file "
+                        f"record left")
+        return True
+
+    def _read_file_for(self, data, selected):
+        """Read `data`'s file on a FileContentWorker for the active tab.
+
+        `selected` is the selection the read is for: a read that finishes
+        after the examiner has moved on is dropped. Inbox.dbx (5 MB) then
+        an RTF showed the RTF, then the mailbox's bytes under the RTF's
+        name when its late read landed."""
+        self.file_worker = self._retain_worker(self.FileContentWorker(
+            self.image_handler, data["inode_number"], data["start_offset"]))
+        self.file_worker.completed.connect(
+            lambda content, _: self._still_selected(selected)
+            and self.update_viewer_with_file_content(content, data))
+        self.file_worker.error.connect(
+            lambda msg: self._still_selected(selected)
+            and self._file_unreadable(data, msg))
+        self.file_worker.start()
+
+    def _still_selected(self, selected):
+        return selected is self.current_selected_data
+
+    def _file_unreadable(self, data, message):
+        """A file's read failed (a damaged MFT record, say): the reason in
+        the viewer, never the previous file under this selection."""
+        self.log_error(message)
+        self.clear_status()
+        adapter = self.active_viewer_adapter()
+        if adapter is not None:
+            adapter.show_nothing(
+                f"{(data or {}).get('name', 'This file')} could not be read "
+                f"from the image:\n{message}")
 
     def _show_in_hex_from_image(self, data):
         """When the Hex tab is in front, give it the file to read from
@@ -9618,6 +12025,50 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             return
         target = self._file_data_for(data) or data
         self.add_bookmark_for(target, suggested_label=f"{quoted} in {name}")
+
+    def bookmark_shown_file(self, label):
+        """The picture viewer's Bookmark Region and the player's Bookmark
+        Moment: a bookmark of the file on screen, `label` naming the
+        region or moment. A carve not rebuilt is its byte range."""
+        data = self.current_selected_data or {}
+        if data.get('is_carved') and not data.get('fragments') and \
+                data.get('offset') is not None and data.get('size'):
+            begin = int(data['offset'])
+            self.bookmark_byte_range(begin, begin + int(data['size']), label)
+            return
+        target = self._file_data_for(data) or data
+        if not target:
+            message.information(self, "Nothing to bookmark",
+                                "Select the file in the tree or a list "
+                                "first.")
+            return
+        self.add_bookmark_for(target, suggested_label=label)
+
+    def add_contact_sheet_to_report(self, sheet):
+        """A contact sheet the player saved, as a report item: the report
+        reads the PNG back and checks it against the SHA-256 recorded
+        here."""
+        if self.case is None:
+            return
+        data = self.current_selected_data or {}
+        ref = None
+        try:
+            ref = self.artifact_ref_for(self._file_data_for(data) or data)
+        except Exception as exc:
+            logger.debug("No reference for the contact sheet: %s", exc)
+        added = self.case.add_report_items('contact_sheet', [{
+            'evidence_id': self.evidence_id_for_current_image(),
+            'artifact_ref': ref, 'time': None,
+            'title': f"Contact sheet: {sheet['file']}",
+            'detail': sheet}])
+        self.set_status("Contact sheet added to the report" if added else
+                        "That contact sheet is already in the report")
+
+    def show_place_on_map(self, latitude, longitude, name, what=''):
+        """A position a viewer read (a video's recorded location), on
+        Triage ▸ Map."""
+        self.show_triage('map')
+        self.map_panel.show_place(latitude, longitude, name, what)
 
     def bookmark_byte_range(self, begin, end, description):
         """Bookmark bytes [begin, end) of the active image -- a hex
@@ -9729,28 +12180,33 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.clear_status()
                 return
 
-            if inode_number:
+            if self._without_record(self.current_selected_data):
+                return
+            # Inode 0 is a file too: NTFS's $MFT.
+            if inode_number is not None:
                 if self._show_in_hex_from_image(self.current_selected_data):
                     return
                 # Ask the active viewer whether it wants a stream, rather than
                 # hardcoding the Application tab's index here.
                 if adapter.wants_stream(self.current_selected_data):
                     # Use MediaStreamWorker for streaming playback (doesn't load content)
+                    # The selection the stream is for: a late one is dropped.
+                    selected = self.current_selected_data
                     self.media_worker = self._retain_worker(self.MediaStreamWorker(self.image_handler, inode_number, offset))
                     self.media_worker.completed.connect(
-                        lambda file_obj, file_size, metadata: self.update_viewer_with_media_stream(
-                            file_obj, file_size, metadata, self.current_selected_data))
+                        lambda file_obj, file_size, metadata:
+                        self._still_selected(selected)
+                        and self.update_viewer_with_media_stream(
+                            file_obj, file_size, metadata, selected))
                     self.media_worker.error.connect(
                         lambda msg: (self.log_error(msg), self.clear_status()))
                     self.media_worker.start()
                 else:
                     # For non-media files or other tabs, use FileContentWorker (loads content)
-                    self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, offset))
-                    self.file_worker.completed.connect(
-                        lambda content, _: self.update_viewer_with_file_content(content, self.current_selected_data))
-                    self.file_worker.error.connect(
-                        lambda msg: (self.log_error(msg), self.clear_status()))
-                    self.file_worker.start()
+                    self._read_file_for(
+                        dict(self.current_selected_data,
+                             inode_number=inode_number, start_offset=offset),
+                        self.current_selected_data)
             else:
                 self.clear_status()
         except Exception as e:
@@ -9830,20 +12286,38 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 content = archives.read_member(archive, name)
                 parent = list(self._archive_stack)
             else:
-                content, _meta = self.image_handler.get_file_content(
+                content, _meta = self._wait_for(
+                    self.image_handler.get_file_content,
                     data['inode_number'], data['start_offset'])
                 parent = []
         except Exception as exc:
             logger.debug("Could not read %s: %s", name, exc)
         if not content:
             self.set_status(f"{name} could not be read.", 5000)
+            message.warning(self, "Show Embedded Files",
+                            f"{name} could not be read from the image.")
             return False
         view = embedded.EmbeddedView(content)
-        if not embedded.list_members(view):
+        members = embedded.list_members(view)
+        if not members:
+            # Most documents and photos embed nothing: said in a dialog,
+            # with what was looked for -- a status line alone read as the
+            # command not working.
             self.set_status(f"{name} embeds no files TRACE can list.", 5000)
+            message.information(
+                self, "Show Embedded Files",
+                f"{name} has no embedded files.",
+                "TRACE looks for: pictures and attached files in PDFs; "
+                "pictures and embedded objects (OLE, packaged files) in "
+                "Word, Excel, PowerPoint and OpenDocument files; objects "
+                "in RTF; and the thumbnail a camera stores in a photo's "
+                "EXIF. Most documents and photos have none.")
             return False
         self._archive_stack = parent + [(name, view, dict(data))]
-        return self.show_archive_level()
+        shown = self.show_archive_level()
+        self.set_status(f"{len(members):,} file(s) embedded in {name} -- "
+                        f"listed like an archive's contents", 6000)
+        return shown
 
     def handle_export(self, data, dest_dir):
         """Export files or folders (one data dict or a list) from the
@@ -9858,18 +12332,30 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if not items or self.image_handler is None:
             return
         evidence = os.path.basename(self.current_image_path or '')
-        progress_dialog = QProgressDialog("Preparing to export...", "Cancel",
-                                          0, 0, self)
-        progress_dialog.setWindowTitle("Exporting Files")
+        progress_dialog = ProgressDialog("Preparing to export…", "Cancel",
+                                         0, 0, self)
+        progress_dialog.setWindowTitle(f"Exporting {len(items):,} item(s)")
+        progress_dialog.set_about(f"From {evidence} to {dest_dir}")
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setMinimumDuration(0)
         progress_dialog.show()
 
         worker = ExportWorker(self.image_handler, items, dest_dir, evidence)
         self.export_worker = worker
+        # What is being copied and how much so far (no total is known for
+        # a folder): the card's busy bar and clock say it is moving.
+        state = {'file': '', 'bytes': 0}
+
+        def shown():
+            done = FileSystemUtils.get_readable_size(state['bytes']) \
+                if state['bytes'] else ''
+            progress_dialog.setLabelText(
+                f"Exporting {state['file']}"
+                + (f" — {done} written" if done else ''))
         worker.status_update.connect(
-            lambda text: progress_dialog.setLabelText(
-                f"Exporting {text}"))
+            lambda text: (state.update(file=text), shown()))
+        worker.progress.connect(
+            lambda written: (state.update(bytes=written), shown()))
         worker.done.connect(
             lambda out, d=progress_dialog, e=evidence, i=items:
             self._export_finished(out, d, e, i))
@@ -9956,7 +12442,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # A finding gets the menu it has in the Triage tab. The nodes
             # that only group bookmarks or findings have nothing to act on --
             # and being top-level, they would otherwise be offered the disk
-            # image's Verify and Image Information below.
+            # image's Verify and Evidence Information below.
             if data and data.get('is_finding'):
                 self.open_finding_menu(
                     data['finding'],
@@ -9967,6 +12453,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                          or data.get('is_tags_group')
                          or data.get('is_activity_root')
                          or data.get('is_activity_group')
+                         or data.get('is_modules_root')
+                         or data.get('is_modules_run')
                          or data.get('is_analysis_root')
                          or data.get('is_analysis_group')
                          or data.get('type') == 'archive-member'):
@@ -10021,7 +12509,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # The row names the image, so describe that one rather than
                 # whichever handler happens to be current.
                 image_path = self._root_image_path(selected_item)
-                view_os_info_action = menu.addAction("View Image Information")
+                view_os_info_action = menu.addAction("Evidence Information")
                 view_os_info_action.triggered.connect(
                     lambda _=False, p=image_path: self.show_image_information_for(p))
 
@@ -10068,7 +12556,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         try:
             # Get directory entries for parent
-            parent_entries = self.image_handler.get_directory_contents(start_offset, parent_inode)
+            parent_entries = self._directory_contents(start_offset, parent_inode)
 
             # Look for parent directory entry (..)
             for entry in parent_entries:
@@ -10590,7 +13078,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         # Create name item with icon
         name_item = QTableWidgetItem(file_name)
-        name_item.setIcon(QIcon(icon_path))
+        name_item.setIcon(icons.cached_icon(icon_path))
         name_item.setData(Qt.UserRole, file_data)
 
         # Create other items
@@ -10683,7 +13171,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.current_path = "/"
 
                 # List the volume's root directory, whichever inode that is.
-                entries = self.image_handler.get_directory_contents(
+                entries = self._directory_contents(
                     start_offset, self.image_handler.get_root_inode(start_offset))
 
                 # Update directory up button - should be disabled since we're at volume root
@@ -10720,7 +13208,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                     self.current_path = posixpath.join(self.current_path, data.get("name", ""))
 
                 # Directories are processed synchronously
-                entries = self.image_handler.get_directory_contents(data["start_offset"], inode_number)
+                entries = self._directory_contents(data["start_offset"], inode_number)
 
                 # Update directory up button state
                 self.update_directory_up_button()
@@ -10753,16 +13241,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 else:
                     self.select_tree_item_by_inode(data.get("inode_number"), data["start_offset"])
 
+                if self._without_record(data):
+                    return
                 if self._show_in_hex_from_image(data):
                     return
                 # Files are processed in a background thread
-                inode_number = data.get("inode_number", 0)
-                self.file_worker = self._retain_worker(self.FileContentWorker(self.image_handler, inode_number, data["start_offset"]))
-                self.file_worker.completed.connect(
-                    lambda content, _: self.update_viewer_with_file_content(content, data))
-                self.file_worker.error.connect(
-                    lambda msg: (self.log_error(msg), self.clear_status()))
-                self.file_worker.start()
+                self._read_file_for(
+                    dict(data, inode_number=data.get("inode_number", 0)),
+                    self.current_selected_data)
 
         except Exception as e:
             self.log_error(f"Error processing listing table click: {str(e)}")

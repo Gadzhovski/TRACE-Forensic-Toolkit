@@ -45,7 +45,10 @@ CATEGORIES = (
     ('communication', 'Messages and calls'),
     ('locations', 'Locations'),
     ('cloud', 'Cloud sync'),
+    ('accounts', 'Accounts and payments'),
+    ('calendar', 'Calendar'),
     ('antivirus', 'Antivirus detections'),
+    ('records', 'Other records'),
 )
 
 #: Larger than this is not read (a 2 GB Security.evtx is real but rare).
@@ -82,13 +85,14 @@ def record(category, source, when, what, subject, detail=None, user='',
 
 class _Entry:
     __slots__ = ('name', 'path', 'inode', 'seq', 'is_dir', 'size', 'deleted',
-                 'created', 'modified', 'is_link')
+                 'created', 'modified', 'changed', 'is_link')
 
 
 def _volumes(image_handler, offset):
     try:
         return Volume.all(image_handler, offset)
-    except Exception:
+    except Exception as exc:
+        logger.debug("Volumes at %s not read: %s", offset, exc)
         return []
 
 
@@ -182,6 +186,7 @@ class Volume:
                                         & pytsk3.TSK_FS_META_FLAG_ALLOC)
                 item.created = times.unix(getattr(meta, 'crtime', 0) or 0)
                 item.modified = times.unix(getattr(meta, 'mtime', 0) or 0)
+                item.changed = times.unix(getattr(meta, 'ctime', 0) or 0)
                 out.append(item)
         self._cache[key] = out
         return out
@@ -281,6 +286,7 @@ class Volume:
             item.deleted = True
             item.created = times.unix(getattr(meta, 'crtime', 0) or 0)
             item.modified = times.unix(getattr(meta, 'mtime', 0) or 0)
+            item.changed = times.unix(getattr(meta, 'ctime', 0) or 0)
             out.append(item)
         return out
 
@@ -431,9 +437,37 @@ def _other_systems(volume, step):
         out += linux.collect(volume, step, homes)
     if macos.is_macos(volume):
         out += macos.collect(volume, step, homes)
+    # Remote Desktop and VNC connection files, an Android RDP client.
+    from trace_app.core.activity import remote_access
+    try:
+        out += remote_access.collect(volume, step, homes)
+    except ActivityCancelled:
+        raise
+    except Exception as exc:
+        logger.warning("Remote access files not read: %s", exc)
+    from trace_app.core.activity import chromeos
+    if chromeos.is_chromeos(volume):
+        out += chromeos.collect(volume, step)
+    # Vim, LibreOffice and web server logs, wherever they are.
+    from trace_app.core.activity import linux_extras
+    try:
+        out += linux_extras.any_system(volume, step, homes)
+    except ActivityCancelled:
+        raise
+    except Exception as exc:
+        logger.warning("Vim / LibreOffice / web logs not read: %s", exc)
     # Any Mac-formatted volume keeps FSEvents, an external drive too.
     from trace_app.core.activity import fsevents
     out += fsevents.activity(volume, step)
+    # Spotlight's stores: the volume's own index (an external drive has
+    # one too), each user's CoreSpotlight, an iPhone's.
+    from trace_app.core.activity import spotlight
+    try:
+        out += spotlight.collect(volume, step, homes)
+    except ActivityCancelled:
+        raise
+    except Exception as exc:
+        logger.warning("Spotlight not read: %s", exc)
     # Apple's unified log wherever it is: a Mac's /private/var/db, an
     # iPhone's file system, a collection or a .logarchive.
     from trace_app.core.activity import unified_log
@@ -442,11 +476,69 @@ def _other_systems(volume, step):
     except Exception as exc:
         logger.warning("Unified log not read: %s", exc)
     out += chat.collect(volume, step, homes)
+    # Biome (SEGB) streams on a Mac or an iPhone; app focus, screen,
+    # now-playing, Wi-Fi -- what KnowledgeC used to hold.
+    out += _biome(volume, step, homes)
     # Phones: an iPhone backup or file system, an Android extraction.
     from trace_app.core.activity import mobile
     out += mobile.collect(volume, step)
     out += _ufdr(volume, step)
     return out
+
+
+#: Where Biome keeps its SEGB streams, on macOS and iOS.
+_BIOME_ROOTS = (
+    ('private', 'var', 'db', 'biome', 'streams'),
+    ('private', 'var', 'mobile', 'Library', 'Biome', 'streams'),
+    ('private', 'var', 'Biome', 'streams'),
+    # Duet's own streams (app launches, app kills) on iOS.
+    ('private', 'var', 'mobile', 'Library', 'DuetActivityScheduler', 'Biome'),
+)
+#: Each user's Biome on macOS 13+ (under the home folder).
+_USER_BIOME = ('Library', 'Biome', 'streams')
+#: Folders inside a stream that are not its name.
+_BIOME_PARTS = ('local', 'remote', 'tombstone', 'public', 'restricted')
+
+
+def _biome(volume, step, homes=()):
+    """Every SEGB stream under a Biome tree: SEGB files (numbered) in
+    …/<stream>/local, and the records it pruned in …/local/tombstone."""
+    from trace_app.core.activity import biome
+    out = []
+    roots = [volume.find(*parts) for parts in _BIOME_ROOTS]
+    roots += [volume.find(*_split(home.path), *_USER_BIOME)
+              for _user, home in homes]
+    for root in roots:
+        if root is None or not root.is_dir:
+            continue
+        for stream_name, entry in _biome_files(volume, root):
+            data = volume.read(entry)
+            if biome.version(data) is None:
+                continue
+            step(entry.path)
+            try:
+                out += biome.records(data, stream_name, entry.path,
+                                     volume.ref(entry))
+            except Exception as exc:
+                logger.debug("Biome %s: %s", entry.path, exc)
+    return out
+
+
+def _biome_files(volume, root, folders=(), depth=0):
+    """(stream name, file entry) for every file under a Biome root. The
+    stream is the innermost folder that is not 'local', 'tombstone'...;
+    a tombstone file's records are marked '(tombstone)'."""
+    if depth > 6:
+        return
+    for child in volume.children(root, dirs=True):
+        yield from _biome_files(volume, child, (*folders, child.name),
+                                depth + 1)
+    names = [f for f in folders if f.lower() not in _BIOME_PARTS]
+    stream = names[-1] if names else root.name
+    if any(f.lower() == 'tombstone' for f in folders):
+        stream += ' (tombstone)'
+    for child in volume.children(root):
+        yield stream, child
 
 
 def _ufdr(volume, step):
@@ -480,6 +572,8 @@ def _ufdr(volume, step):
 
 
 def _windows(volume, step):
+    from trace_app.core.activity import (defender, notepad, powershell,
+                                         windows_logs, wlan)
     windows = volume.find('Windows') or volume.find('WINNT')
     out = []
     users = _profiles(volume)
@@ -492,7 +586,6 @@ def _windows(volume, step):
         out += _setupapi(volume, windows, step)
         out += _event_logs(volume, windows, step, sids)
         out += _srum(volume, windows, step, sids)
-        from trace_app.core.activity import windows_logs
         out += windows_logs.firewall_records(volume, windows, step)
     out += _recycle_bin(volume, sids, step)
     for user, home in users:
@@ -500,12 +593,9 @@ def _windows(volume, step):
         out += _user_shortcuts(volume, user, home, step)
         out += _ie_history(volume, user, home, step)
         out += _windows_timeline(volume, user, home, step)
-        from trace_app.core.activity import notepad, powershell
         out += powershell.history(volume, user, home, step)
         out += notepad.records(volume, user, home, step)
-        from trace_app.core.activity import windows_logs
         out += windows_logs.transcript_records(volume, user, home, step)
-    from trace_app.core.activity import defender, windows_logs, wlan
     out += defender.records(volume, step)
     out += wlan.records(volume, step)
     out += windows_logs.wer_records(volume, step, users)
@@ -679,6 +769,8 @@ def _software_hive(volume, windows, step):
         return []
     common = dict(path=entry.path, ref=volume.ref(entry))
     out = []
+    from trace_app.core.activity import remote_access
+    out += remote_access.software_records(hive, common)
     install = registry.windows_install(hive)
     if install and install['installed']:
         out.append(record(
@@ -1164,6 +1256,9 @@ def _user_registry(volume, user, home, step):
                      'basis': 'when this user last mounted it (key last '
                               'written); a volume GUID matches the USB '
                               'device that carried it'}, **common))
+            # Remote Desktop servers and VPN portals the user reached.
+            from trace_app.core.activity import remote_access
+            out += remote_access.ntuser_records(hive, common)
     if usrclass is not None:
         step(usrclass.path)
         hive = _hive(volume, usrclass)
@@ -1233,7 +1328,8 @@ def _user_shortcuts(volume, user, home, step):
             step(entry.path)
             try:
                 items = parse(volume.read(entry))
-            except Exception:
+            except Exception as exc:
+                logger.debug("Jump list %s not read: %s", entry.path, exc)
                 continue
             app_id, app = jumplists.app_name(entry.name)
             for item in items:
@@ -1294,9 +1390,37 @@ def _homes(volume):
     return homes
 
 
-def _browsers(volume, step):
-    from trace_app.core.activity import chromium_storage
+def _chromium_profile(volume, parts, name, browser, user, step):
+    """Everything in one Chromium profile folder."""
+    from trace_app.core.activity import chromium_extras, chromium_storage
     out = []
+    # What sites kept: Local and Session Storage, IndexedDB.
+    if chromium_storage.has_storage(volume, parts):
+        out += chromium_storage.profile_records(volume, parts, browser,
+                                                user, step)
+    # Cookies, form entries, saved logins (no passwords), top sites,
+    # favicons, shortcuts, media, offline pages, extensions.
+    out += chromium_extras.profile_records(volume, parts, browser, user,
+                                           step, name)
+    history = volume.find(*parts, 'History')
+    if history is not None and not history.is_dir:
+        step(history.path)
+        out += _history(volume.read(history), None, user, history.path,
+                        volume.ref(history),
+                        browsers.browser_name(history.path) or browser,
+                        profile=name)
+    return out
+
+
+def _browsers(volume, step):
+    from trace_app.core.activity import chromeos, chromium_storage
+    out = []
+    # ChromeOS: a user's folder is itself Chrome's profile.
+    for user, profile in chromeos.profiles(volume):
+        parts = _split(profile.path) if profile is not None else []
+        out += _chromium_profile(volume, parts,
+                                 profile.name if profile else '',
+                                 'Chrome (ChromeOS)', user, step)
     for user, home in _homes(volume):
         base = _split(home.path)
         for parts in _CHROMIUM_HOMES:
@@ -1305,28 +1429,10 @@ def _browsers(volume, step):
                 continue
             profiles = [folder] + volume.children(folder, dirs=True)
             for profile in profiles:
-                # What sites kept: Local and Session Storage, IndexedDB.
-                if chromium_storage.has_storage(volume,
-                                                _split(profile.path)):
-                    out += chromium_storage.profile_records(
-                        volume, _split(profile.path),
-                        browsers.browser_name(profile.path + '\\') or
-                        'Chromium', user, step)
-                # Cookies, form entries, saved logins (no passwords), top
-                # sites and favicons.
-                from trace_app.core.activity import chromium_extras
-                out += chromium_extras.profile_records(
-                    volume, _split(profile.path),
+                out += _chromium_profile(
+                    volume, _split(profile.path), profile.name,
                     browsers.browser_name(profile.path + '\\') or
-                    'Chromium', user, step, profile.name)
-                history = volume.find(*_split(profile.path), 'History')
-                if history is None or history.is_dir:
-                    continue
-                step(history.path)
-                out += _history(volume.read(history), None, user,
-                                history.path, volume.ref(history),
-                                browsers.browser_name(history.path)
-                                or 'Chromium', profile=profile.name)
+                    'Chromium', user, step)
         for parts in _FIREFOX_HOMES:
             folder = volume.find(*base, *parts)
             for profile in volume.children(folder, dirs=True):
@@ -1340,6 +1446,10 @@ def _browsers(volume, step):
                                     volume.read(wal) if wal else None, user,
                                     entry.path, volume.ref(entry), 'Firefox',
                                     profile=profile.name)
+                # Cookies (values never copied) and form history.
+                from trace_app.core.activity import chromium_extras
+                out += chromium_extras.firefox_records(
+                    volume, _split(profile.path), user, step, profile.name)
         # Electron apps: each a Chromium profile of its own.
         for app, places in chromium_storage.ELECTRON_APPS.items():
             for parts in places:
@@ -1420,7 +1530,8 @@ def run_evidence(image_handler, case, evidence_id, progress=None,
         try:
             data = read_carved(image_handler.read, row['offset'],
                                row['size'], row.get('fragments'))
-        except Exception:
+        except Exception as exc:
+            logger.debug("Carved %s not read back: %s", row.get('name'), exc)
             data = None
         if not data:
             continue
@@ -1432,7 +1543,9 @@ def run_evidence(image_handler, case, evidence_id, progress=None,
             try:
                 wal = read_carved(image_handler.read, related['offset'],
                                   related['size'])
-            except Exception:
+            except Exception as exc:
+                logger.debug("WAL paired with carved %s not read back: %s",
+                             row.get('name'), exc)
                 wal = None
         carved.append((f"carved {row['name']}", data,
                        row.get('artifact_ref') or '', wal))
@@ -1455,10 +1568,25 @@ def run_evidence(image_handler, case, evidence_id, progress=None,
     except Exception as exc:
         case.set_user_activity_state(evidence_id, 'failed', last_error=str(exc))
         raise
+    # The kinds the case keeps (case setting activity_categories).
+    # Only a kind the examiner could untick is ever left out: a reader's
+    # own kind outside the list ('web': Chromium storage) is kept -- it
+    # was dropped whatever the setting said.
+    from trace_app.core import settings as case_settings
+    known = {key for key, _label in CATEGORIES}
+    kept = case_settings.chosen('activity_categories', known)
+    dropped = known - kept
+    left_out = sum(1 for r in records if r['category'] in dropped)
+    if left_out:
+        records = [r for r in records if r['category'] not in dropped]
+        logger.info("%d activity record(s) of kinds the case leaves out "
+                    "not kept", left_out)
     case.clear_user_activity(evidence_id)
     for start in range(0, len(records), 1000):
         case.add_user_activity(evidence_id, records[start:start + 1000])
     case.commit()
+    # What an external module read of the same records: linked again.
+    case.relink_matches(evidence_id)
     case.set_user_activity_state(evidence_id, 'done', records=len(records))
     logger.info("Read %d activity record(s) from evidence %s", len(records),
                 evidence_id)

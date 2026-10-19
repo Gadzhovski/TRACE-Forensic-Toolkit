@@ -9,10 +9,11 @@ import logging
 import os
 
 from PySide6.QtCore import QEventLoop, Qt, QThread, Signal
-from PySide6.QtWidgets import QFileDialog, QProgressDialog
+from PySide6.QtWidgets import QFileDialog
 
 from trace_app.core import case_archive
 from trace_app.ui.dialogs import message
+from trace_app.ui.widgets.progress_card import ProgressDialog
 
 logger = logging.getLogger('TRACE.CaseArchive')
 
@@ -44,7 +45,7 @@ class _Work(QThread):
 def _run(parent, title, function):
     """Run `function(progress, should_stop)` on a thread behind a progress
     dialog. Returns its result; None when cancelled; raises its error."""
-    dialog = QProgressDialog(title, "Cancel", 0, 1000, parent)
+    dialog = ProgressDialog("Starting…", "Cancel", 0, 1000, parent)
     dialog.setWindowTitle(title)
     dialog.setWindowModality(Qt.WindowModal)
     dialog.setMinimumDuration(300)
@@ -54,7 +55,7 @@ def _run(parent, title, function):
 
     def moved(done, total, what):
         dialog.setValue(int(done * 1000 / total) if total else 0)
-        dialog.setLabelText(f"{title}\n{what}")
+        dialog.setLabelText(what)
 
     work.progressed.connect(moved)
     dialog.canceled.connect(lambda: setattr(work, 'cancelled', True))

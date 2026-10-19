@@ -9,16 +9,14 @@ in context. Landing on a file previews it; double-click goes to its folder.
 import logging
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView,
-                               QLabel, QPushButton, QSizePolicy, QSplitter,
-                               QTableWidget, QTableWidgetItem, QVBoxLayout,
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+                               QSplitter, QTableWidgetItem, QVBoxLayout,
                                QWidget)
 
 from trace_app.core import keywords
-from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui.viewers.virustotal import verdict_brush
-from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets.tables import finding_table
 from trace_app.ui.widgets.row_preview import connect_row_preview
 
 logger = logging.getLogger('TRACE.KeywordsPanel')
@@ -75,12 +73,12 @@ class KeywordsPanel(QWidget):
         splitter = QSplitter(Qt.Vertical)
         splitter.setObjectName("indicatorSplitter")
         layout.addWidget(splitter, 1)
-        self.terms_table = self._table(['Term', 'List', 'Type', 'Files',
+        self.terms_table = finding_table(['Term', 'List', 'Type', 'Files',
                                         'Hits', 'Note'])
         self.terms_table.setSortingEnabled(True)
         self.terms_table.itemSelectionChanged.connect(self._fill_files)
         splitter.addWidget(self.terms_table)
-        self.files_table = self._table(['Name', 'Evidence', 'Hits',
+        self.files_table = finding_table(['Name', 'Evidence', 'Hits',
                                         'Context', 'Size', 'Path'])
         connect_row_preview(self.files_table, self.file_selected.emit)
         self.files_table.itemDoubleClicked.connect(
@@ -91,23 +89,6 @@ class KeywordsPanel(QWidget):
         splitter.addWidget(self.files_table)
         splitter.setSizes([260, 240])
         self.refresh()
-
-    @staticmethod
-    def _table(headers):
-        table = QTableWidget()
-        table.setObjectName("triageTable")
-        table.setColumnCount(len(headers))
-        table.setHorizontalHeaderLabels(headers)
-        table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(TABLE_ROW_HEIGHT)
-        table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        table.setSelectionMode(QAbstractItemView.SingleSelection)
-        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        table.setItemDelegate(NoFocusDelegate(table))
-        table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.Interactive)
-        table.horizontalHeader().setStretchLastSection(True)
-        return table
 
     # --- what to show ----------------------------------------------------
 

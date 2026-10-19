@@ -445,3 +445,108 @@ def test_the_python_udif_reader_agrees_with_libmodi():
     finally:
         ours.close()
         theirs.close()
+
+
+
+# --- a folder's walk: fast, and numbered as before ---------------------------
+
+def _old_folder_nodes(root):
+    """The walk open_folder made before (os.walk + an lstat per entry),
+    kept here as the reference: a node's number is its place in the walk,
+    and cases' tags, bookmarks and staging manifests point at numbers."""
+    import os
+    import stat as stat_
+    from trace_app.core.logical import ROOT
+    from trace_app.core.logical_sources import _stat_times
+    nodes, inodes, number = [], {root: ROOT}, [ROOT]
+
+    def add(parent, name, is_dir, size, times):
+        number[0] += 1
+        nodes.append((number[0], parent, name, is_dir, size, times))
+        return number[0]
+
+    for folder, names, files in os.walk(root):
+        names.sort(key=str.lower)
+        parent = inodes.get(folder)
+        if parent is None:
+            continue
+        for name in sorted(names, key=str.lower):
+            full = os.path.join(folder, name)
+            info = os.lstat(full)
+            if stat_.S_ISLNK(info.st_mode):
+                continue
+            inodes[full] = add(parent, name, True, 0, _stat_times(info))
+        for name in sorted(files, key=str.lower):
+            full = os.path.join(folder, name)
+            info = os.lstat(full)
+            if not stat_.S_ISREG(info.st_mode):
+                continue
+            add(parent, name, False, info.st_size, _stat_times(info))
+    return nodes
+
+
+def _new_folder_nodes(root):
+    from trace_app.core.logical import ROOT
+    from trace_app.core.logical_sources import open_folder
+    fs = open_folder(root)
+    return [(node.inode, node.parent, node.name, node.is_dir, node.size,
+             node.times)
+            for inode, node in sorted(fs.nodes.items()) if inode != ROOT]
+
+
+def test_a_folder_is_numbered_as_it_always_was(tmp_path):
+    import os
+    import random
+    root = tmp_path / 'evidence'
+    rng = random.Random(7)
+    # Case traps (b before C, a before B), nesting, empty files and
+    # folders, names that sort differently by case.
+    for top in ('a', 'B', 'c', 'Data', 'data_2', 'Z'):
+        for middle in range(4):
+            folder = root / top / f"{'Mid' if middle % 2 else 'mid'}{middle}"
+            folder.mkdir(parents=True)
+            for leaf in range(rng.randint(0, 6)):
+                (folder / f"{'F' if leaf % 3 else 'f'}ile{leaf}.bin") \
+                    .write_bytes(os.urandom(rng.randint(0, 64)))
+    (root / 'empty').mkdir()
+    (root / 'README.txt').write_text('x')
+    (root / 'b.txt').write_text('')
+    try:                            # where the OS lets a test make links
+        os.symlink(root / 'a', root / 'link_to_a', target_is_directory=True)
+        os.symlink(root / 'README.txt', root / 'link_to_readme')
+    except (OSError, NotImplementedError):
+        pass
+    old, new = _old_folder_nodes(str(root)), _new_folder_nodes(str(root))
+    assert len(new) > 50
+
+    # Access times aside: the first walk reading a folder updates its
+    # access time (Linux relatime), and Windows' folder listing keeps
+    # access times lazily -- either way the reader's own trace, not
+    # evidence. Numbering, names, sizes, modified/created times are equal.
+    def without_access(nodes):
+        return [node[:5] + ({k: v for k, v in node[5].items()
+                             if k != 'atime'},) for node in nodes]
+
+    assert without_access(new) == without_access(old)
+    names = {node[2] for node in new}
+    assert 'link_to_a' not in names and 'link_to_readme' not in names
+
+
+def test_a_junction_is_not_followed_out_of_the_folder(tmp_path):
+    import subprocess
+    import sys
+    if sys.platform != 'win32':
+        pytest.skip("junctions are Windows'")
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'secret.txt').write_text('not evidence')
+    root = tmp_path / 'evidence'
+    root.mkdir()
+    (root / 'kept.txt').write_text('evidence')
+    made = subprocess.run(['cmd', '/c', 'mklink', '/J',
+                           str(root / 'junction'), str(outside)],
+                          capture_output=True)
+    if made.returncode:
+        pytest.skip("mklink /J is not available")
+    names = {node[2] for node in _new_folder_nodes(str(root))}
+    assert names == {'kept.txt'}

@@ -35,7 +35,7 @@ import stat
 import struct
 import zlib
 
-from trace_app.core.libyal_fs import LibyalFileSystem
+from trace_app.core.libyal_fs import LibyalFileSystem, PathLookup
 
 logger = logging.getLogger('TRACE.EROFS')
 
@@ -611,7 +611,7 @@ class ErofsEntry:
         return self._inode.read(offset, length)
 
 
-class _Volume:
+class _Volume(PathLookup):
     """libyal's volume vocabulary over an ErofsImage."""
 
     def __init__(self, image):
@@ -648,16 +648,9 @@ class _Volume:
                         pending.append(child)
         return self._names
 
-    def get_file_entry_by_path(self, path):
-        entry = self.get_root_directory()
-        for part in [p for p in path.replace('\\', '/').split('/') if p]:
-            for index, (name, _nid, _kind) in enumerate(entry._list()):
-                if name.decode('utf-8', 'surrogateescape') == part:
-                    entry = entry.get_sub_file_entry(index)
-                    break
-            else:
-                return None
-        return entry
+    def _names_in(self, entry):
+        return [name.decode('utf-8', 'surrogateescape')
+                for name, *_ in entry._list()]
 
     def close(self):
         self.image._inodes.clear()
@@ -710,5 +703,3 @@ def open_erofs(source):
         return None
 
 
-def is_erofs_fs(fs):
-    return isinstance(fs, ErofsFileSystem)

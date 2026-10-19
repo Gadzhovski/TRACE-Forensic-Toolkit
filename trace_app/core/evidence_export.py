@@ -90,11 +90,15 @@ def unique_path(folder, name):
         number += 1
 
 
-def write_verified(target, read, size, should_stop=None, progress=None):
+def write_verified(target, read, size, should_stop=None, progress=None,
+                   sync=True):
     """Write `size` bytes from read(offset, length) to `target`, hashing
     them; check the written copy. Returns the digests plus
     'written_copy_check'. Raises HashingError (nothing left behind) when
-    the source cannot be read in full."""
+    the source cannot be read in full. `sync=False` leaves flushing to
+    the system -- for working copies made by the thousand (the files an
+    external tool reads), where a flush per file was most of the time;
+    the copy is still read back and checked."""
     partial = target + '.part'
     hashers = evidence_hash.new_hashers()
     position = 0
@@ -121,7 +125,8 @@ def write_verified(target, read, size, should_stop=None, progress=None):
                 if progress is not None:
                     progress(len(data))
             handle.flush()
-            os.fsync(handle.fileno())
+            if sync:
+                os.fsync(handle.fileno())
         os.replace(partial, target)
     except BaseException:
         try:
@@ -131,8 +136,9 @@ def write_verified(target, read, size, should_stop=None, progress=None):
         raise
     digests = evidence_hash.digests(hashers, position)
     try:
-        written = evidence_hash.hash_file(target)['sha256']
-    except evidence_hash.HashingError as exc:
+        # The SHA-256 alone: it is all the check compares.
+        written = evidence_hash.sha256_file(target)
+    except (OSError, evidence_hash.HashingError) as exc:
         written = None
         digests['written_copy_check'] = f"could not be read back: {exc}"
     else:

@@ -27,6 +27,8 @@ import sqlite3
 import tempfile
 import zipfile
 
+from trace_app.core.evidence_hash import sha256_file
+
 logger = logging.getLogger('TRACE.CaseArchive')
 
 SUFFIX = '.trace'
@@ -49,14 +51,6 @@ class ArchiveError(Exception):
 
 class ArchiveCancelled(Exception):
     """The examiner stopped it."""
-
-
-def _sha256_file(path):
-    digest = hashlib.sha256()
-    with open(path, 'rb') as handle:
-        for block in iter(lambda: handle.read(_BLOCK), b''):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _backup(source, target):
@@ -187,7 +181,7 @@ def write_archive(details, path, include_index=True, progress=None,
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    sha256 = _sha256_file(path)
+    sha256 = sha256_file(path)
     with open(path + '.sha256', 'w', encoding='utf-8') as handle:
         handle.write(f"{sha256}  {os.path.basename(path)}\n")
     return {'path': path, 'sha256': sha256, 'members': len(members),
@@ -288,7 +282,7 @@ def unpack_archive(path, folder, progress=None, should_stop=None):
     """Check every member against the manifest, then unpack into `folder`
     (absent or empty) -- any thread. Returns {'manifest', 'sha256'}.
     Nothing is written when a member fails its check."""
-    sha256 = _sha256_file(path)
+    sha256 = sha256_file(path)
     manifest, problems = check_archive(path, progress, should_stop)
     if problems:
         raise ArchiveError("The archive does not match its manifest:\n"

@@ -28,7 +28,8 @@ PAGES = (
     ("General", icons.SETTINGS,
      "Who you are, where cases start, how sizes read. Kept for you on this "
      "computer, in every case.",
-     ((None, 'user', ('examiner', 'organisation', 'case_folder')),
+     ((None, 'user', ('examiner', 'organisation', 'case_folder',
+                      'modules_folder')),
       ("Working", 'user', ('size_units', 'verify_order',
                            'worker_processes')),
       ("Troubleshooting", 'user', ('debug_log',)))),
@@ -40,7 +41,11 @@ PAGES = (
     ("Privacy & Network", icons.VOLUME_LOCKED,
      "Whether anything from this case may leave this computer.",
      ((None, 'case', ('offline', 'vt_uploads')),
-      ("This computer", 'user', ('check_updates',)))),
+      ("This computer", 'user', ('check_updates', 'check_updates_at_start')))),
+    ("API Keys", icons.API_KEYS,
+     "Your own keys for the online services TRACE can use. Kept for you on "
+     "this computer -- never in a case, a report or the log.",
+     ((None, 'keys', ('virustotal', 'google_maps')),)),
     ("Analysis", icons.TRIAGE,
      "What the analysis modules hash, read and extract.",
      (("Hashes", 'case', ('hash_md5', 'hash_sha1')),
@@ -50,6 +55,17 @@ PAGES = (
       ("Search index", 'case', ('index_unallocated',
                                 'index_memory_files')),
       ("Indicators", 'case', ('indicators',)))),
+    ("Results", icons.TIMELINE_FILTER,
+     "What TRACE keeps and where it shows it: the Activity tab and Triage, "
+     "the Timeline, Search and the report. On a large phone or Mac "
+     "extraction, keeping out what you do not need is also what keeps "
+     "TRACE quick.",
+     (("TRACE's own results", 'case', ('activity_categories',
+                                       'timeline_activity_categories',
+                                       'timeline_sources')),
+      ("External tools (iLEAPP, aLEAPP, ...)", 'case', (
+          'module_destinations', 'module_import_rows',
+          'module_link_readings')))),
     ("Carving & Exports", icons.FINDING_CARVED,
      "How files are carved, and where copies and exports are written.",
      (("Carving", 'case', ('carve_source', 'carve_min_kb', 'analyse_carves',
@@ -70,6 +86,7 @@ RANGES = {
     'archive_member_mb': (1, 4096, None),
     'carve_min_kb': (0, 1024 * 1024, None),
     'worker_processes': (0, 64, None),
+    'module_import_rows': (0, 100_000_000, None),
 }
 
 CHOICES = {
@@ -79,7 +96,42 @@ CHOICES = {
     'ui_scale': ui_scale.SCALES,
 }
 
-FOLDERS = ('case_folder', 'carved_folder', 'export_folder')
+FOLDERS = ('case_folder', 'modules_folder', 'carved_folder',
+           'export_folder')
+
+
+def _activity_kinds():
+    from trace_app.core.activity import CATEGORIES
+    return list(CATEGORIES)
+
+
+def _timeline_sources():
+    from trace_app.core import timeline
+    return [(key, label) for key, label, _colour in timeline.SOURCES]
+
+
+#: List settings shown as ticks: key -> (options as [(value, label)],
+#: columns). Every option ticked is stored as [] -- "all", which takes in
+#: what a later TRACE adds (settings.ALL_WHEN_EMPTY).
+TICK_LISTS = {
+    'activity_categories': (_activity_kinds, 2),
+    'timeline_activity_categories': (_activity_kinds, 2),
+    'timeline_sources': (_timeline_sources, 3),
+}
+
+#: The API Keys page's keys (infra/api_keys.py names): label and help.
+API_KEYS = {
+    'virustotal': (
+        "VirusTotal API key",
+        "Used for VirusTotal ▸ Look Up Hash and Upload File on a file's "
+        "menu. A free key allows four lookups a minute and 500 a day."),
+    'google_maps': (
+        "Google Maps API key",
+        "A Google Maps Platform key with the Map Tiles API enabled (Google "
+        "Cloud console). Used only for the Map's Google styles, and only "
+        "after you agree to fetch tiles; Google bills the key's project "
+        "past its free monthly allowance."),
+}
 
 INDICATOR_LABELS = {
     'email': "E-mail addresses", 'url': "URLs", 'domain': "Domains",
@@ -102,6 +154,8 @@ class SettingsDialog(QDialog):
         self.case_values = settings.for_case(case)
         self.editors = {}          # (scope, key) -> (widget, read function)
         self.changed = {}          # filled on accept: case keys changed
+        #: Filled on accept: the API keys changed, {name: new key}.
+        self.keys_changed = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -149,6 +203,14 @@ class SettingsDialog(QDialog):
     def show_page(self, index):
         self.nav.setCurrentRow(index)
 
+    def show_page_named(self, title):
+        """Open on the page called `title` (Options ▸ API Keys did)."""
+        for index, page in enumerate(PAGES):
+            if page[0] == title:
+                self.show_page(index)
+                return True
+        return False
+
     # --- building ---------------------------------------------------------
 
     def _page(self, title, intro, sections):
@@ -178,6 +240,8 @@ class SettingsDialog(QDialog):
             note.setObjectName("settingsScopeNote")
             note.setWordWrap(True)
             column.addWidget(note)
+        if any(scope == 'keys' for _heading, scope, _keys in sections):
+            column.addWidget(self._keys_note())
 
         for section, scope, keys in sections:
             if section:
@@ -204,9 +268,58 @@ class SettingsDialog(QDialog):
         scroll.setWidget(content)
         return scroll
 
+    def _key_row(self, key):
+        """An API key: its name, a hidden field with Show beside it, what
+        it is for -- laid out as every other setting."""
+        from trace_app.infra import api_keys
+        label, help_text = API_KEYS[key]
+        edit = QLineEdit(api_keys.get(key))
+        edit.setObjectName("apiKeyField")
+        edit.setEchoMode(QLineEdit.Password)
+        edit.setPlaceholderText("Not set")
+        edit.setToolTip(help_text)
+        show = QPushButton("Show")
+        show.setCheckable(True)
+        show.setToolTip("Show or hide the key")
+
+        def shown(on):
+            edit.setEchoMode(QLineEdit.Normal if on else QLineEdit.Password)
+            show.setText("Hide" if on else "Show")
+        show.toggled.connect(shown)
+        self.editors[('keys', key)] = (edit, lambda: edit.text().strip())
+
+        row = QWidget()
+        row.setObjectName("settingsRow")
+        lines = QVBoxLayout(row)
+        lines.setContentsMargins(0, 12, 0, 0)
+        lines.setSpacing(5)
+        name = QLabel(label)
+        name.setObjectName("settingsLabel")
+        name.setBuddy(edit)
+        lines.addWidget(name)
+        field = QHBoxLayout()
+        field.addWidget(edit, 1)
+        field.addWidget(show)
+        lines.addLayout(field)
+        hint = QLabel(help_text)
+        hint.setObjectName("settingsHint")
+        hint.setWordWrap(True)
+        lines.addWidget(hint)
+        return row
+
+    def _keys_note(self):
+        from trace_app.infra import api_keys
+        note = QLabel(f"Keys are kept in {api_keys.store_name()}. Leave a "
+                      "field empty to remove its key.")
+        note.setObjectName("settingsScopeNote")
+        note.setWordWrap(True)
+        return note
+
     def _row(self, scope, key):
         """A setting: its label (or the checkbox itself), the editor, and
         its explanation in the page's full width under it."""
+        if scope == 'keys':
+            return self._key_row(key)
         spec = (settings.USER if scope == 'user' else settings.CASE)[key]
         values = self.user_values if scope == 'user' else self.case_values
         widget, read = self._editor(key, spec, values[key])
@@ -263,6 +376,10 @@ class SettingsDialog(QDialog):
         default = spec[0]
         if key == 'indicators':
             return self._indicators(value)
+        if key in TICK_LISTS:
+            return self._ticks(key, value)
+        if key == 'module_destinations':
+            return self._destinations(value)
         if key in FOLDERS:
             return self._folder(key, value)
         if key in CHOICES:
@@ -305,7 +422,8 @@ class SettingsDialog(QDialog):
         row = QHBoxLayout(holder)
         row.setContentsMargins(0, 0, 0, 0)
         edit = QLineEdit(value or '')
-        edit.setPlaceholderText("Default" if key == 'case_folder' else
+        edit.setPlaceholderText("Default" if key in ('case_folder',
+                                                    'modules_folder') else
                                 "The case's own folder")
         browse = QPushButton("Browse...")
 
@@ -336,6 +454,138 @@ class SettingsDialog(QDialog):
         holder.boxes = boxes
         return holder, lambda: [kind for kind, box in boxes.items()
                                 if box.isChecked()]
+
+    def _ticks(self, key, value):
+        """Ticks for a list setting whose empty value means all (Results
+        page): All / None beside them."""
+        options, columns = TICK_LISTS[key]
+        options = options()
+        every = not value
+        if key == 'timeline_sources' and every:
+            from trace_app.core import timeline
+            value = timeline.default_sources()
+            every = False
+        holder = QWidget()
+        lines = QVBoxLayout(holder)
+        lines.setContentsMargins(0, 2, 0, 2)
+        lines.setSpacing(6)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(24)
+        grid.setVerticalSpacing(8)
+        boxes = {}
+        rows = (len(options) + columns - 1) // columns
+        for index, (option, label) in enumerate(options):
+            box = QCheckBox(label)
+            box.setChecked(every or option in value)
+            boxes[option] = box
+            # Down the columns, as a list reads.
+            grid.addWidget(box, index % rows, index // rows)
+        lines.addLayout(grid)
+        quick = QHBoxLayout()
+        quick.setSpacing(6)
+        for text, state in (("All", True), ("None", False)):
+            button = QPushButton(text)
+            button.setObjectName("settingsSmallButton")
+            button.clicked.connect(
+                lambda _c=False, s=state: [b.setChecked(s)
+                                           for b in boxes.values()])
+            quick.addWidget(button)
+        quick.addStretch(1)
+        lines.addLayout(quick)
+        holder.boxes = boxes
+
+        def read():
+            ticked = [option for option, box in boxes.items()
+                      if box.isChecked()]
+            if key == 'timeline_sources':
+                from trace_app.core import timeline
+                default = [k for k, _l, _c in timeline.SOURCES if k != 'case']
+                return [] if ticked == default else ticked
+            return [] if len(ticked) == len(boxes) else ticked
+        return holder, read
+
+    def _destinations(self, value):
+        """Where an external tool's results go: a role per row (evidence,
+        other records, telemetry), a place per column (Activity & Triage,
+        Timeline, Search, Report), and what the case holds of each."""
+        from trace_app.core.modules import destinations
+        value = destinations.normalise(value)
+        holder = QWidget()
+        holder.boxes = {}
+        lines = QVBoxLayout(holder)
+        lines.setContentsMargins(0, 2, 0, 2)
+        lines.setSpacing(6)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(6)
+        for column, (_place, label) in enumerate(destinations.PLACES,
+                                                 start=1):
+            head = QLabel(label)
+            head.setObjectName("settingsLabel")
+            grid.addWidget(head, 0, column, Qt.AlignCenter)
+        held = self._module_rows()
+        place_help = {
+            'activity': "Evidence: a row per record in Activity, "
+                        "Conversations and the Map. Others: the Activity ▸ "
+                        "Others tabs, read from the tool's database.",
+            'timeline': "An event per timestamp of each row -- copied "
+                        "into the case.",
+            'search': "Each row's text in the search index, its phones, "
+                      "addresses and links in Indicators -- copied into "
+                      "the case.",
+            'report': "Evidence: the tool's records in the report's "
+                      "Activity and Conversations. Others: listed among "
+                      "the run's artifacts.",
+        }
+        for row, (role, label, about) in enumerate(destinations.ROLES,
+                                                   start=1):
+            name = QLabel(label)
+            name.setObjectName("settingsLabel")
+            count = held.get(role)
+            name.setToolTip(about + (
+                f"\nIn this case: {count[1]:,} rows in {count[0]:,} "
+                f"artifacts." if count else ''))
+            grid.addWidget(name, row * 2 - 1, 0)
+            words = QLabel(about + (
+                f" In this case: {count[1]:,} rows in {count[0]:,} "
+                f"artifact(s)." if count else ''))
+            words.setObjectName("settingsHint")
+            words.setWordWrap(True)
+            grid.addWidget(words, row * 2, 0, 1, len(destinations.PLACES) + 1)
+            for column, (place, place_label) in enumerate(
+                    destinations.PLACES, start=1):
+                box = QCheckBox()
+                box.setObjectName("settingsMatrixBox")
+                box.setChecked(place in value[role])
+                box.setToolTip(f"{label} -> {place_label}: "
+                               f"{place_help[place]}")
+                box.setAccessibleName(f"{label}: {place_label}")
+                holder.boxes[(role, place)] = box
+                grid.addWidget(box, row * 2 - 1, column, Qt.AlignCenter)
+        grid.setColumnStretch(0, 1)
+        lines.addLayout(grid)
+
+        def read():
+            return {role: [place for place in destinations.PLACE_KEYS
+                           if holder.boxes[(role, place)].isChecked()]
+                    for role in destinations.ROLE_KEYS}
+        return holder, read
+
+    def _module_rows(self):
+        """{role: (artifacts, rows)} the case's complete runs hold, not
+        superseded -- what each choice above concerns."""
+        if self.case is None:
+            return {}
+        try:
+            found = self.case._db.execute(
+                "SELECT COALESCE(NULLIF(a.role, ''), 'other'), COUNT(*), "
+                "COALESCE(SUM(a.row_count), 0) FROM module_artifacts a "
+                "JOIN module_runs r ON r.id = a.run_id "
+                "WHERE r.status = 'complete' AND a.superseded_by IS NULL "
+                "AND a.row_count > 0 GROUP BY 1").fetchall()
+        except Exception:
+            return {}
+        return {role: (artifacts, rows) for role, artifacts, rows in found}
 
     def _open_log_folder(self):
         from trace_app.infra.paths import log_file
@@ -373,4 +623,23 @@ class SettingsDialog(QDialog):
         settings.save_user(user_values)
         if self.case is not None:
             self.changed = settings.save_case(self.case, self.values('case'))
+        self._save_keys()
         super().accept()
+
+    def _save_keys(self):
+        """Store the API keys that changed (infra/api_keys.py: the system's
+        protected store; nothing else in config.ini is touched). A key
+        the store refuses is used for this session and the examiner told."""
+        from trace_app.infra import api_keys
+        self.keys_changed = {
+            key: value for key, value in self.values('keys').items()
+            if value != api_keys.get(key)}
+        if not self.keys_changed:
+            return
+        problem = api_keys.save(self.keys_changed)
+        if problem:
+            from trace_app.ui.dialogs import message
+            message.warning(
+                self, "Could not save API key",
+                f"The API key could not be stored:\n{problem}\n\n"
+                "It will be used for this session only.")

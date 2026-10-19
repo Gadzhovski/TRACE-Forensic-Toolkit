@@ -18,6 +18,7 @@ import os
 import sqlite3
 import struct
 import tempfile
+from trace_app.infra.sqlite_uri import connect_read_only
 
 HEADER = b'SQLite format 3\x00'
 
@@ -118,7 +119,7 @@ def open_database(database, wal=None, exact=False):
     try:
         with open(path, 'wb') as handle:
             handle.write(data)
-        connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        connection = connect_read_only(path)
         connection.text_factory = factory
         try:
             yield connection

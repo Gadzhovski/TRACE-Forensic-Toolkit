@@ -82,6 +82,14 @@ class UnifiedViewer(QWidget):
         self.database_wal_reader = None
         #: (content, label) -> show a database cell's bytes as a file.
         self.database_blob_opener = None
+        #: (label) -> bookmark the file shown, the label naming a region or
+        #: a moment of it; set by the window.
+        self.bookmark_hook = None
+        #: (latitude, longitude, name, what) -> show a place on the Map.
+        self.show_place_hook = None
+        #: (sheet) -> add a saved contact sheet to the case report; None
+        #: without a case.
+        self.contact_sheet_hook = None
 
         # Store media buffer for in-memory playback (keeps buffer alive during playback)
         self._media_buffer = None
@@ -89,6 +97,33 @@ class UnifiedViewer(QWidget):
         # Store stream device and file object for streaming playback from disk images
         self._media_stream_device = None
         self._media_file_obj = None
+
+    def _bookmark(self, label):
+        """A viewer's Bookmark Region / Bookmark Moment: the window's hook,
+        when there is one."""
+        if self.bookmark_hook is not None:
+            self.bookmark_hook(label)
+
+    def _show_place(self, latitude, longitude, name, what=''):
+        if self.show_place_hook is not None:
+            self.show_place_hook(latitude, longitude, name, what)
+
+    @staticmethod
+    def _media_metadata(content, file_obj, file_size):
+        """core/media_metadata's reading of the file, or None."""
+        from trace_app.core import media_metadata
+        try:
+            if file_obj is not None and file_size:
+                def read(offset, length):
+                    length = max(0, min(length, file_size - offset))
+                    return file_obj.read_random(offset, length) \
+                        if length else b''
+                return media_metadata.read_metadata(read, file_size)
+            if content:
+                return media_metadata.from_bytes(content)
+        except Exception as exc:
+            logger.debug("Media metadata not read: %s", exc)
+        return None
 
     def get_pdf_viewer(self):
         """Lazy initialization of PDF viewer"""
@@ -102,6 +137,7 @@ class UnifiedViewer(QWidget):
         """Lazy initialization of picture viewer"""
         if self._picture_viewer is None:
             self._picture_viewer = PictureViewer(self)
+            self._picture_viewer.bookmark_hook = self._bookmark
             self._picture_viewer.setVisible(False)
             self.layout.addWidget(self._picture_viewer)
         return self._picture_viewer
@@ -129,6 +165,8 @@ class UnifiedViewer(QWidget):
         """Lazy initialization of audio/video player"""
         if self._audio_video_player is None:
             self._audio_video_player = AudioVideoPlayer(self)
+            self._audio_video_player.bookmark_hook = self._bookmark
+            self._audio_video_player.show_place_hook = self._show_place
             self._audio_video_player.setVisible(False)
             self.layout.addWidget(self._audio_video_player)
         return self._audio_video_player
@@ -156,6 +194,7 @@ class UnifiedViewer(QWidget):
             # Process images
             elif mime_type.startswith('image/'):
                 viewer = self.get_picture_viewer()
+                viewer.source_name = path or ''
                 viewer.display(content)
                 viewer.setVisible(True)
                 self.placeholder.setVisible(False)
@@ -165,6 +204,13 @@ class UnifiedViewer(QWidget):
             elif mime_type.startswith(('audio/', 'video/')):
                 player = self.get_audio_video_player()
                 player.source_name = path or ''
+                player.sheet_hook = self.contact_sheet_hook
+                # The container's own metadata, read before the player
+                # starts reading the same file: a few box headers, never
+                # the media data (core/media_metadata).
+                player.prepare(content if file_obj is None else None,
+                               self._media_metadata(content, file_obj,
+                                                    file_size))
 
                 # Create a hint URL with the mime type to help the media backend
                 # identify the format correctly
@@ -354,8 +400,14 @@ class UnifiedViewer(QWidget):
         try:
             if plan.kind == VIEW_IMAGE:
                 viewer = self.get_picture_viewer()
+                viewer.source_name = full_file_path or ''
                 problem = viewer.display(file_content)
                 if problem:
+                    if (data or {}).get('is_deleted'):
+                        problem += ("\n\nThis file is deleted: its clusters "
+                                    "may since hold another file's data "
+                                    "(the Text and Hex tabs show what is "
+                                    "there now).")
                     return self._unavailable(problem, plan.note)
                 return self._showing(viewer, plan.note)
 
@@ -410,7 +462,9 @@ class UnifiedViewer(QWidget):
             return self._unavailable(
                 f"This {plan.label} could not be read: {exc}", plan.note)
         viewer = self.get_html_viewer()
-        notes = [plan.note or f"{plan.label.capitalize()}."]
+        # Only the first letter: str.capitalize() made 'RTF' 'Rtf'.
+        title = plan.label[:1].upper() + plan.label[1:]
+        notes = [plan.note or f"{title}."]
         if decrypted:
             notes.append("Decrypted in memory with the password given; "
                          "nothing was written and the evidence is "
@@ -418,7 +472,7 @@ class UnifiedViewer(QWidget):
         if plan.subtype not in ('msg', 'pcap'):
             findings = [*findings, "Text and structure only; the original "
                         "layout, fonts and images are not reproduced."]
-        viewer.display(markup, plan.label.capitalize(), [*notes, *findings],
+        viewer.display(markup, title, [*notes, *findings],
                        from_evidence=False)
         return self._showing(viewer)
 
@@ -521,6 +575,7 @@ class UnifiedViewer(QWidget):
 
             if self._picture_viewer:
                 self._picture_viewer.clear()
+                self._picture_viewer.shutdown()
 
             if self._html_viewer:
                 self._html_viewer.clear()

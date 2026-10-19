@@ -124,7 +124,7 @@ def test_ios_messages_make_one_thread_per_contact():
 def test_android_calls_join_their_contact_and_contacts_name_them():
     rows = _as_rows(android_records())
     threads = conversations.threads(rows)
-    calls = [t for t in threads if t['app'] == 'Android call log']
+    calls = [t for t in threads if t['app'] == 'Phone']
     by_party = {t['party']: t for t in calls}
     # +447700900123 and 07700 900123 are the same person.
     assert by_party['700900123']['calls'] == 2
@@ -132,7 +132,7 @@ def test_android_calls_join_their_contact_and_contacts_name_them():
     # Named from the address book, not the call.
     assert 'Alex Morgan' in by_party['700900456']['title']
     whatsapp = {t['title']: t for t in threads
-                if t['app'] == 'WhatsApp (Android)'}
+                if t['app'] == 'WhatsApp'}
     assert whatsapp['Weekend plans']['messages'] == 2
     # A one-to-one chat by its number and the contact's name (from the
     # call log), not its JID.
@@ -199,8 +199,8 @@ def case(tmp_path):
 def test_the_case_and_report_show_chosen_conversations(case):
     from trace_app.core import report
     threads = case.conversations()
-    assert {t['app'] for t in threads} >= {'Messages', 'Android call log',
-                                           'WhatsApp (Android)'}
+    assert {t['app'] for t in threads} >= {'Messages', 'Phone',
+                                           'WhatsApp'}
     plans = next(t for t in threads if t['title'] == 'Weekend plans')
     assert len(case.conversation(plans['key'])) == 2
     case.add_report_items('conversation', [{

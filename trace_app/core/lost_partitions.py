@@ -30,6 +30,12 @@ CYLINDER = 16065                         # 255 heads x 63 sectors
 MAX_CANDIDATES = 400_000
 
 
+def qnx6_signature(magic):
+    """'QNX6' when the 4 bytes at 8 KiB are its superblock's magic."""
+    return 'QNX6' if magic in (b'\x22\x11\x19\x68',
+                               b'\x68\x19\x11\x22') else None
+
+
 def signature(head):
     """The file system a boot sector / superblock read at a candidate
     start says it is, or None."""
@@ -58,6 +64,18 @@ def signature(head):
         return 'HFS'
     if head[:4] == b'hsqs':
         return 'SquashFS'
+    if head[:4] in (b'\x45\x3d\xcd\x28', b'\x28\xcd\x3d\x45') and \
+            head[16:32] == b'Compressed ROMFS':
+        return 'cramfs'
+    if head[:8] == b'-rom1fs-':
+        return 'romfs'
+    if head[8:16] == b'littlefs':
+        return 'LittleFS'
+    # QNX4: block 1 opens with the root folder's entry, named '/', a
+    # folder by its mode.
+    if head[512:514] == b'/\0' and not any(head[514:528]) and \
+            head[563] & 0xF0 == 0x40:
+        return 'QNX4'
     if head[1024:1028] == b'\xe2\xe1\xf5\xe0':
         return 'EROFS'
     if head[:4] == b'XFSB':
@@ -115,7 +133,12 @@ def scan(read, total_sectors, known, opens, should_stop=None):
         if any(begin <= sector < end for begin, end in covered):
             continue
         try:
-            kind = signature(read(sector * SECTOR, 4096))
+            head = read(sector * SECTOR, 4096)
+            kind = signature(head)
+            if kind is None and head[:1] == b'\xeb':
+                # QNX6: its superblock follows an 8 KiB boot area, which
+                # opens with the loader's jump -- looked for only there.
+                kind = qnx6_signature(read(sector * SECTOR + 0x2000, 4))
         except Exception:
             continue
         if kind is None:

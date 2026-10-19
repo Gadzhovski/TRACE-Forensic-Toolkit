@@ -6,22 +6,23 @@ image and the point of it is not to be read.
 """
 
 import logging
-import os
 import sqlite3
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
-                            QSortFilterProxyModel, Qt, QThread, QTimer, Signal)
+                            QSortFilterProxyModel, Qt, QTimer, Signal)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QPushButton,
                                QTableView, QVBoxLayout, QWidget)
 
-from trace_app.core.case import CASE_DB_NAME, query_hash_matches
+from trace_app.core.case import query_hash_matches
 from trace_app.core.hashsets import (ALGORITHM_LABELS, CATEGORIES, KNOWN_BAD,
                                      KNOWN_GOOD, NOTABLE)
 from trace_app.infra.constants import TABLE_ROW_HEIGHT
 from trace_app.infra.utils import FileSystemUtils
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.kept_threads import KeptThreads
+from trace_app.ui.widgets.case_query import CaseQuery
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.HashMatches')
@@ -104,31 +105,12 @@ class HashMatchModel(QAbstractTableModel):
         return None
 
 
-class _Load(QThread):
-    loaded = Signal(int, object)
-
-    def __init__(self, folder, generation, evidence_id, categories, text,
-                 parent=None):
-        super().__init__(parent)
-        self.folder, self.generation = folder, generation
-        self.evidence_id, self.categories, self.text = \
-            evidence_id, categories, text
-
-    def run(self):
-        rows = []
-        try:
-            path = os.path.join(self.folder, CASE_DB_NAME)
-            connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True,
-                                         timeout=10)
-            try:
-                rows = query_hash_matches(connection, self.evidence_id,
-                                          self.categories, self.text,
-                                          SHOWN_LIMIT)
-            finally:
-                connection.close()
-        except sqlite3.Error as exc:
-            logger.error("Could not read hash matches: %s", exc)
-        self.loaded.emit(self.generation, rows)
+def _Load(folder, generation, evidence_id, categories, text, parent=None):
+    return CaseQuery(
+        folder, generation,
+        lambda connection: query_hash_matches(connection, evidence_id,
+                                              categories, text, SHOWN_LIMIT),
+        [], 'hash matches', parent)
 
 
 class HashMatchesPanel(QWidget):
@@ -146,7 +128,7 @@ class HashMatchesPanel(QWidget):
         self.evidence_id = None
         self._names = {}
         self._generation = 0
-        self._loads = {}
+        self._loads = KeptThreads(self)
         self.counts = {}
 
         layout = QVBoxLayout(self)
@@ -259,12 +241,10 @@ class HashMatchesPanel(QWidget):
         load = _Load(self.case.folder, self._generation, self.evidence_id,
                      categories, self.filter_input.text().strip(), self)
         load.loaded.connect(self._loaded)
-        load.finished.connect(load.deleteLater)
         self._loads[self._generation] = load
         load.start()
 
     def _loaded(self, generation, rows):
-        self._loads.pop(generation, None)
         if generation != self._generation:
             return
         if self.case is None or not getattr(self.case, 'is_open', True):
@@ -313,6 +293,4 @@ class HashMatchesPanel(QWidget):
                 dict(row), self.table.viewport().mapToGlobal(point))
 
     def shutdown(self):
-        for load in list(self._loads.values()):
-            load.wait(5000)
         self._loads.clear()

@@ -77,3 +77,6 @@ desktop.ini
 /dfvfs-main
 /sleuthkit_test_data-main
 /fedora
+# External modules (iLEAPP, aLEAPP...) installed when running from
+# source: core/modules/paths.py puts them beside TRACE.
+/modules/

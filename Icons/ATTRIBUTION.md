@@ -30,6 +30,13 @@ file from the same tag: the hand-drawn glyphs that used to live here were
 replaced in October 2026, when every file in `Icons/tabler/` was compared with the
 upstream drawings. The `*-filled.svg` dialog glyphs are Tabler's filled set.
 
+External modules' artifacts (iLEAPP, aLEAPP) name Feather or Tabler
+icons; every name the installed releases use (263) resolves to a file here
+(`icons._LEAPP_RENAMED` lists the Feather names Tabler draws under another
+name). The 185 added for them in October 2026 are unmodified upstream files
+from the same tag, each checked to be a plain SVG (no script, no external
+reference) before it was copied in.
+
 The directory holds more icons than the interface currently uses. They are kept
 so that adding a control does not mean going back to the upstream repository
 and risking a mixed set of versions.
@@ -66,6 +73,26 @@ wanted back.
 **If you restore these icons, add the required icons8 link** to the
 application's About dialog and to the README.
 
+## External modules' logos — `Icons/modules/`
+
+`ileapp.png`, `aleapp.png`, `rleapp.png`, `vleapp.png`, `dleapp.png`: each
+LEAPP's own program icon, read from its released build (the Windows
+executable's icon group, scaled to 128 px by `core/modules/logo.py`), so the
+tools show their logos in External Modules and the Modules tab before they
+are installed.
+
+- Source: <https://github.com/abrignoni/iLEAPP>, `ALEAPP`, `RLEAPP`,
+  `VLEAPP`, `DLEAPP` (Alexis Brignoni and contributors), release 2026.4.x
+- Licence: **MIT** (each repository's `LICENSE`)
+
+## Messaging apps' marks — `Icons/tabler/brand-*.svg`
+
+Triage ▸ Conversations names each app by Tabler's brand glyph (WhatsApp,
+Telegram, Signal, Discord, Instagram, Messenger, Snapchat, Skype, WeChat,
+Line, TikTok, X, Zoom, Teams, Slack, Threads, Tinder, Reddit, LinkedIn,
+Gmail, Google) from the same Tabler release and licence as above, tinted in
+code with the app's colour. Tabler has no Viber mark: Viber is a phone.
+
 ## Logos — `Icons/logo.png`, `Icons/logo_prev_ui.png`
 
 TRACE's own branding.
@@ -80,6 +107,8 @@ Information; `core/os_identity.py`).
 - Every other file: Simple Icons v15.0.0 (<https://simpleicons.org>),
   unmodified, **CC0 1.0** (public domain). Colours are each brand's own hex
   from Simple Icons' data, set in `trace_app/ui/icons.py` (`OS_LOGOS`).
+  `chromeos.svg` is Simple Icons' `googlechrome`, renamed: ChromeOS
+  carries Chrome's mark and Simple Icons has none of its own.
 - The marks are trademarks of their owners (Microsoft, Apple, Google, the
   Linux Foundation and the distributions). They are used only to name the
   system found on evidence -- nominative use -- and imply no endorsement;

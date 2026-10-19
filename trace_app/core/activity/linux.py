@@ -265,6 +265,7 @@ _USB_FACT = re.compile(r'^usb ([\d.-]+): (Product|Manufacturer|SerialNumber):'
                        r' (.*)$')
 _USB_STORAGE = re.compile(r'^usb-storage ([\d.:-]+): USB Mass Storage device '
                           r'detected')
+_PRINTK_TIME = re.compile(r'^\[\s*\d+\.\d+\]\s*')
 _STARTUP = re.compile(r'^Startup finished in ')
 _SHUTDOWN = re.compile(r'^(System is (?:powering down|rebooting)|'
                        r'Reached target (?:System )?(?:Power-Off|Shutdown|'
@@ -290,6 +291,10 @@ class Describer:
     def message(self, when, ident, text, pid=None, host=''):
         ident = (ident or '').split('/')[-1]
         text = text or ''
+        if ident == 'kernel':
+            # syslog keeps printk's '[   5.100000] ' (ChromeOS, and any
+            # kernel booted with printk.time).
+            text = _PRINTK_TIME.sub('', text)
         match = None
         if ident == 'sudo' and (match := _SUDO.match(text)):
             user, tty, cwd, run_as, command = match.groups()
@@ -325,6 +330,12 @@ class Describer:
                                  {'address': address,
                                   'account exists': 'no'}, user=user)
             return None
+        # The clock set: systemd ('Time has been changed') and timedatectl
+        # ('Changed local time to ...'). No size is logged.
+        if (ident == 'systemd' and text.startswith('Time has been changed'))                 or (ident == 'systemd-timedated' and
+                    text.startswith('Changed local time')):
+            return self._add('system', when, 'System time changed', text,
+                             {'by': ident})
         if ident == 'systemd-logind':
             if match := _LOGIND_NEW.match(text):
                 session, user = match.groups()
@@ -426,6 +437,9 @@ _SYSLOG = re.compile(r'^(\w{3}) +(\d{1,2}) (\d\d):(\d\d):(\d\d) (\S+) '
 _ISO_SYSLOG = re.compile(r'^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?'
                          r'([+-]\d\d:\d\d|Z)? (\S+) ([^:\[]+)'
                          r'(?:\[(\d+)\])?: (.*)$')
+#: Syslog levels: ChromeOS's syslog puts one where others put the host.
+_LEVELS = {'EMERG', 'ALERT', 'CRIT', 'ERR', 'ERROR', 'WARNING', 'WARN',
+           'NOTICE', 'INFO', 'DEBUG'}
 _MONTHS = {m: i for i, m in enumerate(
     ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct',
      'Nov', 'Dec'), 1)}
@@ -459,6 +473,9 @@ def syslog_activity(text, path, ref, year):
             except ValueError:
                 continue
             describer.local = when.tzinfo is None
+            if host in _LEVELS:
+                # ChromeOS writes the level where the host would be.
+                host = ''
             describer.message(when, ident, text_, host=host)
             continue
         match = _SYSLOG.match(line)
@@ -643,12 +660,15 @@ def is_linux(volume):
 
 
 def collect(volume, step, homes):
-    from trace_app.core.activity import linux_services, linux_system
+    from trace_app.core.activity import (linux_extras, linux_services,
+                                         linux_system)
     out = system_activity(volume, step)
     # The system, its accounts, its software and SSH (linux_system.py).
     out += linux_system.collect(volume, step, homes)
     # Networks joined and containers run (linux_services.py).
     out += linux_services.collect(volume, step, homes)
+    # Trash, mounts and shares, snaps and Flatpaks (linux_extras.py).
+    out += linux_extras.collect(volume, step, homes)
     for user, home in homes:
         out += shell_activity(volume, user, home, step)
         out += recent_files_activity(volume, user, home, step)

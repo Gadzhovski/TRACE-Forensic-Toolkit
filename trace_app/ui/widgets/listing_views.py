@@ -20,7 +20,7 @@ thumbnail hides evidence. The table keeps its file-type icons.
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap
 from PySide6.QtWidgets import (QListView, QMenu, QStyledItemDelegate,
                                QStyleOptionViewItem, QToolButton)
@@ -41,12 +41,15 @@ MODES = {
               QListView.LeftToRight),
     'extra_large': ("Extra large icons", QListView.IconMode, 192,
                     QSize(232, 244), QListView.LeftToRight),
+    # A gallery: every file's own picture where it has one, in a tight
+    # grid with its name under it -- for working down pictures.
+    'thumbnails': ("Thumbnails", QListView.IconMode, 128, QSize(150, 168),
+                   QListView.LeftToRight),
 }
-ORDER = ('extra_large', 'large', 'medium', 'small', 'list', 'details')
+ORDER = ('thumbnails', 'extra_large', 'large', 'medium', 'small', 'list',
+         'details')
 #: From this icon size up, items show their own content.
 THUMBNAIL_FROM = 48
-#: Pictures larger than this are not read for a thumbnail.
-THUMBNAIL_MAX_BYTES = thumbs.MAX_BYTES[thumbs.PICTURE]
 PICTURE_EXTENSIONS = thumbs.PICTURE_EXTENSIONS
 #: Thumbnails are made at least this big, so a step up in icon size does
 #: not have to make them again.
@@ -83,10 +86,6 @@ def is_picture(name):
     return thumbs.kind_by_name(name) == thumbs.PICTURE
 
 
-def is_video(name):
-    return thumbs.kind_by_name(name) == thumbs.VIDEO
-
-
 def video_thumbnail(image, size):
     """A video frame scaled to fit `size` x `size`, play-badged."""
     from trace_app.ui.viewers.media.video_thumbnails import with_play_badge
@@ -120,7 +119,8 @@ def _view_icons():
             'small': icons.VIEW_SMALL_ICONS,
             'medium': icons.VIEW_MEDIUM_ICONS,
             'large': icons.VIEW_LARGE_ICONS,
-            'extra_large': icons.VIEW_EXTRA_LARGE_ICONS}
+            'extra_large': icons.VIEW_EXTRA_LARGE_ICONS,
+            'thumbnails': icons.VIEW_THUMBNAILS}
 
 
 class ViewButton(QToolButton):
@@ -227,6 +227,14 @@ class ListingIconView(QListView):
         self._loader.ready.connect(self._image_ready)
         self._loader.pdf.connect(self._pdf_ready)
         self._loader.video.connect(self._is_video)
+        # Rows arrive one insert at a time (a table refilled by a filter
+        # inserts thousands): mirroring hidden rows and looking for
+        # thumbnails once per insert was quadratic -- 6,311 carves in an
+        # icon view froze the window for minutes on one checkbox.
+        self._settle = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.setInterval(0)
+        self._settle.timeout.connect(self._settled)
         model = table.model()
         model.modelReset.connect(self._model_changed)
         model.rowsInserted.connect(self._rows_changed)
@@ -331,9 +339,15 @@ class ListingIconView(QListView):
                            (data or {}).get('name') or '')
 
     def _rows_changed(self, *_args):
-        if self.isVisible():
+        if self.isVisible() and not self._settle.isActive():
+            self._settle.start()
+
+    def _settled(self):
+        try:
             self.sync_hidden()
-            QTimer.singleShot(0, self._queue_visible)
+            self._queue_visible()
+        except RuntimeError:
+            pass        # the table is gone (closing)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -344,13 +358,41 @@ class ListingIconView(QListView):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._queue_visible)
 
+    def _rows_on_screen(self, rect):
+        """The rows from the first item on screen to the last: items are
+        laid out in row order, so those between are the ones to look at.
+        Every row when the corners land between items."""
+        count = self.model().rowCount()
+        first = last = None
+        step = max(4, min(rect.width(), rect.height()) // 8)
+        for y in range(rect.top(), rect.bottom() + 1, step):
+            for x in range(rect.left(), rect.right() + 1, step):
+                index = self.indexAt(QPoint(x, y))
+                if index.isValid():
+                    first = index.row()
+                    break
+            if first is not None:
+                break
+        for y in range(rect.bottom(), rect.top() - 1, -step):
+            for x in range(rect.right(), rect.left() - 1, -step):
+                index = self.indexAt(QPoint(x, y))
+                if index.isValid():
+                    last = index.row()
+                    break
+            if last is not None:
+                break
+        if first is None or last is None or last < first:
+            return range(count)
+        # A margin either side: a partly shown item at an edge.
+        return range(max(0, first - 2), min(count, last + 3))
+
     def _queue_visible(self, *_args):
         """Ask for thumbnails of the items on screen that have none yet."""
         if not self.thumbnails_on() or not self.isVisible():
             return
         model = self.model()
         rect = self.viewport().rect()
-        for row in range(model.rowCount()):
+        for row in self._rows_on_screen(rect):
             index = model.index(row, 0)
             if self.isRowHidden(row) or \
                     not self.visualRect(index).intersects(rect):

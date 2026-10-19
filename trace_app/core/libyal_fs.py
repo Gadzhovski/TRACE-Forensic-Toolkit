@@ -179,6 +179,29 @@ class _FsInfo:
         self.endian = 0
 
 
+class PathLookup:
+    """`get_file_entry_by_path` for TRACE's own volume classes (the pure-
+    Python file systems), which speak libyal's vocabulary: a root
+    directory, numbered sub-entries, names. `_names_in(entry)` lists a
+    directory's names in sub-entry order; a reader that keeps them raw
+    overrides it so a lookup builds no entry but the one it follows."""
+
+    def _names_in(self, entry):
+        return [entry.get_sub_file_entry(index).name
+                for index in range(entry.number_of_sub_file_entries)]
+
+    def get_file_entry_by_path(self, path):
+        entry = self.get_root_directory()
+        for part in [p for p in path.replace('\\', '/').split('/') if p]:
+            for index, name in enumerate(self._names_in(entry)):
+                if name == part:
+                    entry = entry.get_sub_file_entry(index)
+                    break
+            else:
+                return None
+        return entry
+
+
 class LibyalFileSystem:
     """A libyal volume, read like a pytsk3.FS_Info. Subclasses set KIND and
     implement `identifier`, `_root_identifier`, `_by_identifier`."""

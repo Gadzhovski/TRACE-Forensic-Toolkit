@@ -10,7 +10,7 @@ import binascii
 import configparser
 import logging
 
-from trace_app.infra.paths import config_file
+from trace_app.infra import config_store
 
 logger = logging.getLogger('TRACE.WindowState')
 
@@ -37,9 +37,8 @@ def _section(signature):
 def read_window_state(signature=None):
     """(geometry bytes, state bytes) or (None, None): the layout kept for
     this screen arrangement (`signature`), else the last one kept."""
-    parser = configparser.ConfigParser()
+    parser = config_store.load()
     try:
-        parser.read(config_file())
         for section in ([_section(signature)] if signature else []) + \
                 [_SECTION]:
             if parser.getint(section, 'version', fallback=0) != \
@@ -51,7 +50,7 @@ def read_window_state(signature=None):
                 return (base64.b64decode(geometry) if geometry else None,
                         base64.b64decode(state) if state else None)
         return None, None
-    except (configparser.Error, OSError, ValueError, binascii.Error) as exc:
+    except (configparser.Error, ValueError, binascii.Error) as exc:
         logger.debug("No saved window layout: %s", exc)
         return None, None
 
@@ -59,40 +58,27 @@ def read_window_state(signature=None):
 def save_window_state(geometry, state, signature=None):
     """Keep the layout -- as the last one, and for this screen arrangement
     when `signature` is given."""
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-    except (configparser.Error, OSError):
-        pass
-    for section in [_SECTION] + ([_section(signature)] if signature else []):
-        if not parser.has_section(section):
-            parser.add_section(section)
-        parser.set(section, 'version', str(LAYOUT_VERSION))
-        parser.set(section, 'geometry',
-                   base64.b64encode(bytes(geometry)).decode('ascii'))
-        parser.set(section, 'state',
-                   base64.b64encode(bytes(state)).decode('ascii'))
-    try:
-        with open(config_file(), 'w', encoding='utf-8') as handle:
-            parser.write(handle)
-    except OSError as exc:
-        logger.warning("Could not save the window layout: %s", exc)
+    values = {'version': LAYOUT_VERSION,
+              'geometry': base64.b64encode(bytes(geometry)).decode('ascii'),
+              'state': base64.b64encode(bytes(state)).decode('ascii')}
+
+    def change(parser):
+        for section in [_SECTION] + (
+                [_section(signature)] if signature else []):
+            if not parser.has_section(section):
+                parser.add_section(section)
+            for key, value in values.items():
+                parser.set(section, key, str(value))
+    config_store.update(change)
 
 
 def forget_window_state():
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
+    def change(parser):
         # Every arrangement's layout: Reset Layout means all of them.
-        gone = [section for section in parser.sections()
-                if section == _SECTION or section.startswith(_SECTION + ' ')]
-        for section in gone:
-            parser.remove_section(section)
-        if gone:
-            with open(config_file(), 'w', encoding='utf-8') as handle:
-                parser.write(handle)
-    except (configparser.Error, OSError) as exc:
-        logger.debug("Could not forget the window layout: %s", exc)
+        for section in parser.sections():
+            if section == _SECTION or section.startswith(_SECTION + ' '):
+                parser.remove_section(section)
+    config_store.update(change)
 
 
 _LISTING = 'Listing'
@@ -101,52 +87,18 @@ _LISTING = 'Listing'
 def read_listing_view(default='details', option='view'):
     """The Listing's view mode the examiner last chose (`option`
     'carved_view': the Carved files tab's)."""
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-        return parser.get(_LISTING, option, fallback=default)
-    except (configparser.Error, OSError):
-        return default
+    return config_store.get(_LISTING, option, default)
 
 
 def save_listing_view(mode, option='view'):
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-    except (configparser.Error, OSError):
-        pass
-    if not parser.has_section(_LISTING):
-        parser.add_section(_LISTING)
-    parser.set(_LISTING, option, mode)
-    try:
-        with open(config_file(), 'w', encoding='utf-8') as handle:
-            parser.write(handle)
-    except OSError as exc:
-        logger.warning("Could not save the listing view: %s", exc)
+    config_store.set_value(_LISTING, option, mode)
 
 
 def read_value(section, key, default=''):
     """One remembered value from config.ini (strings only)."""
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-        return parser.get(section, key, fallback=default)
-    except (configparser.Error, OSError):
-        return default
+    return config_store.get(section, key, default)
 
 
 def save_value(section, key, value):
     """Remember one value in config.ini, keeping everything else there."""
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-    except (configparser.Error, OSError):
-        pass
-    if not parser.has_section(section):
-        parser.add_section(section)
-    parser.set(section, key, str(value))
-    try:
-        with open(config_file(), 'w', encoding='utf-8') as handle:
-            parser.write(handle)
-    except OSError as exc:
-        logger.warning("Could not save %s.%s: %s", section, key, exc)
+    config_store.set_value(section, key, value)

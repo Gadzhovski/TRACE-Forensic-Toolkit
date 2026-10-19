@@ -146,6 +146,13 @@ def detect_archive(data):
     if isinstance(data, (bytes, bytearray)) and cpio.format_of(data):
         return 'cpio'
 
+    # A QNX IFS boot image (core/qnx_ifs.py): QNX4's and QNX6's .boot, a
+    # head unit's ifs-*.bin -- by its startup header or 'imagefs'.
+    from trace_app.core import qnx_ifs
+    if isinstance(data, (bytes, bytearray)) and \
+            qnx_ifs.looks_like_ifs(data[:qnx_ifs.SEARCH]):
+        return 'qnx_ifs'
+
     # Cabinet, LHA, ALZip, uuencode, Unix compress (core/legacy_archives).
     from trace_app.core import legacy_archives
     legacy = legacy_archives.kind_of(data)
@@ -208,6 +215,14 @@ def list_members(data, kind=None, password=None):
         return _list_single_stream(data, kind)
     if kind == 'cpio':
         return _list_cpio(data)
+    if kind == 'qnx_ifs':
+        from trace_app.core import qnx_ifs
+        try:
+            found = qnx_ifs.members(data)
+        except (qnx_ifs.IfsError, struct.error) as exc:
+            raise ArchiveError(f"Damaged QNX IFS image: {exc}") from exc
+        return [dict(m, compressed_size=m['size'], encrypted=False, crc='')
+                for m in found]
     if kind in _LEGACY:
         from trace_app.core import legacy_archives
         try:
@@ -345,6 +360,9 @@ def iter_members(data, kind=None, limit=None):
     if kind == 'zlib':
         yield _single_stream_member(data, kind, limit)
         return
+    if kind in _LEGACY:
+        yield from _iter_legacy(data, kind, limit)
+        return
     for member in list_members(data, kind):
         if member['is_dir'] or member['encrypted']:
             yield member, None
@@ -354,6 +372,20 @@ def iter_members(data, kind=None, limit=None):
                                       limit=limit)
         except ArchiveError as exc:
             yield member, exc
+
+
+def _iter_legacy(data, kind, limit):
+    """CAB, LHA, ALZip, uuencode and .Z, each parsed once."""
+    from trace_app.core import legacy_archives
+    try:
+        for member, content in legacy_archives.iter_members(data, kind,
+                                                            limit):
+            if isinstance(content, legacy_archives.LegacyError):
+                content = ArchiveError(str(content))
+            yield member, content
+    except (legacy_archives.LegacyError, struct.error, ValueError,
+            IndexError) as exc:
+        raise ArchiveError(f"Damaged {kind} archive: {exc}") from exc
 
 
 def _iter_zip(data, limit):
@@ -427,6 +459,10 @@ def read_member(data, member_name=None, kind=None, password=None,
     """
     if limit is None:
         limit = MAX_MEMBER_BYTES
+    from trace_app.core.archive_index import IndexedArchive
+    if isinstance(data, IndexedArchive):
+        # Too big to hold: read at the member's offset (core/archive_index).
+        return data.read(member_name, limit)
     from trace_app.core import embedded
     if kind == 'embedded' or (member_name or '').startswith(embedded.PREFIX):
         # A file inside a document (core/embedded): its name says so, so a
@@ -454,6 +490,12 @@ def read_member(data, member_name=None, kind=None, password=None,
         try:
             return cpio.read(data, member_name, limit)
         except cpio.CpioError as exc:
+            raise ArchiveError(str(exc)) from exc
+    if kind == 'qnx_ifs':
+        from trace_app.core import qnx_ifs
+        try:
+            return qnx_ifs.read_member(data, member_name, limit)
+        except (qnx_ifs.IfsError, struct.error) as exc:
             raise ArchiveError(str(exc)) from exc
     if kind in _LEGACY:
         from trace_app.core import legacy_archives

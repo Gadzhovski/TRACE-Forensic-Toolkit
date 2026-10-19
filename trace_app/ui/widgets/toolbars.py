@@ -27,8 +27,12 @@ class _ChildAligner(QObject):
 
     def eventFilter(self, watched, event):
         if event.type() == QEvent.ChildAdded:
-            # Defer: the child is not laid out yet at ChildAdded time.
-            QTimer.singleShot(0, lambda tb=watched: align_controls(tb))
+            # Defer: the child is not laid out yet at ChildAdded time. The
+            # toolbar is the timer's context, so Qt drops the call if it
+            # is destroyed first -- a window freed in the same moment
+            # raised "Internal C++ object already deleted" here.
+            QTimer.singleShot(0, watched,
+                              lambda tb=watched: align_controls(tb))
         return False
 
 
@@ -95,8 +99,9 @@ def align_controls(toolbar):
 
 #: Gap widgets must not paint. A bare QWidget picks up the content-surface
 #: colour from the stylesheet, which is a shade lighter than a toolbar -- so an
-#: expanding gap showed as a pale band across the empty half of the bar.
-_GAP_STYLE = "background: transparent;"
+#: expanding gap showed as a pale band across the empty half of the bar. The
+#: themes make #toolbarGap transparent.
+GAP_NAME = 'toolbarGap'
 
 
 def spacer(width=GROUP_SPACING):
@@ -104,7 +109,7 @@ def spacer(width=GROUP_SPACING):
     widget = QWidget()
     widget.setFixedWidth(width)
     widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
-    widget.setStyleSheet(_GAP_STYLE)
+    widget.setObjectName(GAP_NAME)
     return widget
 
 
@@ -112,7 +117,7 @@ def stretch():
     """An expanding gap that pushes what follows to the right."""
     widget = QWidget()
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-    widget.setStyleSheet(_GAP_STYLE)
+    widget.setObjectName(GAP_NAME)
     return widget
 
 

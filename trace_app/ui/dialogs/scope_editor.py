@@ -20,6 +20,7 @@ from trace_app.core.scope import (CUSTOM, DELETED_EXCLUDE, DELETED_INCLUDE,
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets import date_fields
+from trace_app.ui.widgets.kept_threads import release
 
 #: What honours a scope, and what does not -- shown in the dialog.
 COVERED = ("Applies to: file analysis, the search index, YARA and the "
@@ -449,7 +450,7 @@ class ScopeEditor(QDialog):
     def _count_ended(self, worker):
         if self._counter is worker:
             self._counter = None
-        worker.deleteLater()
+        release(worker)
 
     def done(self, result):
         # A count still running is stopped, not left behind the dialog.

@@ -12,6 +12,13 @@
 * InstallHistory.plist (/Library/Receipts): every system update and
   package installed.
 * utmpx (/private/var/run/utmpx): logons, logoffs and boots.
+* Each user's TCC, Notification Center, Internet accounts, Notes, Dock,
+  Launchpad, CFURL caches, saved application state and Terminal window
+  text, Screen Sharing hosts and Trash (activity/macos_sqlite, macos_plists,
+  macos_state); the system's netusage, XProtect behaviour database, Screen
+  Time, file sharing, sharing services, Remote Management and sudo.
+  Notification Center, Screen Time and Launchpad keep their databases in
+  /private/var/folders/xx/<random>/0 (`_var_folders`).
 
 Times are Cocoa (seconds since 2001) and UTC. Expected values in the tests
 are plaso's for the same files.
@@ -330,10 +337,15 @@ def utmpx_activity(data, path, ref):
 # --- the volume ---------------------------------------------------------------------------
 
 def is_macos(volume):
-    return volume.find('Library') is not None and (
-        volume.find('System', 'Library') is not None or
-        volume.find('private', 'var') is not None or
-        volume.find('Users') is not None)
+    # A triage collection (UAC's [root], a targeted zip) may hold only
+    # some of the system's folders: Users and private/var are enough.
+    if volume.find('Library') is not None and (
+            volume.find('System', 'Library') is not None or
+            volume.find('private', 'var') is not None or
+            volume.find('Users') is not None):
+        return True
+    return (volume.find('Users') is not None and
+            volume.find('private', 'var', 'db') is not None)
 
 
 def _read_with_wal(volume, entry):
@@ -356,10 +368,20 @@ def collect(volume, step, homes):
             logger.info("%s unreadable: %s", entry.path, exc)
             return []
 
+    def plist_source(entry, reader, *args):
+        step(entry.path)
+        try:
+            return reader(volume.read(entry), *args, entry.path,
+                          volume.ref(entry))
+        except Exception as exc:
+            logger.info("%s unreadable: %s", entry.path, exc)
+            return []
+
     system_db = volume.find('private', 'var', 'db', 'CoreDuet', 'Knowledge',
                             'knowledgeC.db')
     if system_db is not None:
         out += sqlite_source(system_db, knowledgec_activity, '')
+    out += _system_plists_and_dbs(volume, plist_source, sqlite_source)
     receipts = volume.find('Library', 'Receipts', 'InstallHistory.plist')
     if receipts is not None:
         step(receipts.path)
@@ -407,4 +429,391 @@ def collect(volume, step, homes):
             step(recent.path)
             out += recent_items_plist(volume.read(recent), user, recent.path,
                                       volume.ref(recent))
+        out += _user_plists_and_dbs(volume, base, user, plist_source,
+                                    sqlite_source)
+        out += _user_state(volume, base, user, step, plist_source,
+                           sqlite_source)
+    out += _system_state(volume, step, plist_source, sqlite_source)
+    return out
+
+
+#: Each user's preference plists (macos_plists) and SQLite databases
+#: (macos_sqlite), by the path under the home folder.
+_USER_PLISTS = (
+    (('Library', 'Preferences', 'com.apple.airport.preferences.plist'),
+     'airport'),
+    (('Library', 'Preferences', 'com.apple.spotlight.plist'),
+     'spotlight_shortcuts'),
+    (('Library', 'Preferences', 'com.apple.dock.plist'), 'dock'),
+)
+_USER_DATABASES = (
+    (('Library', 'Application Support', 'com.apple.TCC', 'TCC.db'), 'tcc'),
+    # Before 10.10 the database sat in Preferences; macOS 15 keeps it in
+    # usernoted's group container (10.10-14: /private/var/folders).
+    (('Library', 'Preferences', 'com.apple.notificationcenterui.db'),
+     'notification_center'),
+    (('Library', 'Group Containers', 'group.com.apple.usernoted', 'db2',
+      'db'), 'notification_center'),
+    (('Library', 'Accounts', 'Accounts4.sqlite'), 'internet_accounts'),
+    (('Library', 'Accounts', 'Accounts3.sqlite'), 'internet_accounts'),
+)
+
+
+def _keychain_entries(data, path, ref, user=''):
+    """Keychain items as metadata records (name, account, where, times);
+    never a secret. core/keychain can decrypt on an examiner's request."""
+    from trace_app.core import keychain
+    from trace_app.core.activity import record
+    try:
+        store = keychain.Keychain(data)
+    except keychain.KeychainError:
+        return []
+    out = []
+    for entry in store.entries():
+        detail = {'account': entry.account, 'where': entry.where,
+                  'protocol': entry.protocol,
+                  'modified': entry.modified.strftime('%Y-%m-%d %H:%M:%S')
+                  if entry.modified else None,
+                  'basis': 'when the keychain item was created'}
+        out.append(record('accounts', 'Keychain', entry.created,
+                          f'Keychain {entry.kind}',
+                          entry.name or entry.account or entry.where or '',
+                          detail, user=user, path=path, ref=ref))
+    return out
+
+
+def _user_plists_and_dbs(volume, base, user, plist_source, sqlite_source):
+    from trace_app.core.activity import macos_plists, macos_sqlite
+    out = []
+    keychains = volume.find(*base, 'Library', 'Keychains')
+    for folder in ((keychains,) if keychains is not None and keychains.is_dir
+                   else ()):
+        for entry in volume.children(folder):
+            if entry.name.endswith(('.keychain', '.keychain-db')):
+                out += plist_source(entry, _keychain_entries, user)
+    for parts, reader in _USER_PLISTS:
+        entry = volume.find(*base, *parts)
+        if entry is not None and not entry.is_dir:
+            out += plist_source(entry, getattr(macos_plists, reader), user)
+    for notes in _note_stores(volume, base):
+        out += sqlite_source(notes, macos_sqlite.macos_notes, user)
+    from trace_app.core.activity import safari_cookies
+    for parts in (('Library', 'Cookies', 'Cookies.binarycookies'),
+                  ('Library', 'Containers', 'com.apple.Safari', 'Data',
+                   'Library', 'Cookies', 'Cookies.binarycookies')):
+        entry = volume.find(*base, *parts)
+        if entry is not None and not entry.is_dir:
+            out += plist_source(entry, safari_cookies.records)
+    for parts, reader in _USER_DATABASES:
+        entry = volume.find(*base, *parts)
+        if entry is not None and not entry.is_dir:
+            out += sqlite_source(entry, getattr(macos_sqlite, reader), user)
+    # The Apple ID plist's name holds a UUID: match it by its prefix.
+    prefs = volume.find(*base, 'Library', 'Application Support',
+                        'com.apple.coreservices')
+    for folder in ((prefs,) if prefs is not None else ()):
+        for entry in volume.children(folder):
+            if entry.name.startswith(
+                    'com.apple.coreservices.appleidauthenticationinfo') and \
+                    entry.name.endswith('.plist'):
+                out += plist_source(entry, macos_plists.apple_account)
+    return out
+
+
+#: System-wide plists and databases, by the path from the volume root.
+_SYSTEM_PLISTS = (
+    (('Library', 'Preferences', 'com.apple.bluetooth.plist'), 'bluetooth'),
+    (('Library', 'Preferences', 'com.apple.loginwindow.plist'),
+     'login_window'),
+    (('Library', 'Preferences', 'SystemConfiguration',
+      'com.apple.spotlight.plist'), 'spotlight_shortcuts'),
+    (('Library', 'Preferences', 'com.apple.iPod.plist'), 'ipod_devices'),
+    (('Library', 'Preferences', 'com.apple.TimeMachine.plist'),
+     'time_machine'),
+    (('Library', 'Preferences', 'com.apple.SoftwareUpdate.plist'),
+     'software_update'),
+    (('private', 'var', 'db', 'Spotlight-V100', 'VolumeConfiguration.plist'),
+     'spotlight_volumes'),
+    (('.Spotlight-V100', 'VolumeConfiguration.plist'), 'spotlight_volumes'),
+)
+_SYSTEM_DATABASES = (
+    (('Library', 'Application Support', 'com.apple.TCC', 'TCC.db'), 'tcc'),
+    (('private', 'var', 'db', 'DocumentRevisions-V100',
+      'db-V1', 'db.sqlite'), 'document_versions'),
+    (('.DocumentRevisions-V100', 'db-V1', 'db.sqlite'), 'document_versions'),
+)
+#: One-argument plist readers take only (data, path, ref), not a user.
+_NO_USER_PLISTS = {'bluetooth', 'login_window', 'ipod_devices',
+                   'time_machine', 'software_update', 'spotlight_volumes'}
+
+
+def _system_plists_and_dbs(volume, plist_source, sqlite_source):
+    from trace_app.core.activity import macos_plists, macos_sqlite
+    out = []
+    for parts, reader in _SYSTEM_PLISTS:
+        entry = volume.find(*parts)
+        if entry is None or entry.is_dir:
+            continue
+        function = getattr(macos_plists, reader)
+        if reader in _NO_USER_PLISTS:
+            out += plist_source(entry, function)
+        else:
+            out += plist_source(entry, function, '')
+    # The user's airport plist is per-system too (SystemConfiguration).
+    airport = volume.find('Library', 'Preferences', 'SystemConfiguration',
+                          'com.apple.airport.preferences.plist')
+    if airport is not None and not airport.is_dir:
+        out += plist_source(airport, macos_plists.airport, '')
+    for parts, reader in _SYSTEM_DATABASES:
+        entry = volume.find(*parts)
+        if entry is not None and not entry.is_dir:
+            out += sqlite_source(entry, getattr(macos_sqlite, reader), '')
+    # Keychains: the item names, accounts and times only -- never a
+    # stored secret (core/keychain decrypts only on an examiner's explicit
+    # request, and TRACE never writes the result to the case).
+    for parts in (('Library', 'Keychains'),):
+        folder = volume.find(*parts)
+        if folder is None or not folder.is_dir:
+            continue
+        for entry in volume.children(folder):
+            if entry.name.endswith(('.keychain', '.keychain-db')):
+                out += plist_source(entry, _keychain_entries)
+    # Apple System Log: /private/var/log/asl/*.asl.
+    from trace_app.core.activity import asl
+    asl_dir = volume.find('private', 'var', 'log', 'asl')
+    if asl_dir is not None and asl_dir.is_dir:
+        for entry in volume.children(asl_dir):
+            if entry.name.endswith('.asl'):
+                out += plist_source(entry, asl.records)
+    # CUPS print jobs: /private/var/spool/cups/c#####.
+    from trace_app.core.activity import cups_ipp
+    spool = volume.find('private', 'var', 'spool', 'cups')
+    if spool is not None and spool.is_dir:
+        for entry in volume.children(spool):
+            if entry.name.startswith('c') and entry.name[1:].isdigit():
+                out += plist_source(entry, cups_ipp.records)
+    # dslocal user accounts (no hash): /var/db/dslocal/nodes/Default/users.
+    users = volume.find('private', 'var', 'db', 'dslocal', 'nodes',
+                        'Default', 'users')
+    if users is not None and users.is_dir:
+        for entry in volume.children(users):
+            if entry.name.endswith('.plist') and not entry.name.startswith(
+                    '_'):
+                out += plist_source(entry, macos_plists.dslocal_user)
+    return out
+
+
+# --- notes, app state, Trash, sharing, per-boot folders ----------------------------
+
+def _note_stores(volume, base):
+    """Each Notes database of a user: NoteStore.sqlite (10.11+) and any
+    NotesV*.storedata (earlier, in the app's container)."""
+    found = []
+    entry = volume.find(*base, 'Library', 'Group Containers',
+                        'group.com.apple.notes', 'NoteStore.sqlite')
+    if entry is not None and not entry.is_dir:
+        found.append(entry)
+    for parts in (('Library', 'Containers', 'com.apple.Notes', 'Data',
+                   'Library', 'Notes'),
+                  ('Library', 'Group Containers', 'group.com.apple.notes')):
+        folder = volume.find(*base, *parts)
+        for child in volume.children(folder, suffix='.storedata') \
+                if folder is not None and folder.is_dir else ():
+            if child.name.lower().startswith('notesv'):
+                found.append(child)
+    return found
+
+
+def _var_folders(volume, *tail):
+    """Entries at `tail` under every per-user temporary folder
+    (/private/var/folders/xx/<random>/...): Notification Center (10.10-
+    14), Screen Time and Launchpad keep their databases there."""
+    root = volume.find('private', 'var', 'folders')
+    if root is None or not root.is_dir:
+        return []
+    out = []
+    for first in volume.children(root, dirs=True):
+        for second in volume.children(first, dirs=True):
+            entry = volume.find(*_parts(second.path), *tail)
+            if entry is not None and not entry.is_dir:
+                out.append(entry)
+    return out
+
+
+def _parts(path):
+    from trace_app.core.activity import _split
+    return _split(path)
+
+
+def _saved_states(volume, base):
+    """(bundle id, the .savedState folder) for every app of a user --
+    in Saved Application State and in each sandboxed app's container."""
+    folders = [volume.find(*base, 'Library', 'Saved Application State')]
+    containers = volume.find(*base, 'Library', 'Containers')
+    for container in volume.children(containers, dirs=True) \
+            if containers is not None and containers.is_dir else ():
+        folders.append(volume.find(*_parts(container.path), 'Data',
+                                   'Library', 'Saved Application State'))
+    for folder in folders:
+        if folder is None or not folder.is_dir:
+            continue
+        for state in volume.children(folder, suffix='.savedState',
+                                     dirs=True):
+            yield state.name[:-len('.savedState')], state
+
+
+def _user_state(volume, base, user, step, plist_source, sqlite_source):
+    from trace_app.core.activity import macos_plists, macos_sqlite, \
+        macos_state
+    out = []
+    # Saved application state and Terminal's window text.
+    for bundle, state in _saved_states(volume, base):
+        windows_plist = volume.find(*_parts(state.path), 'windows.plist')
+        if windows_plist is None or windows_plist.is_dir:
+            continue
+        data_file = volume.find(*_parts(state.path), 'data.data')
+        step(state.path)
+        try:
+            windows_data = volume.read(windows_plist)
+            state_data = volume.read(data_file) if data_file else b''
+            modified = windows_plist.modified
+            ref = volume.ref(windows_plist)
+            if bundle == 'com.apple.Terminal':
+                out += macos_state.terminal_state(
+                    windows_data, state_data, user, modified,
+                    windows_plist.path, ref)
+            out += macos_state.saved_state(
+                windows_data, state_data, bundle, user, modified,
+                windows_plist.path, ref)
+        except Exception as exc:
+            logger.info("%s unreadable: %s", state.path, exc)
+    # Launchpad (before 10.10: the Dock's folder in Application Support).
+    dock_folder = volume.find(*base, 'Library', 'Application Support',
+                              'Dock')
+    for entry in volume.children(dock_folder, suffix='.db') \
+            if dock_folder is not None and dock_folder.is_dir else ():
+        out += sqlite_source(entry, macos_sqlite.launchpad, user)
+    # CFURL caches: each app's Cache.db, sandboxed apps' too.
+    caches = [volume.find(*base, 'Library', 'Caches')]
+    containers = volume.find(*base, 'Library', 'Containers')
+    for container in volume.children(containers, dirs=True) \
+            if containers is not None and containers.is_dir else ():
+        caches.append(volume.find(*_parts(container.path), 'Data',
+                                  'Library', 'Caches'))
+    for folder in caches:
+        if folder is None or not folder.is_dir:
+            continue
+        for app in volume.children(folder, dirs=True):
+            cache = volume.find(*_parts(app.path), 'Cache.db')
+            if cache is not None and not cache.is_dir:
+                out += sqlite_source(
+                    cache, lambda d, w, u, p, r, a=app.name:
+                    macos_sqlite.cfurl_cache(d, w, u, p, r, app=a), user)
+    # Screen Sharing: the computers this user connected to.
+    for parts in (('Library', 'Preferences', 'com.apple.ScreenSharing.plist'),
+                  ('Library', 'Containers', 'com.apple.ScreenSharing',
+                   'Data', 'Library', 'Preferences',
+                   'com.apple.ScreenSharing.plist')):
+        entry = volume.find(*base, *parts)
+        if entry is not None and not entry.is_dir:
+            out += plist_source(entry, macos_plists.screen_sharing_client,
+                                user, entry.modified)
+    # The user's Trash: where each trashed item came from.
+    out += _trash(volume, (*base, '.Trash'), user, step)
+    return out
+
+
+def _trash(volume, parts, user, step):
+    from trace_app.core.activity import macos_state
+    folder = volume.find(*parts)
+    if folder is None or not folder.is_dir:
+        return []
+    store = volume.find(*parts, '.DS_Store')
+    if store is None or store.is_dir:
+        return []
+    step(store.path)
+    present = {e.name: e for e in volume.listdir(folder.path)
+               if e.name != '.DS_Store' and not e.deleted}
+    try:
+        return macos_state.trash(volume.read(store), present,
+                                 lambda entry: entry.changed, user,
+                                 store.path, volume.ref(store))
+    except Exception as exc:
+        logger.info("%s unreadable: %s", store.path, exc)
+        return []
+
+
+def _system_state(volume, step, plist_source, sqlite_source):
+    """What the Mac shares, per-boot databases, sudo, XProtect, network
+    usage, and the Trashes of other volumes' users."""
+    from trace_app.core.activity import macos_plists, macos_sqlite, \
+        macos_state
+    out = []
+    for parts in (('private', 'var', 'networkd', 'netusage.sqlite'),
+                  ('private', 'var', 'networkd', 'db', 'netusage.sqlite')):
+        entry = volume.find(*parts)
+        if entry is not None and not entry.is_dir:
+            out += sqlite_source(entry, macos_sqlite.netusage, '')
+    xprotect = volume.find('private', 'var', 'protected', 'xprotect', 'XPdb')
+    if xprotect is not None and not xprotect.is_dir:
+        out += sqlite_source(xprotect, macos_sqlite.xprotect_behavior, '')
+    for tail, reader in (
+            (('0', 'com.apple.notificationcenter', 'db2', 'db'),
+             macos_sqlite.notification_center),
+            (('0', 'com.apple.notificationcenter', 'db', 'db'),
+             macos_sqlite.notification_center),
+            (('0', 'com.apple.ScreenTimeAgent', 'Store',
+              'RMAdminStore-Local.sqlite'), macos_sqlite.screen_time),
+            (('0', 'com.apple.ScreenTimeAgent', 'Store',
+              'RMAdminStore-Cloud.sqlite'), macos_sqlite.screen_time),
+            (('0', 'com.apple.dock.launchpad', 'db', 'db'),
+             macos_sqlite.launchpad)):
+        for entry in _var_folders(volume, *tail):
+            out += sqlite_source(entry, reader, '')
+    # File sharing: share points, the SMB server's name, and which
+    # sharing services are on.
+    shares = volume.find('private', 'var', 'db', 'dslocal', 'nodes',
+                         'Default', 'sharepoints')
+    for entry in volume.children(shares, suffix='.plist') \
+            if shares is not None and shares.is_dir else ():
+        out += plist_source(entry, macos_plists.sharepoint, entry.modified)
+    for parts, reader in (
+            (('Library', 'Preferences', 'SystemConfiguration',
+              'com.apple.smb.server.plist'), macos_plists.smb_server),
+            (('private', 'var', 'db', 'launchd.db', 'com.apple.launchd',
+              'overrides.plist'), macos_plists.launchd_overrides),
+            (('private', 'var', 'db', 'com.apple.xpc.launchd',
+              'disabled.plist'), macos_plists.launchd_overrides),
+            (('Library', 'Preferences', 'com.apple.RemoteManagement.plist'),
+             macos_plists.remote_management)):
+        entry = volume.find(*parts)
+        if entry is not None and not entry.is_dir:
+            out += plist_source(entry, reader, entry.modified)
+    # sudo: one timestamp file per user (10.12+), else a folder per user
+    # of empty per-terminal files whose times are the record.
+    sudo = volume.find('private', 'var', 'db', 'sudo')
+    if sudo is not None and sudo.is_dir:
+        ts = volume.find('private', 'var', 'db', 'sudo', 'ts')
+        for entry in volume.listdir(ts.path) if ts is not None and \
+                ts.is_dir else ():
+            if entry.is_dir or entry.deleted:
+                continue
+            step(entry.path)
+            out += macos_state.sudo_timestamps(
+                volume.read(entry), entry.name, entry.modified, entry.path,
+                volume.ref(entry))
+        for folder in volume.children(sudo, dirs=True):
+            if folder.name in ('ts', 'lectured'):
+                continue
+            for entry in volume.listdir(folder.path):
+                if not entry.is_dir and not entry.deleted:
+                    out += macos_state.sudo_timestamps(
+                        b'', folder.name, entry.modified, entry.path,
+                        volume.ref(entry))
+    # Trashes of a volume's other users (/.Trashes/<uid>).
+    trashes = volume.find('.Trashes')
+    for folder in volume.children(trashes, dirs=True) \
+            if trashes is not None and trashes.is_dir else ():
+        out += _trash(volume, _parts(folder.path), f'uid {folder.name}',
+                      step)
     return out

@@ -225,7 +225,9 @@ jobs:
       # a VirtualBox snapshot chain made and read by VBoxManage, UBI /
       # UBIFS images from mtd-utils and from Ubuntu's kernel booted under
       # QEMU in a container (nandsim), and ZFS pools from OpenZFS in the
-      # same kind of guest -- no module is loaded on the runner.
+      # same kind of guest, and QNX4 / cramfs / romfs images with the
+      # kernel's own reading of them (and of the QNX4, QNX6, cramfs and
+      # romfs samples) -- no module is loaded on the runner.
       - name: Build the Linux images
         if: runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
         run: |
@@ -250,11 +252,20 @@ jobs:
             "apt-get update -qq && DEBIAN_FRONTEND=noninteractive \
              apt-get install -y -qq --no-install-recommends python3 \
              mtd-utils qemu-system-x86 linux-image-generic busybox-static \
-             zstd cpio kmod zfsutils-linux gdisk >/dev/null && \
+             zstd cpio kmod zfsutils-linux gdisk util-linux-extra \
+             genromfs build-essential zlib1g-dev liblzo2-dev libucl-dev \
+             curl ca-certificates u-boot-tools libubootenv-tool \
+             python3-venv >/dev/null && \
              apt-get install -y -qq --no-install-recommends \
              linux-modules-extra-\$(ls /lib/modules) >/dev/null && \
              python3 tools/testdata/build/make_ubifs.py && \
-             python3 tools/testdata/build/make_zfs.py"
+             python3 tools/testdata/build/make_zfs.py && \
+             python3 tools/testdata/build/make_kernel_keys.py && \
+             python3 tools/testdata/build/make_ifs_images.py && \
+             python3 tools/testdata/build/make_uboot_env.py && \
+             python3 -m venv /tmp/lfs && \
+             /tmp/lfs/bin/pip install -q littlefs-python==0.19.0 && \
+             /tmp/lfs/bin/python tools/testdata/build/make_littlefs.py"
           sudo chown -R "$USER" test_images/built
           # Chromium's own Local/Session Storage and IndexedDB, written by
           # Playwright's pinned Chromium (make_chromium_storage.py).

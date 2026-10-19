@@ -23,9 +23,9 @@ read the same everywhere) and the validation of carved files (loosening
 it turns noise into "evidence").
 """
 
-import configparser
 import json
 import logging
+from trace_app.infra.sqlite_uri import connect_read_only
 
 logger = logging.getLogger('TRACE.Settings')
 
@@ -39,11 +39,25 @@ USER = {
                      "Filled into reports' headers."),
     'case_folder': ('', "Default case folder",
                     "Where New Case and Open Case start looking."),
+    'modules_folder': ('', "External modules folder",
+                       "Where Tools ▸ External Modules installs iLEAPP, "
+                       "aLEAPP and the like. Empty: a 'modules' folder "
+                       "beside TRACE when TRACE's folder can be written to "
+                       "(it then travels with a TRACE copied to a USB "
+                       "stick), else TRACE's folder in your user data -- "
+                       "always there for the macOS app."),
     'check_updates': (True, "Allow checking for new versions",
-                      "Help ▸ About ▸ Check for Updates asks GitHub for "
-                      "the newest release -- one request, carrying nothing "
-                      "but TRACE's version, made only when clicked. Never "
-                      "while a case is offline."),
+                      "TRACE may ask GitHub for its newest release -- one "
+                      "request, carrying nothing but TRACE's version, and "
+                      "nothing is downloaded. Off: never asked, not even "
+                      "from Help ▸ About ▸ Check for Updates. Never while a "
+                      "case is offline."),
+    'check_updates_at_start': (True, "Check when TRACE starts",
+                               "A few seconds after the window opens, the "
+                               "newest release is asked for once; a newer "
+                               "one is named in the status bar, linking its "
+                               "release page. Off: only when Check for "
+                               "Updates is clicked."),
     'ui_scale': ('100%', "Interface size",
                  "Everything larger or smaller -- text, controls, icons -- "
                  "on top of the scaling the system already applies for the "
@@ -148,7 +162,66 @@ CASE = {
     'indicators': (list(INDICATORS), "Indicators extracted",
                    "Which kinds indexing extracts. Phone numbers, for one, "
                    "can be noise in some cases."),
+    # --- what goes where (the Results page) --------------------------------
+    'activity_categories': ([], "Activity kept",
+                            "Which kinds of record the Activity module "
+                            "keeps from the evidence (the Activity tab, "
+                            "Triage, the Timeline and the report all read "
+                            "them). Leaving out a large kind you do not "
+                            "need -- macOS FSEvents fill Files and folders "
+                            "by the tens of thousands -- makes the case "
+                            "smaller and every view quicker. Applies when "
+                            "the module runs; a change offers to run it "
+                            "again. All ticked: every kind, including "
+                            "kinds a later TRACE adds."),
+    'timeline_sources': ([], "Timeline shows",
+                         "The sources the Timeline starts with when it "
+                         "opens; its Filters ▸ Sources still shows any of "
+                         "them on demand. Nothing is removed from the "
+                         "case. Default: everything but the case's own "
+                         "events (the audit trail)."),
+    'timeline_activity_categories': ([], "Activity on the Timeline",
+                                     "Which kinds of Activity record appear "
+                                     "on the Timeline. The Activity tab "
+                                     "still lists every kind. All ticked: "
+                                     "every kind."),
+    'module_destinations': (None, "Where external tools' results go",
+                            "iLEAPP, aLEAPP and the other tools read far "
+                            "more than TRACE shows by default. TRACE sorts "
+                            "each artifact a tool fills: evidence (calls, "
+                            "messages, web history, places, accounts, "
+                            "apps), other records, device telemetry (logs, "
+                            "battery and health samples, usage counters). "
+                            "Tick where each kind goes. Timeline and "
+                            "Search copy every row into the case: that is "
+                            "what makes a large extraction slow and its "
+                            "case big, and why telemetry stays out by "
+                            "default. Whatever is chosen, every row stays "
+                            "in the tool's own database, browsed in the "
+                            "Modules tab. A change applies to the runs "
+                            "already in the case, in the background (a "
+                            "large addition is asked first)."),
+    'module_import_rows': (250000, "Largest artifact copied (rows)",
+                           "An artifact with more rows than this is not "
+                           "copied into the Timeline or Search, whatever "
+                           "kind it is -- iLEAPP reads 21 million "
+                           "unified-log entries from one sysdiagnose. It "
+                           "stays in the tool's own database, browsed in "
+                           "the Modules tab and Activity ▸ Others, and "
+                           "the run says which. Evidence above it goes "
+                           "into Activity up to this many rows. 0: no "
+                           "limit."),
+    'module_link_readings': (True, "Show a record read twice once",
+                             "When TRACE and a tool (or two tools) read the "
+                             "same message, call, visit or place, the "
+                             "Activity tab, Triage, the Timeline and the "
+                             "report show it once, naming every reader. "
+                             "Off: each reading is a row of its own."),
 }
+
+#: Case settings whose empty list means "all of them".
+ALL_WHEN_EMPTY = ('activity_categories', 'timeline_sources',
+                  'timeline_activity_categories')
 
 CARVE_SOURCES = ('unallocated', 'slack', 'memory', 'image')
 VERIFY_ORDERS = ('alongside analysis', 'after analysis', 'before analysis')
@@ -160,41 +233,24 @@ SIZE_UNITS = ('binary', 'decimal')
 _SECTION = 'Settings'
 
 
-def _config_path():
-    from trace_app.infra.paths import config_file
-    return config_file()
-
-
 def read_user():
     """Every user setting, the saved value or its default."""
+    from trace_app.infra import config_store
     values = {key: spec[0] for key, spec in USER.items()}
-    parser = configparser.ConfigParser(interpolation=None)
-    try:
-        parser.read(_config_path())
-        for key in USER:
-            if parser.has_option(_SECTION, key):
+    parser = config_store.load()
+    for key in USER:
+        if parser.has_option(_SECTION, key):
+            try:
                 values[key] = json.loads(parser.get(_SECTION, key))
-    except (configparser.Error, OSError, ValueError) as exc:
-        logger.debug("User settings unreadable: %s", exc)
+            except ValueError as exc:
+                logger.debug("User setting %s unreadable: %s", key, exc)
     return values
 
 
 def save_user(values):
-    parser = configparser.ConfigParser(interpolation=None)
-    try:
-        parser.read(_config_path())
-    except (configparser.Error, OSError):
-        pass
-    if not parser.has_section(_SECTION):
-        parser.add_section(_SECTION)
-    for key in USER:
-        if key in values:
-            parser.set(_SECTION, key, json.dumps(values[key]))
-    try:
-        with open(_config_path(), 'w', encoding='utf-8') as handle:
-            parser.write(handle)
-    except OSError as exc:
-        logger.warning("Could not save settings: %s", exc)
+    from trace_app.infra import config_store
+    config_store.set_values(_SECTION, {key: json.dumps(values[key])
+                                       for key in USER if key in values})
     apply_user(values)
 
 
@@ -223,8 +279,11 @@ def apply_user(values=None):
 # --- case settings ----------------------------------------------------------------
 
 def defaults():
-    return {key: (list(spec[0]) if isinstance(spec[0], list) else spec[0])
-            for key, spec in CASE.items()}
+    values = {key: json.loads(json.dumps(spec[0]))
+              for key, spec in CASE.items()}
+    from trace_app.core.modules import destinations
+    values['module_destinations'] = destinations.normalise(None)
+    return values
 
 
 def for_case(case):
@@ -233,6 +292,9 @@ def for_case(case):
     if case is not None:
         stored = case.setting('settings') or {}
         values.update({k: v for k, v in stored.items() if k in CASE})
+    from trace_app.core.modules import destinations
+    values['module_destinations'] = destinations.normalise(
+        values.get('module_destinations'))
     return values
 
 
@@ -248,17 +310,59 @@ def save_case(case, values):
     case.set_setting('settings', after)
     case.record_event(
         'settings changed',
-        '; '.join(f"{CASE[k][1]}: {_show(old)} -> {_show(new)}"
+        '; '.join(f"{CASE[k][1]}: {_show(old, k)} -> {_show(new, k)}"
                   for k, (old, new) in changed.items()))
     apply_case(case)
     return changed
 
 
-def _show(value):
+#: Case settings that change what is read from the evidence: (the module
+#: that reads it, when a change needs it again -- 'on' turned on, 'any'
+#: any change, 'added' a kind added). Everything else applies at once (it
+#: is read when shown) or to the next run of its module (carving).
+RERUN = {
+    'hash_md5': ('analysis', 'on'),
+    'hash_sha1': ('analysis', 'on'),
+    'max_analysis_mb': ('analysis', 'any'),
+    'max_inspect_mb': ('analysis', 'any'),
+    'archive_depth': ('index', 'any'),
+    'archive_member_mb': ('index', 'any'),
+    'indicators': ('index', 'added'),
+    'index_unallocated': ('index_free', 'on'),
+    'index_memory_files': ('index_free', 'on'),
+    'activity_categories': ('activity', 'any'),
+}
+
+
+def rerun_needed(changed):
+    """{module: [labels of the settings that need it]} for a save_case
+    result {key: (old, new)} -- what the evidence already read must be read
+    again by, for the change to reach it."""
+    out = {}
+    for key, (old, new) in changed.items():
+        if key not in RERUN:
+            continue
+        module, when = RERUN[key]
+        if when == 'on':
+            needed = bool(new) and not bool(old)
+        elif when == 'added':
+            needed = bool(set(new or ()) - set(old or ()))
+        else:
+            needed = old != new
+        if needed:
+            out.setdefault(module, []).append(CASE[key][1])
+    return out
+
+
+def _show(value, key=None):
     if isinstance(value, bool):
         return 'on' if value else 'off'
+    if key == 'module_destinations':
+        from trace_app.core.modules import destinations
+        return '; '.join(destinations.describe(value))
     if isinstance(value, list):
-        return ', '.join(value) or 'none'
+        return ', '.join(value) or ('all' if key in ALL_WHEN_EMPTY
+                                    else 'none')
     return str(value) if value not in (None, '') else '(default)'
 
 
@@ -267,7 +371,16 @@ _case_values = defaults()
 
 def current(key):
     """A case setting as last applied in this process."""
-    return _case_values.get(key, CASE[key][0])
+    if key not in _case_values:
+        return defaults()[key]
+    return _case_values[key]
+
+
+def chosen(key, every):
+    """A list setting's choice as a set: `every` (all known) when it is
+    empty (ALL_WHEN_EMPTY)."""
+    value = current(key) or ()
+    return set(value) if value else set(every)
 
 
 def apply_case(case):
@@ -338,6 +451,22 @@ def statement(values):
         "kept as references into the image (offset, fragments, hashes) and "
         "read from it; exported copies checked against the recorded "
         "SHA-256"))
+    limit = int(values.get('module_import_rows') or 0)
+    from trace_app.core.modules import destinations
+    lines.append("External tools' results, as TRACE sorted them -- " +
+                 '; '.join(destinations.describe(
+                     values.get('module_destinations'))))
+    lines.append("External tools' artifacts " + (
+        f"of up to {limit:,} rows copied into the Timeline and Search; "
+        f"larger ones kept in the tool's database" if limit else
+        "copied into the Timeline and Search whole") +
+        "; every row stays in the tool's own database")
+    lines.append("A record read by TRACE and by a tool shown " + (
+        "once, naming both" if values.get('module_link_readings', True)
+        else "once per reading"))
+    kinds = values.get('activity_categories') or []
+    if kinds:
+        lines.append("Activity kept: " + ', '.join(kinds))
     lines.append("Network: " + ("offline -- nothing sent" if
                                 values.get('offline') else
                                 ("lookups and uploads allowed" if
@@ -366,10 +495,9 @@ class StoredCase:
 
     def __init__(self, folder):
         import os
-        import sqlite3
         self.folder = folder
         path = os.path.join(folder, 'case.db')
-        connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        connection = connect_read_only(path)
         try:
             rows = dict(connection.execute(
                 "SELECT key, value FROM case_info WHERE key IN "

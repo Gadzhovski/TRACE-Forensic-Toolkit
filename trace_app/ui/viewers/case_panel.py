@@ -294,7 +294,10 @@ class CasePanel(QWidget):
         self.filter.setObjectName("caseFilter")
         self.filter.setPlaceholderText("Filter…")
         self.filter.setClearButtonEnabled(True)
-        self.filter.setFixedWidth(220)
+        # Narrower when the tables' side is: at a fixed 220 px, beside
+        # the case card the box ran past the panel's edge, cut off.
+        self.filter.setMinimumWidth(100)
+        self.filter.setMaximumWidth(220)
         self.filter.textChanged.connect(self._apply_filter)
         self.tabs.setCornerWidget(self.filter, Qt.TopRightCorner)
         self.tabs.currentChanged.connect(lambda _i: self._apply_filter())

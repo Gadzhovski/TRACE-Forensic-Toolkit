@@ -131,6 +131,11 @@ def describe(row, image_name=''):
                  else f"Picture of: {row['name']}"),
              detail.get('indexed path') and
              f"Indexed by Windows Search as: {detail['indexed path']}",
+             detail.get('original path') and
+             f"QuickLook made it of: {detail['original path']}",
+             detail.get('last shown') and
+             f"Last shown by QuickLook: {detail['last shown']} UTC "
+             f"({detail.get('hit count') or 0} times)",
              detail.get('indexed modified') and
              f"Modified (as indexed): {detail['indexed modified']} UTC",
              f"Cache: {row.get('cache_path')}"

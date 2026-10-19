@@ -563,6 +563,18 @@ class ModulesPage(WizardPage):
         self.selector.scope_evidence = [
             {'name': item['display_name'], 'path': item['path']}
             for item in self.evidence_page.intake.usable()]
+        # Only what can find anything in this evidence: each item's probe
+        # worked it out (core/evidence_probe -> evidence_profile). An item
+        # not yet probed, or one whose contents are unknown, rules nothing
+        # out.
+        from trace_app.ui.dialogs.analysis_modules import \
+            combine_not_applicable
+        items = [(item['display_name'],
+                  (item.get('result') or {}).get('not_applicable') or {})
+                 for item in self.evidence_page.intake.usable()]
+        if items:
+            self.selector.set_not_applicable(*combine_not_applicable(
+                items, self.selector.boxes))
 
     def choice(self):
         """The modules chosen, or None when there is nothing to run them on

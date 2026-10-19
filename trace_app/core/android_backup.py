@@ -389,37 +389,3 @@ class AndroidBackup:
 
 def open_android_backup(path):
     return AndroidBackup(path).fs
-
-
-# --- writing (tests: an independent check of the reader's rules) ----------------
-
-def make_backup(tar_bytes, version=5, compressed=True, password=None,
-                rounds=10000, salts=None):
-    """An .ab file as Android writes one, from a TAR's bytes."""
-    import os
-    data = zlib.compress(tar_bytes, 9) if compressed else tar_bytes
-    lines = [MAGIC.rstrip(b'\n'), str(version).encode(),
-             b'1' if compressed else b'0']
-    if password is None:
-        lines.append(b'none')
-        return b'\n'.join(lines) + b'\n' + data
-    user_salt, checksum_salt = salts or (os.urandom(64), os.urandom(64))
-    key, iv = os.urandom(32), os.urandom(16)
-    user_iv = os.urandom(16)
-    material = java_utf8(key) if version >= 2 else key
-    checksum = _pbkdf2(material, checksum_salt, rounds)
-    blob = bytes([len(iv)]) + iv + bytes([len(key)]) + key + \
-        bytes([len(checksum)]) + checksum
-    secret = password.encode('utf-8') if version >= 2 else \
-        password.encode('latin-1')
-    user_key = _pbkdf2(secret, user_salt, rounds)
-    pad = 16 - len(blob) % 16
-    blob_cipher = _aes_cbc(user_key, user_iv, blob + bytes([pad]) * pad,
-                           decrypt=False)
-    pad = 16 - len(data) % 16
-    body = _aes_cbc(key, iv, data + bytes([pad]) * pad, decrypt=False)
-    lines += [b'AES-256', user_salt.hex().upper().encode(),
-              checksum_salt.hex().upper().encode(), str(rounds).encode(),
-              user_iv.hex().upper().encode(),
-              blob_cipher.hex().upper().encode()]
-    return b'\n'.join(lines) + b'\n' + body

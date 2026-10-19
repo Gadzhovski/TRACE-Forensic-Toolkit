@@ -137,10 +137,6 @@ def read_member(data, member_name):
     raise ArchiveError(f"No embedded file {member_name}")
 
 
-def has_objects(data):
-    return bool(kind_of(data)) and bool(objects(data))
-
-
 # --- PDF -------------------------------------------------------------------------
 
 def _pdf(data, pictures=True):

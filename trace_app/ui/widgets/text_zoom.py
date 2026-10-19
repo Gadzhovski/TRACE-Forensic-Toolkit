@@ -15,7 +15,6 @@ size is another matter: Settings ▸ Display, applied at start
 (infra/ui_scale.py).
 """
 
-import configparser
 import logging
 
 from PySide6.QtCore import QEvent, QObject, Qt
@@ -23,7 +22,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QAbstractScrollArea,
                                QApplication, QComboBox, QHeaderView,
                                QPlainTextEdit, QTableView, QTextEdit)
 
-from trace_app.infra.paths import config_file
+from trace_app.infra import config_store
 
 logger = logging.getLogger('TRACE.TextZoom')
 
@@ -44,17 +43,13 @@ def _remembered():
     global _saved
     if _saved is None:
         _saved = {}
-        parser = configparser.ConfigParser()
-        try:
-            parser.read(config_file())
-            if parser.has_section(_SECTION):
-                for key, value in parser.items(_SECTION):
-                    try:
-                        _saved[key] = max(LOWEST, min(HIGHEST, int(value)))
-                    except ValueError:
-                        continue
-        except (configparser.Error, OSError) as exc:
-            logger.debug("No text zoom kept: %s", exc)
+        parser = config_store.load()
+        if parser.has_section(_SECTION):
+            for key, value in parser.items(_SECTION):
+                try:
+                    _saved[key] = max(LOWEST, min(HIGHEST, int(value)))
+                except ValueError:
+                    continue
     return _saved
 
 
@@ -64,22 +59,15 @@ def _remember(key, step):
         saved[key] = step
     else:
         saved.pop(key, None)
-    parser = configparser.ConfigParser()
-    try:
-        parser.read(config_file())
-    except (configparser.Error, OSError):
-        pass
-    if parser.has_section(_SECTION):
-        parser.remove_section(_SECTION)
-    if saved:
-        parser.add_section(_SECTION)
-        for name, value in sorted(saved.items()):
-            parser.set(_SECTION, name, str(value))
-    try:
-        with open(config_file(), 'w', encoding='utf-8') as handle:
-            parser.write(handle)
-    except OSError as exc:
-        logger.debug("Text zoom not kept: %s", exc)
+
+    def change(parser):
+        if parser.has_section(_SECTION):
+            parser.remove_section(_SECTION)
+        if saved:
+            parser.add_section(_SECTION)
+            for name, value in sorted(saved.items()):
+                parser.set(_SECTION, name, str(value))
+    config_store.update(change)
 
 
 def kind_of(view):
@@ -156,9 +144,16 @@ def restore(view):
         set_step(view, step, remember=False)
 
 
+# The filter sees every event of the application: anything else leaves at
+# once (a set lookup; comparing with QEvent's attributes costs 3x as much).
+_WATCHED = frozenset((QEvent.Wheel, QEvent.KeyPress, QEvent.Polish))
+
+
 class _Zoomer(QObject):
     def eventFilter(self, watched, event):
         kind = event.type()
+        if kind not in _WATCHED:
+            return False
         if kind == QEvent.Wheel and \
                 event.modifiers() & Qt.ControlModifier:
             view = zoomable(watched)

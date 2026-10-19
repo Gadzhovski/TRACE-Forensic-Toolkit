@@ -274,6 +274,29 @@ def test_a_carved_zip_is_named_for_what_it_is():
     assert Carver._zip_kind(buffer.getvalue()) == 'zip'
 
 
+def _zip(name, text):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+def test_a_damaged_zip_does_not_hide_the_zips_after_it():
+    """A member whose deflate stream is damaged made ZipFile.testzip raise
+    zlib.error, which the validator let through: the ZIP carver stopped for
+    the rest of the read, and every ZIP after it in the chunk was lost
+    (2020JimmyWilson: nine chunks in a row)."""
+    damaged = bytearray(_zip('report.txt', 'deleted report ' * 400))
+    # The member's data starts after its 30-byte header and name; 0xFF is
+    # a final block of the reserved type -- 'invalid block type'.
+    damaged[30 + len('report.txt')] = 0xFF
+    good = _zip('notes.txt', 'kept notes ' * 400)
+    image, placed = _layout([('zip', bytes(damaged)), ('zip', good)])
+    found = _carve(image, ['ZIP'])
+    assert [(kind, offset, content) for kind, offset, content in found] == \
+        [placed[1]]
+
+
 @pytest.mark.images
 def test_the_real_file_corpus_matches_its_answer_key():
     """Real published files of every format (tools/testdata/build/carve_corpus.py): each

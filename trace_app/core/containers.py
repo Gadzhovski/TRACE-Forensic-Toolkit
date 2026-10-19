@@ -103,6 +103,13 @@ class ByteWindow:
         self._position = max(0, offset)
         return self._position
 
+    def seekable(self):
+        """Asked by zipfile (and io) before reading members out of order."""
+        return True
+
+    def readable(self):
+        return True
+
     def tell(self):
         return self._position
 

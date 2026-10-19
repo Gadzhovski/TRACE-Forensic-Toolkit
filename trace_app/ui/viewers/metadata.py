@@ -246,6 +246,18 @@ class MetadataViewer(QWidget):
                 if photo.get('gps_date'):
                     rows.append(("GPS date", photo['gps_date']))
 
+        from trace_app.core import media_metadata
+        if media_metadata.kind(bytes(content[:64])):
+            meta = media_metadata.from_bytes(content)
+            facts = media_metadata.facts(meta)
+            if facts:
+                rows.append((None, "Video" if any(
+                    t.get('kind') == 'video' for t in meta.get('tracks') or
+                    []) else "Audio"))
+                for label, value in facts:
+                    rows.append((label, value, "warning")
+                                if label == "Location" else (label, value))
+
         authors = content_checks.document_authors(content)
         if authors:
             rows.append((None, "Document"))
@@ -423,6 +435,12 @@ class MetadataViewer(QWidget):
         self.details_view.clear()
         self.details_view.setVisible(False)
         self.details_heading.setVisible(False)
+        self._fit_to_contents()
+
+    def show_status(self, message):
+        """Nothing to describe: `message` says why."""
+        self.clear()
+        self.property_table.set_rows([("Status", " ".join(message.split()))])
         self._fit_to_contents()
 
 

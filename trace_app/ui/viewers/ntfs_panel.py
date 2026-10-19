@@ -15,21 +15,21 @@ journal is easily a million records.
 """
 
 import logging
-import os
-import sqlite3
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QSize,
-                            QSortFilterProxyModel, Qt, QThread, QTimer, Signal)
+                            QSortFilterProxyModel, Qt, QTimer, Signal)
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QMenu,
                                QTabBar, QTableView, QVBoxLayout, QWidget)
 
-from trace_app.core.case import CASE_DB_NAME, ntfs_counts, query_ntfs
-from trace_app.infra.constants import TABLE_ROW_HEIGHT
+from trace_app.core.case import ntfs_counts, query_ntfs
+from trace_app.infra.constants import TABLE_ROW_HEIGHT, ROW_EDGE_INSET
 from trace_app.ui import icons
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.kept_threads import KeptThreads
+from trace_app.ui.widgets.case_query import CaseQuery
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.context_menus import show_menu
 
@@ -189,31 +189,15 @@ class NtfsModel(QAbstractTableModel):
         return None
 
 
-class _Load(QThread):
-    loaded = Signal(int, object, object)
-
-    def __init__(self, folder, generation, section, evidence_id, text,
-                 routine, parent=None):
-        super().__init__(parent)
-        self.folder, self.generation = folder, generation
-        self.section, self.evidence_id = section, evidence_id
-        self.text, self.routine = text, routine
-
-    def run(self):
-        rows, counts = [], {}
-        try:
-            path = os.path.join(self.folder, CASE_DB_NAME)
-            connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True,
-                                         timeout=10)
-            try:
-                rows = query_ntfs(connection, self.section, self.evidence_id,
-                                  self.text, self.routine, SHOWN_LIMIT)
-                counts = ntfs_counts(connection, self.evidence_id)
-            finally:
-                connection.close()
-        except sqlite3.Error as exc:
-            logger.error("Could not read NTFS results: %s", exc)
-        self.loaded.emit(self.generation, rows, counts)
+def _Load(folder, generation, section, evidence_id, text, routine,
+          parent=None):
+    """(rows of `section`, counts of every section)."""
+    def query(connection):
+        return (query_ntfs(connection, section, evidence_id, text, routine,
+                           SHOWN_LIMIT),
+                ntfs_counts(connection, evidence_id))
+    return CaseQuery(folder, generation, query, ([], {}), 'NTFS results',
+                     parent)
 
 
 class NtfsPanel(QWidget):
@@ -231,7 +215,7 @@ class NtfsPanel(QWidget):
         self.evidence_id = None
         self._names = {}
         self._generation = 0
-        self._loads = {}
+        self._loads = KeptThreads(self)
         self.counts = {}
 
         # Straight under Triage's tab rows, as a third of them: no gap
@@ -241,6 +225,7 @@ class NtfsPanel(QWidget):
         layout.setSpacing(2)
 
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, ROW_EDGE_INSET, 0)
         self.sections = QTabBar()
         self.sections.setObjectName("activityTabs")
         self.sections.setProperty('row', 'pages')
@@ -350,14 +335,13 @@ class NtfsPanel(QWidget):
                      self.evidence_id, self.filter_input.text().strip(),
                      self.routine_box.isChecked(), self)
         load.loaded.connect(self._loaded)
-        load.finished.connect(load.deleteLater)
         self._loads[self._generation] = load
         load.start()
 
-    def _loaded(self, generation, rows, counts):
-        self._loads.pop(generation, None)
+    def _loaded(self, generation, result):
         if generation != self._generation:
             return
+        rows, counts = result
         section = self.section
         self.model.set_rows(section, rows, self._names)
         widths = {'timestomp': (200, 120, 90, 320, 190, 190, 190, 190),
@@ -416,8 +400,12 @@ class NtfsPanel(QWidget):
 
     @property
     def count(self):
+        """Every row its sections list (routine ones only when shown), as
+        the tree's NTFS groups count them -- it left out $LogFile and the
+        change journal: 1 on the tab, 7,494 in the tree."""
         return sum(self.counts.get(k, 0) for k in ('timestomp', 'streams',
-                                                    'slack'))
+                                                    'slack', 'logfile',
+                                                    'journal'))
 
     # --- actions ----------------------------------------------------------
 
@@ -463,7 +451,5 @@ class NtfsPanel(QWidget):
             self.file_activated.emit(payload)
 
     def shutdown(self):
-        for load in list(self._loads.values()):
-            load.wait(5000)
         self._loads.clear()
 

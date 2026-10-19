@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 
 import pytsk3
 
+from trace_app.core.tsk_names import entry_name
+
 logger = logging.getLogger('TRACE.Scope')
 
 #: How deleted files are treated.
@@ -490,7 +492,8 @@ def listing(image_handler, should_stop=None, progress=None):
                 info = entry.info
                 if info.name is None or info.meta is None:
                     continue
-                name = info.name.name.decode('utf-8', 'replace')
+                # Named as the analysis walk names it (core/walk.py).
+                name = entry_name(entry, fs)
                 if name in ('.', '..'):
                     continue
                 meta = info.meta

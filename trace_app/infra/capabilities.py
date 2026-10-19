@@ -72,6 +72,17 @@ def _module_version(name, attribute='get_version'):
     return probe
 
 
+def _installed_module(tool_id):
+    """An external module's installed version (core/modules); raises when
+    it is not installed, which marks the feature missing."""
+    from trace_app.core.modules import install
+    from trace_app.core.modules.spec import TOOLS
+    record = install.installed(TOOLS[tool_id])
+    if record is None:
+        raise RuntimeError("not installed")
+    return record['version']
+
+
 def _libmagic():
     from trace_app.infra.preflight import libmagic_identity
     import magic
@@ -127,7 +138,11 @@ def _platform_hint(capability):
 GROUPS = ('Evidence images', 'Volumes and encryption', 'File analysis',
           'Windows and browser evidence',
           'Linux, macOS, chat and cloud evidence', 'Viewing',
-          'Reports and exports')
+          'Reports and exports', 'External modules')
+#: Features of tools the examiner installs (Tools ▸ External Modules):
+#: missing until then, and never expected of a fresh installation.
+from trace_app.core.modules.spec import TOOLS as _TOOLS
+ON_REQUEST = tuple(_TOOLS)
 
 
 def _zstd():
@@ -282,6 +297,23 @@ CAPABILITIES = (
                'TRACE (Python)', lambda: 'built in'),
     Capability('report_docx', 'Reports and exports', "Reports as Word "
                "documents (.docx)", 'TRACE (Python)', lambda: 'built in'),
+    Capability('vics', 'Reports and exports', "Pictures and videos as a "
+               "Project VICS 2.0 JSON export (Griffeye, AXIOM)",
+               'TRACE (Python)', lambda: 'built in'),
+    Capability('ileapp', 'External modules', "iOS extractions and backups "
+               "parsed by iLEAPP (messages, calls, apps, locations)",
+               'iLEAPP (downloaded)', lambda: _installed_module('ileapp'),
+               missing_hint="Tools ▸ External Modules installs it."),
+    Capability('aleapp', 'External modules', "Android extractions parsed "
+               "by aLEAPP (messages, calls, apps, locations)",
+               'aLEAPP (downloaded)', lambda: _installed_module('aleapp'),
+               missing_hint="Tools ▸ External Modules installs it."),
+    *[Capability(_spec.id, 'External modules',
+                 f"{_spec.reads[:1].upper()}{_spec.reads[1:]} parsed by "
+                 f"{_spec.name}", f"{_spec.name} (downloaded)",
+                 lambda tool=_spec.id: _installed_module(tool),
+                 missing_hint="Tools ▸ External Modules installs it.")
+      for _spec in _TOOLS.values() if _spec.id not in ('ileapp', 'aleapp')],
     Capability('pcap', 'File analysis', "Network captures (pcap, pcapng): "
                "hosts, DNS, HTTP, TLS server names", 'dpkt',
                _module_version('dpkt', '__version__')),
@@ -334,6 +366,22 @@ CAPABILITIES = (
                "KnowledgeC, quarantine events, recent items (bookmarks), "
                "install history, utmpx", 'TRACE',
                _built_in('trace_app.core.activity.macos')),
+    Capability('macos_artifacts', 'Linux, macOS, chat and cloud evidence',
+               "macOS/iOS plists and databases: Wi-Fi, Bluetooth, TCC, "
+               "notifications, Spotlight, notes, Screen Time, usage, "
+               "Safari cookies, CUPS, ASL", 'TRACE',
+               _built_in('trace_app.core.activity.macos_sqlite')),
+    Capability('biome', 'Linux, macOS, chat and cloud evidence',
+               "Apple Biome (SEGB) event streams (macOS 13+, iOS 16+)",
+               'TRACE', _built_in('trace_app.core.activity.biome')),
+    Capability('spotlight', 'Linux, macOS, chat and cloud evidence',
+               "Spotlight metadata store (file history, incl. LZFSE pages)",
+               'TRACE', _built_in('trace_app.core.spotlight')),
+    Capability('keychain', 'Volumes and encryption',
+               "macOS Keychain items (metadata always; secrets decrypted "
+               "on request with the password or master key)", 'cryptography',
+               lambda: _dist_version('cryptography') or
+               __import__('cryptography') and ''),
     Capability('chat', 'Linux, macOS, chat and cloud evidence',
                "Skype, iMessage, Android SMS, Dropbox, Google Drive, "
                "OneDrive", 'TRACE', _built_in('trace_app.core.activity.chat')),

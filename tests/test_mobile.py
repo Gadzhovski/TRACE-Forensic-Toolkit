@@ -159,8 +159,11 @@ def _with_key(blob, wrapped):
                     '$classes': ['NSMutableData', 'NSData', 'NSObject']})
     objects.append({'NS.data': wrapped,
                     '$class': plistlib.UID(len(objects) - 1)})
-    objects[archive['$top']['root'].data]['EncryptionKey'] = \
-        plistlib.UID(len(objects) - 1)
+    record = objects[archive['$top']['root'].data]
+    record['EncryptionKey'] = plistlib.UID(len(objects) - 1)
+    # As iTunes writes it: the record's class is the key's (iLEAPP reads
+    # the record's, TRACE the key's first four bytes).
+    record['ProtectionClass'] = struct.unpack('<I', wrapped[:4])[0]
     return plistlib.dumps(archive, fmt=plistlib.FMT_BINARY)
 
 

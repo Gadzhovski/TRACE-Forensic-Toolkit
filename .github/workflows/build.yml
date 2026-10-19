@@ -110,6 +110,10 @@ jobs:
 
       - name: Build, package and self-test
         shell: bash
+        env:
+          # The self-test also installs iLEAPP from its release and runs it
+          # from the package (core/modules): a frozen app starting another.
+          TRACE_MODULE_CHECK: '1'
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
           "$PY" build_app.py --require-images

@@ -7,19 +7,19 @@ is not on the image, the hive or task file the entry was read from.
 """
 
 import logging
-import os
-import sqlite3
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex,
-                            QSortFilterProxyModel, Qt, QThread, QTimer, Signal)
+                            QSortFilterProxyModel, Qt, QTimer, Signal)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QTableView,
                                QVBoxLayout, QWidget)
 
-from trace_app.core.case import CASE_DB_NAME, query_persistence
-from trace_app.infra.constants import TABLE_ROW_HEIGHT
+from trace_app.core.case import query_persistence
+from trace_app.infra.constants import TABLE_ROW_HEIGHT, ROW_EDGE_INSET
 from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.kept_threads import KeptThreads
+from trace_app.ui.widgets.case_query import CaseQuery
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.PersistencePanel')
@@ -119,34 +119,18 @@ class PersistenceModel(QAbstractTableModel):
         return None
 
 
-class _Load(QThread):
-    loaded = Signal(int, object, object)
-
-    def __init__(self, folder, generation, evidence_id, routine, text,
-                 parent=None):
-        super().__init__(parent)
-        self.folder, self.generation = folder, generation
-        self.evidence_id, self.routine, self.text = evidence_id, routine, text
-
-    def run(self):
-        rows, counts = [], {}
-        try:
-            path = os.path.join(self.folder, CASE_DB_NAME)
-            connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True,
-                                         timeout=10)
-            try:
-                rows = query_persistence(connection, self.evidence_id,
-                                         self.routine, self.text)
-                where = ('', []) if self.evidence_id is None else (
-                    " WHERE evidence_id = ?", [self.evidence_id])
-                counts = {grade: count for grade, count in connection.execute(
-                    "SELECT grade, COUNT(*) FROM persistence" + where[0]
-                    + " GROUP BY grade", where[1])}
-            finally:
-                connection.close()
-        except sqlite3.Error as exc:
-            logger.error("Could not read persistence: %s", exc)
-        self.loaded.emit(self.generation, rows, counts)
+def _Load(folder, generation, evidence_id, routine, text, parent=None):
+    """(entries, {grade: count})."""
+    def query(connection):
+        rows = query_persistence(connection, evidence_id, routine, text)
+        where = ('', []) if evidence_id is None else (
+            " WHERE evidence_id = ?", [evidence_id])
+        counts = {grade: count for grade, count in connection.execute(
+            "SELECT grade, COUNT(*) FROM persistence" + where[0]
+            + " GROUP BY grade", where[1])}
+        return rows, counts
+    return CaseQuery(folder, generation, query, ([], {}), 'persistence',
+                     parent)
 
 
 class PersistencePanel(QWidget):
@@ -162,13 +146,14 @@ class PersistencePanel(QWidget):
         self.evidence_id = None
         self._names = {}
         self._generation = 0
-        self._loads = {}
+        self._loads = KeptThreads(self)
         self.counts = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 0)
         layout.setSpacing(4)
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, ROW_EDGE_INSET, 0)
         self.status_label = QLabel()
         self.status_label.setObjectName("ntfsStatus")
         self.status_label.setWordWrap(True)
@@ -256,14 +241,13 @@ class PersistencePanel(QWidget):
                      self.routine_box.isChecked(),
                      self.filter_input.text().strip(), self)
         load.loaded.connect(self._loaded)
-        load.finished.connect(load.deleteLater)
         self._loads[self._generation] = load
         load.start()
 
-    def _loaded(self, generation, rows, counts):
-        self._loads.pop(generation, None)
+    def _loaded(self, generation, result):
         if generation != self._generation:
             return
+        rows, counts = result
         self.counts = counts
         self.model.set_rows(rows, self._names)
         self.table.sortByColumn(-1, Qt.AscendingOrder)
@@ -311,6 +295,4 @@ class PersistencePanel(QWidget):
                 self._payload(row), self.table.viewport().mapToGlobal(point))
 
     def shutdown(self):
-        for load in list(self._loads.values()):
-            load.wait(5000)
         self._loads.clear()

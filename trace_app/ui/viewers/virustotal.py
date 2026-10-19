@@ -555,7 +555,8 @@ class VirusTotalPanel(QWidget):
         else:
             self.empty_label.setText(
                 "No VirusTotal API key is set.\n\nAdd one under Options ▸ "
-                "API Keys. A free key allows four lookups a minute.")
+                "Settings ▸ API Keys. A free key allows four lookups a "
+                "minute.")
         self.stack.setCurrentIndex(0)
         self._update_status()
 

@@ -68,7 +68,7 @@ OFFICE_EXTENSIONS = {
     'dotm': 'docx', 'dotx': 'docx', 'xltm': 'xlsx', 'xltx': 'xlsx',
     'potm': 'pptx', 'ppsm': 'pptx', 'ppsx': 'pptx', 'dot': 'legacy',
     'xlt': 'legacy', 'pot': 'legacy', 'pps': 'legacy',
-    'msg': 'msg',
+    'msg': 'msg', 'rtf': 'rtf',
 }
 
 # --- by content ----------------------------------------------------------------
@@ -97,6 +97,7 @@ _MIME_OFFICE = {
     'application/vnd.ms-excel': 'legacy',
     'application/vnd.ms-powerpoint': 'legacy',
     'application/vnd.ms-outlook': 'msg',
+    'text/rtf': 'rtf', 'application/rtf': 'rtf',
 }
 _MIME_HTML = {'text/html', 'application/xhtml+xml'}
 #: libmagic 5.35+ says vnd.sqlite3; 5.32 (Windows' python-magic-bin) x-sqlite3.
@@ -123,6 +124,7 @@ _LABELS = {
     ('office', 'odp'): 'OpenDocument presentation',
     ('office', 'legacy'): 'legacy Office document',
     ('office', 'msg'): 'Outlook message',
+    ('office', 'rtf'): 'RTF document',
     ('office', 'pcap'): 'network capture',
     ('html', ''): 'HTML page',
     ('database', 'sqlite'): 'SQLite database',

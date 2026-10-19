@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
                                QDialog, QDialogButtonBox, QFileDialog,
                                QFormLayout, QGroupBox, QHBoxLayout,
                                QHeaderView, QLabel, QLineEdit, QListWidget,
-                               QListWidgetItem, QProgressBar,
+                               QListWidgetItem,
                                QPushButton, QTableWidget, QTableWidgetItem,
                                QVBoxLayout)
 
@@ -29,6 +29,8 @@ from trace_app.core.hashsets import (ALGORITHM_LABELS, ALGORITHMS,
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
 from trace_app.ui.viewers.virustotal import verdict_brush
+from trace_app.ui.widgets.dialog_page import PageDialog
+from trace_app.ui.widgets.progress_card import SlimBar
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 
 logger = logging.getLogger('TRACE.HashSetsDialog')
@@ -131,7 +133,7 @@ class ImportDialog(QDialog):
             box_layout.addWidget(self.columns)
             layout.addWidget(box)
 
-        self.progress = QProgressBar()
+        self.progress = SlimBar()
         self.progress.setVisible(False)
         layout.addWidget(self.progress)
         self.error = QLabel()
@@ -241,14 +243,16 @@ class EditDialog(QDialog):
                 'enabled_by_default': self.default.isChecked()}
 
 
-class HashSetsDialog(QDialog):
+class HashSetsDialog(PageDialog):
     """The library and this case's use of it."""
 
     #: The examiner asked to match now (after the options were saved).
     match_requested = Signal()
 
     def __init__(self, case=None, library=None, parent=None):
-        super().__init__(parent)
+        super().__init__("Hash Sets", '', icon=icons.HASH_SETS,
+                         parent=parent, scroll=False,
+                         object_name="hashSetsDialog")
         self.setWindowTitle("Hash Sets")
         self.setObjectName("hashSetsDialog")
         self.setWindowIcon(icons.icon(icons.HASH_SETS))
@@ -258,7 +262,7 @@ class HashSetsDialog(QDialog):
         self.options = hashsets.case_options(case, self.library)
         self._initial = dict(self.options, sets=dict(self.options['sets']))
 
-        layout = QVBoxLayout(self)
+        layout = self.table_body()
         intro = QLabel(
             "Hash sets mark files by their digest: <b>known good</b> files "
             "(NSRL: operating systems and applications) can be hidden, "
@@ -268,7 +272,7 @@ class HashSetsDialog(QDialog):
         intro.setWordWrap(True)
         intro.setTextFormat(Qt.RichText)
         intro.setObjectName("analysisModulesIntro")
-        layout.addWidget(intro)
+        self.set_intro(intro.text())
 
         self.use_box = QCheckBox("Use hash sets in this case")
         self.use_box.setObjectName("analysisModuleCheck")
@@ -360,7 +364,7 @@ class HashSetsDialog(QDialog):
         self.status = QLabel()
         self.status.setObjectName("triageStatus")
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
+        self.footer_status(self.status)
 
         buttons = QDialogButtonBox()
         self.match_button = buttons.addButton("Save and Match Now",
@@ -369,7 +373,7 @@ class HashSetsDialog(QDialog):
         close = buttons.addButton(QDialogButtonBox.Close)
         close.clicked.connect(self.accept)
         buttons.rejected.connect(self.accept)
-        layout.addWidget(buttons)
+        self.add_button(buttons)
 
         if case is None:
             for widget in (self.use_box, self.options_box, self.match_button):

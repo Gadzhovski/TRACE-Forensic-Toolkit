@@ -477,14 +477,6 @@ def _label_checksum_ok(block, offset):
     return struct.pack('<4Q', *struct.unpack('>4Q', digest)) == stored
 
 
-def is_zfs(source):
-    """Whether `source` (a partition or disk) holds a ZFS label."""
-    try:
-        return read_label(source) is not None
-    except (OSError, IOError, struct.error):
-        return False
-
-
 # --- dnodes and object sets ------------------------------------------------------
 
 class Dnode:
@@ -762,9 +754,6 @@ class ObjectSet:
             self._dnodes.clear()
         self._dnodes[obj] = found
         return found
-
-    def object_bytes(self, dnode):
-        return self.read(dnode, 0, (dnode.maxblkid + 1) * dnode.datablksz)
 
     # --- ZAPs -----------------------------------------------------------------
 
@@ -1121,10 +1110,6 @@ def open_dataset(pool, dataset, size=0):
     """A ZfsFileSystem over one of `pool.datasets`."""
     return ZfsFileSystem(ZplVolume(pool.open_dataset(dataset),
                                    dataset['name']), size)
-
-
-def is_zfs_fs(fs):
-    return isinstance(fs, ZfsFileSystem)
 
 
 def looks_like_label(head):

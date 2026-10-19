@@ -41,7 +41,8 @@ class MultiSelectButton(QToolButton):
     #: Emitted with the list of selected option names whenever it changes.
     selectionChanged = Signal(list)
 
-    def __init__(self, options, parent=None, noun="types", categories=None):
+    def __init__(self, options, parent=None, noun="types", categories=None,
+                 labels=None):
         super().__init__(parent)
         self._noun = noun
         self._actions = {}
@@ -51,16 +52,54 @@ class MultiSelectButton(QToolButton):
         self.setObjectName("multiSelectButton")
         self.setPopupMode(QToolButton.InstantPopup)
         self.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self._build(list(options), categories, labels or {})
 
+    def set_options(self, options, categories=None, labels=None):
+        """Offer `options` instead (a list built from what is shown, say).
+        What was ticked stays ticked; a new option is ticked when every
+        option was, so "all" stays all. No signal: the selection only
+        changes by what is gone."""
+        options = list(options)
+        if options == list(self._actions):
+            # Same options (new counts, say): relabelled in place, so an
+            # open menu stays open.
+            for name, action in self._actions.items():
+                action.setText((labels or {}).get(name, name))
+            return
+        everything = self.all_selected()
+        before = set(self.selected())
+        old_menu = self.menu()
+        self._actions = {}
+        self._category_menus = {}
+        self._updating = True
+        try:
+            self._build(list(options), categories, labels or {})
+            for name, action in self._actions.items():
+                action.setChecked(everything or name in before)
+        finally:
+            self._updating = False
+        if old_menu is not None:
+            old_menu.deleteLater()
+        self._refresh_label()
+
+    def options(self):
+        """Every option, in order."""
+        return list(self._actions)
+
+    def all_selected(self):
+        """True when every option is ticked (or there are none)."""
+        return all(a.isChecked() for a in self._actions.values())
+
+    def _build(self, options, categories, labels):
         menu = _StayOpenMenu(self)
         menu.setObjectName("multiSelectMenu")
 
-        select_all = QAction("Select all", self)
+        select_all = QAction("Select all", menu)
         select_all.setProperty('keepOpen', True)
         select_all.triggered.connect(lambda: self.set_selected(list(options)))
         menu.addAction(select_all)
 
-        clear = QAction("Clear", self)
+        clear = QAction("Clear", menu)
         clear.setProperty('keepOpen', True)
         clear.triggered.connect(lambda: self.set_selected([]))
         menu.addAction(clear)
@@ -74,26 +113,26 @@ class MultiSelectButton(QToolButton):
             grouped.update(members)
             submenu = _StayOpenMenu(name, menu)
             submenu.setObjectName("multiSelectMenu")
-            every = QAction(f"All {name.lower()}", self)
+            every = QAction(f"All {name.lower()}", submenu)
             every.setProperty('keepOpen', True)
             every.triggered.connect(
                 lambda _=False, m=tuple(members): self._toggle_group(m))
             submenu.addAction(every)
             submenu.addSeparator()
             for option in members:
-                submenu.addAction(self._make_action(option))
+                submenu.addAction(self._make_action(option, labels, submenu))
             menu.addMenu(submenu)
             self._category_menus[name] = (submenu, members)
 
         for option in options:
             if option not in grouped:
-                menu.addAction(self._make_action(option))
+                menu.addAction(self._make_action(option, labels, menu))
 
         self.setMenu(menu)
         self._refresh_label()
 
-    def _make_action(self, option):
-        action = QAction(option, self)
+    def _make_action(self, option, labels=None, owner=None):
+        action = QAction((labels or {}).get(option, option), owner or self)
         action.setCheckable(True)
         action.toggled.connect(self._on_toggled)
         self._actions[option] = action
@@ -139,7 +178,7 @@ class MultiSelectButton(QToolButton):
         chosen = self.selected()
         total = len(self._actions)
 
-        if not chosen:
+        if not chosen and total:
             text = f"No {self._noun}"
         elif len(chosen) == total:
             text = f"All {self._noun}"

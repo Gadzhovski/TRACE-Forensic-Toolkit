@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication
 
 from trace_app import __version__
@@ -108,6 +108,32 @@ def set_taskbar_identity():
         logging.getLogger('TRACE').debug("No taskbar identity: %s", exc)
 
 
+def _opening_splash(case):
+    """The card saying what is opening, with a bar the window's build moves
+    (ui/widgets/opening_splash.py), shown before the window is built."""
+    from trace_app.ui.widgets.opening_splash import OpeningSplash
+    splash = OpeningSplash(f"Opening case “{case.name}”" if case is not None
+                           else "Starting quick triage")
+    splash.start()
+    return splash
+
+
+def _restart_setup(text):
+    """What a new case's wizard asked for, handed over a restart as JSON
+    (File > Switch Case > New Case); None when there is nothing or it
+    cannot be read."""
+    if not text:
+        return None
+    import json
+    try:
+        setup = json.loads(text)
+    except ValueError:
+        logging.getLogger('TRACE').warning(
+            "The new case's setup could not be read after the restart")
+        return None
+    return setup if isinstance(setup, dict) else None
+
+
 def main():
     configure_logging()
     # The examiner's own settings: size units, the log's detail.
@@ -163,37 +189,98 @@ def main():
     # handed a USB stick who wants to know what is on it should not have to
     # name an investigation first, so quick triage leads to exactly the
     # application TRACE was before cases existed.
-    # Restarted from View > Interface Size: straight back into the case.
+    # Restarted (View > Interface Size, File > Switch Case, a case
+    # archive opened): straight into the case or quick triage chosen, with
+    # what a new case's wizard asked for.
     reopen = os.environ.pop('TRACE_REOPEN_CASE', '')
+    triage = os.environ.pop('TRACE_QUICK_TRIAGE', '') == '1'
+    setup = _restart_setup(os.environ.pop('TRACE_CASE_SETUP', ''))
     if reopen and os.path.isdir(reopen):
         from trace_app.core.case import Case
         try:
-            case, setup = Case.open(reopen), None
+            case = Case.open(reopen)
         except Exception as exc:
             logging.getLogger('TRACE').warning(
                 "Could not reopen %s after the restart: %s", reopen, exc)
             case, setup = choose_case()
+    elif triage:
+        case, setup = TRIAGE, None
     else:
         case, setup = choose_case()
     if case is None:
         logging.getLogger('TRACE').info("Launcher dismissed; not starting")
         return 0
 
-    window = MainWindow(case=None if case is TRIAGE else case)
-    window.show_on_start()
+    # Building the window takes a second or two (every panel, then the
+    # case's counts): say so at once, where the launcher was, rather than
+    # leave a gap with nothing on screen.
+    splash = _opening_splash(None if case is TRIAGE else case)
+    app.setOverrideCursor(Qt.WaitCursor)
+    try:
+        window = MainWindow(case=None if case is TRIAGE else case,
+                            progress=splash.set_progress)
+        splash.set_progress(0.9, "Opening the window…")
+        window.show_on_start()
+    except BaseException:
+        splash.close()
+        raise
+    finally:
+        app.restoreOverrideCursor()
+    splash.finish()
+
+    # Is there a newer TRACE? Asked once, a few seconds on, unless turned
+    # off (Settings ▸ Privacy & Network) or the case is offline.
+    window.check_for_update_at_start()
 
     # A new case from the wizard: queue what it asked for (verification,
-    # then the modules) once its evidence is open. A reopened case: offer
-    # the modules if its evidence was never analysed. Deferred by a beat so
-    # either lands on a drawn window rather than a half-built one.
+    # then the modules) once its evidence is open -- deferred by a beat so
+    # it lands on a drawn window. A reopened case is not asked anything:
+    # the wizard is where modules are chosen, and Analysis Modules in the
+    # menu runs more. (Reopening offered the dialog whenever nothing had
+    # run yet -- every time, for a case kept only for browsing.)
     if setup is not None:
         QTimer.singleShot(0, lambda: window.start_case_setup(setup))
-    elif case is not TRIAGE:
-        QTimer.singleShot(0, window.offer_analysis_modules)
 
     try:
-        return app.exec()
+        code = app.exec()
     finally:
         # Live disks' helpers stop when their connection closes.
         from trace_app.core.live_disk import close_all
         close_all()
+    request = getattr(window, 'restart_request', None)
+    if request:
+        # MainWindow.restart from a terminal: this window has closed (the
+        # case saved, its audit line written); the next TRACE runs now.
+        window.deleteLater()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        return run_again(*request)
+    return code
+
+
+def has_console():
+    """Whether TRACE was started from a terminal it writes to (never in a
+    packaged windowed build: no stdout there)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and stream.isatty():
+                return True
+        except (AttributeError, ValueError, OSError):
+            continue
+    return False
+
+
+def run_again(program, arguments, environment):
+    """Run the next TRACE in this terminal and give back its exit code.
+    macOS/Linux: this process becomes it (exec). Windows has no exec --
+    os.execv there starts another process and returns the prompt, the very
+    thing this avoids -- so this one waits for it."""
+    logging.getLogger('TRACE').info("Starting TRACE again")
+    if sys.platform != 'win32':
+        logging.shutdown()
+        os.execve(program, [program] + list(arguments), environment)
+    import subprocess
+    try:
+        return subprocess.call([program] + list(arguments), env=environment)
+    except KeyboardInterrupt:
+        return 130

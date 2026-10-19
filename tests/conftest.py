@@ -37,6 +37,10 @@ for variable, sub in (('APPDATA', 'roaming'), ('LOCALAPPDATA', 'local'),
     os.makedirs(path, exist_ok=True)
     os.environ[variable] = path
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+# API keys in the sandboxed config.ini, never the examiner's own Keychain
+# or keyring (infra/api_keys.py; tests/test_config_store.py checks each
+# store by itself).
+os.environ['TRACE_KEY_STORE'] = 'file'
 
 import pytest  # noqa: E402
 
@@ -95,6 +99,16 @@ def qapp():
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _case_settings_reset():
+    """Case settings are process-wide once applied (settings.apply_case):
+    a test that saves some must not leave them to the next."""
+    yield
+    module = sys.modules.get('trace_app.core.settings')
+    if module is not None and module._case_values != module.defaults():
+        module.apply_case(None)
 
 
 def pump(app, seconds=0.2, until=None):

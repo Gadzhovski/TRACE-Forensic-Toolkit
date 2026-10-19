@@ -33,11 +33,12 @@ import re
 import sqlite3
 import unicodedata
 import uuid
+from trace_app.infra.sqlite_uri import connect_read_only
+from trace_app.core import library as library_module
 
 logger = logging.getLogger('TRACE.Keywords')
 
 MODULE_KEYWORDS = 'keywords'
-LIBRARY_FILE = 'library.json'
 GRADES = ('notable', 'suspicious')
 KINDS = ('text', 'prefix', 'regex')
 KIND_LABELS = {'text': 'Word or phrase', 'prefix': 'Prefix',
@@ -180,19 +181,12 @@ def default_options():
 
 
 def case_options(case, library=None):
-    stored = case.setting('keywords') if case is not None else None
-    options = default_options()
-    if stored:
-        options.update(stored)
-    elif library is not None and library.lists():
-        options['enabled'] = True
-    return options
+    return library_module.case_options(case, 'keywords', default_options(),
+                                       library)
 
 
 def list_enabled_in(options, entry):
-    chosen = (options.get('lists') or {}).get(entry['id'])
-    return entry.get('enabled_by_default', True) if chosen is None \
-        else bool(chosen)
+    return library_module.enabled_in(options, entry, 'lists')
 
 
 def _utc_now():
@@ -200,38 +194,20 @@ def _utc_now():
         '%Y-%m-%dT%H:%M:%S+00:00')
 
 
-class Library:
-    def __init__(self, folder=None):
-        if folder is None:
-            from trace_app.infra.paths import user_data_dir
-            folder = os.path.join(user_data_dir(), 'keywords')
-        self.folder = folder
-        os.makedirs(folder, exist_ok=True)
-        self._path = os.path.join(folder, LIBRARY_FILE)
-
-    def _load(self):
-        try:
-            with open(self._path, encoding='utf-8') as handle:
-                data = json.load(handle)
-        except FileNotFoundError:
-            return {'lists': []}
-        except (OSError, ValueError) as exc:
-            logger.error("Keyword library unreadable: %s", exc)
-            return {'lists': []}
-        data.setdefault('lists', [])
-        return data
-
-    def _save(self, data):
-        temporary = self._path + '.tmp'
-        with open(temporary, 'w', encoding='utf-8') as handle:
-            json.dump(data, handle, indent=2, ensure_ascii=False)
-        os.replace(temporary, self._path)
+class Library(library_module.Library):
+    SUBFOLDER = 'keywords'
+    KEY = 'lists'
+    LABEL = 'Keyword'
+    FIELDS = frozenset({'name', 'grade', 'description', 'enabled_by_default',
+                        'terms'})
+    CHOICES = {'grade': GRADES}
+    ERROR = KeywordError
+    MISSING = "No such keyword list"
+    NOT_A_FIELD = "Not a keyword list field"
+    ENSURE_ASCII = False
 
     def lists(self):
-        return [dict(entry) for entry in self._load()['lists']]
-
-    def get(self, list_id):
-        return next((e for e in self.lists() if e['id'] == list_id), None)
+        return self.entries()
 
     def create(self, name, terms, grade='notable', description='',
                source='', source_sha256=''):
@@ -266,29 +242,14 @@ class Library:
             grade, description, os.path.abspath(path),
             hashlib.sha256(data).hexdigest())
 
-    def update(self, list_id, **fields):
-        allowed = {'name', 'grade', 'description', 'enabled_by_default',
-                   'terms'}
-        if set(fields) - allowed:
-            raise ValueError("Not a keyword list field")
-        if 'grade' in fields and fields['grade'] not in GRADES:
-            raise ValueError("Unknown grade")
+    def _prepare(self, fields):
         if 'terms' in fields:
             fields['terms'] = [make_term(t['term'], t['kind'], t.get('note'))
                                for t in fields['terms']]
-        data = self._load()
-        for entry in data['lists']:
-            if entry['id'] == list_id:
-                entry.update(fields)
-                entry['modified_utc'] = _utc_now()
-                self._save(data)
-                return entry
-        raise KeywordError("No such keyword list")
+        return fields
 
-    def remove(self, list_id):
-        data = self._load()
-        data['lists'] = [e for e in data['lists'] if e['id'] != list_id]
-        self._save(data)
+    def _changed(self, entry):
+        entry['modified_utc'] = _utc_now()
 
     def export_text(self, list_id, path):
         entry = self.get(list_id)
@@ -464,8 +425,7 @@ def run_case(case, library, options=None, evidence_ids=None, progress=None,
         if evidence_ids is None else list(evidence_ids)
     indexed, not_indexed = [], []
     if os.path.exists(path):
-        connection = sqlite3.connect(f'file:{path}?mode=ro', uri=True,
-                                     timeout=30)
+        connection = connect_read_only(path, timeout=30)
         connection.row_factory = sqlite3.Row
     else:
         connection = None

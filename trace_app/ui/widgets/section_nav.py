@@ -20,6 +20,8 @@ from PySide6.QtCore import QSize, Signal
 from PySide6.QtWidgets import (QHBoxLayout, QStackedWidget, QTabBar,
                                QVBoxLayout, QWidget)
 
+from trace_app.infra.constants import ROW_EDGE_INSET
+
 
 def _tab_bar(name):
     bar = QTabBar()
@@ -68,9 +70,11 @@ class GroupedTabs(QWidget):
         self.group_bar.currentChanged.connect(self._group_changed)
         self.page_bar.currentChanged.connect(self._page_changed)
 
-    def set_corner_widget(self, widget):
-        """Put `widget` at the right of the group row (a filter box)."""
+    def set_corner_widget(self, widget, inset=ROW_EDGE_INSET):
+        """Put `widget` at the right of the group row (a filter box),
+        `inset` short of the edge -- flush with it, it read as cut off."""
         self._top.addWidget(widget)
+        self._top.setContentsMargins(0, 0, inset, 0)
 
     def addTab(self, icon, text, group=None):
         """Add a tab under `group`; returns its index."""
@@ -94,6 +98,27 @@ class GroupedTabs(QWidget):
         elif group == self._current_group():
             self._show_group(group, self._current)
         return index
+
+    def remove_group(self, group):
+        """Take away `group` and its tabs -- the last ones added (a group
+        that comes and goes is added after the fixed ones, so no other
+        tab's index changes). The current tab moves to the first group."""
+        if group not in self._shown_groups():
+            return
+        while self._tabs and self._tabs[-1]['group'] == group:
+            self._tabs.pop()
+        if any(tab['group'] == group for tab in self._tabs):
+            raise ValueError(f"{group!r} has tabs before others")
+        was_current = self._current >= len(self._tabs)
+        self._last.pop(group, None)
+        self._filling = True
+        try:
+            self.group_bar.removeTab(self._shown_groups().index(group))
+        finally:
+            self._filling = False
+        if was_current and self._tabs:
+            self._current = -1
+            self._show_group(self._tabs[0]['group'], 0)
 
     def count(self):
         return len(self._tabs)
