@@ -29,9 +29,11 @@ import json
 import logging
 import os
 import platform
+import re
 
 from trace_app.core.case import (REPORTED_FINDING_GRADES, REPORTED_MISMATCHES,
-                                 parse_artifact_ref)
+                                 parse_artifact_ref, query_user_activity)
+from trace_app.infra.sqlite_uri import connect_read_only
 
 logger = logging.getLogger('TRACE.Report')
 
@@ -68,6 +70,10 @@ SECTIONS = (
     ('activity', 'User activity',
      "Programs run, files opened, USB devices, logons, web history -- the "
      "newest of each kind."),
+    ('modules', 'External modules',
+     "iLEAPP, aLEAPP and other tools run on the evidence: each run's tool, "
+     "version and program hash, the files given to it, what it extracted, "
+     "and the rows the examiner added to the report."),
     ('timeline', 'Timeline',
      "Events added to the report from the Timeline, and/or every event in "
      "a time range."),
@@ -117,15 +123,25 @@ def default_options(case=None):
         'activity_limit': 50,
         'activity_categories': [],          # empty: every category
         'timeline_items': True,
+        'timeline_starred': True,           # the examiner's starred events
+        'timeline_chart': True,             # the timeline as a picture
         'timeline_range': False,
         'timeline_start': '',
         'timeline_end': '',
         'timeline_limit': 500,
         'timeline_sources': [],             # empty: the timeline's default
         'carved_limit': 200,
+        'carved_order': 'kind',             # kind | offset
+        'carved_statuses': [],              # empty: every status
         'indicator_limit': 25,
         'audit_limit': 5000,
         'evidence_ids': None,               # None: every image
+        'skip_empty': True,                 # sections with nothing left out
+        'module_runs': [],                  # empty: every run
+        'module_artifacts': 'rows',         # rows | all | none
+        'copy_tool_reports': True,          # tools' own reports beside it
+        'module_database': False,           # ... with _lava_artifacts.db
+        'folder': '',                       # '': the case's exports folder
     }
 
 
@@ -220,6 +236,16 @@ class _Builder:
         self.custom = {s['key']: s for s in options.get('sections') or []
                        if isinstance(s, dict) and
                        (s.get('title') or s.get('text'))}
+        #: What external tools' results the case sends to reports
+        #: (core/modules/destinations, Settings ▸ Results): their evidence
+        #: rows in Activity and Conversations, their other and telemetry
+        #: artifacts in each run's list.
+        from trace_app.core.modules import destinations
+        self.tool_evidence = destinations.goes_to({'role': 'evidence'},
+                                                  'report')
+        self.tool_roles = {role for role in destinations.ROLE_KEYS
+                           if destinations.goes_to({'role': role},
+                                                   'report')}
         #: The systems found on each image (Case.systems, schema 20).
         try:
             self.systems = case.systems()
@@ -473,7 +499,48 @@ class _Builder:
                 out.append(f"<div class='note'><p class='note-meta'>"
                            f"{e(note.get('created_utc'))}</p>"
                            f"{_paragraphs(note.get('body'))}</div>")
+        sheets = self.scope(self.case.report_items('contact_sheet'))
+        if sheets:
+            out.append(self.heading(2, 'contact-sheets',
+                                    f"Video contact sheets ({len(sheets)})"))
+            for item in sheets:
+                self.check()
+                out.append(self._contact_sheet(item))
         return ''.join(out)
+
+    def _contact_sheet(self, item):
+        """A contact sheet the examiner saved from the player: read back
+        from where it was saved and shown only if it is still the file
+        whose SHA-256 was recorded."""
+        detail = item.get('detail') or {}
+        path = detail.get('path') or ''
+        facts = [("Video", e(detail.get('file'))),
+                 ("Evidence", e(self.evidence_name(item.get('evidence_id')))
+                  if item.get('evidence_id') else '—'),
+                 ("Reference", _mono(item.get('artifact_ref'))),
+                 ("Frames", e(f"{detail.get('how')}"
+                              + (f"; {detail['missing']} not decoded"
+                                 if detail.get('missing') else ''))),
+                 ("Video SHA-256", _mono(detail.get('file_sha256') or
+                                         "not computed (streamed)")),
+                 ("Sheet", _mono(path)),
+                 ("Sheet SHA-256", _mono(detail.get('sha256')))]
+        body = f"<p class='item-title'>{e(item.get('title'))}</p>" + \
+            _facts(facts)
+        try:
+            with open(path, 'rb') as handle:
+                png = handle.read()
+        except OSError as exc:
+            return body + (f"<p class='none'>The sheet was not read from "
+                           f"{e(path)}: {e(exc)}.</p>")
+        import hashlib
+        if hashlib.sha256(png).hexdigest() != detail.get('sha256'):
+            return body + ("<p class='none'>Not shown: the file saved there "
+                           "is no longer the sheet that was recorded (its "
+                           "SHA-256 differs).</p>")
+        uri = "data:image/png;base64," + base64.b64encode(png).decode('ascii')
+        self.pictures += 1
+        return body + f"<p><img src='{uri}' {_fitted(uri, 680)} alt=''/></p>"
 
     def section_conversations(self):
         out = [self.heading(1, 'conversations',
@@ -486,18 +553,230 @@ class _Builder:
         for number, item in enumerate(chosen, start=1):
             self.check()
             key = (item.get('detail') or {}).get('key')
-            rows = [r for r in self.scope(self.case.conversation(key))]
+            rows = [r for r in self.scope(self.case.conversation(key))
+                    if self.tool_evidence or not r.get('module_run_id')]
             out.append(self.heading(2, f"conversation-{number}",
                                     f"{item['title']} ({len(rows):,})"))
             out.append(_table(
                 ['Time (UTC)', 'Direction', 'Sender', 'Text', 'Record',
-                 'Evidence'],
+                 'Read by', 'Evidence'],
                 [[e(r.get('time_utc')), e({'out': 'sent', 'in': 'received'}
                                           .get(r['direction'], '')),
                   e(r.get('sender')), e(r.get('subject')), e(r.get('what')),
+                  e(', '.join(r.get('read_by') or ['TRACE'])),
                   e(self.evidence_name(r.get('evidence_id')))]
                  for r in rows], css='small'))
         return ''.join(out)
+
+    def section_modules(self):
+        """External modules' runs (core/modules) and the rows picked from
+        them (report_items kind 'module_row')."""
+        out = [self.heading(1, 'modules', SECTION_TITLES['modules'])]
+        runs = chosen_runs(self.case, self.options,
+                           [r['id'] for r in self.evidence])
+        if not runs:
+            out.append("<p class='none'>No external module was run.</p>")
+            return ''.join(out)
+        attached = self.options.get('_attached') or {}
+        copies = attached.get('runs') or {}
+        out.append(_table(
+            ['Tool', 'Evidence', 'Started (UTC)', 'Status', 'Files given',
+             'Program SHA-256'],
+            [[e(f"{r['tool']} {r['version']}"),
+              e(self.evidence_name(r.get('evidence_id'))),
+              e(r.get('started_utc')), e(r.get('status')),
+              e(f"{r.get('staged') or 0:,}"),
+              _mono(r.get('executable_sha256'))] for r in runs],
+            css='small'))
+        out.append("<p>Each tool ran on copies of the files it reads, taken "
+                   "from the image by TRACE and hashed as they were "
+                   "written (the run's staging-manifest.csv). What a tool "
+                   "found that is <b>evidence</b> -- calls, messages, "
+                   "browsing, places, accounts, apps -- is in this report's "
+                   "Activity, Conversations and Timeline sections, marked "
+                   "with the tool that read it. Everything else it "
+                   "extracted is in the tool's own report"
+                   + (", copied beside this one (below)"
+                      if copies else '') + ".</p>")
+        if attached.get('manifest'):
+            out.append(f"<p class='caption'>The tools' reports were copied "
+                       f"into {e(report_attach_folder())}/ when this report "
+                       f"was made; every copied file and its SHA-256 is in "
+                       f"{e(attached['manifest'])} (SHA-256 "
+                       f"{_mono(attached.get('sha256'))}). The tools' copies "
+                       f"of evidence files (data/) are not included"
+                       + ("" if self.options.get('module_database') else
+                          ", nor their databases (_lava_artifacts.db): they "
+                          "stay in the case folder") + ".</p>")
+        listing = self.options.get('module_artifacts') or 'rows'
+        for number, run in enumerate(runs, start=1):
+            self.check()
+            artifacts = self.case.module_artifacts(run['id'])
+            out.append(self.heading(
+                2, f"modules-{number}",
+                f"{run['tool']} {run['version']} on "
+                f"{self.evidence_name(run.get('evidence_id'))}"))
+            params = run.get('params') or {}
+            covered = params.get('coverage') or {}
+            given = params.get('input') or {}
+            copy = copies.get(run['id']) or copies.get(str(run['id']))
+            page, page_hash = _tool_page(run)
+            if copy and copy.get('index'):
+                own = (f"<a href='{e(copy['index'])}'>{e(copy['index'])}"
+                       f"</a> ({copy['files']:,} files, "
+                       f"{e(_size(copy['bytes']))}, copied with this "
+                       f"report)")
+            elif page:
+                own = _mono(page) + " (in the case folder" + (
+                    f"; not copied: {e(copy['error'])}"
+                    if copy and copy.get('error') else '') + ")"
+            elif copy and copy.get('files'):
+                own = (f"none -- its output holds no index.html; "
+                       f"{copy['files']:,} file(s) of it "
+                       f"({e(_size(copy['bytes']))}) copied to "
+                       f"{e(copy['folder'])}/")
+            else:
+                own = "none -- its output holds no HTML report"
+            facts = [
+                ('Program SHA-256', _mono(run.get('executable_sha256'))),
+                ('Started (UTC)', e(run.get('started_utc'))),
+                ('Status', e(run.get('status'))),
+                # The label often counts the files already ('16,397 loose
+                # file(s)'); the staged count only where it does not.
+                ('Given', e(', '.join(p for p in (
+                    given.get('label'),
+                    f"{run.get('staged') or 0:,} files staged"
+                    if run.get('staged') and f"{run['staged']:,}" not in
+                    (given.get('label') or '') else '') if p))),
+                ('Input SHA-256', _mono(given.get('sha256'))
+                 if given.get('sha256') else ''),
+                ('Covered', e(
+                    f"{covered.get('artifacts', 0):,} artifacts tried: "
+                    f"{covered.get('with_data', 0):,} found data, "
+                    f"{covered.get('no_files', 0):,} found no files"
+                    + (f", {len(covered.get('other') or []):,} did not "
+                       f"finish" if covered.get('other') else ''))
+                 if covered else ''),
+                (f"{run['tool']}'s own report", own),
+                ("Its index.html SHA-256", _mono(page_hash)
+                 if page_hash else ''),
+                ('Staging manifest SHA-256',
+                 _mono(run.get('manifest_sha256'))
+                 if run.get('manifest_sha256') else ''),
+                ('LAVA database SHA-256', _mono(run.get('lava_sha256'))
+                 if run.get('lava_sha256') else ''),
+                ('Sorted by TRACE', e(_role_counts(artifacts))),
+                ('Result', e(run.get('message')))]
+            out.append(_facts([(k, v) for k, v in facts if v]))
+            if copy and copy.get('skipped'):
+                out.append("<p class='caption'>Not copied: " + '; '.join(
+                    f"{e(path)} ({e(why)})" for path, why in
+                    copy['skipped'][:20])
+                    + (f"; and {len(copy['skipped']) - 20:,} more"
+                       if len(copy['skipped']) > 20 else '') + ".</p>")
+            from trace_app.core.modules import routes
+            groups = routes.accounting(artifacts)
+            if groups:
+                out.append(_table(
+                    ['Sorted by', 'Shown as', 'Artifacts', 'Rows'],
+                    [[e(g['words']),
+                      e(_ROLE_WORDS.get(g['role'], g['role']) if g['role']
+                        != 'superseded' else 'superseded by a newer run'),
+                      e(f"{g['artifacts']:,}"), e(f"{g['rows']:,}")]
+                     for g in groups], css='small'))
+            from trace_app.core.modules import destinations
+            shown = [a for a in artifacts
+                     if destinations.role_of(a) in self.tool_roles]
+            left_out = len(artifacts) - len(shown)
+            if listing == 'rows':
+                shown = sorted((a for a in shown if a.get('row_count')),
+                               key=lambda a: ((a.get('category') or '')
+                                              .lower(), a.get('name') or ''))
+            if listing != 'none' and shown:
+                out.append(_table(
+                    ['Category', 'Artifact', 'Rows', 'Sorted as',
+                     'Read from'],
+                    [[e(a['category']), e(a['name']),
+                      e(f"{a['row_count'] or 0:,}"),
+                      e(_ROLE_WORDS.get(a.get('role') or '', 'not sorted')
+                        + (' (superseded)' if a.get('superseded_by')
+                           else '')
+                        + (f" — by {_SORTED_SHORT.get(a['sorted_by'], '')}"
+                           if _SORTED_SHORT.get(a.get('sorted_by') or '')
+                           else '')),
+                      _source_cell(a['source_path'])]
+                     for a in shown], css='small'))
+            if listing == 'rows' and len(shown) < len(artifacts):
+                out.append(f"<p class='caption'>{len(shown):,} of "
+                           f"{len(artifacts):,} artifacts listed"
+                           + (f" ({left_out:,} of kinds the case leaves "
+                              f"out of reports: Settings ▸ Results)"
+                              if left_out else '')
+                           + "; the tool's own report lists every "
+                           "one.</p>")
+        whole = self.scope(self.case.report_items('module_artifact'))
+        if whole:
+            out.append(self.heading(2, 'modules-artifacts',
+                                    f"Artifacts added to the report "
+                                    f"({len(whole):,})"))
+            for item in whole:
+                self.check()
+                out.append(self._module_artifact(item))
+        picked = self.scope(self.case.report_items('module_row'))
+        if picked:
+            out.append(self.heading(2, 'modules-rows',
+                                    f"Rows added to the report "
+                                    f"({len(picked):,})"))
+            for item in picked:
+                self.check()
+                detail = item.get('detail') or {}
+                values = detail.get('values') or {}
+                out.append(f"<p><b>{e(item.get('title'))}</b> "
+                           f"({e(detail.get('tool'))}, "
+                           f"{e(self.evidence_name(item.get('evidence_id')))})"
+                           f"</p>")
+                out.append(_table(['', ''], [[e(k), e(v)] for k, v in
+                                             values.items() if v],
+                                  css='small'))
+        return ''.join(out)
+
+    def _module_artifact(self, item):
+        """An artifact the examiner added whole: its first rows as the
+        tool wrote them (read from its database now), and how many more."""
+        from trace_app.core.modules import lava
+        detail = item.get('detail') or {}
+        limit = int(self.options.get('activity_limit') or 50)
+        run = self.case.module_run(detail.get('run_id'))
+        artifact = next((a for a in (self.case.module_artifacts(run['id'])
+                                     if run else ())
+                         if a['tablename'] == detail.get('tablename')), None)
+        title = f"<p><b>{e(item.get('title'))}</b>"
+        if run is None or artifact is None:
+            return title + " -- its run is no longer in the case.</p>"
+        title += (f" ({e(run['tool'])} {e(run['version'] or '')}, "
+                  f"{e(self.evidence_name(run.get('evidence_id')))})</p>")
+        try:
+            connection = lava.connect(os.path.join(run['path'], 'report'))
+        except (lava.LavaError, OSError) as exc:
+            return title + f"<p class='none'>Not read: {e(exc)}</p>"
+        try:
+            media = lava.media(connection)
+            rows = lava.rows(connection, artifact, limit=limit,
+                             after=-2 ** 63)
+        finally:
+            connection.close()
+        columns = artifact['columns']
+        total = artifact.get('row_count') or len(rows)
+        table = _table([c.get('label') or c['name'] for c in columns],
+                       [[e(lava.display(c, values.get(c['name']), media))
+                         for c in columns] for _rowid, values in rows],
+                       css='small')
+        more = (f"<p class='none'>{len(rows):,} of {total:,} row(s) shown; "
+                f"the rest are in the tool's database "
+                f"(_lava_artifacts.db, table {e(artifact['tablename'])}, "
+                f"SHA-256 {e(run.get('lava_sha256') or '')}).</p>"
+                if total > len(rows) else '')
+        return title + table + more
 
     def section_tags(self):
         out = [self.heading(1, 'tags', SECTION_TITLES['tags'])]
@@ -747,13 +1026,20 @@ class _Builder:
         rows = self.scope(self.case.persistence(None, include_benign=False))
         routine = sum(self.case.persistence_counts(e['id']).get('benign', 0)
                       for e in self.evidence)
+
+        def starts(row):
+            # Whether the started file is there sits under the command: as
+            # a column of its own the table was wider than a PDF page.
+            there = {1: 'file present', 0: 'file missing'}.get(
+                row.get('target_exists'))
+            cell = _mono(row.get('command'))
+            if there:
+                cell += f"<br/><span class='caption'>{there}</span>"
+            return cell
         out.append(_table(
-            ['Grade', 'Where', 'Name', 'Starts', 'Why', 'File', 'User',
-             'Evidence'],
+            ['Grade', 'Where', 'Name', 'Starts', 'Why', 'User', 'Evidence'],
             [[_badge(r.get('grade')), e(r.get('location')), e(r.get('name')),
-              _mono(r.get('command')), e('; '.join(r.get('reasons') or [])),
-              e({1: 'present', 0: 'missing'}.get(r.get('target_exists'),
-                                                 '')),
+              starts(r), e('; '.join(r.get('reasons') or [])),
               e(r.get('user')), e(self.evidence_name(r.get('evidence_id')))]
              for r in rows], css='small'))
         if routine:
@@ -812,28 +1098,102 @@ class _Builder:
             if key not in chosen:
                 continue
             self.check()
-            rows = self.scope(self.case.user_activity(None, key))
-            if not rows:
+            # Counted, then only the rows shown read: a phone's or Mac's
+            # categories run to hundreds of thousands of rows.
+            query = dict(evidence_ids=[r['id'] for r in self.evidence],
+                         category=key, trace_only=not self.tool_evidence)
+            total = query_user_activity(self.case._db, count=True, **query)
+            if not total:
                 continue
+            rows = query_user_activity(self.case._db, limit=limit, **query)
             any_rows = True
             out.append(self.heading(2, f"activity-{key}",
-                                    f"{label} ({len(rows):,})"))
+                                    f"{label} ({total:,})"))
             out.append(_limited(_table(
                 ['Time (UTC)', 'What', 'Subject', 'User', 'Source',
-                 'Evidence'],
+                 'Read by', 'Evidence'],
                 [[e(f"{r.get('time_utc') or ''}"
                     + (' (local)' if r.get('time_local') else '')),
                   e(r.get('what')), _mono(r.get('subject')),
                   e(r.get('user')), e(r.get('source')),
+                  e(', '.join(r.get('read_by') or ['TRACE'])),
                   e(self.evidence_name(r.get('evidence_id')))]
-                 for r in rows[:limit]], css='small'), len(rows), limit))
+                 for r in rows[:limit]], css='small'), total, limit))
         if not any_rows:
             out.append("<p class='none'>No activity was read.</p>")
         return ''.join(out)
 
+    def _timeline_chart(self, starred):
+        """An <img> of the timeline: over the starred events' span (a
+        tenth either side) when there are some, else the range asked for,
+        else where the events are."""
+        import base64
+        import datetime
+        from trace_app.core import timeline, timeline_chart
+        filters = timeline.default_filters()
+        if len(self.evidence) == 1:
+            filters['evidence_id'] = self.evidence[0]['id']
+        times = sorted(m['time'] for m in starred if m.get('time'))
+        connection = self.case._db
+        if len(times) >= 2 and timeline.parse(times[0]) and \
+                timeline.parse(times[-1]):
+            first, last = timeline.parse(times[0]), timeline.parse(times[-1])
+            margin = max((last - first) / 10, datetime.timedelta(hours=1))
+            start, end = timeline.text(first - margin), \
+                timeline.text(last + margin)
+            what = "around the starred events"
+        elif self.options.get('timeline_range') and \
+                self.options.get('timeline_start'):
+            start = self.options['timeline_start']
+            end = self.options.get('timeline_end') or timeline.text(
+                timeline.parse(start) + datetime.timedelta(days=1))
+            what = "over the range reported"
+        else:
+            spread = timeline.spread(connection, filters)
+            if not spread:
+                return ''
+            start, end = spread['dense_first'], spread['dense_last']
+            what = "where most events are"
+        filters['start'], filters['end'] = start, end
+        unit = timeline.unit_for(start, end, most=160)
+        try:
+            png = timeline_chart.chart_png(
+                timeline.histogram(connection, filters, unit), unit, start,
+                end, times, title=f"Events per {unit}, {what}: "
+                                  f"{start[:16]} to {end[:16]} UTC")
+        except Exception as exc:        # a picture is never worth the report
+            logger.warning("Timeline chart not drawn: %s", exc)
+            return ''
+        if not png:
+            return ''
+        uri = "data:image/png;base64," + base64.b64encode(png).decode('ascii')
+        return (f"<p><img src='{uri}' width='680' alt='Timeline chart'/>"
+                f"</p>")
+
     def section_timeline(self):
         from trace_app.core import timeline
         out = [self.heading(1, 'timeline', SECTION_TITLES['timeline'])]
+        marks = self.scope(list(self.case.timeline_marks(
+            starred_only=True).values()))
+        if self.options.get('timeline_chart', True):
+            out.append(self._timeline_chart(marks))
+        if self.options.get('timeline_starred', True) and marks:
+            # The examiner's narrative: what they starred, in order, with
+            # what they wrote about it.
+            out.append(self.heading(2, 'timeline-starred',
+                                    f"Starred events ({len(marks):,})"))
+            out.append(_table(
+                ['Time', 'Event', 'Path / subject', 'Comment', 'Evidence'],
+                [[e(m.get('time') or '') + (' (local)' if m.get('local')
+                                            else ''),
+                  "<span class='dot' style='color:"
+                  f"{timeline.SOURCE_COLOURS.get(m.get('source'))}'>"
+                  f"&#9679;</span> " + e(timeline.describe_kind(m)
+                                         + (f": {m['title']}"
+                                            if m.get('title') else '')),
+                  _mono(m.get('subject')), e(m.get('comment') or ''),
+                  e(self.evidence_name(m.get('evidence_id')))]
+                 for m in marks], css='small'))
         if self.options.get('timeline_items', True):
             items = self.scope(self.case.report_items('timeline'))
             out.append(self.heading(2, 'timeline-picked',
@@ -888,6 +1248,15 @@ class _Builder:
         limit = int(self.options.get('carved_limit') or 200)
         from trace_app.core.carve_verify import STATUS_LABELS
         rows = self.scope(self.case.carved_files(None))
+        statuses = self.options.get('carved_statuses') or []
+        if statuses:
+            rows = [r for r in rows if r.get('status') in statuses]
+        order = self.options.get('carved_order') or 'kind'
+        if order == 'kind':
+            rows.sort(key=carved_rank)
+        else:
+            rows.sort(key=lambda r: (r.get('evidence_id') or 0,
+                                     r.get('offset') or 0))
         states = {}
         for row in rows:
             states[row.get('status')] = states.get(row.get('status'), 0) + 1
@@ -910,8 +1279,14 @@ class _Builder:
                      "checksums prove the file whole. Valid: every check "
                      "passed; the format has nothing that could prove no "
                      "foreign data is inside. Reconstructed: rebuilt from "
-                     "fragments a checksum proved. Partial: a check failed."
-                     "</p>")
+                     "fragments a checksum proved. Partial: a check failed. "
+                   + ("Listed by kind: pictures and documents first, "
+                      "file-system records last."
+                      if order == 'kind' else "Listed in disk order.")
+                   + (" Only: " + ', '.join(
+                       STATUS_LABELS.get(k, k).lower() for k in statuses)
+                      + '.' if statuses else '')
+                   + "</p>")
         for run in self.case.carving_runs(None, limit=20):
             if self.evidence and run['evidence_id'] not in \
                     {e_['id'] for e_ in self.evidence}:
@@ -941,18 +1316,33 @@ class _Builder:
             if failed:
                 status += ': ' + '; '.join(failed)
             table.append([
-                f"<img class='small-thumb' src='{picture}' alt=''/>"
+                f"<img class='small-thumb' src='{picture}' "
+                f"{_fitted(picture, SMALL_THUMB)} alt=''/>"
                 if picture else '',
-                e(row.get('name')), e(self.evidence_name(row.get(
-                    'evidence_id'))), e((row.get('type') or '').upper()),
-                e(status), e((row.get('origin') or {}).get('path')),
-                f"{row.get('offset') or 0:,}", e(_size(row.get('size'))),
-                e(row.get('embedded_date')), _mono(row.get('sha256'))])
+                self._carved_file_cell(row),
+                e(self.evidence_name(row.get('evidence_id'))),
+                f"{e((row.get('type') or '').upper())}<br/>"
+                f"<span class='caption'>{e(_size(row.get('size')))}</span>",
+                e(status), f"{row.get('offset') or 0:,}",
+                e(row.get('embedded_date'))])
+        # The deleted entry's path and the SHA-256 sit under the file's
+        # name, the size under the type: as columns of their own the table
+        # was wider than a PDF page and its last columns were not printed.
         out.append(_limited(_table(['', 'File', 'Evidence', 'Type', 'Status',
-                                    'Was', 'Offset', 'Size', 'Date inside',
-                                    'SHA-256'],
+                                    'Offset', 'Date inside'],
                                    table, css='small'), len(rows), limit))
         return ''.join(out)
+
+    @staticmethod
+    def _carved_file_cell(row):
+        parts = [e(row.get('name'))]
+        was = (row.get('origin') or {}).get('path')
+        if was:
+            parts.append(f"<span class='caption'>was {e(was)}</span>")
+        if row.get('sha256'):
+            parts.append(f"<span class='caption'>SHA-256</span> "
+                         f"{_mono(row.get('sha256'))}")
+        return '<br/>'.join(parts)
 
     def section_indicators(self):
         out = [self.heading(1, 'indicators', SECTION_TITLES['indicators'])]
@@ -975,8 +1365,7 @@ class _Builder:
                 values = index.indicators(kind, limit=limit)
                 out.append(self.heading(
                     2, f"indicators-{kind}",
-                    f"{kind.replace('_', ' ').capitalize()} "
-                    f"({summary[kind]:,})"))
+                    f"{INDICATOR_KINDS[kind][1]} ({summary[kind]:,})"))
                 out.append(_limited(_table(
                     ['Value', 'Items holding it'],
                     [[_mono(v['value']), f"{v['files']:,}"]
@@ -1032,6 +1421,10 @@ class _Builder:
         lines = settings.statement(settings.for_case(self.case)) + [
             "What the file analysis, search index, YARA and deleted-file "
             "check covered: " + covered.describe()]
+        if getattr(self, 'left_out', None):
+            lines.append("Sections chosen for this report but left out "
+                         "because the case holds nothing for them: "
+                         + ', '.join(self.left_out))
         out.append('<ul>' + ''.join(f"<li>{e(line)}</li>" for line in lines)
                    + '</ul>')
         out.append(self.heading(2, 'methods-tools', "Software"))
@@ -1111,12 +1504,23 @@ class _Builder:
     def body(self):
         sections = [s for s in self.options.get('sections') or []
                     if s.get('enabled')]
+        counts = {}
+        if self.options.get('skip_empty'):
+            chosen = self.options.get('evidence_ids')
+            counts = section_counts(
+                self.case._db, None if chosen is None else
+                [r['id'] for r in self.evidence], self.case.folder,
+                self.options)
+        #: Sections chosen but left out with nothing in them; Methods
+        #: names them, so their absence is not taken for an omission.
+        self.left_out = [SECTION_TITLES.get(s['key'], s['key'])
+                         for s in sections if counts.get(s['key']) == 0]
         parts = [self.cover(), "<div class='toc-holder'>{{TOC}}</div>"]
         for done, section in enumerate(sections):
             self.check()
             key = section['key']
             builder = getattr(self, f"section_{key}", None)
-            if builder is None:
+            if builder is None or counts.get(key) == 0:
                 continue
             if self.progress:
                 self.progress(done, len(sections),
@@ -1128,6 +1532,214 @@ class _Builder:
 def _paragraphs(text):
     return ''.join(f"<p>{e(line)}</p>" for line in (text or '').split('\n')
                    if line.strip())
+
+
+#: How an artifact was sorted (core/modules/routes), in words.
+_ROLE_WORDS = {'evidence': 'evidence (Activity)', 'telemetry': 'telemetry',
+               'other': 'other'}
+#: What decided it (Route.sorted_by), in a few words for the table.
+_SORTED_SHORT = {'map': "the tool's map", 'conversation':
+                 'its conversation view',
+                 'list': 'a list', 'name': 'its name', 'columns':
+                 'its location columns', 'override': 'the examiner'}
+
+
+def source_paths(source):
+    """The files a tool says an artifact was read from, as a list. LEAPPs
+    join several with spaces ('TestData/x.log TestData/x.log.1.gz') and
+    may name their own copy by the run's absolute path; a copy in the
+    run's report/data/ is named 'data/...', as the tool's report folder
+    has it (and the path of the machine it ran on means nothing)."""
+    paths = []
+    # aLEAPP puts one path a line; VLEAPP joins them with spaces.
+    for text in (source or '').replace('\\', '/').splitlines():
+        text = text.strip()
+        if not text:
+            continue
+        root = text.split('/', 1)[0] + '/' if '/' in text else None
+        # Split only where the next path starts as the first one does, so
+        # a space inside a name ('rleapp run') stays.
+        parts = text.split(' ' + root) if root else [text]
+        paths += [parts[0]] + [root + part for part in parts[1:]]
+    marker = '/report/data/'
+    return ['data/' + p.rsplit(marker, 1)[1] if marker in p else p
+            for p in paths]
+
+
+def _source_cell(source):
+    paths = source_paths(source)
+    if not paths:
+        return ''
+    more = len(paths) - 1
+    return _mono(paths[0]) + (f" <span class='caption'>and {more:,} more"
+                              f"</span>" if more else '')
+
+
+def _role_counts(artifacts):
+    """'164 artifacts as evidence (copied into Activity), 178 other, 142
+    telemetry'."""
+    counts = {}
+    for artifact in artifacts:
+        counts[artifact.get('role') or ''] = \
+            counts.get(artifact.get('role') or '', 0) + 1
+    parts = []
+    for role, words in (('evidence', 'as evidence (copied into Activity)'),
+                        ('other', 'other'), ('telemetry', 'telemetry'),
+                        ('', 'not sorted yet')):
+        if counts.get(role):
+            parts.append(f"{counts[role]:,} {words}")
+    return ', '.join(parts)
+
+
+def _tool_page(run):
+    """(path, SHA-256) of the tool's own HTML report -- hashed now: TRACE
+    stars a backup's password in it after the run (job._redact)."""
+    from trace_app.core.evidence_hash import sha256_file
+    page = os.path.join(run.get('path') or '', 'report', 'index.html')
+    if not os.path.isfile(page):
+        return None, None
+    try:
+        return page, sha256_file(page)
+    except OSError:
+        return page, None
+
+
+def chosen_runs(case, options, evidence_ids=None):
+    """The external tools' runs in the report, newest first: those on the
+    chosen evidence (None = every image), narrowed to `module_runs` when
+    the examiner picked some."""
+    runs = case.module_runs()
+    if evidence_ids is not None:
+        runs = [r for r in runs if r.get('evidence_id') in evidence_ids
+                or r.get('evidence_id') is None]
+    picked = {int(i) for i in options.get('module_runs') or ()}
+    if picked:
+        runs = [r for r in runs if r['id'] in picked]
+    return runs
+
+
+def report_attach_folder():
+    from trace_app.core.report_attach import FOLDER
+    return FOLDER
+
+
+#: Sections shown whatever the case holds: they describe the case itself.
+ALWAYS_SHOWN = ('summary', 'evidence', 'methods', 'audit')
+
+#: section -> [(SQL counting what it reads, whether the evidence filter
+#: applies)]. A count of the rows a section reads before its own options
+#: (grades, limits) narrow them: 0 means the section is empty, anything
+#: else that it may hold something.
+_COUNTS = {
+    'bookmarks': ["SELECT count(*) FROM bookmarks WHERE {ev}",
+                  "SELECT count(*) FROM notes WHERE {ev}",
+                  "SELECT count(*) FROM report_items "
+                  "WHERE kind = 'contact_sheet'"],
+    'tags': ["SELECT count(*) FROM artifact_tags WHERE {ev}",
+             "SELECT count(*) FROM vic_categories WHERE {ev}"],
+    'conversations': ["SELECT count(*) FROM report_items "
+                      "WHERE kind = 'conversation'"],
+    'findings': ["SELECT count(*) FROM file_findings WHERE {ev} AND module "
+                 "NOT IN ('ntfs', 'keywords', 'persistence')",
+                 "SELECT count(*) FROM file_analysis WHERE {ev} AND "
+                 "mismatch IS NOT NULL AND mismatch != ''"],
+    'hashes': ["SELECT count(*) FROM hash_matches WHERE {ev}"],
+    'ntfs': ["SELECT count(*) FROM file_findings WHERE {ev} "
+             "AND module = 'ntfs' AND kind IN ('timestomp', 'motw', 'ads')"],
+    'persistence': ["SELECT count(*) FROM persistence WHERE {ev}"],
+    'keywords': ["SELECT count(*) FROM file_findings WHERE {ev} "
+                 "AND module = 'keywords'"],
+    'activity': ["SELECT count(*) FROM user_activity WHERE {ev}"],
+    'modules': ["SELECT count(*) FROM module_runs WHERE {ev}"],
+    'timeline': ["SELECT count(*) FROM timeline_marks WHERE starred = 1",
+                 "SELECT count(*) FROM report_items WHERE kind = 'timeline'"],
+    'carved': ["SELECT count(*) FROM carved_files WHERE {ev}"],
+    'virustotal': ["SELECT count(*) FROM vt_results WHERE {ev}"],
+}
+
+
+def section_counts(connection, evidence_ids=None, folder=None,
+                   options=None):
+    """{section key: rows it reads} for the case on `connection` (any
+    connection to case.db: the dialog's is read-only, on a thread);
+    `evidence_ids` None = every image. Sections in `ALWAYS_SHOWN` have
+    None. The indicators come from the case's search.db in `folder`. With
+    `options`, the timeline also counts a chosen time range as 'some'."""
+    if evidence_ids is None:
+        clause, params = "1 = 1", []
+    else:
+        ids = [int(i) for i in evidence_ids]
+        clause = (f"(evidence_id IN ({','.join('?' * len(ids))}) "
+                  f"OR evidence_id IS NULL)") if ids else "0"
+        params = ids
+    counts = {key: None for key in ALWAYS_SHOWN}
+    for key, queries in _COUNTS.items():
+        total = 0
+        for query in queries:
+            try:
+                total += connection.execute(
+                    query.format(ev=clause),
+                    params if '{ev}' in query else []).fetchone()[0]
+            except Exception as exc:
+                # A table an older case does not have: nothing there.
+                logger.debug("Not counted (%s): %s", key, exc)
+        counts[key] = total
+    if options and options.get('timeline_range'):
+        counts['timeline'] = max(counts['timeline'], 1)
+    counts['indicators'] = _indicator_count(folder, evidence_ids)
+    return counts
+
+
+def _indicator_count(folder, evidence_ids):
+    from trace_app.core.search_index import ENABLED_INDICATORS, SEARCH_DB_NAME
+    path = os.path.join(folder or '', SEARCH_DB_NAME)
+    if not folder or not os.path.isfile(path):
+        return 0
+    import sqlite3
+    kinds = sorted(ENABLED_INDICATORS)
+    # Distinct values, as the section and the Indicators tab count them.
+    query = (f"SELECT DISTINCT kind, value FROM entities WHERE kind IN "
+             f"({','.join('?' * len(kinds))})")
+    params = list(kinds)
+    if evidence_ids is not None:
+        query += f" AND evidence_id IN ({','.join('?' * len(evidence_ids))})"
+        params += [int(i) for i in evidence_ids]
+    query = f"SELECT count(*) FROM ({query})"
+    try:
+        connection = connect_read_only(path)
+        try:
+            return connection.execute(query, params).fetchone()[0]
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        logger.debug("Indicators not counted: %s", exc)
+        return 0
+
+
+#: Carved files listed first in the report: what an examiner reads,
+#: before what proves the file system (CARVE_CATEGORIES' names).
+CARVED_KIND_ORDER = ('Pictures', 'Camera raw', 'Documents', 'Email',
+                     'Video', 'Audio', 'Archives', 'Databases & logs',
+                     'Windows artifacts', 'Executables', 'System records')
+_CARVED_STATUS_ORDER = ('complete', 'reconstructed', 'valid', 'partial')
+
+
+def carved_rank(row):
+    """Sort key of a carve when listed by kind: its kind, then how
+    well it was proved, then where it is."""
+    from trace_app.core.carving import CARVE_CATEGORIES
+    kind = (row.get('type') or '').upper()
+    group = next((name for name, types in CARVE_CATEGORIES.items()
+                  if kind in types), None)
+    # A kind of no group: after everything an examiner reads, before the
+    # file-system records.
+    rank = (CARVED_KIND_ORDER.index(group) if group in CARVED_KIND_ORDER
+            else len(CARVED_KIND_ORDER) - 1.5)
+    status = row.get('status')
+    proof = (_CARVED_STATUS_ORDER.index(status)
+             if status in _CARVED_STATUS_ORDER
+             else len(_CARVED_STATUS_ORDER))
+    return (rank, proof, row.get('evidence_id') or 0, row.get('offset') or 0)
 
 
 def _limited(table, total, limit):
@@ -1185,6 +1797,26 @@ def thumbnail_uri(data, size, keep_format=False):
         return ''
     return f"data:image/{kind};base64," + base64.b64encode(
         out.getvalue()).decode('ascii')
+
+
+#: The carved-files table's thumbnails fit this many pixels.
+SMALL_THUMB = 64
+
+
+def _fitted(uri, box):
+    """width/height attributes fitting the data: URI picture `uri` in a
+    `box`-pixel square. MuPDF ignores a CSS max-width on a picture, so
+    a carve's thumbnail drew at full size and pushed the table's last
+    columns off the PDF page; explicit sizes it honours."""
+    try:
+        from PIL import Image
+        width, height = Image.open(io.BytesIO(base64.b64decode(
+            uri.split(',', 1)[1]))).size
+    except Exception:
+        return f"width='{box}'"
+    scale = min(1.0, box / max(width, height, 1))
+    return (f"width='{max(1, round(width * scale))}' "
+            f"height='{max(1, round(height * scale))}'")
 
 
 def _trace_version():
@@ -1305,6 +1937,7 @@ table.data tbody tr:nth-child(even) td { background-color: #f6f8fa; }
 _CSS_PDF = """
 .section { page-break-before: always; }
 .logo img { height: 70px; }
+h2 { margin-top: 0; padding-top: 14pt; }
 table.data th { background-color: transparent;
                 border-bottom: 1.5px solid #0b3d63; }
 """
@@ -1327,30 +1960,115 @@ def build_html(case, options, images=None, progress=None,
     return page, builder, body
 
 
+class ReportError(Exception):
+    """The report could not be written; the message says why."""
+
+
+class _LayoutRestarted(Exception):
+    pass
+
+
+#: Points taken off the bottom of the text box, one per layout attempt.
+_LAYOUT_SHRINK = (0, 7, 15, 24)
+#: No report is longer; past it the layout is taken to be looping.
+MAX_PDF_PAGES = 50000
+#: Pages in a row that place the same short stretch (ending this far above
+#: the foot) and open nothing: MuPDF has stalled.
+_STALL_PAGES = 3
+_STALL_GAP = 100
+
+
+#: (run, every): a text run at least `run` characters long gets a break
+#: opportunity every `every` characters in the PDF. Finer steps are tried
+#: only while a page's content is still wider than the page.
+_BREAKS = ((20, 10), (14, 8), (10, 5))
+_RUN = re.compile(r'(?:&[#\w]+;|[^\s<&])+')
+_UNIT = re.compile(r'&[#\w]+;|.', re.S)
+
+
+def _breakable_runs(markup, run, every):
+    """`markup` with a zero-width space every `every` characters of each
+    unbroken run of text at least `run` long (hashes, paths, URLs). MuPDF
+    sizes a table's columns to their longest word and does not shrink
+    them to the page: a SHA-256 pushed the columns after it off the page,
+    and they were not in the PDF at all. Tags and entities are left
+    whole; the spaces are not in the text a reader copies out."""
+    def soften(match):
+        units = _UNIT.findall(match.group(0))
+        if len(units) < run:
+            return match.group(0)
+        return '\u200b'.join(''.join(units[i:i + every])
+                              for i in range(0, len(units), every))
+
+    def text(match):
+        return _RUN.sub(soften, match.group(0))
+    return re.sub(r'(?<=>)[^<]+', text, markup)
+
+
 def write_pdf(builder, body, path):
     """The PDF: two layout passes, so the contents carry page numbers."""
     import pymupdf
     css = _CSS_COMMON + _CSS_PDF
 
-    def lay_out(content, output):
+    def lay_out(content, output, shrink):
+        # MuPDF cannot place a block whose top margin falls past the
+        # page's end, and instead of saying so it starts the story again
+        # from the first element -- for ever (a heading at the foot of a
+        # page hung the report job). A heading id met a second time is
+        # that restart.
         story = pymupdf.Story(html=content, user_css=css)
         writer = pymupdf.DocumentWriter(output)
         mediabox = pymupdf.paper_rect('a4')
-        where = mediabox + (42, 58, -42, -58)
+        where = mediabox + (42, 58, -42, -58 - shrink)
         positions = []
+        opened = set()
         page = 0
         more = True
+        widest = 0
+        last, stalled = None, 0
         while more:
+            if page >= MAX_PDF_PAGES:
+                raise _LayoutRestarted()
             device = writer.begin_page(mediabox)
-            more, _ = story.place(where)
+            more, filled = story.place(where)
+            widest = max(widest, filled[2])
+            placed = []
             # add_pdf_links reads `page_num`, counted from 1.
-            story.element_positions(lambda p: positions.append(p),
+            story.element_positions(lambda p: placed.append(p),
                                     {'page_num': page + 1})
+            # It can also stall: the same short stretch placed page after
+            # page, nothing new opened (a page break at the very start).
+            # A real page fills to its foot or opens a heading.
+            short = filled[3] < where.y1 - _STALL_GAP
+            stalled = stalled + 1 if (short and not placed and
+                                      tuple(filled) == last) else 0
+            if stalled >= _STALL_PAGES:
+                raise _LayoutRestarted()
+            last = tuple(filled)
+            for position in placed:
+                if position.id and position.open_close & 1:
+                    if position.id in opened:
+                        raise _LayoutRestarted()
+                    opened.add(position.id)
+            positions.extend(placed)
             story.draw(device)
             writer.end_page()
             page += 1
         writer.close()
-        return story, positions
+        # What was laid out past the box's right edge is not printed.
+        return story, positions, widest > where.x1 + 0.5
+
+    def two_passes(body, shrink):
+        # Pass one: where does each heading land? Pass two: the same
+        # layout with those numbers in the contents (same length, same
+        # pages).
+        _story, positions, _wide = lay_out(body.replace('{{TOC}}', _toc(
+            builder.toc, {anchor: 999 for _l, anchor, _t in builder.toc})),
+            io.BytesIO(), shrink)
+        second = io.BytesIO()
+        story, positions, too_wide = lay_out(body.replace('{{TOC}}', _toc(
+            builder.toc, heading_pages(positions))), second, shrink)
+        return story, positions, second, too_wide
 
     def heading_pages(positions):
         pages = {}
@@ -1359,16 +2077,30 @@ def write_pdf(builder, body, path):
                 pages.setdefault(position.id, position.page_num)
         return pages
 
-    # Pass one: where does each heading land? Pass two: the same layout
-    # with those numbers in the contents (same length, same pages).
-    first = io.BytesIO()
-    _story, positions = lay_out(body.replace('{{TOC}}', _toc(
-        builder.toc, {anchor: 999 for _l, anchor, _t in builder.toc})),
-        first)
-    pages = heading_pages(positions)
-    second = io.BytesIO()
-    story, positions = lay_out(body.replace('{{TOC}}', _toc(builder.toc,
-                                                            pages)), second)
+    def fitted(body):
+        # A shorter text box moves every page break, so the block that
+        # could not be placed lands elsewhere.
+        for shrink, then in zip(_LAYOUT_SHRINK, _LAYOUT_SHRINK[1:] + (None,)):
+            try:
+                return two_passes(body, shrink)
+            except _LayoutRestarted:
+                if then is not None:
+                    logger.warning("PDF layout started over; laying it out "
+                                   "again with the text box %d pt shorter",
+                                   then)
+        raise ReportError("The PDF could not be laid out: MuPDF kept "
+                          "starting the report over.")
+
+    for run, every in _BREAKS:
+        story, positions, second, too_wide = fitted(
+            _breakable_runs(body, run, every))
+        if not too_wide:
+            break
+        logger.info("PDF wider than the page with breaks every %d "
+                    "characters; trying finer", every)
+    else:
+        logger.warning("A table in the PDF is still wider than the page; "
+                       "the HTML and Word reports show it whole")
     document = pymupdf.open('pdf', second.getvalue())
     try:
         story.add_pdf_links(document, positions)
@@ -1435,17 +2167,56 @@ def _pdf_text(text):
 
 def write_report(case, options, images=None, progress=None,
                  should_stop=None, folder=None):
-    """Write the report in each chosen format. Returns
-    [{'format', 'path', 'sha256', 'pages'}] and records each in the audit
-    trail."""
-    import hashlib
-    folder = folder or os.path.join(case.folder, 'exports')
-    os.makedirs(folder, exist_ok=True)
-    stamp = _now().strftime('%Y%m%d-%H%M%S')
-    base = os.path.join(folder, f"report-{stamp}")
+    """Write the report in each chosen format, into a new folder of its
+    own under `folder` (else options['folder'], else the case's exports).
+    Returns [{'format', 'path', 'sha256', 'pages', 'folder'}] and records
+    each in the audit trail."""
+    parent = folder or options.get('folder') or os.path.join(case.folder,
+                                                              'exports')
+    os.makedirs(parent, exist_ok=True)
+    # Each report is a folder: the report in its formats and what it
+    # links to (the external tools' own reports), handed on as one.
+    folder = _new_folder(parent, f"Report {_now():%Y-%m-%d %H%M%S}")
+    try:
+        return _write_into(folder, case, options, images, progress,
+                           should_stop)
+    except ReportCancelled:
+        # Nothing half-made is left: the folder is this report's own.
+        import shutil
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+def _write_into(folder, case, options, images, progress, should_stop):
+    base = os.path.join(folder, 'report')
+    options = dict(options)
+    sections = {s['key'] for s in options.get('sections') or []
+                if s.get('enabled')}
+    runs = []
+    if options.get('copy_tool_reports') and 'modules' in sections:
+        chosen = options.get('evidence_ids')
+        runs = chosen_runs(case, options, chosen)
+    if runs:
+        from trace_app.core import report_attach
+        if progress:
+            progress(0, 1, "Copying the external tools' own reports")
+        copies, manifest, digest = report_attach.copy_runs(
+            runs, folder, bool(options.get('module_database')), should_stop)
+        options['_attached'] = {
+            'runs': copies, 'sha256': digest,
+            'manifest': (os.path.relpath(manifest, folder).replace('\\', '/')
+                         if manifest else None)}
+        if manifest:
+            case.record_event(
+                'external tool reports copied',
+                f"{os.path.basename(folder)}/{report_attach.FOLDER}: "
+                + ', '.join(f"run {run_id} {c['files']:,} files"
+                            for run_id, c in copies.items())
+                + f"; {report_attach.MANIFEST} sha256={digest}")
     page, builder, body = build_html(case, options, images, progress,
                                      should_stop)
     written = []
+    failed = None
     formats = [f for f in options.get('formats') or FORMATS if f in FORMATS]
     if 'html' in formats:
         path = base + '.html'
@@ -1458,8 +2229,12 @@ def write_report(case, options, images=None, progress=None,
         if progress:
             progress(1, 1, 'Laying out the PDF')
         path = base + '.pdf'
-        pages = write_pdf(builder, body, path)
-        written.append({'format': 'pdf', 'path': path, 'pages': pages})
+        try:
+            pages = write_pdf(builder, body, path)
+            written.append({'format': 'pdf', 'path': path, 'pages': pages})
+        except ReportError as exc:
+            # The other formats are still written and recorded.
+            failed = str(exc)
     if 'docx' in formats:
         if should_stop and should_stop():
             raise ReportCancelled()
@@ -1470,21 +2245,35 @@ def write_report(case, options, images=None, progress=None,
         write_docx(builder, body.replace('{{TOC}}', ''), path, options,
                    _trace_version())
         written.append({'format': 'docx', 'path': path, 'pages': None})
+    from trace_app.core.evidence_hash import sha256_file
     for item in written:
-        digest = hashlib.sha256()
-        with open(item['path'], 'rb') as handle:
-            for block in iter(lambda: handle.read(1 << 20), b''):
-                digest.update(block)
-        item['sha256'] = digest.hexdigest()
+        item['sha256'] = sha256_file(item['path'])
         sections = ','.join(s['key'] for s in options.get('sections') or []
                             if s.get('enabled'))
+        item['folder'] = folder
         case.record_event(
             'report created',
-            f"{os.path.basename(item['path'])} sha256={item['sha256']} "
+            f"{os.path.basename(folder)}/{os.path.basename(item['path'])} "
+            f"sha256={item['sha256']} "
             f"sections={sections}" + (f" pages={item['pages']}"
                                       if item['pages'] else ''))
     logger.info("Report written: %s", ', '.join(i['path'] for i in written))
+    if failed:
+        raise ReportError(failed + (" Written: " + ', '.join(
+            os.path.basename(i['path']) for i in written) if written else ''))
     return written
+
+
+def _new_folder(parent, name):
+    """`parent/name`, made; 'name (2)'... when it is there already."""
+    target, number = os.path.join(parent, name), 2
+    while True:
+        try:
+            os.makedirs(target)
+            return target
+        except FileExistsError:
+            target = os.path.join(parent, f"{name} ({number})")
+            number += 1
 
 
 def save_template(options, path):
@@ -1492,7 +2281,8 @@ def save_template(options, path):
     keep = {k: v for k, v in options.items()
             if k not in ('case_name', 'case_number', 'summary',
                          'conclusions', 'evidence_ids', 'timeline_start',
-                         'timeline_end')}
+                         'timeline_end', 'module_runs', 'folder')
+            and not k.startswith('_')}
     with open(path, 'w', encoding='utf-8') as handle:
         json.dump(keep, handle, indent=2)
 

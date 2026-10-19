@@ -72,8 +72,11 @@ def test_both_formats_written_and_audited(written):
         assert digest == item['sha256']
         assert any(os.path.basename(item['path']) in line
                    and f"sha256={digest}" in line for line in audit)
-        assert os.path.dirname(item['path']) == os.path.join(case.folder,
-                                                             'exports')
+        # Each report is a folder of its own under the case's exports.
+        assert os.path.dirname(item['path']) == item['folder']
+        assert os.path.dirname(item['folder']) == os.path.join(case.folder,
+                                                               'exports')
+        assert os.path.basename(item['folder']).startswith('Report ')
 
 
 def test_evidence_text_is_never_markup(written):
