@@ -1,0 +1,2595 @@
+{
+"columns": {
+"GooglePlaySearches": [
+"timestamp",
+"display",
+"query"
+],
+"Turbo_Battery": [
+"timestamp",
+"battery_level",
+"charge_type",
+"battery_saver",
+"timezone",
+"source"
+],
+"accounts_ce": [
+"account_type",
+"account_name",
+"password"
+],
+"accounts_ce_authtokens": [
+"account_type",
+"account_name",
+"authtoken_type",
+"authtoken"
+],
+"accounts_de": [
+"last_password_entry",
+"account_type",
+"account_name",
+"action_type",
+"debug_time",
+"source_path"
+],
+"adb_authorizations": [
+"last_connection",
+"host",
+"adb_public_key",
+"source_file"
+],
+"adb_hosts": [
+"username",
+"hostname"
+],
+"android_tombstones": [
+"timestamp",
+"process",
+"command_line",
+"thread",
+"pid",
+"tid",
+"uid",
+"signal",
+"abort_message",
+"process_uptime",
+"build_fingerprint",
+"format",
+"source_file"
+],
+"android_users": [
+"created",
+"last_logged_in",
+"last_entered_foreground",
+"user_id",
+"user_name",
+"user_type_as_stored",
+"serial_number",
+"flags_as_stored",
+"profile_badge_as_stored",
+"in_userlist",
+"last_logged_in_fingerprint",
+"source_file"
+],
+"appIcons": [
+"app_name",
+"package_name",
+"main_icon",
+"icons"
+],
+"app_idle_stats": [
+"package_name",
+"user_id",
+"standby_bucket",
+"bucket_reason",
+"bucket_reason_as_stored",
+"next_estimated_app_launch",
+"last_used_deviceon_ms",
+"last_used_by_user_deviceon_ms",
+"last_used_screen_on_screenon_ms",
+"last_predicted_deviceon_ms",
+"last_job_run_deviceon_ms",
+"bucket_expiry_deviceon_ms",
+"last_restriction_attempt_deviceon_ms",
+"restriction_reason",
+"source_file"
+],
+"appicons": [
+"app_name",
+"package_name",
+"main_icon",
+"icons"
+],
+"appops_modes": [
+"package_name",
+"uid",
+"android_user",
+"permission",
+"op_code",
+"mode",
+"mode_stored_against",
+"source_file"
+],
+"battery_stats_daily": [
+"start_time",
+"end_time",
+"step_type",
+"raw_step_content",
+"content_prefix",
+"initial_state",
+"change_flags",
+"prefix_meaning",
+"battery_level",
+"time_ms"
+],
+"chrome_sync_devices": [
+"device_name",
+"browser",
+"session_tag",
+"window_id",
+"tabs_in_window",
+"device_type_as_stored",
+"browser_type_as_stored",
+"source_file"
+],
+"chrome_sync_sessions": [
+"timestamp",
+"device_name",
+"browser",
+"url",
+"title",
+"referrer",
+"http_status",
+"navigation_index",
+"current_navigation_index",
+"tab_id",
+"window_id",
+"session_tag",
+"page_transition_as_stored",
+"favicon_url",
+"superseded",
+"source_file"
+],
+"contacts": [
+"mimetype",
+"data_1",
+"display_name",
+"phone_number",
+"email_address",
+"source_file"
+],
+"downloads": [
+"last_modified_timestamp",
+"title",
+"description",
+"provider_uri",
+"save_location",
+"mime_type",
+"app_provider_package",
+"current_bytes",
+"total_bytes",
+"status",
+"error_message",
+"etag",
+"visible_in_downloads_ui",
+"deleted",
+"source_file"
+],
+"dropbox_boot_records": [
+"timestamp",
+"tag",
+"headers_from_previous_boot",
+"build",
+"hardware",
+"bootloader",
+"radio",
+"kernel",
+"last_boot_reason",
+"truncated",
+"size_bytes",
+"source_file"
+],
+"dropbox_other_entries": [
+"timestamp",
+"tag",
+"content_type",
+"compressed",
+"content_lost",
+"size_bytes",
+"first_line",
+"source_file"
+],
+"dropbox_process_errors": [
+"timestamp",
+"tag",
+"process",
+"pid",
+"uid",
+"packages",
+"foreground",
+"subject",
+"activity",
+"parent_process",
+"first_body_line",
+"signal",
+"abort_message",
+"reported_at",
+"frozen",
+"process_runtime_ms",
+"error_id",
+"dropped_count",
+"build",
+"size_bytes",
+"source_file"
+],
+"dust_conversations": [
+"updated_date",
+"other_party_display_name",
+"other_account_id",
+"account_id",
+"conversation_id",
+"subtitle_as_stored",
+"muted",
+"blocked",
+"missed_message",
+"count",
+"type_as_stored"
+],
+"dust_key_bundles": [
+"account_id",
+"conversation_id",
+"device_identifiers",
+"accounts_in_bundle",
+"key_material_as_stored"
+],
+"dust_known_accounts": [
+"updated_time",
+"account_id",
+"photo_url"
+],
+"exoplayerCachedMedia": [
+"last_touched",
+"media",
+"app",
+"kind",
+"what",
+"state",
+"bytes",
+"length_recorded",
+"pieces_joined",
+"audio_tracks",
+"key_as_stored",
+"key_from",
+"cache_folder"
+],
+"exoplayercachedmedia": [
+"last_touched",
+"media",
+"app",
+"kind",
+"what",
+"state",
+"bytes",
+"length_recorded",
+"pieces_joined",
+"audio_tracks",
+"key_as_stored",
+"key_from",
+"cache_folder"
+],
+"frosting": [
+"last_updated_timestamp",
+"app_package_name",
+"apk_path"
+],
+"galleryvault_account_profile": [
+"android_user",
+"name",
+"value"
+],
+"galleryvault_hidden_files": [
+"added_time",
+"file_last_modified_time",
+"file_name",
+"folder",
+"original_path",
+"mime_type",
+"file_size",
+"dimensions",
+"video_duration",
+"file_type_value",
+"encrypt_state",
+"storage_type",
+"complete_state",
+"delete_state",
+"uuid",
+"source"
+],
+"galleryvault_preferences": [
+"preference",
+"value",
+"original_key"
+],
+"get_Cello": [
+"created_date",
+"file_name",
+"modified_date",
+"shared_with_user_date",
+"modified_by_user_date",
+"viewed_by_user_date",
+"mime_type",
+"offline",
+"quota_size",
+"folder",
+"user_is_owner",
+"deleted",
+"offline_file",
+"source_file"
+],
+"get_Turbo_AppUsage": [
+"app_launch_timestamp",
+"app_name"
+],
+"get_Viber": [
+"call_start_time",
+"phone_number",
+"call_direction",
+"call_end_time_computed_start_duration",
+"call_type"
+],
+"get_Viber_contacts": [
+"display_name",
+"phone_number"
+],
+"get_Viber_messages": [
+"message_date",
+"direction",
+"from_phone_number",
+"message",
+"recipients",
+"thread_id",
+"unread",
+"file_attachment"
+],
+"get_WhatsAppLogFiles": [
+"timestamp",
+"token",
+"description",
+"full_line",
+"source_file",
+"possible_full_numbers_last4_match"
+],
+"get_appopSetupWiz": [
+"timestamp",
+"package"
+],
+"get_appops": [
+"access_timestamp",
+"reject_timestamp",
+"package_name",
+"id",
+"proxy_package_name",
+"proxy_package_uid",
+"permission"
+],
+"get_appopsetupwiz": [
+"timestamp",
+"package"
+],
+"get_bluetoothAdapter": [
+"key",
+"value"
+],
+"get_bluetoothConnections": [
+"first_connected_timestamp",
+"device_name",
+"mac_address",
+"link_key"
+],
+"get_bluetoothadapter": [
+"key",
+"value"
+],
+"get_bluetoothconnections": [
+"first_connected_timestamp",
+"device_name",
+"mac_address",
+"link_key"
+],
+"get_browserCachechrome": [
+"timestamp_modified",
+"filename",
+"mime_type",
+"cached_file",
+"source_url",
+"source"
+],
+"get_browsercachechrome": [
+"timestamp_modified",
+"filename",
+"mime_type",
+"cached_file",
+"source_url",
+"source"
+],
+"get_build": [
+"key",
+"value"
+],
+"get_calendar_calendars": [
+"created_timestamp",
+"calendar_name",
+"calendar_display_name",
+"account_name",
+"account_type",
+"visible",
+"calendar_location",
+"timezone",
+"owner_account",
+"is_primary",
+"color",
+"color_index"
+],
+"get_calllog": [
+"call_date",
+"phone_account_address",
+"partner",
+"type",
+"duration_in_secs",
+"partner_location",
+"country_iso",
+"data",
+"mime_type",
+"transcription",
+"deleted"
+],
+"get_cello": [
+"created_date",
+"file_name",
+"modified_date",
+"shared_with_user_date",
+"modified_by_user_date",
+"viewed_by_user_date",
+"mime_type",
+"offline",
+"quota_size",
+"folder",
+"user_is_owner",
+"deleted",
+"offline_file",
+"source_file"
+],
+"get_chrome": [
+"last_visit_time",
+"url",
+"title",
+"visit_count",
+"typed_count",
+"id",
+"hidden",
+"browser_name"
+],
+"get_chromeAutofill": [
+"date_created",
+"field",
+"value",
+"date_last_used",
+"count",
+"browser_name"
+],
+"get_chromeAutofillProfiles": [
+"date_modified",
+"guid",
+"first_name",
+"middle_name",
+"last_name",
+"email",
+"phone_number",
+"company_name",
+"address",
+"city",
+"state",
+"zip_code",
+"date_last_used",
+"use_count",
+"browser_name"
+],
+"get_chromeBookmarks": [
+"added_date",
+"url",
+"name",
+"parent",
+"type",
+"browser_name"
+],
+"get_chromeCookies": [
+"last_access_date",
+"host",
+"name",
+"value",
+"created_date",
+"expiration_date",
+"path",
+"browser_name"
+],
+"get_chromeDownloads": [
+"start_time",
+"end_time",
+"last_access_time",
+"tab_url",
+"target_path",
+"state",
+"danger_type",
+"interrupt_reason",
+"opened",
+"received_bytes",
+"total_bytes",
+"browser_name"
+],
+"get_chromeKeywordSearchTerms": [
+"last_visit_time",
+"term",
+"url",
+"browser_name"
+],
+"get_chromeLoginData": [
+"created_time",
+"username",
+"password",
+"origin_url",
+"blacklisted_by_user",
+"browser_name"
+],
+"get_chromeOfflinePages": [
+"creation_time",
+"last_access_time",
+"online_url",
+"file_path",
+"title",
+"access_count",
+"file_size",
+"browser_name"
+],
+"get_chromeSearchTerms": [
+"last_visit_time",
+"search_term",
+"url",
+"title",
+"visit_count",
+"browser_name"
+],
+"get_chromeWebVisits": [
+"visit_timestamp",
+"url",
+"title",
+"duration",
+"transition_type",
+"qualifiers",
+"from_visit_url",
+"browser_name"
+],
+"get_chromeautofill": [
+"date_created",
+"field",
+"value",
+"date_last_used",
+"count",
+"browser_name"
+],
+"get_chromeautofillprofiles": [
+"date_modified",
+"guid",
+"first_name",
+"middle_name",
+"last_name",
+"email",
+"phone_number",
+"company_name",
+"address",
+"city",
+"state",
+"zip_code",
+"date_last_used",
+"use_count",
+"browser_name"
+],
+"get_chromebookmarks": [
+"added_date",
+"url",
+"name",
+"parent",
+"type",
+"browser_name"
+],
+"get_chromecookies": [
+"last_access_date",
+"host",
+"name",
+"value",
+"created_date",
+"expiration_date",
+"path",
+"browser_name"
+],
+"get_chromedownloads": [
+"start_time",
+"end_time",
+"last_access_time",
+"tab_url",
+"target_path",
+"state",
+"danger_type",
+"interrupt_reason",
+"opened",
+"received_bytes",
+"total_bytes",
+"browser_name"
+],
+"get_chromekeywordsearchterms": [
+"last_visit_time",
+"term",
+"url",
+"browser_name"
+],
+"get_chromelogindata": [
+"created_time",
+"username",
+"password",
+"origin_url",
+"blacklisted_by_user",
+"browser_name"
+],
+"get_chromeofflinepages": [
+"creation_time",
+"last_access_time",
+"online_url",
+"file_path",
+"title",
+"access_count",
+"file_size",
+"browser_name"
+],
+"get_chromesearchterms": [
+"last_visit_time",
+"search_term",
+"url",
+"title",
+"visit_count",
+"browser_name"
+],
+"get_chromewebvisits": [
+"visit_timestamp",
+"url",
+"title",
+"duration",
+"transition_type",
+"qualifiers",
+"from_visit_url",
+"browser_name"
+],
+"get_emulatedSmeta_files_legacy": [
+"timestamp_added",
+"timestamp_modified",
+"timestamp_taken",
+"path",
+"title",
+"display_name",
+"size",
+"latitude",
+"longitude",
+"orientation",
+"bucket_display_name",
+"width",
+"height",
+"id",
+"source_db_path"
+],
+"get_emulatedsmeta_files_legacy": [
+"timestamp_added",
+"timestamp_modified",
+"timestamp_taken",
+"path",
+"title",
+"display_name",
+"size",
+"latitude",
+"longitude",
+"orientation",
+"bucket_display_name",
+"width",
+"height",
+"id",
+"source_db_path"
+],
+"get_fb_threads_calls": [
+"timestamp",
+"call_duration",
+"caller_id",
+"receiver_name",
+"receiver_id",
+"video_call",
+"thread_key",
+"source_file"
+],
+"get_fb_threads_chats": [
+"timestamp",
+"sender_name",
+"sender_id",
+"thread_key",
+"message",
+"snippet",
+"attachment_name",
+"share_name",
+"share_description",
+"share_link",
+"message_reaction",
+"message_reaction_timestamp",
+"message_id",
+"source_file"
+],
+"get_fb_threads_contacts": [
+"user_id",
+"first_name",
+"last_name",
+"username",
+"profile_pic_url",
+"is_messenger_user",
+"is_friend",
+"friendship_status",
+"contact_relationship_status",
+"source_file"
+],
+"get_fb_user_id": [
+"user_id",
+"source_file"
+],
+"get_fcm_dump": [
+"package",
+"timestamp",
+"originating_file",
+"record_id",
+"key",
+"value"
+],
+"get_fcm_dump_tiktok": [
+"timestamp",
+"originating_file",
+"data",
+"title"
+],
+"get_gboardCache_keystrokes": [
+"source",
+"event_timestamp",
+"id",
+"text",
+"app",
+"input_name",
+"input_id"
+],
+"get_gboardcache_keystrokes": [
+"source",
+"event_timestamp",
+"id",
+"text",
+"app",
+"input_name",
+"input_id"
+],
+"get_gmailActive": [
+"active_gmail_address",
+"source_file"
+],
+"get_gmailactive": [
+"active_gmail_address",
+"source_file"
+],
+"get_googleDuo": [
+"timestamp",
+"local_user",
+"remote_user",
+"contact_name",
+"activity_type",
+"call_status",
+"direction"
+],
+"get_googleDuo_contacts": [
+"last_updated_timestamp",
+"contact_name",
+"contact_info",
+"contact_label",
+"contact_id"
+],
+"get_googleInitiatedNav": [
+"timestamp",
+"initiated_navigation_destination"
+],
+"get_googleLastTrip": [
+"timestamp",
+"directionality",
+"place",
+"latitude",
+"longitude",
+"data"
+],
+"get_googleMapsGmm": [
+"directions_url",
+"latitude",
+"longitude",
+"to_latitude",
+"to_longitude",
+"row_id",
+"type"
+],
+"get_googleMapsGmm_places": [
+"timestamp",
+"label",
+"latitude",
+"longitude",
+"address",
+"url"
+],
+"get_googleMessages": [
+"message_timestamp",
+"direction",
+"message_sender",
+"other_participantconversation_name",
+"message",
+"message_type",
+"attachment_byte_size",
+"attachment_location",
+"conversation_id"
+],
+"get_googlePhotos": [
+"source",
+"timestamp",
+"file_name",
+"file_path",
+"captured_timestamp",
+"timezone_offset_hours_truncated",
+"width",
+"height",
+"size",
+"duration",
+"latitude",
+"longitude",
+"folder_name",
+"media_store_id",
+"trashed_timestamp",
+"purge_timestamp"
+],
+"get_googlePhotos_cache": [
+"timestamp",
+"key",
+"image",
+"size",
+"pending_deletion"
+],
+"get_googlePhotos_folders": [
+"source",
+"bucket_id",
+"folder_name",
+"folder_path"
+],
+"get_googlePhotos_remote": [
+"source",
+"timestamp",
+"file_name",
+"remote_url",
+"captured_timestamp",
+"timezone_offset_hours_truncated",
+"duration",
+"latitude",
+"longitude",
+"inferred_latitude",
+"inferred_longitude",
+"upload_status"
+],
+"get_googlePhotos_shared": [
+"source",
+"timestamp",
+"file_name",
+"remote_url",
+"size",
+"captured_timestamp",
+"timezone_offset_hours_truncated",
+"upload_status"
+],
+"get_googleduo": [
+"timestamp",
+"local_user",
+"remote_user",
+"contact_name",
+"activity_type",
+"call_status",
+"direction"
+],
+"get_googleduo_contacts": [
+"last_updated_timestamp",
+"contact_name",
+"contact_info",
+"contact_label",
+"contact_id"
+],
+"get_googleinitiatednav": [
+"timestamp",
+"initiated_navigation_destination"
+],
+"get_googlelasttrip": [
+"timestamp",
+"directionality",
+"place",
+"latitude",
+"longitude",
+"data"
+],
+"get_googlemapaudio": [
+"timestamp",
+"audio",
+"filename",
+"file_size"
+],
+"get_googlemapaudioTemp": [
+"timestamp_modified",
+"audio",
+"filename",
+"file_size"
+],
+"get_googlemapaudiotemp": [
+"timestamp_modified",
+"audio",
+"filename",
+"file_size"
+],
+"get_googlemapsgmm": [
+"directions_url",
+"latitude",
+"longitude",
+"to_latitude",
+"to_longitude",
+"row_id",
+"type"
+],
+"get_googlemapsgmm_places": [
+"timestamp",
+"label",
+"latitude",
+"longitude",
+"address",
+"url"
+],
+"get_googlemessages": [
+"message_timestamp",
+"direction",
+"message_sender",
+"other_participantconversation_name",
+"message",
+"message_type",
+"attachment_byte_size",
+"attachment_location",
+"conversation_id"
+],
+"get_googlephotos": [
+"source",
+"timestamp",
+"file_name",
+"file_path",
+"captured_timestamp",
+"timezone_offset_hours_truncated",
+"width",
+"height",
+"size",
+"duration",
+"latitude",
+"longitude",
+"folder_name",
+"media_store_id",
+"trashed_timestamp",
+"purge_timestamp"
+],
+"get_googlephotos_cache": [
+"timestamp",
+"key",
+"image",
+"size",
+"pending_deletion"
+],
+"get_googlephotos_folders": [
+"source",
+"bucket_id",
+"folder_name",
+"folder_path"
+],
+"get_googlephotos_remote": [
+"source",
+"timestamp",
+"file_name",
+"remote_url",
+"captured_timestamp",
+"timezone_offset_hours_truncated",
+"duration",
+"latitude",
+"longitude",
+"inferred_latitude",
+"inferred_longitude",
+"upload_status"
+],
+"get_googlephotos_shared": [
+"source",
+"timestamp",
+"file_name",
+"remote_url",
+"size",
+"captured_timestamp",
+"timezone_offset_hours_truncated",
+"upload_status"
+],
+"get_imagemngCache": [
+"timestamp_last_modified",
+"media",
+"filename",
+"source_file"
+],
+"get_imagemngcache": [
+"timestamp_last_modified",
+"media",
+"filename",
+"source_file"
+],
+"get_imo_account": [
+"account_id",
+"name"
+],
+"get_imo_messages": [
+"timestamp",
+"direction",
+"chat_partner",
+"last_message",
+"from_id",
+"to_id",
+"message_read",
+"attachment"
+],
+"get_installedappsGass": [
+"user",
+"bundle_id",
+"version_code",
+"sha256_hash"
+],
+"get_installedappsLibrary": [
+"user",
+"purchase_time",
+"account",
+"doc_id"
+],
+"get_installedappsVending": [
+"user",
+"first_download",
+"package_name",
+"title",
+"install_reason",
+"last_updated",
+"auto_update",
+"account"
+],
+"get_installedappsgass": [
+"user",
+"bundle_id",
+"version_code",
+"sha256_hash"
+],
+"get_installedappslibrary": [
+"user",
+"purchase_time",
+"account",
+"doc_id"
+],
+"get_installedappsvending": [
+"user",
+"first_download",
+"package_name",
+"title",
+"install_reason",
+"last_updated",
+"auto_update",
+"account"
+],
+"get_line": [
+"user_id",
+"user_name"
+],
+"get_line_calls": [
+"start_time",
+"end_time",
+"to_id",
+"from_id",
+"direction",
+"call_type"
+],
+"get_line_messages": [
+"start_time",
+"direction",
+"from_id",
+"message",
+"attachment",
+"attachment_file",
+"attachment_format",
+"attachment_type_as_stored",
+"local_uri_as_stored",
+"to_id",
+"thread_id",
+"android_user"
+],
+"get_mewe_chat": [
+"timestamp",
+"message_direction",
+"user_name",
+"thread_name",
+"message_text",
+"thread_id",
+"group_id",
+"chat_type",
+"user_id",
+"message_type",
+"attachment_name",
+"deleted"
+],
+"get_mewe_groups": [
+"last_opened",
+"type",
+"name",
+"description",
+"access",
+"role",
+"public",
+"confirmed",
+"verified",
+"followers",
+"public_url_id",
+"owner_id",
+"id"
+],
+"get_mewe_post_media": [
+"post_created",
+"post_author",
+"group_name",
+"media_type",
+"mime_type",
+"file_name",
+"image_url",
+"width",
+"height",
+"video_url_template",
+"video_resolutions",
+"post_id",
+"item_id"
+],
+"get_mewe_reactions": [
+"target_created",
+"reacted_to",
+"emoji",
+"reaction_count",
+"device_owner_reacted",
+"target_author",
+"target_text",
+"target_id"
+],
+"get_mewe_session": [
+"key",
+"value"
+],
+"get_offlinePages": [
+"timestamp",
+"file",
+"web_source",
+"subject",
+"mime_date",
+"source_in_extraction"
+],
+"get_offlinepages": [
+"timestamp",
+"file",
+"web_source",
+"subject",
+"mime_date",
+"source_in_extraction"
+],
+"get_pSettings": [
+"name",
+"value"
+],
+"get_packageGplinks": [
+"bundle_id",
+"possible_google_play_store_link"
+],
+"get_package_info": [
+"ft",
+"name",
+"install_time",
+"update_time",
+"install_originator",
+"installer",
+"code_path",
+"public_flags",
+"private_flags"
+],
+"get_packagegplinks": [
+"bundle_id",
+"possible_google_play_store_link"
+],
+"get_permissions_list": [
+"name",
+"package",
+"protection"
+],
+"get_permissions_packages": [
+"type",
+"package",
+"permission",
+"granted"
+],
+"get_permissions_trees": [
+"name",
+"package"
+],
+"get_persistentProp": [
+"timestamp",
+"event"
+],
+"get_persistentprop": [
+"timestamp",
+"event"
+],
+"get_psettings": [
+"name",
+"value"
+],
+"get_quicksearch": [
+"file_timestamp",
+"type",
+"queries",
+"response",
+"source_file"
+],
+"get_quicksearch_recent": [
+"timestamp",
+"search_query",
+"screenshot",
+"protobuf_data",
+"source_file"
+],
+"get_recentactivity": [
+"ce_profile",
+"task_id",
+"effective_uid",
+"affinity",
+"real_activity",
+"first_active_time",
+"last_active_time",
+"last_time_moved",
+"calling_package",
+"user_id",
+"action",
+"component",
+"snapshot_image",
+"low_resolution_snapshot",
+"snapshot_id",
+"snapshot_capture_time",
+"snapshot_top_activity",
+"is_real_snapshot",
+"snapshot_orientation",
+"snapshot_rotation",
+"original_task_size",
+"windowing_mode",
+"is_translucent",
+"content_insets_l_t_r_b",
+"letterbox_insets_l_t_r_b",
+"appearance",
+"ui_mode",
+"recent_image",
+"task_attributes",
+"activity_attributes"
+],
+"get_roles": [
+"source_path_variant",
+"user",
+"role",
+"holder"
+],
+"get_runtimePerms": [
+"user",
+"type",
+"name",
+"permission",
+"granted",
+"flag"
+],
+"get_runtimeperms": [
+"user",
+"type",
+"name",
+"permission",
+"granted",
+"flag"
+],
+"get_settingsGlobal": [
+"user",
+"name",
+"value",
+"package"
+],
+"get_settingsSearch": [
+"timestamp",
+"query"
+],
+"get_settingsSecure": [
+"user",
+"name",
+"value"
+],
+"get_settingsSystem": [
+"user",
+"name",
+"value",
+"package"
+],
+"get_settingsglobal": [
+"user",
+"name",
+"value",
+"package"
+],
+"get_settingssearch": [
+"timestamp",
+"query"
+],
+"get_settingssecure": [
+"user",
+"name",
+"value"
+],
+"get_settingssystem": [
+"user",
+"name",
+"value",
+"package"
+],
+"get_siminfo": [
+"user_id",
+"number",
+"imsi",
+"display_name",
+"carrier_name",
+"iso_code",
+"carrier_id",
+"icc_id"
+],
+"get_skout_messages": [
+"timestamp",
+"user",
+"message",
+"type",
+"picture_url",
+"gift_url",
+"thread_id"
+],
+"get_skout_users": [
+"last_message_timestamp",
+"user",
+"picture_url",
+"user_id"
+],
+"get_sms_mms": [
+"date",
+"date_sent",
+"type",
+"address",
+"body",
+"msg_id",
+"thread_id",
+"contact_id",
+"read",
+"service_center",
+"error_code"
+],
+"get_sms_mms_combined": [
+"date",
+"date_sent",
+"direction",
+"address",
+"body",
+"media",
+"message_type",
+"msg_id",
+"thread_id",
+"read",
+"to_address",
+"cc",
+"bcc",
+"contact_id",
+"service_center",
+"error_code",
+"source_table"
+],
+"get_sms_mms_mms": [
+"date",
+"date_sent",
+"direction",
+"from_address",
+"body",
+"media",
+"msg_id",
+"thread_id",
+"read",
+"to_address",
+"cc",
+"bcc"
+],
+"get_snapchat_core_preferences": [
+"key",
+"value",
+"value_column"
+],
+"get_snapchat_feeds": [
+"last_interaction_timestamp",
+"key",
+"display_interaction_type",
+"last_read_timestamp",
+"last_reader",
+"last_write_timestamp",
+"last_writer",
+"last_write_type"
+],
+"get_snapchat_friends": [
+"added_timestamp",
+"reverse_added_timestamp",
+"username",
+"user_id",
+"display_name",
+"phone_nr",
+"birthday",
+"friend_link_type_as_stored"
+],
+"get_snapchat_identity": [
+"key",
+"value"
+],
+"get_snapchat_login_signup": [
+"key",
+"value"
+],
+"get_snapchat_memories": [
+"timestamp",
+"memory_id",
+"snap_id",
+"is_private",
+"media_format"
+],
+"get_snapchat_meo": [
+"user_id",
+"hashed_passcode",
+"passcode",
+"master_key",
+"master_key_iv"
+],
+"get_snapchat_messages": [
+"creation_timestamp",
+"seen_timestamp",
+"sender_id",
+"sender_username",
+"sender_display_name",
+"message_type",
+"text"
+],
+"get_snapchat_snap_media": [
+"create_time",
+"id",
+"media_id",
+"memories_entry_id",
+"time_zone_id",
+"format",
+"width",
+"height",
+"duration",
+"has_overlay",
+"overlay_size",
+"overlay_info",
+"front_facing",
+"size",
+"has_location_info",
+"latitude",
+"longitude",
+"snap_user_agent",
+"thumbnail_size",
+"thumbnail_info"
+],
+"get_snapchat_user_session": [
+"key",
+"value"
+],
+"get_suggestions": [
+"timestamp",
+"name"
+],
+"get_telegramAutoDownload": [
+"network",
+"autodownload_enabled",
+"chat_category",
+"media_autodownloaded",
+"photo_size_limit",
+"video_size_limit",
+"document_size_limit"
+],
+"get_telegramChatHints": [
+"date",
+"chat_id",
+"chat",
+"rating_as_stored",
+"type_as_stored"
+],
+"get_telegramChats": [
+"last_activity",
+"dialog_id",
+"chat",
+"messages_stored",
+"unread_count",
+"pinned",
+"folder"
+],
+"get_telegramContacts": [
+"user_id",
+"first_name",
+"last_name",
+"phone_numbers",
+"imported",
+"device_contact_key"
+],
+"get_telegramPeerDetails": [
+"user_id",
+"name",
+"username",
+"bio",
+"blocked",
+"pinned"
+],
+"get_telegramSaveToGallery": [
+"chat_category",
+"save_photos",
+"save_videos",
+"video_size_limit"
+],
+"get_telegramUsers": [
+"last_seen",
+"user_id",
+"display_name",
+"username",
+"status_value"
+],
+"get_telegramVoipLogs": [
+"log_last_modified_utc",
+"call_id",
+"logged_span_seconds",
+"first_entry_device_local_time",
+"last_entry_device_local_time",
+"log_size_bytes",
+"stats_log_present",
+"log_file"
+],
+"get_telegramautodownload": [
+"network",
+"autodownload_enabled",
+"chat_category",
+"media_autodownloaded",
+"photo_size_limit",
+"video_size_limit",
+"document_size_limit"
+],
+"get_telegramchathints": [
+"date",
+"chat_id",
+"chat",
+"rating_as_stored",
+"type_as_stored"
+],
+"get_telegramchats": [
+"last_activity",
+"dialog_id",
+"chat",
+"messages_stored",
+"unread_count",
+"pinned",
+"folder"
+],
+"get_telegramcontacts": [
+"user_id",
+"first_name",
+"last_name",
+"phone_numbers",
+"imported",
+"device_contact_key"
+],
+"get_telegrampeerdetails": [
+"user_id",
+"name",
+"username",
+"bio",
+"blocked",
+"pinned"
+],
+"get_telegramsavetogallery": [
+"chat_category",
+"save_photos",
+"save_videos",
+"video_size_limit"
+],
+"get_telegramusers": [
+"last_seen",
+"user_id",
+"display_name",
+"username",
+"status_value"
+],
+"get_telegramvoiplogs": [
+"log_last_modified_utc",
+"call_id",
+"logged_span_seconds",
+"first_entry_device_local_time",
+"last_entry_device_local_time",
+"log_size_bytes",
+"stats_log_present",
+"log_file"
+],
+"get_textnow_call_logs": [
+"start_time",
+"end_time_computed_from_message_text",
+"from_id",
+"to_id",
+"call_direction"
+],
+"get_textnow_contacts": [
+"number",
+"name"
+],
+"get_textnow_messages": [
+"send_timestamp",
+"thread_id",
+"from_id",
+"to_id",
+"direction",
+"message",
+"read",
+"attachment"
+],
+"get_tikTok": [
+"timestamp",
+"direction",
+"nickname",
+"message",
+"uid",
+"unique_id",
+"link_gif_name",
+"link_gif_url",
+"message_type_as_stored",
+"deleted_as_stored",
+"read",
+"local_info",
+"conversation_id",
+"account_id",
+"source_file"
+],
+"get_tikTok_account": [
+"entry",
+"key",
+"value",
+"source_file"
+],
+"get_tikTok_app_log_events": [
+"timestamp",
+"row_type",
+"category",
+"tag",
+"label",
+"payload_as_stored",
+"session_id",
+"user_id",
+"session_uuid",
+"session_info",
+"source_file"
+],
+"get_tikTok_app_open": [
+"open_time",
+"open_time_as_stored",
+"source_file"
+],
+"get_tikTok_contacts": [
+"update_time",
+"uid",
+"nickname",
+"unique_id",
+"initial_letter",
+"avatar_url",
+"follow_status",
+"blocked_as_stored",
+"deleted_as_stored",
+"source_file"
+],
+"get_tikTok_downloads": [
+"download_start",
+"download_finish",
+"url",
+"save_path",
+"name",
+"mime_type",
+"status_as_stored",
+"current_bytes",
+"total_bytes",
+"md5_as_stored",
+"source_file"
+],
+"get_tiktok": [
+"timestamp",
+"direction",
+"nickname",
+"message",
+"uid",
+"unique_id",
+"link_gif_name",
+"link_gif_url",
+"message_type_as_stored",
+"deleted_as_stored",
+"read",
+"local_info",
+"conversation_id",
+"account_id",
+"source_file"
+],
+"get_tiktok_account": [
+"entry",
+"key",
+"value",
+"source_file"
+],
+"get_tiktok_app_log_events": [
+"timestamp",
+"row_type",
+"category",
+"tag",
+"label",
+"payload_as_stored",
+"session_id",
+"user_id",
+"session_uuid",
+"session_info",
+"source_file"
+],
+"get_tiktok_app_open": [
+"open_time",
+"open_time_as_stored",
+"source_file"
+],
+"get_tiktok_contacts": [
+"update_time",
+"uid",
+"nickname",
+"unique_id",
+"initial_letter",
+"avatar_url",
+"follow_status",
+"blocked_as_stored",
+"deleted_as_stored",
+"source_file"
+],
+"get_tiktok_downloads": [
+"download_start",
+"download_finish",
+"url",
+"save_path",
+"name",
+"mime_type",
+"status_as_stored",
+"current_bytes",
+"total_bytes",
+"md5_as_stored",
+"source_file"
+],
+"get_turbo_appusage": [
+"app_launch_timestamp",
+"app_name"
+],
+"get_urluser": [
+"name",
+"value"
+],
+"get_usageapps": [
+"timestamp",
+"deleted",
+"bundleid",
+"generated_from",
+"from_in_proto",
+"proto_full"
+],
+"get_usagestats": [
+"user_uid",
+"timestamp_last_time_active",
+"usage_type",
+"time_active_ms",
+"time_active_sec",
+"last_time_service_used",
+"total_time_service_used_ms",
+"last_time_visible",
+"total_time_visible_ms",
+"last_time_component_used",
+"app_launch_count",
+"package",
+"event_type",
+"class",
+"event_flags_as_stored",
+"shortcut_id",
+"standby_bucket_high_16_bits",
+"standby_reason_low_16_bits",
+"notification_channel",
+"instance_id",
+"task_root_package",
+"task_root_class",
+"locus_id",
+"interaction_category",
+"interaction_action",
+"interval"
+],
+"get_viber": [
+"call_start_time",
+"phone_number",
+"call_direction",
+"call_end_time_computed_start_duration",
+"call_type"
+],
+"get_viber_contacts": [
+"display_name",
+"phone_number"
+],
+"get_viber_messages": [
+"message_date",
+"direction",
+"from_phone_number",
+"message",
+"recipients",
+"thread_id",
+"unread",
+"file_attachment"
+],
+"get_walStrings": [
+"report",
+"location"
+],
+"get_walstrings": [
+"report",
+"location"
+],
+"get_wellbeing": [
+"timestamp",
+"package_name",
+"event_type"
+],
+"get_wellbeing_url": [
+"timestamp",
+"event_id",
+"package_id",
+"package_name",
+"component_name",
+"event"
+],
+"get_wellbeingaccount": [
+"protobuf_parsed_data",
+"protobuf_data"
+],
+"get_whatsapp_contacts": [
+"name",
+"whatsapp_name",
+"jid",
+"number",
+"status_text",
+"status_timestamp"
+],
+"get_whatsapp_messages": [
+"message_timestamp",
+"received_timestamp",
+"message_id",
+"recipients",
+"direction",
+"message",
+"group_sender",
+"attachment"
+],
+"get_whatsapp_user_profile": [
+"version",
+"name",
+"user_status",
+"country_code",
+"mobile_number"
+],
+"get_whatsapplogfiles": [
+"timestamp",
+"token",
+"description",
+"full_line",
+"source_file",
+"possible_full_numbers_last4_match"
+],
+"get_wifiHotspot": [
+"ssid",
+"passphrase",
+"securitytype"
+],
+"get_wifihotspot": [
+"ssid",
+"passphrase",
+"securitytype"
+],
+"get_wire_contacts": [
+"user_id",
+"display_name",
+"handle_id",
+"connection_status",
+"connection_time",
+"profile_picture_id"
+],
+"get_wire_messages": [
+"date_time_sent",
+"message_id",
+"user_name",
+"message_type",
+"message_content",
+"reaction",
+"date_time_reacted",
+"reacted_by",
+"call_duration_assumes_ms",
+"asset_name",
+"date_time_deleted"
+],
+"get_wire_profile": [
+"user_id",
+"display_name",
+"email_address",
+"phone_number",
+"verification_status",
+"first_client_label",
+"device_model",
+"date_registered",
+"profile_picture_id",
+"profile_picture"
+],
+"get_wire_proteus_sessions": [
+"other_party_user_id",
+"other_party_domain",
+"other_party_client_id",
+"local_account_id",
+"session_id_as_stored",
+"source_path"
+],
+"gmailEmails": [
+"timestamp",
+"account",
+"account_id",
+"email_id",
+"message",
+"links",
+"attachment",
+"attachment_name",
+"recipient",
+"recipient_name",
+"reply_to",
+"reply_to_name",
+"subject_line",
+"mailed_by",
+"signed_by",
+"source_file"
+],
+"gmailLabels": [
+"account",
+"account_id",
+"label",
+"unread_count",
+"total_count",
+"unseen_count",
+"source_file"
+],
+"gmailemails": [
+"timestamp",
+"account",
+"account_id",
+"email_id",
+"message",
+"links",
+"attachment",
+"attachment_name",
+"recipient",
+"recipient_name",
+"reply_to",
+"reply_to_name",
+"subject_line",
+"mailed_by",
+"signed_by",
+"source_file"
+],
+"gmaillabels": [
+"account",
+"account_id",
+"label",
+"unread_count",
+"total_count",
+"unseen_count",
+"source_file"
+],
+"gmsAccountHistory": [
+"account_name",
+"change_type",
+"event_index",
+"change_data"
+],
+"gmsIcingContactMethods": [
+"display_name",
+"kind",
+"value",
+"label",
+"type",
+"contact_id"
+],
+"gmsIcingContacts": [
+"last_updated",
+"contact_id",
+"display_name",
+"given_names",
+"nickname",
+"organization",
+"note",
+"emails",
+"phone_numbers",
+"postal_address",
+"times_contacted",
+"starred",
+"lookup_key"
+],
+"gmsaccounthistory": [
+"account_name",
+"change_type",
+"event_index",
+"change_data"
+],
+"gmsicingcontactmethods": [
+"display_name",
+"kind",
+"value",
+"label",
+"type",
+"contact_id"
+],
+"gmsicingcontacts": [
+"last_updated",
+"contact_id",
+"display_name",
+"given_names",
+"nickname",
+"organization",
+"note",
+"emails",
+"phone_numbers",
+"postal_address",
+"times_contacted",
+"starred",
+"lookup_key"
+],
+"googleCast": [
+"last_published_timestamp",
+"device_id_ssdp_udn",
+"capabilities",
+"device_version",
+"device_friendly_name",
+"device_model_name",
+"receiver_metrics_id",
+"service_instance_name",
+"device_ip_address",
+"device_port",
+"supported_criteria",
+"rcn_enabled_status",
+"hotspot_bssid",
+"cloud_device_id",
+"last_discovered_timestamp",
+"last_discovered_by_ble_timestamp",
+"source_file"
+],
+"googleDialerAnnotatedCallLog": [
+"timestamp",
+"formatted_number",
+"raw_number",
+"call_type",
+"presentation",
+"duration_seconds",
+"geocoded_location",
+"phone_account_id",
+"is_read",
+"new",
+"is_voicemail_call",
+"voicemail_transcription"
+],
+"googleDialerPhoneLookupHistory": [
+"last_modified",
+"number",
+"contact_name",
+"number_label",
+"cnap_name",
+"location_info",
+"contact_lookup_uri"
+],
+"google_searches_msl_plugin": [
+"profile_path",
+"source",
+"location",
+"domain",
+"timestamp",
+"search_term",
+"ei_session_start_timestamp"
+],
+"googlecast": [
+"last_published_timestamp",
+"device_id_ssdp_udn",
+"capabilities",
+"device_version",
+"device_friendly_name",
+"device_model_name",
+"receiver_metrics_id",
+"service_instance_name",
+"device_ip_address",
+"device_port",
+"supported_criteria",
+"rcn_enabled_status",
+"hotspot_bssid",
+"cloud_device_id",
+"last_discovered_timestamp",
+"last_discovered_by_ble_timestamp",
+"source_file"
+],
+"googledialerannotatedcalllog": [
+"timestamp",
+"formatted_number",
+"raw_number",
+"call_type",
+"presentation",
+"duration_seconds",
+"geocoded_location",
+"phone_account_id",
+"is_read",
+"new",
+"is_voicemail_call",
+"voicemail_transcription"
+],
+"googledialerphonelookuphistory": [
+"last_modified",
+"number",
+"contact_name",
+"number_label",
+"cnap_name",
+"location_info",
+"contact_lookup_uri"
+],
+"googleplaysearches": [
+"timestamp",
+"display",
+"query"
+],
+"graphics_stats": [
+"day",
+"stats_start",
+"stats_end",
+"package",
+"version_code",
+"total_frames",
+"janky_frames",
+"missed_vsync",
+"high_input_latency",
+"slow_ui_thread",
+"slow_bitmap_upload",
+"slow_draw",
+"missed_deadline",
+"pipeline",
+"uid",
+"file_version",
+"source_file"
+],
+"history_msl_plugin": [
+"profile_path",
+"record_location",
+"title",
+"url",
+"visit_time",
+"transition_core",
+"transition_qualifiers",
+"parent_record_id"
+],
+"instagramAccounts": [
+"username",
+"full_name",
+"user_id",
+"account_type_as_stored",
+"is_business_as_stored",
+"is_verified_as_stored",
+"follower_count",
+"following_count",
+"biography",
+"external_url",
+"profile_pic_url",
+"source_key"
+],
+"instagramDirectCalls": [
+"timestamp",
+"direction",
+"thread",
+"sender_username",
+"action_as_stored",
+"description_as_stored",
+"did_join_as_stored",
+"call_id",
+"sender_id",
+"thread_id"
+],
+"instagramDirectMessages": [
+"timestamp",
+"media_taken_at",
+"direction",
+"sender_username",
+"message",
+"thread",
+"item_type_as_stored",
+"content_type_as_stored",
+"media_url",
+"media_owner_username",
+"sender_id",
+"thread_id",
+"item_id"
+],
+"instagramDirectThreads": [
+"last_activity_time",
+"thread_title",
+"participants",
+"inviter_username",
+"thread_id",
+"thread_v2_id"
+],
+"instagramTimeInApp": [
+"start_time",
+"end_time",
+"start_event_as_stored",
+"end_event_as_stored",
+"user_id",
+"sequence_number"
+],
+"instagramaccounts": [
+"username",
+"full_name",
+"user_id",
+"account_type_as_stored",
+"is_business_as_stored",
+"is_verified_as_stored",
+"follower_count",
+"following_count",
+"biography",
+"external_url",
+"profile_pic_url",
+"source_key"
+],
+"instagramdirectcalls": [
+"timestamp",
+"direction",
+"thread",
+"sender_username",
+"action_as_stored",
+"description_as_stored",
+"did_join_as_stored",
+"call_id",
+"sender_id",
+"thread_id"
+],
+"instagramdirectmessages": [
+"timestamp",
+"media_taken_at",
+"direction",
+"sender_username",
+"message",
+"thread",
+"item_type_as_stored",
+"content_type_as_stored",
+"media_url",
+"media_owner_username",
+"sender_id",
+"thread_id",
+"item_id"
+],
+"instagramdirectthreads": [
+"last_activity_time",
+"thread_title",
+"participants",
+"inviter_username",
+"thread_id",
+"thread_v2_id"
+],
+"instagramtimeinapp": [
+"start_time",
+"end_time",
+"start_event_as_stored",
+"end_event_as_stored",
+"user_id",
+"sequence_number"
+],
+"install_sessions": [
+"created",
+"updated",
+"committed",
+"app_package",
+"app_label",
+"installer_package",
+"initiating_package",
+"update_owner_package",
+"user_id",
+"originating_uid",
+"installer_uid",
+"session_id",
+"parent_session_id",
+"size_bytes",
+"staging_directory",
+"install_reason_as_stored",
+"install_location_as_stored",
+"package_source_as_stored",
+"applied",
+"failed",
+"error_message",
+"source_file"
+],
+"kik_attachments": [
+"media",
+"file_name",
+"file_size",
+"source_app",
+"layout",
+"file_url",
+"platform_uri",
+"file_content_type",
+"allow_forward",
+"preview_reference",
+"icon_reference",
+"content_id",
+"local_file_path"
+],
+"kik_chat_metadata": [
+"chat_end_time",
+"chat_id",
+"retained",
+"show_when_empty",
+"anonymously_matched",
+"anonymous_session_uuid",
+"anonymous_chat_reported",
+"anonymous_chat_rated",
+"anonymous_friending_started",
+"sort_order"
+],
+"kik_local_account": [
+"user_name",
+"core_id",
+"active"
+],
+"kik_messages": [
+"timestamp",
+"direction",
+"sender",
+"body",
+"attachment",
+"partner_jid",
+"partner_display_name",
+"attachment_file_name",
+"attachment_file_size",
+"attachment_url",
+"attachment_source_app",
+"read_state_value",
+"group_chat",
+"chat_id",
+"status_message",
+"system_message",
+"content_id",
+"app_id",
+"message_uid"
+],
+"kik_roster": [
+"profile_update_time",
+"bare_jid",
+"held_in",
+"account_core_id"
+],
+"magisk_configuration": [
+"setting",
+"value_as_stored",
+"stored_type",
+"store"
+],
+"magisk_superuser_log": [
+"request_time",
+"app_name",
+"package_name",
+"command",
+"action_as_stored",
+"from_uid",
+"to_uid",
+"from_pid",
+"target_as_stored",
+"context",
+"gids",
+"log_id"
+],
+"netstats": [
+"bucket_start",
+"duration",
+"uidpackage",
+"interface",
+"usage_set",
+"rx_bytes",
+"rx_packets",
+"tx_bytes",
+"tx_packets"
+],
+"package_dex_usage_list_cross_package": [
+"loading_package",
+"owning_package",
+"code_path",
+"isolated_process",
+"source_file"
+],
+"package_dex_usage_list_secondary": [
+"owning_package",
+"dex_file",
+"android_user",
+"also_loaded_by",
+"instruction_sets",
+"class_loader_context",
+"source_file"
+],
+"package_restrictions": [
+"first_install_time",
+"package",
+"user_id",
+"stopped",
+"not_launched",
+"installed",
+"enabled_as_stored",
+"enabled_caller",
+"install_reason_as_stored",
+"virtual_preload",
+"disabled_components",
+"enabled_components",
+"source_file"
+],
+"settings_ssaid": [
+"package",
+"uid",
+"ssaid",
+"user_id",
+"setting_id",
+"default_set_by_system",
+"present_in"
+],
+"silentphone_account": [
+"preference",
+"value_as_stored",
+"stored_type",
+"store"
+],
+"silentphone_conversation_objects": [
+"participant_1",
+"participant_2",
+"item_identifier",
+"object",
+"size",
+"conversation_folder_as_stored"
+],
+"silentphone_zrtp_peers": [
+"secure_since",
+"name_last_update",
+"peer_name_as_stored",
+"remote_zid",
+"local_zid",
+"local_account_info",
+"rs1_retained_secret_present",
+"rs2_retained_secret_present",
+"mitm_key_present",
+"flags_as_stored",
+"presh_counter_as_stored"
+],
+"spotify_account": [
+"canonical_username",
+"event_owner_id",
+"auth_source",
+"language",
+"app_first_launch_time",
+"installation_id"
+],
+"spotify_playlist_library": [
+"snapshot_time",
+"account_folder",
+"playlist_uri",
+"counter_a_raw",
+"counter_b_raw"
+],
+"syncAccountsXml": [
+"user",
+"account",
+"account_type",
+"authority",
+"enabled",
+"syncable",
+"id"
+],
+"syncaccountsxml": [
+"user",
+"account",
+"account_type",
+"authority",
+"enabled",
+"syncable",
+"id"
+],
+"telecom_phone_accounts": [
+"label",
+"handle",
+"subscription_number",
+"short_description",
+"component",
+"account_id",
+"user_serial_number",
+"enabled",
+"is_default_outgoing",
+"supported_uri_schemes",
+"capabilities_as_stored",
+"highlight_color_as_stored",
+"supported_audio_routes_as_stored",
+"source_file"
+],
+"turbo_battery": [
+"timestamp",
+"battery_level",
+"charge_type",
+"battery_saver",
+"timezone",
+"source"
+],
+"twitterCachedVideos": [
+"first_touched",
+"last_touched",
+"media",
+"media_path_from_url",
+"cache_folder",
+"segments",
+"span_files",
+"bytes_cached",
+"declared_length",
+"sample_url",
+"android_user"
+],
+"twittercachedvideos": [
+"first_touched",
+"last_touched",
+"media",
+"media_path_from_url",
+"cache_folder",
+"segments",
+"span_files",
+"bytes_cached",
+"declared_length",
+"sample_url",
+"android_user"
+],
+"usagestatsVersion": [
+"property",
+"property_value"
+],
+"usagestatsversion": [
+"property",
+"property_value"
+]
+},
+"tool": "aleapp"
+}
