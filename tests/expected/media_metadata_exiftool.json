@@ -1,0 +1,72 @@
+{
+  "_source": "ExifTool's own output for its test images (exiftool/exiftool commit 2200871d9cef988051d2a99d67df3bda6cbb30a8, t/QuickTime_2.out, QuickTime_3.out, RIFF_2.out, RIFF_3.out, Matroska_2.out), transcribed by hand. Times are what exiftool prints with the colons as dashes; durations to exiftool's two decimals; 'tags' are values exiftool lists that TRACE must list too.",
+  "exiftool-QuickTime.mov": {
+    "container": "QuickTime",
+    "created": "2005-08-11 14:03:54",
+    "modified": "2010-07-30 15:43:59",
+    "duration": 4.97,
+    "tracks": [
+      {"kind": "video", "codec": "jpeg", "width": 320, "height": 240,
+       "frame_rate": 30, "duration": 4.97},
+      {"kind": "audio", "codec": "raw", "channels": 1, "sample_rate": 7875,
+       "duration": 4.97}
+    ],
+    "tags": ["Digital Camera", "PENTAX DIGITAL CAMERA", "These are lyrics",
+             "An Alternate Scene Name", "Phil Harvey", "2010", "128",
+             "ålbum", "årtist", "çømménts",
+             "cømpøsér", "Genré",
+             "ålbüm årtîst", "grøuping"]
+  },
+  "exiftool-QuickTime.m4a": {
+    "container": "MPEG-4 audio",
+    "brand": "M4A",
+    "created": "2005-06-29 19:02:19",
+    "modified": "2006-09-22 11:06:45",
+    "duration": 29.05,
+    "title": "Sample",
+    "software": "iTunes v4.9, QuickTime 7.0.1",
+    "tracks": [
+      {"kind": "audio", "codec": "mp4a", "channels": 2, "sample_rate": 44100,
+       "duration": 29.06}
+    ],
+    "tags": ["Sample", "120", "these are lyrics", "Phil Harvey",
+             "album artist", "Composer", "album", "grouping",
+             "Children’s Music", "2006", "comments"]
+  },
+  "exiftool-RIFF.wav": {
+    "container": "WAV",
+    "make": "PENTAX Corporation",
+    "model": "PENTAX Optio WP",
+    "creation_date": "2005-08-08 16:23:35",
+    "tracks": [
+      {"kind": "audio", "codec": "PCM", "channels": 1, "sample_rate": 7872}
+    ],
+    "tags": ["0220", "IMGP1149.JPG"],
+    "_differs": "exiftool's Duration 0.03 s is its estimate from the file size (224 bytes at 7,872 bytes a second); the file's data chunk records 0 bytes, which is TRACE's duration."
+  },
+  "exiftool-RIFF.avi": {
+    "container": "AVI",
+    "duration": 15.53,
+    "software": "CanonMVI01",
+    "creation_date": "2003-03-10 15:04:43",
+    "tracks": [
+      {"kind": "video", "codec": "MJPG", "width": 320, "height": 240,
+       "frame_rate": 15, "samples": 233},
+      {"kind": "audio", "codec": "PCM", "channels": 1, "sample_rate": 11024}
+    ],
+    "tags": ["An Alternate Scene Name", "No Album", "Phil Harvey"]
+  },
+  "exiftool-Matroska.mkv": {
+    "container": "Matroska",
+    "created": "2010-02-03 21:17:48",
+    "duration_text": "0:02:29",
+    "software": "mkvmerge v2.4.0 ('Fumbling Towards Ecstasy') built on Dec  3 2008 16:22:41",
+    "tracks": [
+      {"kind": "video", "codec": "V_MPEG4/ISO/AVC", "width": 704,
+       "height": 576, "frame_rate": 25},
+      {"kind": "audio", "codec": "A_MPEG/L3", "channels": 2,
+       "sample_rate": 48000}
+    ],
+    "tags": ["libebml v0.7.8 + libmatroska v0.8.1"]
+  }
+}
