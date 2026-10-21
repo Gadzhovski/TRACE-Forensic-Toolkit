@@ -10,7 +10,7 @@ Open disk images read-only, organise them into cases, triage what stands out,<br
 search inside the evidence and recover deleted files — on Windows, macOS and Linux.
 
 <p>
-  <img src="https://img.shields.io/badge/version-2.4.0-4c8eda?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-2.4.1-4c8eda?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
