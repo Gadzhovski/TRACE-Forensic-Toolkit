@@ -162,7 +162,10 @@ class ResultDocks(QObject):
                         (bar.height() - corner.height()) // 2)
             corner.show()
             corner.raise_()
+        # A row Qt dropped: its corner hidden at once -- deleteLater alone
+        # left it on screen beside the new row's until the event loop ran.
         for corner in self._corners.values():
+            corner.hide()
             corner.deleteLater()
         self._corners = kept
 

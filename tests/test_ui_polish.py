@@ -22,15 +22,18 @@ def test_evidence_has_a_name_even_a_live_disk(path, name, monkeypatch):
     assert live_disk.display_name(path) == name
 
 
-def test_a_case_names_a_live_disk(tmp_path, monkeypatch):
+def test_a_case_names_a_live_disk(tmp_path):
+    """This system's own device path (on Linux a Windows one is only a
+    relative file name, made absolute by add_evidence)."""
     import sys
     from trace_app.core.case import Case
-    monkeypatch.setattr(sys, 'platform', 'win32')
+    device, name = ((r'\\.\PhysicalDrive1', 'PhysicalDrive1')
+                    if sys.platform == 'win32' else ('/dev/sdb', 'sdb'))
     case = Case.create(str(tmp_path / 'case'), 'Disk')
     try:
-        evidence = case.add_evidence(r'\\.\PhysicalDrive1')
+        evidence = case.add_evidence(device)
         row = next(r for r in case.evidence() if r['id'] == evidence)
-        assert row['display_name'] == 'PhysicalDrive1'
+        assert row['display_name'] == name
     finally:
         case.close()
 
@@ -123,14 +126,18 @@ def test_the_result_panels_tab_row_has_float_and_close(window, qapp):
     window.resize(1400, 900)
     window.show()
     pump(qapp, 0.3)
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QTabBar, QWidget
     docks = window.result_viewer
-    corners = [c for c in window.result_area.findChildren(
-        type(window.viewer_tab.cornerWidget()))
-        if c.objectName() == 'dockHeaderCorner' and c.isVisible()]
-    assert len(corners) == 1
+    rows = [b for b in window.result_area.findChildren(
+        QTabBar, options=Qt.FindDirectChildrenOnly) if b.isVisible()]
+    corners = [c for c in window.result_area.findChildren(QWidget)
+               if c.objectName() == 'dockHeaderCorner' and c.isVisible()]
+    assert rows and len(corners) == len(rows)     # one per tab row
     front = docks.dock(docks.currentWidget())
-    float_button = corners[0].children()[1]
-    assert front.windowTitle() in float_button.toolTip()
+    float_button = next(
+        c.children()[1] for c in corners
+        if front.windowTitle() in c.children()[1].toolTip())
     float_button.click()
     pump(qapp, 0.3)
     assert front.isFloating()
