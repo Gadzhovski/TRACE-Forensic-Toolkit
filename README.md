@@ -122,8 +122,7 @@ compiler, and on macOS no Homebrew.
 git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
 cd TRACE-Forensic-Toolkit
 powershell -ExecutionPolicy Bypass -File install_windows.ps1
-venv\Scripts\activate
-python main.py
+TRACE.cmd
 ```
 
 **macOS, Linux and WSL**
@@ -132,9 +131,17 @@ python main.py
 git clone https://github.com/Gadzhovski/TRACE-Forensic-Toolkit.git
 cd TRACE-Forensic-Toolkit
 ./install.sh
-source venv/bin/activate
-python main.py
+./trace
 ```
+
+The installer finds Python 3.10+ (on Windows every version the `py`
+launcher knows), installs the system libraries on Linux (apt, dnf,
+pacman or zypper: Ubuntu, Debian, Fedora, RHEL/Rocky, Arch, openSUSE),
+then checks that the forensic engines, Qt and libmagic load before it says
+TRACE is installed. `TRACE.cmd` / `./trace` start TRACE from anywhere; the
+manual way still works (`venv\Scripts\activate` or
+`source venv/bin/activate`, then `python main.py`). It can be run again at
+any time: a usable venv is kept, a broken one is rebuilt.
 
 A standalone app (Windows `.zip`, macOS `.dmg`) is built with
 `python build_app.py`, and every push builds them on GitHub Actions.

@@ -232,67 +232,112 @@ function Write-LogTail {
     Get-Content $LogFile -Tail 25 | ForEach-Object { Write-Host "      $_" }
 }
 
+# venv, requirements.txt and the launcher are this checkout's, wherever the
+# script was started from (the caller's folder made a venv there and could
+# not find requirements.txt). The caller's folder is given back on the way
+# out: run with & in a session, the script shares its location.
+$script:CallerLocation = Get-Location
+Set-Location -LiteralPath $PSScriptRoot
+
+function Stop-Install([int]$Code) {
+    Set-Location -LiteralPath $script:CallerLocation
+    exit $Code
+}
+
 Show-Banner
 
 # --- Locate a suitable Python ---------------------------------------------
+# Newest first: TRACE_PYTHON when set (CI names the Python it tests), then
+# every version the py launcher knows -- the default 'python' may be an
+# older one while 3.12 is installed beside it -- then python / python3.
+function Get-PythonVersion([string]$Exe, [string[]]$Arguments) {
+    if (-not (Get-Command $Exe -ErrorAction SilentlyContinue)) { return $null }
+    try {
+        $ver = & $Exe @Arguments -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+    } catch { return $null }
+    if ($LASTEXITCODE -ne 0 -or -not $ver) { return $null }
+    $ver = "$ver".Trim()
+    if ($ver -notmatch '^\d+\.\d+$') { return $null }
+    return $ver
+}
+
+function Test-NewEnough([string]$Version) {
+    if (-not $Version) { return $false }
+    $parts = $Version.Split('.')
+    return ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge 10)
+}
+
 Write-Step "Looking for Python 3.10 or newer"
 
+$candidates = @()
+if ($env:TRACE_PYTHON) { $candidates += , @{ Exe = $env:TRACE_PYTHON; Args = @() } }
+foreach ($minor in 14..10) { $candidates += , @{ Exe = 'py'; Args = @("-3.$minor") } }
+$candidates += , @{ Exe = 'python'; Args = @() }
+$candidates += , @{ Exe = 'python3'; Args = @() }
+
 $python = $null
-foreach ($candidate in @('python', 'python3', 'py')) {
-    $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-    if (-not $cmd) { continue }
-    try {
-        $ver = & $candidate -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
-    } catch { continue }
+foreach ($candidate in $candidates) {
+    $ver = Get-PythonVersion $candidate.Exe $candidate.Args
     if (-not $ver) { continue }
-    $parts = $ver.Split('.')
-    if ([int]$parts[0] -eq 3 -and [int]$parts[1] -ge 10) {
+    $label = (@($candidate.Exe) + $candidate.Args) -join ' '
+    if (Test-NewEnough $ver) {
         $python = $candidate
-        Write-Ok "Using $candidate (Python $ver)"
+        Write-Ok "Using $label (Python $ver)"
         break
-    } else {
-        Write-Warn "$candidate is Python $ver - TRACE needs 3.10 or newer"
     }
+    Write-Warn "$label is Python $ver - TRACE needs 3.10 or newer"
 }
 
 if (-not $python) {
     Write-Fail "No suitable Python found. TRACE needs Python 3.10 or newer."
     Write-Note "Install it from https://www.python.org/downloads/windows/"
     Write-Note "and tick 'Add python.exe to PATH' during setup."
-    exit 1
+    Stop-Install 1
 }
 
 # --- Virtual environment ---------------------------------------------------
+# An existing venv is reused only if its own Python runs and is new enough:
+# one made by an older Python, copied from another machine, or whose Python
+# has since been uninstalled fails inside pip with nothing saying why.
 Write-Step "Creating virtual environment"
+$venvPython = Join-Path $PSScriptRoot 'venv\Scripts\python.exe'
+$makeVenv = $true
 if (Test-Path 'venv') {
-    Write-Warn "A venv directory already exists."
-    $reply = if ($Yes) { 'n' } else { Read-Host "    Recreate it? Existing packages will be lost. [y/N]" }
-    if ($reply -match '^[Yy]') {
-        Remove-Item -Recurse -Force venv
-        if ((Invoke-Quietly 'Creating venv' $python @('-m', 'venv', 'venv')) -ne 0) {
-            Write-Fail "Could not create the virtual environment."; Write-LogTail; exit 1
-        }
-        Write-Ok "venv recreated"
+    $venvVer = Get-PythonVersion $venvPython @()
+    if (Test-NewEnough $venvVer) {
+        Write-Ok "Reusing the existing venv (Python $venvVer)"
+        $makeVenv = $false
     } else {
-        Write-Ok "Reusing the existing venv"
+        if ($venvVer) {
+            Write-Warn "The existing venv cannot be used: it was made with Python $venvVer."
+        } else {
+            Write-Warn "The existing venv cannot be used: its Python does not run (moved, copied, or uninstalled)."
+        }
+        $reply = if ($Yes) { 'y' } else { Read-Host "    Rebuild it? [Y/n]" }
+        if ($reply -match '^[Nn]') {
+            Write-Fail "TRACE needs a venv with Python 3.10 or newer."
+            Stop-Install 1
+        }
+        Remove-Item -Recurse -Force venv
     }
-} else {
-    if ((Invoke-Quietly 'Creating venv' $python @('-m', 'venv', 'venv')) -ne 0) {
-        Write-Fail "Could not create the virtual environment."; Write-LogTail; exit 1
+}
+if ($makeVenv) {
+    $venvArgs = @($python.Args) + @('-m', 'venv', 'venv')
+    if ((Invoke-Quietly 'Creating venv' $python.Exe $venvArgs) -ne 0) {
+        Write-Fail "Could not create the virtual environment."; Write-LogTail; Stop-Install 1
     }
     Write-Ok "venv ready"
 }
 
 # --- Dependencies ----------------------------------------------------------
 Write-Step "Installing Python packages (this can take a few minutes)"
-$venvPy = Join-Path (Resolve-Path 'venv') 'Scripts\python.exe'
-if ((Invoke-Quietly 'Updating pip' $venvPy @('-m', 'pip', 'install', '--upgrade', 'pip')) -ne 0) {
-    Write-Fail "Could not update pip."; Write-LogTail; exit 1
+if ((Invoke-Quietly 'Updating pip' $venvPython @('-m', 'pip', 'install', '--upgrade', 'pip')) -ne 0) {
+    Write-Fail "Could not update pip."; Write-LogTail; Stop-Install 1
 }
 $before = (Get-Content $LogFile).Count
 # --only-binary for the two forensic engines: if no wheel exists for this
 # Python, say so plainly rather than attempt a C build that will fail.
-$code = Invoke-Quietly 'Installing packages' $venvPy @('-m', 'pip', 'install',
+$code = Invoke-Quietly 'Installing packages' $venvPython @('-m', 'pip', 'install',
     '--only-binary=pytsk3,libewf-python', '-r', 'requirements.txt')
 
 if ($code -ne 0) {
@@ -300,9 +345,9 @@ if ($code -ne 0) {
     Write-LogTail
     Write-Note ""
     Write-Note "pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
-    Write-Note "on x64, x86 and ARM64 Windows. Check that '$python' is one of"
-    Write-Note "those versions."
-    exit 1
+    Write-Note "on x64, x86 and ARM64 Windows. Check that the Python used is one"
+    Write-Note "of those versions."
+    Stop-Install 1
 }
 $installed = Get-Content $LogFile | Select-Object -Skip $before |
     Where-Object { $_ -like 'Successfully installed *' } | Select-Object -Last 1
@@ -311,14 +356,55 @@ if ($installed) {
 } else {
     Write-Ok "Every package already installed"
 }
+
+# --- Checking the install --------------------------------------------------
+# The forensic engines, Qt and libmagic imported now, while the installer
+# can still say what is missing, not at the first start
+# (trace_app/infra/install_check.py, shared with install.sh).
+Write-Step "Checking the install"
+$saved = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    $problems = & $venvPython -m trace_app.infra.install_check 2>&1 | ForEach-Object { "$_" }
+    $checkCode = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $saved
+}
+if ($checkCode -ne 0) {
+    Write-Fail "TRACE's libraries do not all load:"
+    $problems | ForEach-Object { Write-Host "      $_" }
+    Add-Content -Path $LogFile -Value (@("`n> check") + $problems) -Encoding UTF8
+    Stop-Install 1
+}
+Write-Ok "The forensic engines, Qt and libmagic load"
+
+# --- Launcher --------------------------------------------------------------
+# TRACE.cmd starts TRACE with this checkout's venv, from anywhere, with no
+# venv to activate; pythonw, so no console window stays open.
+$launcher = @(
+    '@echo off'
+    'rem Starts TRACE with its own Python (written by install_windows.ps1).'
+    'start "" "%~dp0venv\Scripts\pythonw.exe" "%~dp0main.py" %*'
+)
+Set-Content -Path (Join-Path $PSScriptRoot 'TRACE.cmd') -Value $launcher -Encoding ASCII
 Write-Seg '    Full log: install.log' -Dim -Fallback DarkGray
 
 Write-Host ''
 Write-Seg "  $($G.Ok) TRACE is installed." -Color 42 -Fallback Green -Bold
 Write-Host ''
 Write-Host '  Start it with:'
-Write-Seg '    venv\Scripts\activate' -Color 39 -Fallback Cyan
-Write-Seg '    python main.py' -Color 39 -Fallback Cyan
+Write-Seg '    TRACE.cmd' -Color 39 -Fallback Cyan
+Write-Seg '  or: venv\Scripts\activate, then python main.py' -Dim -Fallback DarkGray
 Write-Host ''
-Write-Seg '  Type deactivate when you are finished.' -Dim -Fallback DarkGray
-Write-Host ''
+
+if (-not $Yes -and -not [Console]::IsInputRedirected) {
+    $reply = Read-Host '  Start TRACE now? [Y/n]'
+    if ($reply -notmatch '^[Nn]') {
+        $pythonw = Join-Path $PSScriptRoot 'venv\Scripts\pythonw.exe'
+        $main = Join-Path $PSScriptRoot 'main.py'
+        Start-Process -FilePath $pythonw -ArgumentList "`"$main`"" -WorkingDirectory $PSScriptRoot
+        Write-Ok "TRACE is starting"
+        Write-Host ''
+    }
+}
+Set-Location -LiteralPath $script:CallerLocation

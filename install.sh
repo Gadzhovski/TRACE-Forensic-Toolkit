@@ -15,6 +15,10 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# venv, requirements.txt and the launcher are this checkout's, wherever the
+# script was started from ("bash ~/TRACE/install.sh" in another folder made
+# a venv there and could not find requirements.txt).
+cd "$SCRIPT_DIR"
 
 # === Output ===============================================================
 # Kept identical in look to install_windows.ps1.
@@ -186,6 +190,17 @@ describe() {
             rest="${line%% (*}"; echo "${rest%%:*}" ;;
         "Reading package lists"*|"Building dependency tree"*|"Hit:"*)
             echo "Reading package lists" ;;
+        # dnf "Installing : glib2-2.82.x86_64 3/52", dnf5 "[ 3/52]
+        # Installing glib2-0:2.82...", pacman "(3/52) installing glib2",
+        # zypper "(3/52) Installing: glib2-2.82...".
+        *[Ii]"nstalling"*)
+            rest="${line#*nstalling}"; rest="${rest#*[: ]}"
+            rest="${rest#"${rest%%[![:space:]:]*}"}"
+            echo "Installing ${rest%% *}" ;;
+        "Retrieving"*|"Downloading Packages"*|"downloading "*)
+            rest="${line#Retrieving}"; rest="${rest#: }"; rest="${rest# package }"
+            rest="${rest#downloading }"
+            echo "Downloading ${rest%% *}" ;;
         *) return 1 ;;
     esac
 }
@@ -268,36 +283,133 @@ case "$USER_INPUT" in
     *)      USER_OS="$DETECTED_OS" ;;
 esac
 
-# --- Pick a Python interpreter -------------------------------------------
+# --- Python ------------------------------------------------------------------
 # Python 3.10 or newer: pytsk3 and libewf-python publish pre-built wheels for
 # 3.10+ on every platform, so nothing is compiled. (3.9 is end-of-life and
 # would need a C toolchain for both.)
-find_python() {
-    step "Looking for Python 3.10 or newer"
-    # TRACE_PYTHON names the interpreter explicitly -- CI sets it so each
-    # job installs with the Python it is meant to test, not whichever newer
-    # one the runner also has.
-    for candidate in ${TRACE_PYTHON:-} python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
-        if command -v "$candidate" &> /dev/null; then
-            PY="$candidate"
-            PY_VER=$("$PY" -c 'import sys; print("%d.%d" % sys.version_info[:2])')
-            MAJOR=${PY_VER%%.*}
-            MINOR=${PY_VER##*.}
-            if [[ "$MAJOR" -eq 3 && "$MINOR" -ge 10 ]]; then
-                ok "Using $PY (Python $PY_VER)"
-                return 0
-            fi
+
+# python_version EXE: "3.12" if EXE runs, else nothing.
+python_version() {
+    "$1" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null \
+        || true
+}
+
+# new_enough VERSION: whether VERSION ("3.12") is 3.10 or newer.
+new_enough() {
+    [[ "$1" =~ ^3\.([0-9]+)$ ]] && [[ "${BASH_REMATCH[1]}" -ge 10 ]]
+}
+
+# pick_python: set PY and PY_VER to the newest suitable interpreter, or
+# return 1. TRACE_PYTHON names it explicitly -- CI sets it so each job
+# installs with the Python it is meant to test.
+pick_python() {
+    local candidate version
+    for candidate in ${TRACE_PYTHON:-} python3.14 python3.13 python3.12 \
+            python3.11 python3.10 python3; do
+        command -v "$candidate" &> /dev/null || continue
+        version=$(python_version "$candidate")
+        if new_enough "$version"; then
+            PY="$candidate"; PY_VER="$version"
+            return 0
         fi
     done
+    return 1
+}
+
+no_python() {
     fail "No suitable Python found. TRACE needs Python 3.10 or newer."
     note "macOS:          the installer from https://www.python.org/downloads/macos/"
     note "                (or: brew install python@3.12)"
     note "Debian/Ubuntu:  sudo apt install python3.12 python3.12-venv"
+    note "Fedora/RHEL:    sudo dnf install python3.12"
+    note "openSUSE Leap:  sudo zypper install python312"
     note "                (older releases: python.org or pyenv)"
     exit 1
 }
 
-# --- System dependencies --------------------------------------------------
+# --- System packages -----------------------------------------------------------
+# What TRACE needs from the system on Linux, per package manager. No
+# compiler or -dev packages: pytsk3 and libewf-python come as pre-built
+# wheels with The Sleuth Kit and libewf inside.
+#   libmagic: file-type detection (python-magic loads it at run time)
+#   xcb-cursor, xcb-icccm, xcb-keysyms, xcb-shape, xkbcommon-x11, EGL, GL,
+#     glib, fontconfig, dbus: the Qt 6 platform plugin and its libraries
+#     (a minimal Ubuntu lacks icccm, keysyms and shape: ldd on libqxcb.so)
+#   pulse: Qt Multimedia -- without it the window cannot open
+#   krb5 / gssapi: Qt Network
+PKG=""
+for manager in apt-get dnf pacman zypper; do
+    if command -v "$manager" &> /dev/null; then PKG="$manager"; break; fi
+done
+
+packages_for() {
+    case "$PKG" in
+        apt-get)
+            echo python3 python3-venv python3-pip libmagic1 \
+                libxcb-cursor0 libxcb-xinerama0 libxcb-icccm4 libxcb-keysyms1 \
+                libxcb-shape0 libegl1 libxkbcommon-x11-0 \
+                libgl1 libglib2.0-0 libfontconfig1 libdbus-1-3 \
+                libpulse0 libgssapi-krb5-2 ;;
+        dnf)
+            echo python3 python3-pip file-libs \
+                xcb-util-cursor xcb-util-wm xcb-util-keysyms mesa-libEGL \
+                libxkbcommon-x11 mesa-libGL \
+                glib2 fontconfig dbus-libs pulseaudio-libs krb5-libs ;;
+        pacman)
+            echo python python-pip file \
+                xcb-util-cursor xcb-util-wm xcb-util-keysyms libglvnd \
+                libxkbcommon-x11 \
+                glib2 fontconfig dbus libpulse krb5 ;;
+        zypper)
+            echo python3 python3-pip libmagic1 \
+                libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 \
+                libglvnd libxkbcommon-x11-0 \
+                libglib-2_0-0 libgthread-2_0-0 fontconfig libdbus-1-3 \
+                libpulse0 krb5 ;;
+    esac
+}
+
+# A newer Python where the distribution's own python3 is too old (RHEL /
+# Rocky 9: 3.9; openSUSE Leap 15: 3.6; Ubuntu 20.04: 3.8).
+newer_python_packages() {
+    case "$PKG" in
+        apt-get) echo python3.12 python3.12-venv ;;
+        dnf)     echo python3.12 python3.12-pip ;;
+        zypper)  echo python312 python312-pip ;;
+    esac
+}
+
+SUDO=""
+need_root() {
+    if [[ -z "$SUDO" && "$(id -u)" -ne 0 ]]; then
+        SUDO="sudo"
+        # Ask for the password now, in plain sight: with the package
+        # manager's output going to the log, a prompt from inside it would
+        # never be seen.
+        sudo -v
+    fi
+}
+
+# pkg_install LABEL PACKAGE...: install with the distribution's manager.
+pkg_install() {
+    local label="$1"
+    shift
+    case "$PKG" in
+        # --no-install-recommends: python3-pip otherwise pulls in a C/C++
+        # compiler that nothing here needs.
+        apt-get) quietly "$label" $SUDO env DEBIAN_FRONTEND=noninteractive \
+                     apt-get install -y --no-install-recommends "$@" ;;
+        dnf)     quietly "$label" $SUDO dnf install -y \
+                     --setopt=install_weak_deps=False "$@" ;;
+        # --needed: what is installed stays. No -y: a partial upgrade breaks
+        # Arch; a stale package database says so and is the examiner's to
+        # refresh (pacman -Syu).
+        pacman)  quietly "$label" $SUDO pacman -S --needed --noconfirm "$@" ;;
+        zypper)  quietly "$label" $SUDO zypper --non-interactive install \
+                     --no-recommends "$@" ;;
+    esac
+}
+
 install_macos_deps() {
     # Nothing to install outside Python: every library comes as a wheel --
     # The Sleuth Kit (pytsk3), libewf, and libmagic (pylibmagic). No
@@ -309,8 +421,8 @@ install_macos_deps() {
 
 install_linux_deps() {
     step "Installing system packages"
-    if ! command -v apt &> /dev/null; then
-        warn "This script automates apt-based distributions only."
+    if [[ -z "$PKG" ]]; then
+        warn "This script installs packages with apt, dnf, pacman or zypper only."
         note "Install the equivalents of these, then rerun:"
         note "  python3 (3.10+) with venv and pip"
         note "  libmagic (file-type detection)"
@@ -322,38 +434,30 @@ install_linux_deps() {
         fi
         return
     fi
-
-    # No compiler or -dev packages: pytsk3 and libewf-python come as
-    # pre-built wheels with The Sleuth Kit and libewf inside.
-    # libmagic1: file-type detection (python-magic loads it at runtime).
-    # libxcb-cursor0 and friends: the Qt 6 platform plugins.
-    SUDO=""
-    if [[ "$(id -u)" -ne 0 ]]; then
-        SUDO="sudo"
-        # Ask for the password now, in plain sight: with apt's output going
-        # to the log, a prompt from inside it would never be seen.
-        sudo -v
-    fi
-    if ! quietly "Reading package lists" $SUDO apt-get update; then
-        fail "apt-get update failed."; log_tail; exit 1
-    fi
-    # libpulse0: Qt Multimedia (the audio/video player) fails to import
-    #   without it, which stops the whole window opening.
-    # libgssapi-krb5-2: Qt Network.
-    # --no-install-recommends: python3-pip otherwise pulls in a C/C++
-    #   compiler that nothing here needs.
+    need_root
+    case "$PKG" in
+        apt-get)
+            if ! quietly "Reading package lists" $SUDO apt-get update; then
+                fail "apt-get update failed."; log_tail; exit 1
+            fi ;;
+        zypper)
+            if ! quietly "Reading package lists" \
+                    $SUDO zypper --non-interactive refresh; then
+                fail "zypper refresh failed."; log_tail; exit 1
+            fi ;;
+    esac
     local before count
     before=$(wc -l < "$LOG")
-    if ! quietly "Installing system packages" \
-        $SUDO apt-get install -y --no-install-recommends \
-        python3 python3-venv python3-pip \
-        libmagic1 \
-        libxcb-cursor0 libxcb-xinerama0 libegl1 libxkbcommon-x11-0 libgl1 \
-        libglib2.0-0 libfontconfig1 libdbus-1-3 \
-        libpulse0 libgssapi-krb5-2; then
-        fail "Installing system packages failed."; log_tail; exit 1
+    # shellcheck disable=SC2046  # one word per package
+    if ! pkg_install "Installing system packages" $(packages_for); then
+        fail "Installing system packages failed."; log_tail
+        [[ "$PKG" == pacman ]] && \
+            note "If a package was not found, refresh first: sudo pacman -Syu"
+        exit 1
     fi
-    count=$(tail -n +"$((before + 1))" "$LOG" | grep -c '^Setting up ' || true)
+    count=$(tail -n +"$((before + 1))" "$LOG" |
+        grep -ciE '^(Setting up |[[:space:]]*Installing[[:space:]]*:|\[ *[0-9]+/[0-9]+\] Installing|\([0-9]+/[0-9]+\) installing|installing [^ ]+\.\.\.$)' \
+        || true)
     if [[ "$count" -gt 0 ]]; then
         ok "$count system packages installed"
     else
@@ -363,10 +467,213 @@ install_linux_deps() {
 
 install_wsl_deps() {
     install_linux_deps
-    warn "WSL needs a working X/Wayland display (WSLg on Windows 11)."
+    if [[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
+        warn "WSL needs a display for TRACE's window: WSLg (Windows 11) or an X server."
+    fi
 }
 
-# --- Run ------------------------------------------------------------------
+find_python() {
+    step "Looking for Python 3.10 or newer"
+    if ! pick_python; then
+        local newer
+        newer=$(newer_python_packages)
+        if [[ "$USER_OS" != "macOS" && -n "$newer" ]]; then
+            note "The system's python3 is older than 3.10: installing $newer"
+            need_root
+            # shellcheck disable=SC2086
+            pkg_install "Installing a newer Python" $newer || true
+        fi
+        pick_python || no_python
+    fi
+    ok "Using $PY (Python $PY_VER)"
+    # Debian and Ubuntu keep venv's pip (ensurepip) in a package of its own,
+    # one per Python version: python3-venv is only the default python3's.
+    if ! "$PY" -c 'import ensurepip, venv' &> /dev/null; then
+        if [[ "$PKG" == apt-get ]]; then
+            need_root
+            if pkg_install "Installing python$PY_VER-venv" "python$PY_VER-venv" &&
+                    "$PY" -c 'import ensurepip, venv' &> /dev/null; then
+                ok "python$PY_VER-venv installed"
+                return 0
+            fi
+        fi
+        fail "$PY cannot make a virtual environment (no venv / ensurepip)."
+        note "Debian/Ubuntu:  sudo apt install python$PY_VER-venv"
+        note "Fedora/RHEL:    sudo dnf install python3-pip"
+        exit 1
+    fi
+}
+
+# --- Virtual environment -------------------------------------------------------
+# An existing venv is reused only if its own Python runs and is new enough:
+# one made by an older Python, on another system, or whose Python has since
+# been removed fails inside pip with nothing saying why.
+make_venv() {
+    step "Creating virtual environment"
+    if [[ -e venv ]]; then
+        local version why reply
+        version=$(python_version venv/bin/python)
+        if new_enough "$version"; then
+            ok "Reusing the existing venv (Python $version)"
+            return 0
+        fi
+        if [[ -n "$version" ]]; then
+            why="it was made with Python $version"
+        else
+            why="its Python does not run (moved, made on another system, or removed)"
+        fi
+        warn "The existing venv cannot be used: $why."
+        if [[ "$ASSUME_YES" -eq 1 ]]; then
+            reply=y
+        else
+            read -r -p "    Rebuild it with $PY? [Y/n] " reply
+        fi
+        if [[ "$reply" =~ ^[Nn] ]]; then
+            fail "TRACE needs a venv with Python 3.10 or newer."; exit 1
+        fi
+        rm -rf venv
+    fi
+    if ! quietly "Creating venv" "$PY" -m venv venv; then
+        fail "Could not create the virtual environment."; log_tail; exit 1
+    fi
+    ok "venv ready"
+}
+
+install_packages() {
+    step "Installing Python packages (this can take a few minutes)"
+    if ! quietly "Updating pip" "$VENV_PY" -m pip install --upgrade pip; then
+        fail "Could not update pip."; log_tail; exit 1
+    fi
+    local before installed
+    before=$(wc -l < "$LOG")
+    # --only-binary for the two forensic engines: if no wheel exists for
+    # this platform, say so plainly rather than attempt a C build that will
+    # fail.
+    if ! quietly "Installing packages" "$VENV_PY" -m pip install \
+            --only-binary=pytsk3,libewf-python -r requirements.txt; then
+        fail "Dependency installation failed."
+        log_tail
+        note ""
+        note "pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
+        note "on Windows, macOS (Apple Silicon and Intel) and Linux (x86_64 and"
+        note "aarch64). Check that $PY is one of those versions and this machine"
+        note "one of those platforms."
+        exit 1
+    fi
+    installed=$(tail -n +"$((before + 1))" "$LOG" |
+        grep '^Successfully installed' | wc -w || true)
+    if [[ "$installed" -gt 2 ]]; then
+        ok "$((installed - 2)) packages installed"
+    else
+        ok "Every package already installed"
+    fi
+}
+
+# --- Checking the install ------------------------------------------------------
+# What a missing system library looks like only at the first start -- the
+# forensic engines, Qt, libmagic -- tried now, while the installer can still
+# say which package it is (trace_app/infra/install_check.py, shared with
+# install_windows.ps1).
+
+# The package holding a library, for the distribution's manager.
+package_of() {
+    local soname="$1"
+    # Debian and openSUSE name a library's package by its name and major
+    # version: libxcb-icccm.so.4 -> libxcb-icccm4.
+    local by_major="${soname%%.so*}${soname##*.so.}"
+    by_major="${by_major%%.*}"
+    case "$PKG:$soname" in
+        apt-get:libxcb-cursor*)    echo libxcb-cursor0 ;;
+        apt-get:libEGL*)           echo libegl1 ;;
+        apt-get:libGL.so*|apt-get:libOpenGL*) echo libgl1 ;;
+        apt-get:libfontconfig*)    echo libfontconfig1 ;;
+        apt-get:libdbus*)          echo libdbus-1-3 ;;
+        apt-get:libxcb-*|apt-get:libxkbcommon*|apt-get:libX11-xcb*)
+            echo "$by_major" | tr "[:upper:]" "[:lower:]" ;;
+        apt-get:libSM*)            echo libsm6 ;;
+        apt-get:libICE*)           echo libice6 ;;
+        dnf:libxcb-cursor*)        echo xcb-util-cursor ;;
+        dnf:libxcb-icccm*)         echo xcb-util-wm ;;
+        dnf:libxcb-image*)         echo xcb-util-image ;;
+        dnf:libxcb-keysyms*)       echo xcb-util-keysyms ;;
+        dnf:libxcb-render-util*)   echo xcb-util-renderutil ;;
+        dnf:libxkbcommon-x11*)     echo libxkbcommon-x11 ;;
+        dnf:libEGL*)               echo mesa-libEGL ;;
+        dnf:libGL.so*|dnf:libOpenGL*) echo mesa-libGL ;;
+        pacman:libxcb-cursor*)     echo xcb-util-cursor ;;
+        pacman:libxcb-icccm*)      echo xcb-util-wm ;;
+        pacman:libxcb-image*)      echo xcb-util-image ;;
+        pacman:libxcb-keysyms*)    echo xcb-util-keysyms ;;
+        pacman:libxcb-render-util*) echo xcb-util-renderutil ;;
+        pacman:libxkbcommon-x11*)  echo libxkbcommon-x11 ;;
+        pacman:libEGL*|pacman:libGL.so*|pacman:libOpenGL*) echo libglvnd ;;
+        zypper:libxcb-*)           echo "$by_major" ;;
+        zypper:libxkbcommon-x11*)  echo libxkbcommon-x11-0 ;;
+        zypper:libEGL*|zypper:libGL.so*|zypper:libOpenGL*) echo libglvnd ;;
+    esac
+}
+
+check_install() {
+    step "Checking the install"
+    local problems missing qxcb lib package
+    if ! problems=$("$VENV_PY" -m trace_app.infra.install_check 2>&1); then
+        fail "TRACE's libraries do not all load:"
+        printf '%s\n' "$problems" | sed 's/^/      /'
+        printf '\n$ check\n%s\n' "$problems" >> "$LOG"
+        exit 1
+    fi
+    ok "The forensic engines, Qt and libmagic load"
+    if [[ "$USER_OS" == "macOS" ]] || ! command -v ldd &> /dev/null; then
+        return 0
+    fi
+    # The window's platform plugin loads its libraries only when the window
+    # opens: ask the loader now which of them are not on this system.
+    qxcb=$("$VENV_PY" -c 'import os, PySide6
+print(os.path.join(os.path.dirname(PySide6.__file__), "Qt", "plugins",
+                   "platforms", "libqxcb.so"))' 2>/dev/null || true)
+    [[ -f "$qxcb" ]] || return 0
+    # sed, not awk: openSUSE Tumbleweed has no awk, and the check then said
+    # nothing was missing.
+    missing=$(ldd "$qxcb" 2>/dev/null |
+        sed -n 's/^[[:space:]]*\([^[:space:]]*\) => not found.*/\1/p' | sort -u)
+    if [[ -z "$missing" ]]; then
+        ok "Qt's window libraries are present"
+        return 0
+    fi
+    warn "TRACE's window needs libraries this system does not have:"
+    for lib in $missing; do
+        package=$(package_of "$lib")
+        if [[ -n "$package" ]]; then
+            note "  $lib  (package $package)"
+        else
+            note "  $lib"
+        fi
+    done
+    note "Install them, then start TRACE. Without them its window cannot open."
+}
+
+# --- Launcher ------------------------------------------------------------------
+# ./trace starts TRACE with this checkout's venv, from any folder, with no
+# venv to activate. Links to it (in ~/bin) are followed back here.
+write_launcher() {
+    cat > trace <<'LAUNCHER'
+#!/bin/sh
+# Starts TRACE with its own Python (written by install.sh).
+self=$0
+while [ -h "$self" ]; do
+    link=$(readlink "$self")
+    case $link in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+here=$(cd "$(dirname "$self")" && pwd)
+exec "$here/venv/bin/python" "$here/main.py" "$@"
+LAUNCHER
+    chmod +x trace
+}
+
+# --- Run -----------------------------------------------------------------------
 case "$USER_OS" in
     macOS) install_macos_deps ;;
     Linux) install_linux_deps ;;
@@ -374,43 +681,26 @@ case "$USER_OS" in
 esac
 
 find_python
-
-step "Creating virtual environment"
-if ! quietly "Creating venv" "$PY" -m venv venv; then
-    fail "Could not create the virtual environment."; log_tail; exit 1
-fi
-ok "venv ready"
-
-step "Installing Python packages (this can take a few minutes)"
+make_venv
 VENV_PY="venv/bin/python"
-if ! quietly "Updating pip" "$VENV_PY" -m pip install --upgrade pip; then
-    fail "Could not update pip."; log_tail; exit 1
-fi
-BEFORE=$(wc -l < "$LOG")
-# --only-binary for the two forensic engines: if no wheel exists for this
-# platform, say so plainly rather than attempt a C build that will fail.
-if ! quietly "Installing packages" \
-    "$VENV_PY" -m pip install --only-binary=pytsk3,libewf-python -r requirements.txt; then
-    fail "Dependency installation failed."
-    log_tail
-    note ""
-    note "pytsk3 and libewf-python have pre-built wheels for Python 3.10-3.14"
-    note "on Windows, macOS (Apple Silicon and Intel) and Linux (x86_64 and"
-    note "aarch64). Check that $PY is one of those versions and this machine"
-    note "one of those platforms."
-    exit 1
-fi
-INSTALLED=$(tail -n +"$((BEFORE + 1))" "$LOG" | grep '^Successfully installed' | wc -w || true)
-if [[ "$INSTALLED" -gt 2 ]]; then
-    ok "$((INSTALLED - 2)) packages installed"
-else
-    ok "Every package already installed"
-fi
+install_packages
+check_install
+write_launcher
 note "${DIM}Full log: install.log${R}"
 
 echo
 printf '  %s%s TRACE is installed.%s\n\n' "$GREEN$BOLD" "$G_OK" "$R"
 printf '  Start it with:\n'
-printf '    %ssource venv/bin/activate%s\n' "$ACCENT" "$R"
-printf '    %spython main.py%s\n\n' "$ACCENT" "$R"
-printf '  %sType deactivate when you are finished.%s\n\n' "$DIM" "$R"
+printf '    %s./trace%s\n' "$ACCENT" "$R"
+printf '  %sor: source venv/bin/activate, then python main.py%s\n\n' "$DIM" "$R"
+
+if [[ "$ASSUME_YES" -eq 0 && -t 0 && -t 1 ]]; then
+    read -r -p "  Start TRACE now? [Y/n] " reply
+    if [[ ! "$reply" =~ ^[Nn] ]]; then
+        # Detached, its output to its own log (user_data_dir()/trace.log):
+        # closing this terminal leaves TRACE running.
+        nohup ./trace > /dev/null 2>&1 &
+        ok "TRACE is starting"
+        echo
+    fi
+fi
