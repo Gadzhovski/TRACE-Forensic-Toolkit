@@ -815,6 +815,32 @@ def test_the_import_job_adds_audits_and_sorts_again(case):
     case.__dict__['_db'] = Case.open(folder)._db
 
 
+def test_closing_the_window_starts_no_job(qapp, case, monkeypatch):
+    """Closing the evidence refreshes the Modules tab, which queued the
+    bridge and fit jobs again -- after the window had waited for its jobs.
+    On a macOS runner the new job outlived the window and Qt aborted
+    ("QThread: Destroyed while thread is still running")."""
+    from tests.conftest import close_window
+    from trace_app.ui.main_window import MainWindow
+    from trace_app.ui.process_worker import ProcessWorker
+    run = _run(case, case.phone, 'first', [SAFARI, LOGS])
+    _imported_at(case, run, ['unifiedlogs'])
+    window = MainWindow(case=case)
+    closing, started = [], []
+    start, cleanup = ProcessWorker.start, window.cleanup_resources
+    monkeypatch.setattr(ProcessWorker, 'start', lambda worker, *a: (
+        closing and started.append(worker.kind), start(worker, *a)))
+
+    def cleanup_now():
+        closing.append(True)
+        cleanup()
+        assert started == []
+        # Anything asking for a job now is refused.
+        assert window.job_bar.submit(type('Job', (), {'key': 'x'})())             is False
+    window.cleanup_resources = cleanup_now
+    close_window(window)
+    assert started == []
+
 def test_a_large_import_is_asked_and_a_no_puts_the_setting_back(
         qapp, case, monkeypatch):
     from tests.conftest import close_window

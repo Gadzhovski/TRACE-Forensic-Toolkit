@@ -251,6 +251,10 @@ class JobBar(QWidget):
         duplicated: pressing Build Index twice should not walk the image
         twice.
         """
+        if getattr(self, '_closed', False):
+            logger.debug("Job %s not started: the window is closing",
+                         job.key)
+            return False
         running = [j for j in (self._current, self._side) if j is not None]
         if any(j.key == job.key for j in running):
             logger.debug("Job %s is already running", job.key)
@@ -383,6 +387,13 @@ class JobBar(QWidget):
         self.cancel_current()
         self.cancel_side()
         self._refresh_steps()
+
+    def close(self):
+        """The window is closing: stop everything, and start nothing from
+        now on -- closing the evidence refreshes views that queue jobs, and
+        one started after the window's wait outlived the window."""
+        self._closed = True
+        self.cancel_all()
 
     def cancel_side(self):
         """Ask the side lane's job to stop (cooperatively, like the main)."""

@@ -5332,6 +5332,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if getattr(self, 'map_panel', None) is not None:
             self.map_panel.set_hidden_note(self._unmapped_note(runs))
         self.refresh_modules_tree(runs)
+        if getattr(self, '_closing', False):
+            # Closing the evidence refreshes this; a job started then ran
+            # on past the window's wait and was destroyed with the window.
+            return
         self._ensure_module_fit()
         self._ensure_module_bridge()
         self._ensure_module_import_limit()
@@ -9298,9 +9302,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # it anyway -- it ends an event loop, and this thread is inside a walk
         # over the evidence. Left running, it would keep reading an image
         # whose handler is closed a few lines further down.
+        self._closing = True
         try:
             if getattr(self, 'job_bar', None) is not None:
-                self.job_bar.cancel_all()
+                self.job_bar.close()
             if getattr(self, 'vt_worker', None) is not None:
                 self.vt_worker.stop()
             from trace_app.ui.process_worker import (CLOSE_WAIT_MS,
