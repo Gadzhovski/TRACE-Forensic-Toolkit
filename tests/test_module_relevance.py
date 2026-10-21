@@ -39,11 +39,13 @@ def test_what_each_image_rules_out():
     from trace_app.core.modules.spec import TOOLS
     found, ruled_out = _profile(image_path(BTRFS))
     assert found['filesystems'] == ['Btrfs'] and not found['unreadable']
-    # No phone, computer, return or car on it: every external tool is
-    # ruled out too, each saying why.
-    tools = {key for key in ruled_out if key in TOOLS}
-    assert tools == set(TOOLS)
-    assert set(ruled_out) - tools == {'ntfs', 'persistence'}  # deleted: leaves
+    # No system found on it, and the return/vehicle patterns are not counted
+    # in a disk image's profile: TRACE cannot tell what it is, so no
+    # external tool is ruled out (evidence_profile.UNKNOWN).
+    from trace_app.core import evidence_profile
+    assert evidence_profile.UNKNOWN in found['tool_systems']
+    assert not {key for key in ruled_out if key in TOOLS}
+    assert set(ruled_out) == {'ntfs', 'persistence'}  # deleted: leaves
     assert 'No NTFS volume' in ruled_out['ntfs']
 
     found, ruled_out = _profile(image_path(NTFS))
