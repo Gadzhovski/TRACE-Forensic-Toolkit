@@ -122,18 +122,32 @@ def test_nothing_is_drawn_beside_the_tabs(window, qapp, theme):
 def test_the_result_panels_tab_row_has_float_and_close(window, qapp):
     """The row of Listing, Search... ends the same way, acting on the
     panel in front."""
+    import time
     from tests.conftest import pump
-    window.resize(1400, 900)
-    window.show()
-    pump(qapp, 0.3)
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QTabBar, QWidget
     docks = window.result_viewer
-    rows = [b for b in window.result_area.findChildren(
-        QTabBar, options=Qt.FindDirectChildrenOnly) if b.isVisible()]
-    corners = [c for c in window.result_area.findChildren(QWidget)
-               if c.objectName() == 'dockHeaderCorner' and c.isVisible()]
-    assert rows and len(corners) == len(rows)     # one per tab row
+    window.resize(1400, 900)
+    window.show()
+    # The default arrangement, whatever the window opened with: one row.
+    docks.arrange()
+
+    def shown():
+        rows = [b for b in window.result_area.findChildren(
+            QTabBar, options=Qt.FindDirectChildrenOnly) if b.isVisible()]
+        corners = [c for c in window.result_area.findChildren(QWidget)
+                   if c.objectName() == 'dockHeaderCorner' and c.isVisible()]
+        return rows, corners
+
+    deadline = time.monotonic() + 3
+    while True:
+        pump(qapp, 0.1)
+        rows, corners = shown()
+        if (rows and len(corners) == len(rows)) or time.monotonic() > deadline:
+            break
+    assert rows and len(corners) == len(rows), (   # one per tab row
+        [(b.count(), b.tabText(b.currentIndex()), b.geometry().getRect())
+         for b in rows], [c.geometry().getRect() for c in corners])
     front = docks.dock(docks.currentWidget())
     float_button = next(
         c.children()[1] for c in corners
