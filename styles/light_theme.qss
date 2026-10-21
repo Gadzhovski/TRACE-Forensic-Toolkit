@@ -175,7 +175,10 @@ QListWidget::item:selected, QTableWidget::item:selected {
 
 /* Menu and MenuBar Styles */
 QMenuBar {
-    background-color: #FFFFFF;
+    /* The window's ground, not white: with the title bar (the same colour,
+       ui/widgets/title_bar.COLOURS) it is one header above the white
+       toolbar and panels. */
+    background-color: #F2F3F5;
     border-bottom: 1px solid #E5E5E5;
 }
 QMenuBar::item {
@@ -183,10 +186,10 @@ QMenuBar::item {
     border-radius: 4px;
 }
 QMenuBar::item:selected {
-    background-color: #e7e7e7;
+    background-color: #E3E5E8;
 }
 QMenuBar::item:pressed {
-    background-color: #d7d7d7;
+    background-color: #D5D8DC;
 }
 
 QMenu {
