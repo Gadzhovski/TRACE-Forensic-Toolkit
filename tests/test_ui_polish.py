@@ -132,25 +132,49 @@ def test_the_result_panels_tab_row_has_float_and_close(window, qapp):
     # The default arrangement, whatever the window opened with: one row.
     docks.arrange()
 
-    def shown():
-        rows = [b for b in window.result_area.findChildren(
-            QTabBar, options=Qt.FindDirectChildrenOnly) if b.isVisible()]
-        corners = [c for c in window.result_area.findChildren(QWidget)
-                   if c.objectName() == 'dockHeaderCorner' and c.isVisible()]
-        return rows, corners
+    def corners():
+        return [c for c in window.result_area.findChildren(QWidget)
+                if c.objectName() == 'dockHeaderCorner' and c.isVisible()]
 
-    deadline = time.monotonic() + 3
-    while True:
+    def settled(count):
+        deadline = time.monotonic() + 3
+        while len(corners()) != count and time.monotonic() < deadline:
+            pump(qapp, 0.1)
         pump(qapp, 0.1)
-        rows, corners = shown()
-        if (rows and len(corners) == len(rows)) or time.monotonic() > deadline:
-            break
-    assert rows and len(corners) == len(rows), (   # one per tab row
-        [(b.count(), b.tabText(b.currentIndex()), b.geometry().getRect())
-         for b in rows], [c.geometry().getRect() for c in corners])
+        return corners()
+
+    def row_of(dock):
+        """The tab bar Qt lays out on `dock`'s group (it keeps others it no
+        longer uses -- Qt 6.11 leaves them visible)."""
+        return next(b for b in window.result_area.findChildren(
+            QTabBar, options=Qt.FindDirectChildrenOnly)
+            if b.isVisible() and b.width() == dock.width()
+            and dock.windowTitle() in [b.tabText(i) for i in range(b.count())])
+
+    def on_row(corner, dock):
+        bar, place = row_of(dock).geometry(), corner.geometry()
+        return (bar.top() <= place.center().y() <= bar.bottom()
+                and abs(place.right() - dock.geometry().right()) <= 1)
+
+    # One group: one corner, at the end of its row -- none over a panel.
+    front = docks.dock(docks.currentWidget())
+    shown = settled(1)
+    assert len(shown) == 1, [c.geometry().getRect() for c in shown]
+    assert on_row(shown[0], front)
+    # Two groups, one above the other: a corner on each row.
+    timeline = docks.dock(window.timeline_panel)
+    activity = docks.dock(window.activity_panel)
+    window.result_area.addDockWidget(Qt.BottomDockWidgetArea, timeline)
+    window.result_area.tabifyDockWidget(timeline, activity)
+    timeline.raise_()
+    shown = settled(2)
+    assert len(shown) == 2, [c.geometry().getRect() for c in shown]
+    assert any(on_row(c, timeline) for c in shown)
+    docks.arrange()
+    shown = settled(1)
     front = docks.dock(docks.currentWidget())
     float_button = next(
-        c.children()[1] for c in corners
+        c.children()[1] for c in shown
         if front.windowTitle() in c.children()[1].toolTip())
     float_button.click()
     pump(qapp, 0.3)

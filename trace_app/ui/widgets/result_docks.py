@@ -136,7 +136,8 @@ class ResultDocks(QObject):
         kept = {}
         for bar in bars:
             front = by_title.get(bar.tabText(bar.currentIndex()))
-            if not bar.isVisible() or front is None:
+            if not bar.isVisible() or front is None \
+                    or not self._heads(bar, front):
                 continue
             corner = self._corners.pop(bar, None)
             if corner is None:
@@ -168,6 +169,20 @@ class ResultDocks(QObject):
             corner.hide()
             corner.deleteLater()
         self._corners = kept
+
+    @staticmethod
+    def _heads(bar, front):
+        """Whether `bar` is the tab row of `front`'s group: as wide as the
+        dock and against its top or bottom. Qt keeps tab bars it no longer
+        lays out, still with tabs, and Qt 6.11 leaves them "visible" (at
+        their 100 px default width): a corner placed for one of those
+        stood over the panel."""
+        row, dock = bar.geometry(), front.geometry()
+        return (front.isVisible()
+                and abs(row.left() - dock.left()) <= 2
+                and abs(row.right() - dock.right()) <= 2
+                and (abs(row.bottom() + 1 - dock.top()) <= 6
+                     or abs(dock.bottom() + 1 - row.top()) <= 6))
 
     def _front(self, bar, what):
         """Float or close the panel in front of the tab row `bar`."""
