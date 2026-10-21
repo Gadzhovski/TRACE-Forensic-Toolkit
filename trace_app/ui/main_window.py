@@ -5233,14 +5233,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return None
 
     def _mobile_systems(self, path, handler):
-        """Which phone systems an image holds, cheaply: an iOS or Android
-        backup by its kind, else what os_identity found on its volumes
-        ('iPhone OS' in SystemVersion.plist, Android's build.prop)."""
+        """Which systems an image holds for the external tools
+        (evidence_profile.tool_systems), cheaply: an iOS or Android backup
+        by its kind; an image not open (or not worked out yet) is UNKNOWN,
+        which rules no tool out."""
         from trace_app.core import evidence_profile, logical_sources
         if handler is None or not handler.loaded:
             kind = logical_sources.kind_of(path) or ''
-            return {'ios_backup': ['ios'],
-                    'android_backup': ['android']}.get(kind, [])
+            return {'ios_backup': ['ios'], 'android_backup': ['android']}.get(
+                kind, [evidence_profile.UNKNOWN])
         # What the image's opening found (never read here: a phone packed
         # in a 16 GB tar is found header by header).
         return evidence_profile.tool_systems(handler, read=False)
