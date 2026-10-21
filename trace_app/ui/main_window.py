@@ -9303,14 +9303,24 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.job_bar.cancel_all()
             if getattr(self, 'vt_worker', None) is not None:
                 self.vt_worker.stop()
+            from trace_app.ui.process_worker import (CLOSE_WAIT_MS,
+                                                     ProcessWorker)
             for worker in list(getattr(self, '_active_workers', ())):
-                if hasattr(worker, 'stop'):
+                if isinstance(worker, ProcessWorker):
+                    worker.close()
+                elif hasattr(worker, 'stop'):
                     worker.stop()
             for worker in list(getattr(self, '_active_workers', ())):
                 if worker.isRunning():
                     # Generous, because the wait is for the current file to
-                    # finish rather than for the whole run.
-                    worker.wait(5000)
+                    # finish rather than for the whole run. A child process
+                    # is ended after its grace (ProcessWorker.close): the
+                    # thread must not outlive the window that owns it --
+                    # a job still starting when a test's window closed
+                    # outlasted 5 s on a macOS runner, and Qt aborted.
+                    worker.wait(CLOSE_WAIT_MS
+                                if isinstance(worker, ProcessWorker)
+                                else 5000)
         except Exception as exc:
             logger.error("Error stopping background jobs: %s", exc)
 

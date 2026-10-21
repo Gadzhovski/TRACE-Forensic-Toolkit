@@ -93,3 +93,44 @@ def test_a_retained_worker_is_let_go_only_once_its_thread_has_ended(
     assert pump(qapp, 10, until=lambda: not window._active_workers)
     gc.collect()
     window.close()
+
+
+class _Stuck:
+    """A child process that never answers or ends by itself."""
+
+    def __init__(self):
+        self.ended = False
+
+    def is_alive(self):
+        return not self.ended
+
+    def terminate(self):
+        self.ended = True
+
+    def join(self, timeout=None):
+        pass
+
+
+def test_a_closing_window_ends_a_job_that_does_not_stop(monkeypatch):
+    """The window waits for its jobs before it is deleted: a child that
+    outlasted the wait (one still starting, on a macOS runner) left its
+    thread running under a deleted window and Qt aborted. Closed, a job
+    is ended after its grace; a plain cancel still waits for it."""
+    import queue
+    import time
+    from trace_app.ui import process_worker
+    worker = process_worker.ProcessWorker({})
+    channel, child = queue.Queue(), _Stuck()
+    worker.close()
+    worker._closing -= process_worker.CLOSE_GRACE_SECONDS + 1
+    started = time.monotonic()
+    assert worker._relay(channel, child) == (0, '')
+    assert child.ended and time.monotonic() - started < 2
+    # Cancelled from the job bar: still relaying when the child answers.
+    worker, child = process_worker.ProcessWorker({}), _Stuck()
+    worker.stop()
+    threading.Timer(0.6, channel.put, [('done', 3, '')]).start()
+    assert worker._relay(channel, child) == (3, '')
+    assert not child.ended
+    assert process_worker.CLOSE_WAIT_MS > \
+        (process_worker.CLOSE_GRACE_SECONDS + 5) * 1000
