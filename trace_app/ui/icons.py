@@ -267,6 +267,7 @@ EXTERNAL_LINK = "Icons/tabler/external-link.svg"
 CLOSE = "Icons/tabler/x.svg"
 REGISTRY = "Icons/tabler/database.svg"
 # The viewer dock's tabs.
+TAB_TREE = "Icons/tabler/list-tree.svg"
 TAB_HEX = "Icons/tabler/binary.svg"
 TAB_TEXT = "Icons/tabler/file-text.svg"
 TAB_APPLICATION = "Icons/tabler/eye.svg"

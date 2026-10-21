@@ -76,6 +76,8 @@ class ResultDocks(QObject):
         self._docks = []
         self._current = None
         self._icons = {}              # dock -> icon name
+        #: tab bar -> its float / close corner (dock_header.corner).
+        self._corners = {}
         self._pending = False
         window.tabifiedDockWidgetActivated.connect(self._dock_raised)
         QApplication.instance().focusChanged.connect(self._focus_changed)
@@ -84,7 +86,8 @@ class ResultDocks(QObject):
     def eventFilter(self, watched, event):
         # Qt makes and refills the docks' tab bars itself as panels move:
         # tidy them after every change of the arrangement.
-        if event.type() in (QEvent.ChildAdded, QEvent.LayoutRequest):
+        if event.type() in (QEvent.ChildAdded, QEvent.LayoutRequest,
+                            QEvent.Resize):
             self.refresh()
         return False
 
@@ -93,13 +96,16 @@ class ResultDocks(QObject):
         settled (also after a theme change, for the icons' tint)."""
         if not self._pending:
             self._pending = True
-            QTimer.singleShot(0, self._tidy)
+            # `self` as the context: a tidy queued as the window closes is
+            # dropped with it, not run over deleted docks.
+            QTimer.singleShot(0, self, self._tidy)
 
     def _tidy(self):
         self._pending = False
         by_title = {dock.windowTitle(): dock for dock in self._docks}
-        for bar in self._window.findChildren(
-                QTabBar, options=Qt.FindDirectChildrenOnly):
+        bars = self._window.findChildren(QTabBar,
+                                         options=Qt.FindDirectChildrenOnly)
+        for bar in bars:
             # Qt turns the base line on: a dark rule from the last tab to
             # the window's edge that no other tab row in TRACE has.
             bar.setDrawBase(False)
@@ -119,6 +125,62 @@ class ResultDocks(QObject):
                 old = dock.titleBarWidget()
                 dock.setTitleBarWidget(None)
                 old.deleteLater()
+        self._place_corners(bars, by_title)
+
+    def _place_corners(self, bars, by_title):
+        """Float and close at the right end of each tab row, acting on the
+        panel in front of it -- the Utils and tree docks' header
+        (ui/widgets/dock_header.py). Qt makes and drops these tab bars as
+        panels move, so a row's corner is found or made here each time."""
+        from trace_app.ui.widgets import dock_header
+        kept = {}
+        for bar in bars:
+            front = by_title.get(bar.tabText(bar.currentIndex()))
+            if not bar.isVisible() or front is None:
+                continue
+            corner = self._corners.pop(bar, None)
+            if corner is None:
+                corner = dock_header.corner(
+                    self._window,
+                    # clicked passes `checked` first.
+                    lambda _checked=False, bar=bar: self._front(bar, 'float'),
+                    lambda _checked=False, bar=bar: self._front(bar, 'close'),
+                    'this panel')
+                bar.currentChanged.connect(self.refresh)
+            kept[bar] = corner
+            dock_header.name(corner, f"the {front.windowTitle()} panel")
+            corner.adjustSize()
+            right = front.geometry().right()
+            x = right - corner.width() + 1
+            # No room beside the tabs: the tabs come first. (The bar itself
+            # runs the row's width: its last tab is where they end.)
+            tabs_end = bar.x() + bar.tabRect(bar.count() - 1).right()
+            if x <= tabs_end + 4:
+                corner.hide()
+                continue
+            corner.move(x, bar.geometry().y() +
+                        (bar.height() - corner.height()) // 2)
+            corner.show()
+            corner.raise_()
+        for corner in self._corners.values():
+            corner.deleteLater()
+        self._corners = kept
+
+    def _front(self, bar, what):
+        """Float or close the panel in front of the tab row `bar`."""
+        try:
+            dock = next((d for d in self._docks
+                         if d.windowTitle() == bar.tabText(
+                             bar.currentIndex())), None)
+        except RuntimeError:            # Qt dropped the bar meanwhile
+            return
+        if dock is None:
+            return
+        if what == 'float':
+            dock.setFloating(True)
+        else:
+            dock.close()
+        self.refresh()
 
     # -- building --------------------------------------------------------
 

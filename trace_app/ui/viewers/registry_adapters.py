@@ -93,6 +93,9 @@ class TextAdapter(ViewerAdapter):
     def display(self, content, data):
         self.widget.display_text_content(content)
 
+    def show_nothing(self, message):
+        self.widget.clear_content(message)
+
 
 class ApplicationAdapter(ViewerAdapter):
     label = 'Application'

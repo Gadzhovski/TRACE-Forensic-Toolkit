@@ -33,6 +33,7 @@ from trace_app.ui.process_worker import ProcessWorker
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.core.live_disk import display_name as evidence_name
 
 logger = logging.getLogger('TRACE.SearchPanel')
 
@@ -311,7 +312,7 @@ class SearchPanel(QWidget):
                 f"listed in Triage ▸ Indicators.")
         # An image whose run did not finish holds part of its files only:
         # say so, or every result list reads as complete.
-        names = {row['id']: row['display_name'] or os.path.basename(row['path'])
+        names = {row['id']: row['display_name'] or evidence_name(row['path'])
                  for row in self.case.evidence()} if self.case else {}
         for evidence_id, state in self.index.states().items():
             note = unfinished_note(state)

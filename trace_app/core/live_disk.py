@@ -28,6 +28,7 @@ and an error message when the read fails.
 
 import logging
 import os
+import re
 import secrets
 import socket
 import struct
@@ -67,6 +68,18 @@ def is_device_path(path):
     if sys.platform == 'win32':
         return lowered.startswith('\\\\.\\physicaldrive')
     return lowered.startswith('/dev/')
+
+
+def display_name(path):
+    """The name evidence at `path` goes by: its file or folder name, a
+    disk's device name ('PhysicalDrive0', 'sda', 'disk2'). os.path.basename
+    of '\\\\.\\PhysicalDrive0' is '' (ntpath takes it all for the drive), so
+    a live disk's tree node, case row and job lines had no name."""
+    if not path:
+        return ''
+    text = str(path).rstrip('\\/')
+    return re.split(r'[\\/]', text)[-1] if is_device_path(path) else \
+        os.path.basename(os.path.normpath(text)) or text
 
 
 # --- listing ----------------------------------------------------------------------

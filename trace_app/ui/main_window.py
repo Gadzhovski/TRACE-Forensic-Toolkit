@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (QMainWindow, QMenuBar, QMenu, QToolBar, QDockWidg
 
 from trace_app.ui.widgets.progress_card import ProgressDialog
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
+from trace_app.ui.widgets import dock_header
 from trace_app.ui.widgets.result_docks import ResultDocks
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.tree_branch import BranchTreeWidget
@@ -33,7 +34,6 @@ from trace_app.infra.constants import (COLUMN_WIDTHS, GROUP_SPACING,
                                        PROGRESS_MIN_DURATION,
                                        TABLE_BATCH_SIZE, TABLE_ICON_SIZE, TREE_ICON_SIZE,
                                        TREE_INDENTATION, VIEWER_DOCK_MIN_HEIGHT)
-from trace_app import __version__
 from trace_app.core.database import DatabaseManager
 from trace_app.ui.viewers.carved_panel import (CarvedFilesPanel,
                                                CarvingWorker)
@@ -42,6 +42,7 @@ from trace_app.core import archives
 from trace_app.core.carving import read_carved
 from trace_app.infra.theme import save_theme
 from trace_app.infra.utils import FileSystemUtils
+from trace_app.core.live_disk import display_name as evidence_name
 from trace_app.core.case import (REPORTED_FINDING_GRADES,
                                  REPORTED_MISMATCHES, make_artifact_ref,
                                  make_span_ref, parse_artifact_ref)
@@ -239,6 +240,11 @@ class _HandlerOpener(QThread):
                 evidence_overview.overview(handler)
         except Exception as exc:
             logger.debug("Warming %s: %s", handler.image_path, exc)
+
+
+def _sectors(count):
+    """'1 sector', '2,048 sectors'."""
+    return f"{count:,} sector" + ('' if count == 1 else 's')
 
 
 class MainWindow(VolumeInfoMixin, QMainWindow):
@@ -1697,7 +1703,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # No end offset and no name: this is the image itself.
             if self.current_image_path:
                 partitions = len(self.image_handler.get_partitions()) if self.image_handler else 0
-                return (f"{os.path.basename(self.current_image_path)}"
+                return (f"{evidence_name(self.current_image_path)}"
                         f"   ·   {partitions} partitions")
             return ""
 
@@ -2191,7 +2197,16 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tree_dock = tree_dock = QDockWidget('Tree View', self)
         tree_dock.setObjectName('treeDock')
 
-        tree_dock.setWidget(self.tree_viewer)
+        # Headed by a tab, as Utils and the result panels are: Qt's "Tree
+        # View" strip was the one title row of its kind left
+        # (ui/widgets/dock_header.py).
+        self.tree_tabs = QTabWidget(tree_dock)
+        self.tree_tabs.setObjectName('treeTabs')
+        self.tree_tabs.addTab(self.tree_viewer, icons.icon(icons.TAB_TREE),
+                              "Tree View")
+        tree_dock.setWidget(self.tree_tabs)
+        dock_header.head_with_tabs(tree_dock, self.tree_tabs,
+                                   "the Tree View")
         # Never a sliver: a busy tab once squeezed it to 100 px.
         self.tree_viewer.setMinimumWidth(self._TREE_MIN)
         self.addDockWidget(Qt.LeftDockWidgetArea, tree_dock)
@@ -2758,6 +2773,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.viewer_dock = QDockWidget('Utils', self)
         self.viewer_dock.setObjectName('utilsDock')
         self.viewer_dock.setWidget(self.viewer_tab)
+        # The tabs name the panel: Qt's "Utils" strip above them took a row
+        # for nothing (ui/widgets/dock_header.py, as the tree's).
+        dock_header.head_with_tabs(self.viewer_dock, self.viewer_tab,
+                                   "the Utils panel")
         # Under the result panels, beside the tree.
         self.addDockWidget(Qt.BottomDockWidgetArea, self.viewer_dock)
         self.result_viewer.arrange()
@@ -3111,7 +3130,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 return dict(row)
         if path in self._image_handlers or path in self.evidence_files:
             return {'id': None, 'path': path,
-                    'display_name': os.path.basename(path)}
+                    'display_name': evidence_name(path)}
         return None
 
     def show_verification(self, path):
@@ -3441,10 +3460,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """
         if self.case is not None:
             return [(row['id'], row.get('display_name')
-                     or os.path.basename(row['path']))
+                     or evidence_name(row['path']))
                     for row in self.case.evidence()
                     if os.path.exists(row['path'])]
-        return [(path, os.path.basename(path))
+        return [(path, evidence_name(path))
                 for path in self._image_handlers]
 
     def _refresh_carving_targets(self):
@@ -3481,11 +3500,11 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 if targets is None or row['id'] in targets:
                     jobs.append((row['id'], row['path'],
                                  row.get('display_name')
-                                 or os.path.basename(row['path'])))
+                                 or evidence_name(row['path'])))
         else:
             for path in (list(self._image_handlers) if targets is None
                          else targets):
-                jobs.append((None, path, os.path.basename(path)))
+                jobs.append((None, path, evidence_name(path)))
 
         queued = 0
         logical = []
@@ -3973,7 +3992,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         checked.add(image_path)
         from trace_app.ui.process_worker import ProcessWorker
         from trace_app.ui.widgets.job_bar import SIDE
-        name = os.path.basename(os.path.normpath(image_path)) or image_path
+        name = evidence_name(image_path) or image_path
         found = []
 
         def start(job):
@@ -4740,7 +4759,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for row in rows:
             found = self.evidence_profile(row)
             evidence.append((row['id'], row.get('display_name')
-                             or os.path.basename(row['path']),
+                             or evidence_name(row['path']),
                              found['summary'] if found else '',
                              self._not_applicable(found)))
         choice = choose_modules(self,
@@ -4809,7 +4828,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for row in chosen:
             mine, skipped = self._applicable_choice(
                 row, per.get(row['id'], choice))
-            name = row.get('display_name') or os.path.basename(row['path'])
+            name = row.get('display_name') or evidence_name(row['path'])
             for key, why in skipped.items():
                 logger.info("Not running %s on %s: %s", key, name, why)
             if skipped:
@@ -4846,7 +4865,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for row in (self.case.evidence() if self.case else []):
             handler = self._image_handlers.get(os.path.normpath(row['path']))
             out.append({'name': row.get('display_name')
-                        or os.path.basename(row['path']),
+                        or evidence_name(row['path']),
                         'path': row['path'],
                         'unlock': self._unlocks_for(row['path']),
                         'handler': handler if handler is not None
@@ -4958,7 +4977,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         queued = 0
         for row in rows:
             key = row.get('id') if row.get('id') is not None else row['path']
-            name = row.get('display_name') or os.path.basename(row['path'])
+            name = row.get('display_name') or evidence_name(row['path'])
 
             def start(job, row=row, name=name):
                 current = row
@@ -5026,14 +5045,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             for row in self.case.evidence():
                 if not os.path.exists(row['path']):
                     continue
-                name = row.get('display_name') or os.path.basename(
+                name = row.get('display_name') or evidence_name(
                     row['path'])
                 out.append({'key': row['id'], 'name': name,
                             'source_id': row.get('exhibit_number') or name,
                             'path': row['path']})
             return out
-        return [{'key': path, 'name': os.path.basename(path),
-                 'source_id': os.path.basename(path), 'path': path}
+        return [{'key': path, 'name': evidence_name(path),
+                 'source_id': evidence_name(path), 'path': path}
                 for path, handler in self._image_handlers.items()
                 if handler is not None and handler.loaded]
 
@@ -6074,7 +6093,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         what the case recorded (Case.relocate_checked)."""
         if self.case is None or row.get('id') is None:
             return
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
         start = os.path.dirname(row['path'])
         if not os.path.isdir(start):
             start = case_settings.user('case_folder') or ''
@@ -6215,7 +6234,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _queue_analysis_job(self, row, modules):
         """One evidence row, one job."""
         evidence_id = row['id']
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
         scope = self._job_scope()
 
         def start(job):
@@ -6268,7 +6287,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
     def _queue_indexing_job(self, row):
         evidence_id = row['id']
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
         scope = self._job_scope()
 
         def start(job):
@@ -6303,7 +6322,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                row['path'])
                 continue
             evidence_id = row['id']
-            name = row.get('display_name') or os.path.basename(row['path'])
+            name = row.get('display_name') or evidence_name(row['path'])
             scope = self._job_scope()
 
             def start(job, row=row, evidence_id=evidence_id, name=name,
@@ -6367,7 +6386,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         '<key>:<evidence id>' and its title '<title> on <name>'. Returns
         whether the job bar took it (not already queued)."""
         evidence_id = row['id']
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
 
         def start(job):
             worker = make_worker()
@@ -7045,7 +7064,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _queue_yara_job(self, row, options):
         from trace_app.ui.dialogs.yara_rules import YaraWorker
         evidence_id = row['id']
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
         scope = self._job_scope()
 
         def start(job):
@@ -7127,7 +7146,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _queue_sigma_job(self, row, options):
         from trace_app.ui.dialogs.sigma_rules import SigmaWorker
         evidence_id = row['id']
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
 
         def start(job):
             worker = SigmaWorker(row['path'], self.case.folder, evidence_id,
@@ -7203,7 +7222,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             if not os.path.exists(row['path']):
                 continue
             evidence_id = row['id']
-            name = row.get('display_name') or os.path.basename(row['path'])
+            name = row.get('display_name') or evidence_name(row['path'])
 
             def start(job, row=row, evidence_id=evidence_id, name=name):
                 worker = ThumbnailsWorker(row['path'], self.case.folder,
@@ -7405,7 +7424,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 f"in {count:,} file(s)")
         if missing:
             names = {r['id']: r.get('display_name')
-                     or os.path.basename(r['path'])
+                     or evidence_name(r['path'])
                      for r in self.case.evidence()}
             text += (" — not searched, not indexed yet: "
                      + ', '.join(names.get(e, f'#{e}') for e in missing))
@@ -7716,7 +7735,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 and not self.case.findings(evidence_id, 'thumbnails',
                                            limit=1):
             return
-        names = {r['id']: r.get('display_name') or os.path.basename(r['path'])
+        names = {r['id']: r.get('display_name') or evidence_name(r['path'])
                  for r in self.case.evidence()}
 
         groups = [
@@ -8299,6 +8318,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         }
 
     def _tint_viewer_tabs(self):
+        tree = getattr(self, 'tree_tabs', None)
+        if tree is not None:
+            tree.setTabIcon(0, icons.icon(icons.TAB_TREE))
         tabs = getattr(self, 'viewer_tab', None)
         if tabs is None:
             return
@@ -9101,13 +9123,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 'results': None, 'checked': row.get('verified_utc')}
 
     def _case_title(self):
-        """Window title, naming the case when there is one."""
-        base = f'TRACE {__version__}'
+        """Window title: the case, or nothing. Qt adds ' - ' and the
+        application's display name, 'TRACE <version>' (app.main): the
+        title once held the version too and read 'TRACE 2.4.0 - TRACE'.
+        Empty, Qt shows the display name alone."""
         if not self.case:
-            return base
+            return ''
         number = self.case.number
         name = self.case.name or 'Untitled case'
-        return f'{base}  —  {name}' + (f' ({number})' if number else '')
+        return name + (f' ({number})' if number else '')
 
     def record_evidence_in_case(self, image_path):
         """Add an image to the open case, if there is one."""
@@ -9408,7 +9432,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 # examiner's call, not a guess.
                 from PySide6.QtWidgets import QMessageBox
                 from trace_app.ui.dialogs import message
-                names = ', '.join(os.path.basename(i) for i in images[:3])
+                names = ', '.join(evidence_name(i) for i in images[:3])
                 other = not message.question(
                     self, "Open the disk image?",
                     f"This folder holds the disk image {names} and other "
@@ -9525,7 +9549,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             progress = ProgressDialog("Opening the image…", None, 0, 1000,
                                       self)
             progress.setWindowTitle("Loading evidence")
-            progress.set_about(os.path.basename(image_path) or image_path)
+            progress.set_about(evidence_name(image_path) or image_path)
             progress.set_stages(self._loading_stages(
                 image_path, record_in_case and self.case is not None))
             progress.setWindowModality(Qt.WindowModal)
@@ -9735,7 +9759,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         for path, handler in self._image_handlers.items():
             row = self.case.evidence_for_path(path) \
                 if getattr(self, 'case', None) is not None else None
-            name = (row or {}).get('display_name') or os.path.basename(path)
+            name = (row or {}).get('display_name') or evidence_name(path)
             evidence.append((path, name, handler))
         widget.set_evidence(evidence)
 
@@ -9767,7 +9791,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             widget.set_image_handler(handler)
         self._refresh_carving_targets()
         self.set_status_context(
-            f"{os.path.basename(image_path)}   ·   "
+            f"{evidence_name(image_path)}   ·   "
             f"{len(handler.get_partitions())} partitions")
         self._update_listing_scope()
         return True
@@ -9781,7 +9805,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         row = next((r for r in self.case.evidence() if r['id'] == evidence_id),
                    None)
         if row is None or not self.activate_image(row['path']):
-            name = os.path.basename(row['path']) if row else f"#{evidence_id}"
+            name = evidence_name(row['path']) if row else f"#{evidence_id}"
             self.set_status(f"{name} is not open; it cannot be read.", 6000)
             return False
         return True
@@ -9937,7 +9961,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         names = {}
         for path in self.evidence_files:
             row = self.case.evidence_for_path(path) if self.case else None
-            label = (row or {}).get('display_name') or os.path.basename(path)
+            label = (row or {}).get('display_name') or evidence_name(path)
             names[f"{label}   ({path})"] = path
         everything = "All evidence"
         if len(names) == 1:
@@ -9965,7 +9989,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return True
 
     def _removal_question(self, paths):
-        what = os.path.basename(paths[0]) if len(paths) == 1 \
+        what = evidence_name(paths[0]) if len(paths) == 1 \
             else f"these {len(paths)} pieces of evidence"
         if self.case is None:
             return f"Close {what}?"
@@ -9985,7 +10009,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             notes = self.case.notes_for_evidence(row['id'])
             recorded = ', '.join(f"{count:,} {what}"
                                  for what, count in footprint)
-            lines.append(f"{os.path.basename(path)}: "
+            lines.append(f"{evidence_name(path)}: "
                          f"{recorded or 'nothing recorded yet'}"
                          + (f"; {notes} note(s) kept" if notes else ''))
         return ("Deleted from the case: " + '\n'.join(lines) + "\n\n"
@@ -10024,7 +10048,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 logger.error("Could not remove %s from the case: %s",
                              path, exc)
                 message.critical(self, "Remove Evidence",
-                                 f"{os.path.basename(path)} was closed but "
+                                 f"{evidence_name(path)} was closed but "
                                  f"could not be removed from the case: "
                                  f"{exc}")
 
@@ -10189,7 +10213,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # every root began "D:\Cases\..." and was cut off before the part
         # that differs. The path is kept in the data and the tooltip.
         root_item_tree = self.create_tree_item(self.tree_viewer,
-                                               os.path.basename(image_path),
+                                               evidence_name(image_path),
                                                self.db_manager.get_icon_path('device', 'media-optical'),
                                                {"start_offset": 0,
                                                 "image_path": image_path})
@@ -10300,7 +10324,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             # is and what The Sleuth Kit called it go in the tooltip.
             label = self.image_handler.partition_label(start, desc)
             where = (f"{desc_str} -- sectors {start:,}-{end:,} "
-                     f"({length:,} sectors), table slot {addr}")
+                     f"({_sectors(length)}), table slot {addr}")
             kind = self.image_handler.volume_kind(start)
             if self.image_handler.encryption(start):
                 self._add_bitlocker_node(
@@ -10398,7 +10422,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             {"inode_number": None, "start_offset": first,
              "end_offset": last, "volume_label": region['label']})
         item.setToolTip(0, f"Sectors {first:,}-{last:,} "
-                           f"({region['sectors']:,} sectors), in "
+                           f"({_sectors(region['sectors'])}), in "
                            f"{desc_str} (table slot {addr})")
         item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
         self.create_tree_item(item, f"Unallocated Space: Size: {size}",
@@ -11665,9 +11689,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 size_item = QTableWidgetItem(readable_size)
 
                 # Use timestamp columns for partition geometry
-                start_offset_item = QTableWidgetItem(f"{start:,} sectors")
-                end_offset_item = QTableWidgetItem(f"{end:,} sectors")
-                length_item = QTableWidgetItem(f"{length:,} sectors")
+                start_offset_item = QTableWidgetItem(_sectors(start))
+                end_offset_item = QTableWidgetItem(_sectors(end))
+                length_item = QTableWidgetItem(_sectors(length))
                 block_size_item = QTableWidgetItem(block_size)
 
                 # Build comprehensive info string
@@ -11676,9 +11700,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 if desc_str and desc_str.strip():
                     info_parts.append(desc_str)
                 # Add detailed partition information
-                info_parts.append(f"Start: {start:,} sectors ({start * sector_size:,} bytes)")
-                info_parts.append(f"End: {end:,} sectors ({end * sector_size:,} bytes)")
-                info_parts.append(f"Length: {length:,} sectors ({size_in_bytes:,} bytes)")
+                info_parts.append(f"Start: {_sectors(start)} ({start * sector_size:,} bytes)")
+                info_parts.append(f"End: {_sectors(end)} ({end * sector_size:,} bytes)")
+                info_parts.append(f"Length: {_sectors(length)} ({size_in_bytes:,} bytes)")
                 if block_size != "N/A":
                     info_parts.append(f"Block Size: {block_size}")
                 info_parts.append(f"Filesystem: {fs_type}")
@@ -11696,6 +11720,13 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 self.listing_table.setItem(row_position, 7, block_size_item)
                 self.listing_table.setItem(row_position, 9, info_item)
 
+            # Fitted as a folder's listing is: the file widths cut Name to
+            # 'Protect…' and Size to '953.85' while the offsets sat wide.
+            # Details, the last column, takes what is left.
+            try:
+                fit_columns(self.listing_table, self._VOLUME_COLUMN_CAPS)
+            except Exception as e:
+                logger.debug("Could not fit the volume columns: %s", e)
         finally:
             self.listing_table.setSortingEnabled(True)
 
@@ -11798,6 +11829,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     #: capped for the same reason: a full MIME string is longer than the
     #: filename it describes.
     _LISTING_COLUMN_CAPS = {8: 420, 11: 320, 12: 200}
+    #: The same for the volume listing: names like 'Basic data partition @
+    #: 32768' stay whole, the Details text elides.
+    _VOLUME_COLUMN_CAPS = {0: 360, 9: 600}
 
     def _fit_listing_columns(self):
         """Size the listing's columns to what the current directory holds.
@@ -12332,7 +12366,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         items = [dict(item) for item in items if item]
         if not items or self.image_handler is None:
             return
-        evidence = os.path.basename(self.current_image_path or '')
+        evidence = evidence_name(self.current_image_path or '')
         progress_dialog = ProgressDialog("Preparing to export…", "Cancel",
                                          0, 0, self)
         progress_dialog.setWindowTitle(f"Exporting {len(items):,} item(s)")
