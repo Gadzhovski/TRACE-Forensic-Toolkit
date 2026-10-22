@@ -270,6 +270,11 @@ jobs:
       # same kind of guest, and QNX4 / cramfs / romfs images with the
       # kernel's own reading of them (and of the QNX4, QNX6, cramfs and
       # romfs samples) -- no module is loaded on the runner.
+      # VBoxManage needs no kernel driver for disks: virtualbox-source meets
+      # virtualbox's driver dependency without building one. Otherwise apt
+      # picks virtualbox-dkms, whose build against the runner's kernel
+      # failed the whole install once the runner image changed (ubuntu24
+      # 20261018). apt's output goes to a log, shown when it fails.
       - name: Build the Linux images
         if: env.EVIDENCE == 'true' && runner.os == 'Linux' && needs.plan.outputs.linux_images == 'true'
         run: |
@@ -281,7 +286,9 @@ jobs:
             afflib-tools xz-utils zstd bzip2 pbzip2 lz4 curl \
             android-libbase-dev android-liblog-dev android-libsparse-dev \
             android-libext4-utils-dev android-libcutils-dev \
-            android-libboringssl-dev zlib1g-dev virtualbox >/dev/null
+            android-libboringssl-dev zlib1g-dev virtualbox virtualbox-source \
+            > "$RUNNER_TEMP/apt-images.log" 2>&1 \
+            || { tail -n 60 "$RUNNER_TEMP/apt-images.log"; exit 1; }
           sudo python3 tools/testdata/build/make_btrfs_deleted.py
           sudo python3 tools/testdata/build/make_md_raid.py
           sudo python3 tools/testdata/build/make_luks_lvm.py
