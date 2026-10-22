@@ -971,6 +971,33 @@ QToolButton#tabCloseButton:hover {
     background-color: rgba(255, 255, 255, 0.10);
 }
 
+/* A dock headed by its tabs (ui/widgets/dock_header.py): the row
+   right of the tabs is the tab bar's colour, not the dock's ground,
+   and float / close sit at its end. */
+QTabWidget[dockHeader="true"] {
+    background-color: #2E2E2E;
+    /* QTabWidget's rounded frame drew a faint box right of the tabs once
+       this paints its background: a dock header has none, as the result
+       panels' tab row has none. */
+    border: none;
+    border-radius: 0px;
+}
+QWidget#dockHeaderCorner {
+    background: transparent;
+}
+QToolButton#dockHeaderButton {
+    border: none;
+    border-radius: 4px;
+    padding: 3px;
+    background: transparent;
+}
+QToolButton#dockHeaderButton:hover {
+    background-color: rgba(255, 255, 255, 0.10);
+}
+QToolButton#dockHeaderButton:pressed {
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
 /* ==================== Metadata pane ==================== */
 /* A result panel's holder (widgets/result_docks.py): it scrolls only
    when the dock is shorter than the panel can be. */

@@ -52,6 +52,14 @@ KIND_NAMES = {'ios': 'iOS (iPhone or iPad)', 'android': 'Android',
 #: Kinds no system shows: a tool reading one fits where its patterns name
 #: files (`module_fit`).
 PATTERN_KINDS = ('return', 'vehicle')
+#: In tool_systems when TRACE cannot tell what the evidence is -- no system
+#: found and no single pattern-fitted kind (a return's zip, a car's export:
+#: both fitting is no answer), a volume it cannot read (locked, damaged),
+#: or not worked out yet: then no tool is ruled out (`tool_reason`).
+#: Ruling one out on a guess hid the right one: a Linux disk whose
+#: os-release was not found was offered RLEAPP and VLEAPP for one stray
+#: file each, and DLEAPP not at all.
+UNKNOWN = 'unknown'
 #: Systems os_identity names that a tool can suit.
 _SYSTEM_KINDS = ('ios', 'android', 'windows', 'macos', 'linux', 'chromeos')
 #: On evidence TRACE knows for a phone or a computer, a pattern-fitted tool
@@ -94,17 +102,35 @@ def tool_systems(image_handler, read=True):
     """The kinds of evidence an image holds for external tools: phones
     ('ios' / 'android': a backup's kind, what os_identity found -- installed
     or packed in a tar or zipped backup inside a folder -- or a phone's
-    user data at a system root, as a partial extraction has no
-    SystemVersion.plist or build.prop), computers ('windows' / 'macos' /
-    'linux', os_identity), and the kinds the tools' own patterns found
-    (`module_fit`: 'return', 'vehicle'). Worked out once per handler;
-    read=False never reads (the window's thread: the image's opening
-    worked it out), answering from what is known so far."""
-    from trace_app.core import logical_sources, os_identity
+    user data, as a partial extraction has no SystemVersion.plist or
+    build.prop), computers ('windows' / 'macos' / 'linux' / 'chromeos':
+    os_identity, else the system's own folders), a QNX head unit
+    ('vehicle'), and the kinds the tools' own patterns found (`module_fit`:
+    'return', 'vehicle'). UNKNOWN among them when TRACE cannot tell (see
+    UNKNOWN). Worked out once per handler (ImageHandler forgets it when a
+    volume is unlocked); read=False never reads (the window's thread: the
+    image's opening worked it out), and before that answers UNKNOWN."""
     known = image_handler.__dict__.get('_tool_systems')
-    if known is not None:
-        return list(known) + fitted_kinds(image_handler, known)
-    found = []
+    if known is None:
+        known = _certain_kinds(image_handler, read)
+        if read:
+            image_handler.__dict__['_tool_systems'] = known
+    found, complete = known
+    fitted = [kind for kind in fitted_kinds(image_handler, found)
+              if kind not in found]
+    decided = any(kind in _SYSTEM_KINDS or kind == 'vehicle'
+                  for kind in found) or \
+        len(fitted) == 1    # a return, or a car's export, and nothing else
+    return list(found) + fitted + ([] if decided and complete
+                                   else [UNKNOWN])
+
+
+def _certain_kinds(image_handler, read):
+    """(kinds TRACE itself finds on the image -- no pattern counts --,
+    complete): complete is False when part of it could not be read or
+    nothing was read (read=False)."""
+    from trace_app.core import logical_sources, os_identity
+    found, unread = [], False
     try:
         kind = logical_sources.kind_of(image_handler.image_path) or ''
     except Exception:
@@ -116,12 +142,23 @@ def tool_systems(image_handler, read=True):
     look = os_identity.identify if read else os_identity.cached
     try:
         keys = list(image_handler.volume_offsets())
+        named = set()
         for key in keys:
             family = (look(image_handler, key) or {}).get('family')
             if family in _SYSTEM_KINDS:
                 found.append(family)
+                named.add(key)
         if read:
-            found += _phone_data(image_handler, keys)
+            phones = _phone_data(image_handler, keys)
+            for key, kinds in phones.items():
+                found += kinds
+            found += _phone_paths(image_handler)
+            # A volume nothing named and holding no phone: the system's own
+            # folders, as the module profile finds them (a live USB's
+            # overlay has /etc and /home but no os-release).
+            found += _desktop_systems(
+                image_handler, [k for k in keys
+                                if k not in named and not phones.get(k)])
             found += [RAW_ONLY[name] for _start, name in
                       unreadable_signatures(image_handler)]
             for key in keys:
@@ -131,13 +168,11 @@ def tool_systems(image_handler, read=True):
                         found.append('vehicle')
                 except Exception:
                     continue
+            unread = has_unread_volume(image_handler)
     except Exception as exc:
-        logger.debug("No phone systems for %s: %s",
-                     image_handler.image_path, exc)
-    found = list(dict.fromkeys(found))
-    if read:
-        image_handler.__dict__['_tool_systems'] = found
-    return list(found) + fitted_kinds(image_handler, found)
+        logger.debug("No systems for %s: %s", image_handler.image_path, exc)
+        unread = True
+    return list(dict.fromkeys(found)), read and not unread
 
 
 def set_module_fit(image_handler, fit):
@@ -170,28 +205,158 @@ def fitted_kinds(image_handler, systems=()):
 
 
 def _phone_data(image_handler, keys):
-    """'ios' / 'android' where a volume's system root holds a phone's
-    user data (activity/mobile's own tests for it)."""
+    """{volume key: ['ios' / 'android']} where a volume's system root holds
+    a phone's user data (activity/mobile's own tests for it, and iOS's data
+    partition on its own: mobile/ and containers/ at its top)."""
     from trace_app.core.activity import Volume, mobile
-    found = []
+    found = {}
     for key in keys:
         if image_handler.get_fs_info(key) is None:
             continue
         for volume in Volume.all(image_handler, key):
             try:
-                if mobile.is_ios(volume):
-                    found.append('ios')
+                if mobile.is_ios(volume) or any(
+                        volume.find(*parts) is not None
+                        for parts in _IOS_DATA_PARTITION):
+                    found.setdefault(key, []).append('ios')
                 if mobile.android_base(volume) is not None:
-                    found.append('android')
+                    found.setdefault(key, []).append('android')
             except Exception as exc:
                 logger.debug("Phone check at %s failed: %s", key, exc)
     return found
 
 
+#: Paths only iOS's data partition (/private/var) has at its top, for an
+#: image or folder of that partition alone.
+_IOS_DATA_PARTITION = (('mobile', 'Library', 'SMS'),
+                       ('mobile', 'Containers', 'Data', 'Application'),
+                       ('containers', 'Shared', 'SystemGroup'))
+#: Folders only a phone has, anywhere in logical evidence ('/' around each
+#: name, lower case). An extraction tool puts the phone's partitions under
+#: folders of its own ('filesystem2/mobile/Library/SMS', iLEAPP's own test
+#: data), where no system root is found. iOS's need 'mobile/library': a
+#: Mac has Library/SMS-like folders under Users/<name> only.
+_IOS_FOLDERS = ('/mobile/library/sms/', '/mobile/library/callhistorydb/',
+                '/mobile/library/addressbook/',
+                '/mobile/containers/data/application/',
+                '/containers/shared/systemgroup/',
+                '/mobile/library/preferences/com.apple.')
+_ANDROID_FOLDERS = ('/data/data/com.android.', '/data/user/0/com.android.',
+                    '/data/user_de/0/com.android.',
+                    '/com.android.providers.telephony/',
+                    '/com.android.providers.contacts/')
+
+
+def _phone_paths(image_handler):
+    """'ios' / 'android' for logical evidence whose folders only a phone
+    has, at any depth (its names are in memory: no read). [] for a disk
+    image -- `_phone_data` looks at its volumes' roots."""
+    fs = image_handler.logical_fs
+    if fs is None:
+        return []
+    found, seen = [], set()
+    try:
+        rows = fs.file_rows()
+    except Exception as exc:
+        logger.debug("No file rows for %s: %s", image_handler.image_path,
+                     exc)
+        return []
+    for folder, _name, _size in rows:
+        if folder in seen:
+            continue
+        seen.add(folder)
+        text = folder.lower().replace('\\', '/').rstrip('/') + '/'
+        if 'ios' not in found and '/users/' not in text and any(
+                part in text for part in _IOS_FOLDERS):
+            found.append('ios')
+        if 'android' not in found and any(
+                part in text for part in _ANDROID_FOLDERS):
+            found.append('android')
+        if len(found) == 2:
+            break
+    return found
+
+
+def _desktop_systems(image_handler, keys):
+    """'windows' / 'linux' / 'macos' / 'chromeos' by the system's own
+    folders on the volumes at `keys` -- the module profile's test, for
+    systems os_identity could not name."""
+    from trace_app.core.activity import Volume, chromeos, linux, macos
+    found = []
+    for key in keys:
+        if image_handler.get_fs_info(key) is None:
+            continue
+        try:
+            volumes = Volume.all(image_handler, key)
+        except Exception as exc:
+            logger.debug("No system roots at %s: %s", key, exc)
+            continue
+        for volume in volumes:
+            try:
+                if chromeos.is_chromeos(volume):
+                    found.append('chromeos')
+                elif volume.find('Windows') or volume.find('WINNT'):
+                    found.append('windows')
+                elif macos.is_macos(volume):
+                    found.append('macos')
+                elif linux.is_linux(volume):
+                    found.append('linux')
+            except Exception as exc:
+                logger.debug("System check at %s failed: %s", key, exc)
+    return found
+
+
+#: Volume kinds whose contents are unknown until unlocked or assembled.
+_LOCKED_KINDS = ('bitlocker', 'fvde', 'luks', 'apfs', 'ios_backup',
+                 'android_backup', 'mdraid')
+
+
+def has_unread_volume(image_handler):
+    """Whether part of the image is a volume TRACE cannot read -- locked,
+    a RAID member alone, a file system it does not open -- so what the
+    image holds is not known in full."""
+    from trace_app.core import containers
+    starts = [p[2] for p in image_handler.get_partitions()] or [0]
+    for start in dict.fromkeys(starts):
+        try:
+            kind = image_handler.volume_kind(start)
+            if kind == 'bitlocker' and not image_handler.is_unlocked(start):
+                return True
+            if kind == 'apfs' and any(
+                    v['locked'] for v in image_handler.apfs_volumes(start)):
+                return True
+        except Exception as exc:
+            logger.debug("Container check at %s failed: %s", start, exc)
+    for key in image_handler.volume_offsets():
+        if image_handler.get_fs_info(key) is not None:
+            continue
+        try:
+            kind = image_handler.volume_kind(key) \
+                if key < containers.SHADOW_KEY_BASE else None
+        except Exception:
+            kind = None
+        if kind in _LOCKED_KINDS:
+            return True
+        try:
+            if image_handler.detect_filesystems(key):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def tool_suits(suits, systems):
+    """Whether a tool suiting `suits` (spec.suits) may run on evidence
+    holding `systems` (tool_systems): a tool for anything, a kind found,
+    or TRACE cannot tell (UNKNOWN)."""
+    return not suits or UNKNOWN in (systems or ()) or \
+        bool(set(suits) & set(systems or ()))
+
+
 def tool_reason(spec, systems):
     """Why an external tool (core/modules/spec) cannot run on an image
     holding `systems` (tool_systems), or None when it can."""
-    if not spec.suits or set(spec.suits) & set(systems):
+    if tool_suits(spec.suits, systems):
         return None
     if set(spec.suits) <= set(PATTERN_KINDS):
         return (f"{spec.name} reads {spec.reads or 'its own evidence'}: "

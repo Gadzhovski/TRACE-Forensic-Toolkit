@@ -41,7 +41,7 @@ ROUND = 2                       # DWMWCP_ROUND
 COLOURS = {
     'dark': {'caption': '#3C3C3C', 'text': '#E0E0E0',
              'inactive': '#9A9A9A', 'border': '#4A4A4A'},
-    'light': {'caption': '#FFFFFF', 'text': '#1F1F1F',
+    'light': {'caption': '#F2F3F5', 'text': '#1F1F1F',
               'inactive': '#8A8A8A', 'border': '#D0D0D0'},
 }
 

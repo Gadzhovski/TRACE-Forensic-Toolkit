@@ -40,8 +40,11 @@ search.db-shm
 # Application output
 /carved_files/
 
-# Installer log (install.sh / install_windows.ps1)
+# Installer log and the launchers the installers write (they point at
+# this checkout's venv)
 /install.log
+/trace
+/TRACE.cmd
 
 # Virtual environments
 /venv/

@@ -161,7 +161,8 @@ def main():
     from trace_app.ui.widgets import item_views
     item_views.install(app)
     app.setApplicationName("TRACE")
-    app.setApplicationDisplayName("TRACE")
+    # Qt adds it after every window's title: "Case 12 - TRACE 2.4.0".
+    app.setApplicationDisplayName(f"TRACE {__version__}")
     app.setOrganizationName("TRACE")
     app.setApplicationVersion(__version__)
     # Every window's icon, the launcher's included, and the taskbar's.

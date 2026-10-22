@@ -38,6 +38,7 @@ from trace_app.ui import icons
 from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.context_menus import show_menu
+from trace_app.core.live_disk import display_name as evidence_name
 
 logger = logging.getLogger('TRACE.CasePanel')
 
@@ -120,7 +121,7 @@ class EvidenceDetailsDialog(QDialog):
         self.setObjectName("evidenceDetailsDialog")
         self.setMinimumWidth(460)
         layout = QVBoxLayout(self)
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
         title = QLabel(name)
         title.setObjectName("wizardTitle")
         layout.addWidget(title)
@@ -525,7 +526,7 @@ class CasePanel(QWidget):
         custody: "this matched when it was added and again last Tuesday"
         is a stronger claim than "this matches now"."""
         names = {row['id']: (row.get('display_name')
-                             or os.path.basename(row['path']))
+                             or evidence_name(row['path']))
                  for row in evidence}
         history = self.case.verifications()
         table = self.history_table

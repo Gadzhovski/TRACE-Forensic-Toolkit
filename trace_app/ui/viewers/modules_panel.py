@@ -352,18 +352,26 @@ class ModulesPanel(QWidget):
 
     def _suggest(self):
         """Only the tools that read what the chosen image holds: iOS ->
-        iLEAPP, Android -> aLEAPP (MainWindow._mobile_systems). An Android
-        folder is never offered iLEAPP."""
+        iLEAPP, Android -> aLEAPP, a computer -> DLEAPP
+        (MainWindow._mobile_systems; evidence_profile.tool_suits). An
+        Android folder is never offered iLEAPP. Evidence TRACE cannot tell
+        (UNKNOWN) is offered every tool, those its findings name first."""
+        from trace_app.core import evidence_profile
         index = self.evidence_combo.currentIndex()
         systems = set(self._targets[index][2] or ()) \
             if 0 <= index < len(self._targets) else set()
+        self._undecided = evidence_profile.UNKNOWN in systems
         current = self.tool_combo.currentData()
         self.tool_combo.blockSignals(True)
         self.tool_combo.clear()
-        for tool_id, label, suits in self._tools:
-            if not suits or set(suits) & systems:
-                self.tool_combo.addItem(icons.module_logo(tool_id), label,
-                                        tool_id)
+        offered = [(tool_id, label, suits) for tool_id, label, suits
+                   in self._tools
+                   if evidence_profile.tool_suits(suits, systems)]
+        # Named by what was found first (stable: the tools' own order).
+        offered.sort(key=lambda tool: not (set(tool[2]) & systems))
+        for tool_id, label, _suits in offered:
+            self.tool_combo.addItem(icons.module_logo(tool_id), label,
+                                    tool_id)
         position = self.tool_combo.findData(current)
         self.tool_combo.setCurrentIndex(max(position, 0))
         self.tool_combo.blockSignals(False)
@@ -670,8 +678,11 @@ class ModulesPanel(QWidget):
                                    self.tool_combo.count() > 0)
         self.run_button.setToolTip(self._why_no_tool())
         self.tool_combo.setToolTip(
-            self._why_no_tool() or "The installed tools that read what "
-            "the chosen image holds")
+            self._why_no_tool() or (
+                "TRACE could not tell what the chosen image holds, so every "
+                "installed tool is offered" if getattr(
+                    self, '_undecided', False) else
+                "The installed tools that read what the chosen image holds"))
 
     def _why_no_tool(self):
         """'' when a tool can run on the chosen image, else why not."""
@@ -680,7 +691,8 @@ class ModulesPanel(QWidget):
         if not self._tools:
             return "Install a tool first: External Modules (the puzzle icon)"
         return ("No installed tool reads this image: iLEAPP needs an iOS "
-                "extraction or backup, aLEAPP an Android one")
+                "extraction or backup, aLEAPP an Android one, DLEAPP a "
+                "Windows, macOS or Linux computer")
 
 
 #: How an artifact was sorted (core/modules/routes), after its name.

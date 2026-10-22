@@ -1924,6 +1924,16 @@ class ImageHandler:
         self._fs_misses.clear()
         self._fs_types.clear()
         self._directory_cache.clear()
+        self._forget_systems()
+
+    def _forget_systems(self):
+        """Drop what was concluded about the systems on the image -- its OS
+        details, os_identity's names, evidence_profile's tool systems: a
+        volume unlocked now was 'nothing found' while locked, and an
+        unlocked Linux install was never offered DLEAPP."""
+        self._os_info_cache.clear()
+        for name in ('_os_identity_cache', '_tool_systems'):
+            self.__dict__.pop(name, None)
 
     @containers.holding_libyal
     def inner_kind(self, start_sector):
@@ -2346,6 +2356,7 @@ class ImageHandler:
         self._directory_cache.clear()
         self._fs_misses.clear()
         self._fs_types.clear()
+        self._forget_systems()
         logger.info("%s unlocked", containers.ENCRYPTION_NAMES.get(kind,
                                                                    kind))
         return True

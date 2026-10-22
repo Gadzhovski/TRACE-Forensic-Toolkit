@@ -87,9 +87,13 @@ jobs:
           TRACE_PYTHON: ${{ steps.python.outputs.python-path }}
         run: ./install.sh --yes
 
+      # TRACE_PYTHON: the installer otherwise takes the newest Python the
+      # py launcher knows, not the one set up above.
       - name: Install (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          TRACE_PYTHON: ${{ steps.python.outputs.python-path }}
         run: ./install_windows.ps1 -Yes
 
       # The same cache as the tests' CI data set (tests.yml), restored

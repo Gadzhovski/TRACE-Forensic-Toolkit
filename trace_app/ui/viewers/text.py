@@ -51,6 +51,8 @@ MIN_STRING = 4
 SHOW_AUTO, SHOW_TEXT, SHOW_STRINGS = 'auto', 'text', 'strings'
 #: A strings line starts '00001A2B  U ' -- the text after these characters.
 _STRING_PREFIX = 12
+#: Where the text goes while there is none.
+NOTHING_SHOWN = "Select a file to see its text."
 
 
 class SearchDirection(Enum):
@@ -346,7 +348,9 @@ class TextViewer(QWidget):
             "The encoding the text was written in. Automatic names the one "
             "it reads as; choose another when that is wrong -- a short text "
             "in a legacy code page can read as more than one")
-        self.encoding_combo.setFixedWidth(150)
+        # As wide as its longest name: a fixed 150 px cut its own
+        # 'Encoding: automatic' to 'Encoding: automati'.
+        self.encoding_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.encoding_combo.currentIndexChanged.connect(self._show_changed)
         self.toolbar.addWidget(self.encoding_combo)
         self.toolbar.addWidget(QLabel(" Font: "))
@@ -404,6 +408,7 @@ class TextViewer(QWidget):
         self.text_edit.setReadOnly(True)
         self.text_edit.setLineWrapMode(QTextEdit.NoWrap)
         self.text_edit.setFont(fonts.monospace(10))
+        self.text_edit.setPlaceholderText(NOTHING_SHOWN)
         self.layout.addWidget(self.text_edit)
 
     # --- content ----------------------------------------------------------------
@@ -431,8 +436,12 @@ class TextViewer(QWidget):
         text = self.text_edit.toPlainText()
         return text if text else None
 
-    def clear_content(self):
+    def clear_content(self, message=None):
+        """Empty the view; `message` (else NOTHING_SHOWN) says why where
+        the text would be -- a partition selected, an empty file -- rather
+        than a blank page under '1 of —'."""
         self.text_edit.clear()
+        self.text_edit.setPlaceholderText(message or NOTHING_SHOWN)
         self.manager.clear_content()
         self.manager.page_changed_callback = self.refresh_content
         self.mode_label.setText('')

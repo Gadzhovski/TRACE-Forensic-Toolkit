@@ -31,6 +31,7 @@ import re
 import sqlite3
 
 from trace_app.core.search_index import use_wal
+from trace_app.core.live_disk import display_name as evidence_name
 
 logger = logging.getLogger('TRACE.Case')
 
@@ -465,7 +466,7 @@ class Case:
                    if key in EVIDENCE_DETAILS and value is not None}
         columns = ['path', 'display_name', 'size', 'added_utc',
                    'last_status'] + list(details)
-        values = [path, display_name or os.path.basename(path), size,
+        values = [path, display_name or evidence_name(path), size,
                   _utc_now(), STATUS_PENDING] + list(details.values())
         # What the image was acquired as, from the imaging tool's log
         # beside it (core/acquisition_log.py): the reference a raw image
@@ -643,7 +644,7 @@ class Case:
         if row is None:
             return None
         row = dict(row)
-        name = row.get('display_name') or os.path.basename(row['path'])
+        name = row.get('display_name') or evidence_name(row['path'])
         footprint = self.evidence_footprint(evidence_id)
         notes = self.notes_for_evidence(evidence_id)
         carved_folder = self._carved_folder_path(evidence_id)
@@ -2666,7 +2667,7 @@ class Case:
         label = ''
         if row is not None:
             row = dict(row)
-            label = row.get('display_name') or os.path.basename(row['path'])
+            label = row.get('display_name') or evidence_name(row['path'])
         safe = ''.join(c if c.isalnum() or c in '-_.' else '_'
                        for c in label)[:60].strip('._')
         return os.path.join(self.carved_dir,

@@ -44,6 +44,7 @@ from trace_app.ui.widgets.no_focus_delegate import NoFocusDelegate
 from trace_app.ui.widgets.row_preview import connect_row_preview
 from trace_app.ui.widgets.table_columns import fit_columns
 from trace_app.ui.widgets.toolbars import align_controls, prepare_toolbar
+from trace_app.core.live_disk import display_name as evidence_name
 
 logger = logging.getLogger('TRACE.Carving')
 
@@ -167,7 +168,7 @@ class CarvingWorker(ProcessWorker):
                  source=None, resume=False):
         self.image_path = image_path
         self.evidence_id = evidence_id
-        self.label = label or os.path.basename(image_path)
+        self.label = label or evidence_name(image_path)
         super().__init__({
             'image_path': image_path,
             'file_types': list(file_types),

@@ -175,7 +175,10 @@ def test_the_panel_stars_tints_and_filters(qapp, marked):
                                 Qt.BackgroundRole) is not None
         assert panel.model.data(panel.model.index(position, 0),
                                 Qt.BackgroundRole) is None
-        # S stars the selected row.
+        # S stars the selected row. The keys are QShortcuts, which fire only
+        # in an active window: a loaded runner had not activated it yet.
+        panel.activateWindow()
+        assert pump(qapp, 10, panel.isActiveWindow)
         panel.table.setFocus()
         panel.table.selectRow(position)
         QTest.keyClick(panel.table, Qt.Key_S)

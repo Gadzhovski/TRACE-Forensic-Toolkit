@@ -9,6 +9,7 @@ keep the signals the window already connects to.
 
 import logging
 import queue as queue_module
+import time
 
 from PySide6.QtCore import QThread, Signal
 
@@ -20,6 +21,9 @@ logger = logging.getLogger('TRACE.Jobs')
 #: the process is ended. Only on window close; a cancel from the job bar
 #: waits as long as it takes.
 CLOSE_GRACE_SECONDS = 10
+#: How long the closing window waits for a worker it closed: the grace,
+#: then the process ended and joined (run's finally), with room to spare.
+CLOSE_WAIT_MS = (CLOSE_GRACE_SECONDS + 10) * 1000
 
 
 class ProcessWorker(QThread):
@@ -40,9 +44,20 @@ class ProcessWorker(QThread):
         # Made here, on the UI thread, so stop() works even before run().
         self._stop = background.context().Event()
         self._process = None
+        self._closing = None
 
     def stop(self):
         self._stop.set()
+
+    def close(self):
+        """The window is closing: stop, and end the process if it has not
+        finished within CLOSE_GRACE_SECONDS -- the thread must be done
+        before the window that owns it is deleted (Qt aborts the process
+        on a QThread destroyed while running). A cancel from the job bar
+        (`stop`) still waits as long as the job takes."""
+        if self._closing is None:
+            self._closing = time.monotonic()
+        self.stop()
 
     def run(self):
         count, error = 0, ''
@@ -76,6 +91,12 @@ class ProcessWorker(QThread):
 
     def _relay(self, channel, process):
         while True:
+            if self._closing is not None and process.is_alive() and                     time.monotonic() - self._closing > CLOSE_GRACE_SECONDS:
+                logger.warning("%s job did not stop as the window closed; "
+                               "ending it", self.kind)
+                process.terminate()
+                process.join(5)
+                return 0, ''
             try:
                 message = channel.get(timeout=0.25)
             except queue_module.Empty:
