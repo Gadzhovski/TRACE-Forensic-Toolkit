@@ -2374,6 +2374,24 @@ QLabel#pageHint {
     color: #9aa4b0;
     font-size: 11px;
 }
+/* What an export will lack because a scan has not run
+   (ui/widgets/readiness_banner). */
+QFrame#readinessBanner {
+    background-color: #3A3426;
+    border: 1px solid #E3A008;
+    border-radius: 6px;
+}
+QFrame#readinessBanner QLabel {
+    background-color: transparent;
+    color: #E0E0E0;
+}
+QFrame#readinessBanner QLabel#readinessTitle {
+    font-weight: 600;
+    color: #E3A008;
+}
+QFrame#readinessBanner QLabel#readinessIntro {
+    color: #B0B0B0;
+}
 QLabel#pageNote {
     color: #9aa4b0;
     background-color: #353535;

@@ -27,7 +27,7 @@ KINDS = {
 }
 
 
-def _choose_evidence(parent, case):
+def choose_evidence(parent, case):
     """The image to export; None if cancelled. One image: no question."""
     rows = case.evidence()
     if not rows:
@@ -44,20 +44,27 @@ def _choose_evidence(parent, case):
     return rows[names.index(choice)] if ok else None
 
 
+def ask_path(parent, case, kind, evidence=None):
+    """Where to write export `kind` (the case's export folder offered);
+    '' if cancelled."""
+    _menu_text, title, extension, pattern = KINDS[kind]
+    stem = 'case' if kind == 'case' else os.path.splitext(
+        os.path.basename(evidence['path']))[0]
+    default = os.path.join(case.exports_dir, stem + extension)
+    os.makedirs(os.path.dirname(default), exist_ok=True)
+    path, _ = QFileDialog.getSaveFileName(parent, title, default, pattern)
+    return path
+
+
 def export_for_tools(parent, case, kind, path=None, evidence=None):
     """Ask where, write, audit. Returns the path written, or None."""
-    menu_text, title, extension, pattern = KINDS[kind]
+    _menu_text, title, _extension, _pattern = KINDS[kind]
     if kind == 'dfxml' and evidence is None:
-        evidence = _choose_evidence(parent, case)
+        evidence = choose_evidence(parent, case)
         if evidence is None:
             return None
     if path is None:
-        stem = 'case' if kind == 'case' else os.path.splitext(
-            os.path.basename(evidence['path']))[0]
-        default = os.path.join(case.exports_dir, stem + extension)
-        os.makedirs(os.path.dirname(default), exist_ok=True)
-        path, _ = QFileDialog.getSaveFileName(parent, title, default,
-                                              pattern)
+        path = ask_path(parent, case, kind, evidence)
         if not path:
             return None
     database = os.path.join(case.folder, 'case.db')

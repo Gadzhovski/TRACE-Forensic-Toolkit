@@ -335,6 +335,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: image even after another one became active.
         self._listing_image = None
         self._evidence_profiles = {}
+        #: Quick triage's record of the scans run this session (a case
+        #: keeps it in module_completions): evidence path -> {module:
+        #: {'state', 'settings'}}, for core/export_readiness.
+        self._session_completions = {}
         #: (evidence path, backup path on it) -> an encrypted backup's
         #: password, for external modules: this session only, never stored.
         self._backup_passwords = {}
@@ -2640,6 +2644,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.timeline_panel.report_requested.connect(
             self.add_timeline_to_report)
         self.timeline_panel.exported.connect(self._timeline_exported)
+        self.timeline_panel.before_export = self._timeline_before_export
         self.timeline_panel.menu_extender = self._timeline_menu_extras
         self.timeline_panel.detail_extender = self._timeline_detail
         self.timeline_panel.set_case(self.case)
@@ -3539,7 +3544,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         def start(job):
             if not resume:
-                self.carved_panel.forget(key)
+                from trace_app.core.carving import replaced_sources
+                self.carved_panel.forget(key, replaced_sources(
+                    source or 'unallocated'))
             self.carved_panel.update_resume(running={evidence_id})
             worker = CarvingWorker(path, file_types,
                                    source in (None, 'unallocated'),
@@ -3551,6 +3558,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 lambda done, total, found: self.job_bar.report(
                     done, total, f"{found:,} file(s) found"))
             worker.file_carved.connect(self.carved_panel.add_record)
+            if self.case is None:
+                # A case records how the carve ended itself
+                # (module_completions); quick triage keeps it here.
+                settings = {'types': list(file_types),
+                            'source': source or 'unallocated'}
+                worker.finished_carving.connect(
+                    lambda _count, error, worker=worker:
+                    self._note_session_scan(path, 'carve', worker, error,
+                                            settings))
             worker.finished_carving.connect(
                 lambda count, error: self._carving_finished(label, count,
                                                             error))
@@ -5028,11 +5044,187 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.case_panel.refresh()
 
     def export_for_tools(self, kind):
-        """Case > Export for Other Tools: DFXML or CASE/UCO."""
+        """Case > Export for Other Tools: DFXML or CASE/UCO -- after saying
+        which scans it draws on have not run, if any."""
         if self.case is None:
             return None
-        from trace_app.ui.dialogs.interchange_export import export_for_tools
-        return export_for_tools(self, self.case, kind)
+        from trace_app.ui.dialogs.interchange_export import (
+            KINDS, ask_path, choose_evidence, export_for_tools)
+        from trace_app.ui.widgets.readiness_banner import RUN_FIRST
+        evidence = None
+        if kind == 'dfxml':
+            evidence = choose_evidence(self, self.case)
+            if evidence is None:
+                return None
+        rows = [evidence] if evidence is not None else self.case.evidence()
+        choice, gaps = self._ask_export_readiness(kind, rows)
+        if choice is None:
+            return None
+        if choice == RUN_FIRST:
+            path = ask_path(self, self.case, kind, evidence)
+            if not path:
+                return None
+            self.run_missing_scans(kind, gaps)
+            self._queue_after_scans(
+                f'export:{kind}', KINDS[kind][1],
+                lambda: export_for_tools(self, self.case, kind, path,
+                                         evidence))
+            return None
+        return export_for_tools(self, self.case, kind, evidence=evidence)
+
+    # --- before an export: the scans it draws on --------------------------
+
+    def _readiness_items(self, rows):
+        """Case evidence rows as export_gaps takes them."""
+        return [{'key': row['id'], 'path': row['path'],
+                 'name': row.get('display_name') or evidence_name(
+                     row['path'])} for row in rows]
+
+    def export_gaps(self, kind, evidence):
+        """What export `kind` will lack on `evidence` ([{'key', 'name',
+        'path'}]: a case's ids, or quick triage's paths) because a scan
+        it draws on has not run (core/export_readiness)."""
+        from trace_app.core import export_readiness
+        index = None
+        if self.case is not None and kind == 'report':
+            from trace_app.core.search_index import SearchIndex
+            try:
+                index = SearchIndex(self.case.folder)
+            except Exception as exc:
+                logger.debug("Search index not read: %s", exc)
+        states, ruled_out, pairs = {}, {}, []
+        try:
+            for item in evidence:
+                key = item['key']
+                pairs.append((key, item['name']))
+                ruled_out[key] = self._not_applicable(
+                    self.evidence_profile({'path': item['path']}))
+                if self.case is not None:
+                    states[key] = export_readiness.module_states(
+                        self.case, key, index)
+                else:
+                    states[key] = self._session_completions.get(
+                        os.path.normpath(item['path']), {})
+        finally:
+            if index is not None:
+                index.close()
+        return export_readiness.gaps(kind, pairs, states, ruled_out)
+
+    def ask_export_readiness(self, kind, gaps):
+        """RUN_FIRST, EXPORT_NOW or None (cancelled). Replaced in tests."""
+        from trace_app.ui.widgets.readiness_banner import ReadinessDialog
+        dialog = ReadinessDialog(kind, gaps, self)
+        dialog.exec()
+        return dialog.choice
+
+    def _ask_export_readiness(self, kind, rows):
+        """(choice, gaps) for case evidence `rows`: EXPORT_NOW at once when
+        nothing is missing."""
+        from trace_app.ui.widgets.readiness_banner import EXPORT_NOW
+        gaps = self.export_gaps(kind, self._readiness_items(rows))
+        if not gaps:
+            return EXPORT_NOW, gaps
+        return self.ask_export_readiness(kind, gaps), gaps
+
+    def run_missing_scans(self, kind, gaps):
+        """Queue the scans `gaps` lack, each image its own choice: the file
+        modules it had run again with the missing ones (an analysis run
+        replaces its rows), carving with the types it had plus what the
+        export wants. Returns how many images got scans."""
+        from trace_app.core import export_readiness as readiness
+        from trace_app.core.analysis import MODULES
+        from trace_app.core.carving import CARVABLE_TYPES
+        from trace_app.ui.dialogs.analysis_modules import JOB_MODULES
+        missing = readiness.missing_modules(gaps)
+        if not missing:
+            return 0
+        wanted_types = readiness.media_carve_types() if kind == 'vics' \
+            else {t.lower() for t in CARVABLE_TYPES}
+
+        def carve_choice(state):
+            settings = (state or {}).get('settings') or {}
+            types = {t.lower() for t in settings.get('types') or ()}
+            return sorted(types | wanted_types), \
+                settings.get('source') or 'unallocated'
+
+        if self.case is None:
+            for path, modules in missing.items():
+                if readiness.CARVE in modules:
+                    state = self._session_completions.get(
+                        os.path.normpath(path), {}).get(readiness.CARVE)
+                    types, source = carve_choice(state)
+                    self.start_carving([path], types, source)
+            return len(missing)
+        rows = [row for row in self.case.evidence() if row['id'] in missing]
+        per_evidence = {}
+        for row in rows:
+            modules = missing[row['id']]
+            states = readiness.module_states(self.case, row['id'])
+            choice = {key: key in modules for key in JOB_MODULES}
+            choice.update({'modules': [], 'carve_types': [],
+                           'unallocated_only': True})
+            if any(module in MODULES for module in modules):
+                choice['modules'] = [
+                    module for module in MODULES if module in modules or
+                    (states.get(module) or {}).get('state') == readiness.DONE]
+            if readiness.CARVE in modules:
+                choice['carve_types'], choice['unallocated_only'] = \
+                    carve_choice(states.get(readiness.CARVE))
+            per_evidence[row['id']] = choice
+        # Not the examiner's choice: the Analysis Modules dialog keeps
+        # offering what they chose last.
+        last = getattr(self, '_last_choice', None)
+        self.queue_choice(rows, {'modules': [], 'carve_types': [],
+                                 'unallocated_only': True,
+                                 'per_evidence': per_evidence})
+        self._last_choice = last
+        return len(rows)
+
+    def _queue_after_scans(self, key, title, call):
+        """`call` as a job on the main lane: it runs once the scans queued
+        before it have ended."""
+        def start(job):
+            def run():
+                error = None
+                try:
+                    call()
+                except Exception as exc:
+                    logger.exception("%s failed", title)
+                    error = str(exc)
+                self.job_bar.job_finished(error=error)
+            QTimer.singleShot(0, run)
+            return None
+        return self.job_bar.submit(Job(key=key, title=title, start=start))
+
+    def _note_session_scan(self, path, module, worker, error, settings):
+        """Quick triage: how a scan of `path` ended, for export_gaps."""
+        from trace_app.core import export_readiness as readiness
+        state = readiness.FAILED if error else readiness.CANCELLED \
+            if worker.stop_requested() else readiness.DONE
+        self._session_completions.setdefault(
+            os.path.normpath(path), {})[module] = {'state': state,
+                                                   'settings': settings}
+
+    def _timeline_before_export(self, fmt):
+        """The Timeline's Export: whether to export now (False when it was
+        cancelled, or queued after the scans it lacks)."""
+        from trace_app.ui.widgets.readiness_banner import RUN_FIRST
+        if self.case is None:
+            return True
+        choice, gaps = self._ask_export_readiness('timeline',
+                                                  self.case.evidence())
+        if choice is None:
+            return False
+        if choice != RUN_FIRST:
+            return True
+        path = self.timeline_panel.ask_export_path(fmt)
+        if not path:
+            return False
+        self.run_missing_scans('timeline', gaps)
+        self._queue_after_scans(
+            'export:timeline', "Exporting the timeline",
+            lambda: self.timeline_panel.export_csv(path, fmt))
+        return False
 
     # --- Project VICS -----------------------------------------------------
 
@@ -5068,6 +5260,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return [{'name': r.get('name') or '', 'offset': int(r['offset']),
                  'size': int(r['size']), 'type': r.get('type') or '',
                  'fragments': r.get('fragments') or None,
+                 'source': r.get('source') or 'unallocated',
                  # The ref tags and categories were put on: a rebuilt
                  # carve's spans its pieces, not offset + size.
                  'artifact_ref': r.get('artifact_ref') or ''}
@@ -5110,10 +5303,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 scope = scope_module.setting_value(self.case)
                 if not scope.everything:
                     defaults['scope'] = scope.describe(short=True)
-            dialog = VicsExportDialog(evidence, defaults, self)
+            dialog = VicsExportDialog(
+                evidence, defaults, self,
+                gaps_for=lambda chosen: self.export_gaps('vics', chosen))
             if dialog.exec() != QDialog.Accepted:
                 return None
             options = dialog.options
+        if options.get('run_first') and self.run_missing_scans(
+                'vics', self.export_gaps('vics', options['evidence'])):
+            # The carves are read when the export starts: after the scans.
+            return self._queue_after_scans(
+                'vics:after-scans', "Exporting Project VICS",
+                lambda: self.queue_vics(options))
         return self.queue_vics(options)
 
     def queue_vics(self, options):
@@ -5136,6 +5337,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   'version': __version__,
                   'include_deleted': options.get('include_deleted', True),
                   'include_carved': options.get('include_carved', True),
+                  'inside': options.get('inside', True),
+                  'carve_inside': options.get('carve_inside', False),
+                  'shadows': options.get('shadows', False),
                   'min_size': options.get('min_size', 0)}
         if self.case is not None:
             params['case_folder'] = self.case.folder
@@ -6825,9 +7029,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                 "A report is made from a case.")
             return False
         from trace_app.ui.dialogs.report import ReportDialog
+        from trace_app.ui.widgets.readiness_banner import RUN_FIRST
+        choice, gaps = self._ask_export_readiness('report',
+                                                  self.case.evidence())
+        if choice is None:
+            return False
         dialog = ReportDialog(self.case, self)
         if dialog.exec() != QDialog.Accepted:
             return False
+        if choice == RUN_FIRST:
+            # The report is a job too: queued after the scans, it reads
+            # what they found.
+            self.run_missing_scans('report', gaps)
         return self.queue_report(dialog.options)
 
     def queue_report(self, options):

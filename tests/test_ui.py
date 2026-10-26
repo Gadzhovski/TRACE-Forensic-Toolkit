@@ -1599,6 +1599,10 @@ def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
     original = module.QFileDialog.getSaveFileName
     module.QFileDialog.getSaveFileName = staticmethod(
         lambda *a, **k: (out, 'CSV (*.csv)'))
+    # Scans the export lacks are asked about first
+    # (tests/test_export_readiness.py): export as things stand.
+    from trace_app.ui.widgets.readiness_banner import EXPORT_NOW
+    window.ask_export_readiness = lambda kind, gaps: EXPORT_NOW
     try:
         actions['TRACE CSV…'].trigger()
         assert pump(qapp, 60, lambda: panel._export is None)
@@ -1611,6 +1615,7 @@ def test_timeline_tab_previews_pivots_exports_and_feeds_the_report(
         assert pump(qapp, 60, lambda: panel._export is None)
     finally:
         module.QFileDialog.getSaveFileName = original
+        del window.ask_export_readiness       # the shared window's own
     with open(out, encoding='utf-8') as handle:
         assert sum(1 for _line in handle) == panel.total
     assert 'timeline.jsonl' in window.case.activity()[0]['detail']
@@ -1628,6 +1633,11 @@ def test_case_menu_exports_for_other_tools(qapp, window, tmp_path,
                         lambda *a, **k: told.append(a[2]))
     monkeypatch.setattr(module.message, 'warning',
                         lambda *a, **k: told.append(a[2]))
+    # Scans the export draws on that have not run are asked about first
+    # (tests/test_export_readiness.py): export as things stand.
+    from trace_app.ui.widgets.readiness_banner import EXPORT_NOW
+    monkeypatch.setattr(window, 'ask_export_readiness',
+                        lambda kind, gaps: EXPORT_NOW)
     texts = {a.text() for a in window.interchange_actions}
     assert texts == {text for text, *_rest in module.KINDS.values()}
     assert all(a.isEnabled() for a in window.interchange_actions)

@@ -111,9 +111,42 @@ def child_main(kind, params, queue, stop):
         logger.exception("%s job failed", kind)
         error = str(exc) or type(exc).__name__
         count = getattr(exc, 'count', 0)
+    _record_completion(kind, params, 'failed' if error else
+                       'cancelled' if stop.is_set() else 'done', error)
     queue.put(('done', int(count or 0), error))
     queue.close()
     queue.join_thread()
+
+
+def _record_completion(kind, params, status, error):
+    """How a module job on one evidence item of a case ended
+    (Case.module_completions), so an export can say what has not run
+    (core/export_readiness). One place for every module job; quick triage
+    has no case and keeps its own record in the window."""
+    from trace_app.core.export_readiness import RECORDED_JOBS
+    if kind not in RECORDED_JOBS or not params.get('case_folder') or \
+            params.get('evidence_id') is None:
+        return
+    if kind == 'analysis':
+        settings = {'modules': list(params.get('modules') or ())}
+    elif kind == 'carve':
+        settings = {'types': list(params.get('file_types') or ()),
+                    'source': params.get('source') or (
+                        'unallocated' if params.get('unallocated_only', True)
+                        else 'image')}
+    else:
+        settings = {}
+    from trace_app.core.case import Case
+    case = None
+    try:
+        case = Case.open(params['case_folder'])
+        case.record_module_completion(params['evidence_id'], kind, status,
+                                      settings, error)
+    except Exception as exc:
+        logger.warning("Could not record how %s ended: %s", kind, exc)
+    finally:
+        if case is not None:
+            case.close()
 
 
 def _apply_settings(params):
@@ -564,7 +597,9 @@ def job_vics(params, progress, item, should_stop):
             params.get('include_deleted', True),
             params.get('include_carved', True),
             int(params.get('min_size') or 0), should_stop,
-            lambda examined, copied, what: progress(examined, copied, what))
+            lambda examined, copied, what: progress(examined, copied, what),
+            params.get('inside', True), params.get('carve_inside', False),
+            params.get('shadows', False))
         item(summary)
         return summary['media_files']
     finally:

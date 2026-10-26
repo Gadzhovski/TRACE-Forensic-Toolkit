@@ -453,6 +453,12 @@ def test_the_dialog_gives_the_options_the_window_queues(qapp, tmp_path):
     assert options['case_number'] == 'OP-7'
     assert options['contact']['ContactName'] == 'A. Examiner'
     assert options['model'] == 'CUSTOM' and options['min_size'] == 10240
+    # Looking inside files is on, carving inside them (slow) off.
+    assert options['inside'] is True and options['carve_inside'] is False
+    dialog.inside_box.setChecked(False)
+    dialog.carve_inside_box.setChecked(True)
+    assert dialog.options['inside'] is False
+    assert dialog.options['carve_inside'] is True
     dialog.case_number.setText('  ')
     assert not ok.isEnabled()
     dialog.case_number.setText('OP-7')

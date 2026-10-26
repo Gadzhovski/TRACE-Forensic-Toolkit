@@ -68,7 +68,8 @@ PAGES = (
           'module_link_readings')))),
     ("Carving & Exports", icons.FINDING_CARVED,
      "How files are carved, and where copies and exports are written.",
-     (("Carving", 'case', ('carve_source', 'carve_min_kb', 'analyse_carves',
+     (("Carving", 'case', ('carve_source', 'carve_min_kb',
+                           'carve_unaligned_pictures', 'analyse_carves',
                            'carve_write_copies')),
       ("Folders", 'case', ('carved_folder', 'export_folder')))),
 )
