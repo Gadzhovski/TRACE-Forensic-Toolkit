@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QLabel, QPlainTextEdit, QScrollArea, QSizePolicy,
                                QVBoxLayout, QWidget)
 
 from trace_app.infra.constants import UNKNOWN_DATE
-from trace_app.core import content_checks
+from trace_app.core import content_checks, geocode
 from trace_app.ui.widgets.property_table import PropertyTable
 import hashlib
 from magic import Magic
@@ -241,6 +241,10 @@ class MetadataViewer(QWidget):
                 rows.append(("Location", f"{photo['latitude']:.6f}, "
                                          f"{photo['longitude']:.6f}",
                              "warning"))
+                near = geocode.describe(photo['latitude'],
+                                        photo['longitude'])
+                if near:
+                    rows.append(("Near (approx.)", near))
                 if photo.get('altitude') is not None:
                     rows.append(("Altitude", f"{photo['altitude']} m"))
                 if photo.get('gps_date'):
@@ -257,6 +261,11 @@ class MetadataViewer(QWidget):
                 for label, value in facts:
                     rows.append((label, value, "warning")
                                 if label == "Location" else (label, value))
+                if meta.get('latitude') is not None:
+                    near = geocode.describe(meta['latitude'],
+                                            meta['longitude'])
+                    if near:
+                        rows.append(("Near (approx.)", near))
 
         authors = content_checks.document_authors(content)
         if authors:

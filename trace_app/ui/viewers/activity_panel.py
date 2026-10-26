@@ -99,6 +99,9 @@ _C = {
     'place': ('Place', 'subject', 300),
     'latitude': ('Latitude', 'd:latitude', 100),
     'longitude': ('Longitude', 'd:longitude', 100),
+    # Worked out from the position (core/geocode), not read: 'place' is
+    # the record's own name for it.
+    'near': ('Near (approx.)', 'near', 240),
     'accuracy': ('Accuracy', 'd:accuracy', 80),
     'account': ('Account', 'd:account|subject', 240),
     'service': ('Service', 'd:service', 140),
@@ -120,7 +123,7 @@ LAYOUTS = {
     'downloads': ('time', 'what', 'url', 'browser', 'user') + _TAIL,
     'searches': ('time', 'what', 'subject', 'browser', 'user') + _TAIL,
     'locations': ('time', 'what', 'place', 'latitude', 'longitude',
-                  'accuracy', 'source') + _TAIL,
+                  'near', 'accuracy', 'source') + _TAIL,
     'accounts': ('time', 'what', 'account', 'service', 'app',
                  'user') + _TAIL,
     'network': ('time', 'what', 'network', 'bssid', 'security',
@@ -263,6 +266,12 @@ class ActivityModel(QAbstractTableModel):
             return ''
         if spec == 'app':
             return str(detail.get('app') or row.get('source') or '')
+        if spec == 'near':
+            if '_near' not in row:
+                from trace_app.core import geo, geocode
+                where = geo.position(detail)
+                row['_near'] = geocode.describe(*where) if where else ''
+            return row['_near']
         if spec.startswith('d:'):
             for key in spec[2:].split('|'):
                 value = row.get(key) if key in ('subject', 'source') \
