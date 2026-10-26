@@ -856,17 +856,22 @@ class _Builder:
         photos = [r for r in self.scope(self.case.findings(
             None, 'photo', limit=100000)) if 'latitude' in (r.get('detail')
                                                             or {})]
+        # Seven columns at most (the PDF's width): the position is one,
+        # with the place it is near (core/geocode, offline) beside it.
+        from trace_app.core import geocode
         groups.append(('findings-photos', 'Photos with a location',
-                       ['Photo', 'Evidence', 'Taken', 'Camera', 'Latitude',
-                        'Longitude', 'Path'],
+                       ['Photo', 'Evidence', 'Taken', 'Camera', 'Position',
+                        'Near (approx.)', 'Path'],
                        [[e(r.get('name')),
                          e(self.evidence_name(r.get('evidence_id'))),
                          e(r['detail'].get('taken')),
                          e(' '.join(p for p in (r['detail'].get('make'),
                                                 r['detail'].get('model'))
                                     if p)),
-                         f"{r['detail']['latitude']:.6f}",
+                         f"{r['detail']['latitude']:.6f}, "
                          f"{r['detail']['longitude']:.6f}",
+                         e(geocode.describe(r['detail']['latitude'],
+                                            r['detail']['longitude'])),
                          _mono(r.get('path'))] for r in photos]))
         authors = self.scope(self.case.findings(None, 'authors',
                                                 limit=limit + 1))
@@ -1418,6 +1423,7 @@ class _Builder:
         # "nothing there".
         from trace_app.core import scope as scope_module
         covered = scope_module.setting_value(self.case)
+        from trace_app.core import geocode
         lines = settings.statement(settings.for_case(self.case)) + [
             "What the file analysis, search index, YARA and deleted-file "
             "check covered: " + covered.describe()]
@@ -1425,6 +1431,10 @@ class _Builder:
             lines.append("Sections chosen for this report but left out "
                          "because the case holds nothing for them: "
                          + ', '.join(self.left_out))
+        lines.append("Place names beside positions ('Near'): worked out by "
+                     "TRACE from the coordinates, not recorded by the "
+                     "device. " + geocode.source() + " Nothing was sent to "
+                     "an online service to find them.")
         out.append('<ul>' + ''.join(f"<li>{e(line)}</li>" for line in lines)
                    + '</ul>')
         out.append(self.heading(2, 'methods-tools', "Software"))

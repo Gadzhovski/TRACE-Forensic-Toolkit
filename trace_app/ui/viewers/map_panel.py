@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QPushButton,
                                QToolTip, QVBoxLayout, QWidget)
 
 from trace_app import __version__
-from trace_app.core import conversations, geo
+from trace_app.core import conversations, geo, geocode
 from trace_app.infra.paths import resource_path
 from trace_app.ui.widgets.tables import finding_table
 from trace_app.ui.widgets.row_preview import connect_row_preview
@@ -424,6 +424,7 @@ class MapCanvas(QWidget):
                           f"{point['name']}\n{point['what']}\n"
                           f"{point['when'] or 'no time recorded'}\n"
                           f"{geo.describe(point['latitude'], point['longitude'])}\n"
+                          f"{_near(point) or 'no place name'} (approx.)\n"
                           f"{point['source']} · read by "
                           f"{conversations.readers_text(point.get('read_by') or [])}",
                           self)
@@ -566,7 +567,9 @@ class MapPanel(QWidget):
         self.canvas = MapCanvas()
         splitter.addWidget(self.canvas)
         self.table = finding_table(['Name', 'Kind', 'Evidence', 'When',
-                                  'Position', 'Source', 'Read by', 'Path'])
+                                  'Position', 'Near (approx.)', 'Source',
+                                  'Read by', 'Path'])
+        self.table.horizontalHeaderItem(5).setToolTip(geocode.source())
         connect_row_preview(self.table, self._row_landed)
         self.table.itemDoubleClicked.connect(
             lambda item: self.point_activated.emit(
@@ -646,6 +649,7 @@ class MapPanel(QWidget):
                      self._names.get(point['evidence_id'], ''),
                      str(point['when'] or ''),
                      geo.describe(point['latitude'], point['longitude']),
+                     _near(point),
                      point['source'],
                      conversations.readers_text(point.get('read_by') or []),
                      point['path']]
@@ -654,7 +658,7 @@ class MapPanel(QWidget):
                 if column == 0:
                     item.setData(Qt.UserRole, row)
                 table.setItem(row, column, item)
-        for column, width in enumerate((200, 110, 140, 150, 210, 160,
+        for column, width in enumerate((200, 110, 140, 150, 210, 260, 160,
                                         100)):
             table.setColumnWidth(column, width)
         self.canvas.set_points(self.points)
@@ -958,3 +962,12 @@ class MapPanel(QWidget):
                    if google else '')
                 + "\n\nWithout it the points are drawn over the offline "
                   "map (Natural Earth), which needs no network."))
+
+
+def _near(point):
+    """The place a point is in or near (core/geocode), named once per
+    point and kept on it."""
+    if 'near' not in point:
+        point['near'] = geocode.describe(point['latitude'],
+                                         point['longitude'])
+    return point['near']
