@@ -32,13 +32,32 @@ def _tools():
                   for p in glob.glob(os.path.join(MAPS, '*.json')))
 
 
+def _recordings(tool):
+    """[{artifact_key: [column]}] from the tool's recorded runs, oldest
+    release first (by version, not text: 2026.10 is after 2026.9)."""
+    def release(path):
+        name = os.path.splitext(os.path.basename(path))[0]
+        return tuple(int(part) for part in name.split('-', 1)[1].split('.'))
+    out = []
+    for path in sorted(glob.glob(os.path.join(COLUMNS, f'{tool}-*.json')),
+                       key=release):
+        with open(path, encoding='utf-8') as handle:
+            out.append(json.load(handle)['columns'])
+    return out
+
+
 def _recorded(tool):
-    """{artifact_key: [column]} from the tool's recorded run, or None."""
-    found = sorted(glob.glob(os.path.join(COLUMNS, f'{tool}-*.json')))
-    if not found:
+    """{artifact_key: [column]}: every release's recorded columns together
+    (a map names a renamed column under each release's name), or None."""
+    recordings = _recordings(tool)
+    if not recordings:
         return None
-    with open(found[-1], encoding='utf-8') as handle:
-        return json.load(handle)['columns']
+    merged = {}
+    for columns in recordings:
+        for key, names in columns.items():
+            merged.setdefault(key, [])
+            merged[key] += [name for name in names if name not in merged[key]]
+    return merged
 
 
 def test_there_are_maps():
@@ -72,6 +91,31 @@ def test_every_mapped_column_is_one_the_tool_writes(tool):
     for key in maps.load(tool)['telemetry'] + maps.load(tool)['other']:
         if key not in columns:
             wrong.append(f"{key}: listed, but not an artifact of the run")
+    assert wrong == []
+
+
+@pytest.mark.parametrize('tool', _tools())
+def test_the_newest_release_fills_every_mapped_field(tool):
+    """A release that renames a column (aLEAPP 2026.4.4: 17 of them, Google
+    Duo's 'direction' became 'outgoing_as_stored') leaves the old name
+    in no column: each mapped field and time must have a name the newest
+    recorded release writes, wherever that release has the artifact."""
+    recordings = _recordings(tool)
+    if not recordings:
+        pytest.skip(f"no recorded columns for {tool}")
+    newest = recordings[-1]
+    wrong = []
+    for key, entry in maps.load(tool)['artifacts'].items():
+        if key not in newest:
+            continue                # no data for it in that run's evidence
+        wanted = dict(entry.get('fields') or {})
+        if entry.get('time'):
+            wanted['time'] = entry['time']
+        for field, names in wanted.items():
+            names = names if isinstance(names, list) else [names]
+            if not any(name in newest[key] for name in names):
+                wrong.append(f"{key}.{field}: none of {names} in "
+                             f"{newest[key]}")
     assert wrong == []
 
 

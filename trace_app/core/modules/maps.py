@@ -10,7 +10,10 @@ sorted (core/modules/routes: name rules, else Others) and browsable.
     {"tool": "aLEAPP", "checked_with": "<release>",
      "artifacts": {"<artifact_key>": {
          "type": "<record_types.TYPES key>",
-         "time": "<column>",                    (optional)
+         "time": "<column>" | ["<column>", ...],   (optional; a list:
+                                                   the first the artifact
+                                                   has -- a column a newer
+                                                   release renamed)
          "fields": {"<typed field>": "<column>" | ["<column>", ...]},
          "directions": {"<tool value>": "out|in|missed"},  (optional)
          "app": "<name>",                         (optional)
@@ -71,9 +74,22 @@ def entry(tool, artifact_key):
     return None, None
 
 
+def time_column(found, columns):
+    """The entry's time column among `columns` (the artifact's own, LAVA
+    column dicts): a list names a column under each release's name, the
+    first the artifact has wins; '' when it has none."""
+    wanted = found.get('time') or ''
+    if not isinstance(wanted, list):
+        return wanted
+    names = {column['name'] for column in columns}
+    return next((name for name in wanted if name in names), '')
+
+
 def columns_of(found):
     """Every column a map entry reads (time and fields)."""
-    out = [found['time']] if found.get('time') else []
+    wanted = found.get('time')
+    out = (wanted if isinstance(wanted, list) else [wanted]) if wanted \
+        else []
     for value in (found.get('fields') or {}).values():
         out += value if isinstance(value, list) else [value]
     return out

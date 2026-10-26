@@ -33,8 +33,10 @@ from dataclasses import dataclass, field
 #: 4: the tools' maps (resources/leapp_maps, core/modules/maps) -- typed
 #: fields under TRACE's own keys. 5: how each was sorted is kept
 #: (module_artifacts.sorted_by, the run's accounting). 6: iLEAPP's map
-#: replaces the table that was here.
-ROUTES_VERSION = 6
+#: replaces the table that was here. 7: aLEAPP 2026.4.4 / iLEAPP 2026.4.5
+#: renamed columns -- maps name both releases' columns, a time may be a
+#: list.
+ROUTES_VERSION = 7
 EVIDENCE, TELEMETRY, OTHER = 'evidence', 'telemetry', 'other'
 ROLES = (EVIDENCE, TELEMETRY, OTHER)
 
@@ -135,7 +137,8 @@ def default(tool, artifact):
                          why=f"{tool}'s map ({kind}), read through its "
                              f"conversation view", mapping=mapped,
                          sorted_by='map')
-        return Route(EVIDENCE, category, what, mapped.get('time') or '',
+        return Route(EVIDENCE, category, what,
+                     maps.time_column(mapped, columns),
                      why=f"{tool}'s map: {kind}", mapping=mapped,
                      sorted_by='map')
     if role == TELEMETRY:

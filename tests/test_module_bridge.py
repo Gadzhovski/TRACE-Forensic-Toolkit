@@ -1042,3 +1042,37 @@ def test_the_report_leaves_out_what_the_case_keeps_from_reports(case):
     html = written()
     assert 'trace.test' not in html and 'From TRACE' in html
     assert 'Unified Logs' in html
+
+
+def _lockdown(column, value):
+    return {'artifact_key': 'lockdownEvents', 'name': 'Lockdown Events',
+            'category': 'Logs', 'module': 'lockdown',
+            'columns': [(column, 'Timestamp', ''), ('event', 'Event', '')],
+            'rows': [(value, 'Lockdownd startup')]}
+
+
+def test_a_renamed_time_column_is_read_under_either_release_name(case):
+    """iLEAPP 2026.4.5 renamed lockdownEvents' time column; the map names
+    both, and the one the artifact has is the time."""
+    run = _run(case, case.phone, 'old', [_lockdown(
+        'timestamp_device_local_no_offset', '2020-03-21 14:38:54')])
+    _bridge(case, run)
+    row, = case.user_activity(case.phone)
+    assert row['time_utc'].startswith('2020-03-21 14:38:54')
+    run = _run(case, case.other, 'new', [_lockdown(
+        'timestamp_as_stored_no_offset', '2020-03-22 09:00:00')])
+    _bridge(case, run)
+    row, = case.user_activity(case.other)
+    assert row['time_utc'].startswith('2020-03-22 09:00:00')
+
+
+def test_a_time_that_cannot_be_read_stays_a_detail(case):
+    """'03/21/20 14:38:54.943217' is not read as a time (its day/month
+    order is not said): the row has no time, and the value as the tool
+    wrote it is kept, not dropped with the time column."""
+    run = _run(case, case.phone, 'new', [_lockdown(
+        'timestamp_as_stored_no_offset', '03/21/20 14:38:54.943217')])
+    _bridge(case, run)
+    row, = case.user_activity(case.phone)
+    assert not row['time_utc']
+    assert '03/21/20 14:38:54.943217' in row['detail'].values()
