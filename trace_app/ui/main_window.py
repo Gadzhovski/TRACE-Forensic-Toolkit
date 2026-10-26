@@ -1622,6 +1622,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.ui.dialogs.about import UpdateCheck
         if updates.start_refusal():         # a case set offline meanwhile
             return
+        # The installed external tools too: a newer release is named in
+        # the Modules tab (only installed tools are asked about).
+        self.check_module_updates()
         worker = UpdateCheck(self)
         worker.answered.connect(self._update_answered)
         self._retain_worker(worker)
@@ -2632,6 +2635,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Shown: the tools installed now (another window or session may have
         # installed one) and the images open now.
         self.modules_panel.shown.connect(self.refresh_modules)
+        # ...and whether newer releases of the installed tools are out
+        # (kept 12 h, so showing the tab rarely asks GitHub).
+        self.modules_panel.shown.connect(self.check_module_updates)
         self.result_viewer.addTab(self.modules_panel, 'Modules',
                                   icons.MODULES)
 
@@ -5424,6 +5430,37 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         dialog.exec()
         if dialog.changed:
             self.refresh_modules()
+        # It read GitHub afresh: the Modules tab's notice follows.
+        self.check_module_updates()
+
+    def check_module_updates(self, force=False):
+        """Whether newer releases of the installed external tools are
+        published (core/modules/updates; refused, from what is kept only,
+        when checking is turned off or the case is offline), said in the
+        Modules tab's notice."""
+        from trace_app.ui.widgets.kept_threads import KeptThreads
+        from trace_app.ui.widgets.module_updates import ReleaseCheck
+        if getattr(self, 'modules_panel', None) is None:
+            return
+        if getattr(self, '_module_release_checks', None) is None:
+            self._module_release_checks = KeptThreads(self)
+        self._module_release_generation = generation = \
+            getattr(self, '_module_release_generation', 0) + 1
+        check = ReleaseCheck(generation, force, self)
+        check.checked.connect(self._module_updates_checked)
+        self._module_release_checks[generation] = check
+        check.start()
+
+    @Slot(int, object)
+    def _module_updates_checked(self, generation, result):
+        from trace_app.ui.widgets.module_updates import pending_names
+        if generation != getattr(self, '_module_release_generation', 0):
+            return
+        pending = pending_names(result)
+        for name, old, new in pending:
+            logger.info("External module update: %s %s is published "
+                        "(installed %s)", name, new, old)
+        self.modules_panel.set_updates(pending)
 
     def _module_targets(self):
         """[(key, label, systems, icon)] the Modules tab can run on: the
@@ -9519,6 +9556,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         try:
             if getattr(self, 'job_bar', None) is not None:
                 self.job_bar.close()
+            # A release check is a few HTTP requests with a 30 s timeout.
+            if getattr(self, '_module_release_checks', None):
+                self._module_release_checks.clear(timeout=35000)
             if getattr(self, 'vt_worker', None) is not None:
                 self.vt_worker.stop()
             from trace_app.ui.process_worker import (CLOSE_WAIT_MS,

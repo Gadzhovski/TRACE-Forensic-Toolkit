@@ -2907,3 +2907,14 @@ QLabel#embeddedThumbnail {
     border: 1px solid #5A5A5A;
     padding: 4px;
 }
+
+/* Modules tab: newer releases of installed tools (core/modules/updates) */
+QFrame#modulesUpdateNotice {
+    background-color: #1F2D40;
+    border: none;
+    border-bottom: 1px solid #3B6EA8;
+}
+QFrame#modulesUpdateNotice QLabel {
+    background-color: transparent;
+    color: #D6E4F5;
+}
