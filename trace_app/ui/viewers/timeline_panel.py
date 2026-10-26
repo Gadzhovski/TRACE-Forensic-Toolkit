@@ -1191,6 +1191,9 @@ class TimelinePanel(QWidget):
         self.menu_extender = None
         #: Set by the host: detail_extender(row) -> extra HTML for the pane.
         self.detail_extender = None
+        #: Set by the host: before_export(fmt) -> whether Export goes ahead
+        #: now (the window's notice of scans the export lacks).
+        self.before_export = None
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -2976,21 +2979,31 @@ class TimelinePanel(QWidget):
 
     # --- export and views ------------------------------------------------------
 
+    def ask_export_path(self, fmt):
+        """Where to write the export in `fmt`, the case's export folder
+        offered -- its exports/, or the one its settings name (Options >
+        Settings > Carving & exports); '' if cancelled."""
+        label, extension, pattern = timeline_export.FORMATS[fmt]
+        stem = 'timeline' if fmt == 'csv' else f'timeline-{fmt}'
+        default = os.path.join(self.case.exports_dir, stem + extension)
+        os.makedirs(os.path.dirname(default), exist_ok=True)
+        path, _ = QFileDialog.getSaveFileName(
+            self, f"Export Timeline as {label}", default, pattern)
+        return path
+
     def export_csv(self, path=None, fmt='csv'):
-        """Every selected event in `fmt` (timeline_export.FORMATS)."""
+        """Every selected event in `fmt` (timeline_export.FORMATS). Asked
+        from the button, `before_export(fmt)` (the window's) first says
+        which scans the export lacks and may run them first."""
         if self.case is None:
             return
-        label, extension, pattern = timeline_export.FORMATS[fmt]
         # Only a real path: a button's `checked` flag once arrived here as
         # False, and open(False) is the console.
         if not isinstance(path, str) or not path:
-            # The case's export folder -- its exports/, or the one its
-            # settings name (Options > Settings > Carving & exports).
-            stem = 'timeline' if fmt == 'csv' else f'timeline-{fmt}'
-            default = os.path.join(self.case.exports_dir, stem + extension)
-            os.makedirs(os.path.dirname(default), exist_ok=True)
-            path, _ = QFileDialog.getSaveFileName(
-                self, f"Export Timeline as {label}", default, pattern)
+            if self.before_export is not None and \
+                    not self.before_export(fmt):
+                return
+            path = self.ask_export_path(fmt)
             if not path:
                 return
         self.export_button.setEnabled(False)

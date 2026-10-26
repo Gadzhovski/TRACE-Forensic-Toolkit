@@ -454,3 +454,70 @@ def test_the_job_passes_both_choices_on(evidence, tmp_path):
     assert md5(evidence['gif']) in found['default']
     assert md5(evidence['gif']) not in found['neither']
     assert md5(evidence['tail']) in found['carved'] - found['default']
+
+
+# --- Volume Shadow Copies ------------------------------------------------------
+
+def test_shadow_copies_add_only_what_differs_from_the_volume(tmp_path,
+                                                            monkeypatch):
+    """dfvfs's vss.raw: two snapshots of an NTFS volume. No picture is on
+    it, so a few files are taken for pictures by name: one the snapshots
+    hold unchanged (a_file), one written after the first (vss1), and the
+    snapshot store, which differs in every snapshot."""
+    from tests.conftest import data_path
+    from trace_app.core import vics
+    image = data_path('samples', 'vss.raw')
+    store = '{de81cc22-aa8b-11eb-9339-8cdcd4557abc}' \
+        '{3808876b-c176-4e48-b7ae-04046e6cc752}'
+
+    def as_picture(head, name='', *_args, **_kwargs):
+        return 'image/png' if name in ('a_file', 'vss1', store) else None
+    monkeypatch.setattr(vics, 'media_type', as_picture)
+    plain = _export(image, tmp_path / 'plain')
+    assert not any('Shadow copy' in f['FilePath']
+                   for m in plain.values() for f in m['MediaFiles'])
+    media = _export(image, tmp_path / 'shadows', shadows=True)
+    places = sorted((f['FilePath'], f['FileName'])
+                    for m in media.values() for f in m['MediaFiles'])
+    first = 'EXHIBIT 1\\Shadow copy 1 (created 2021-05-01 17:40 UTC)'
+    second = 'EXHIBIT 1\\Shadow copy 2 (created 2021-05-01 17:41 UTC)'
+    assert places == sorted([
+        ('EXHIBIT 1', 'vss1'),
+        ('EXHIBIT 1\\a_directory', 'a_file'),
+        ('EXHIBIT 1\\System Volume Information', store),
+        (first + '\\System Volume Information', store),
+        (second + '\\System Volume Information', store)])
+    with open(tmp_path / 'shadows' / vics.LOG_NAME, encoding='utf-8') as log:
+        assert '3 file(s) in Volume Shadow Copies' in log.read()
+
+
+# --- pictures kept in databases --------------------------------------------------
+
+def test_pictures_kept_as_blobs_in_a_database_are_exported(tmp_path):
+    """Avatars, message thumbnails, cached images: BLOBs in any table, any
+    column -- SQLite types values, not columns -- WITHOUT ROWID tables
+    numbered; text and short BLOBs are not pictures."""
+    import sqlite3
+    root = tmp_path / 'evidence'
+    root.mkdir()
+    avatar, thumb = picture('PNG', 'blue'), picture('JPEG', 'red')
+    database = root / 'app.db'
+    connection = sqlite3.connect(str(database))
+    connection.executescript(
+        "CREATE TABLE contacts (id INTEGER PRIMARY KEY, name TEXT, "
+        "photo BLOB);"
+        "CREATE TABLE notes (k TEXT PRIMARY KEY, body TEXT) WITHOUT ROWID;")
+    connection.execute("INSERT INTO contacts VALUES (7, 'Ann', ?)",
+                       (avatar,))
+    connection.execute("INSERT INTO contacts VALUES (8, 'Bob', ?)",
+                       (b'\x00' * 64,))
+    connection.execute("INSERT INTO notes VALUES ('a', ?)", (thumb,))
+    connection.execute("INSERT INTO notes VALUES ('b', 'plain text')")
+    connection.commit()
+    connection.close()
+    media = _export(str(root), tmp_path / 'out')
+    places = {(f['FilePath'], f['FileName'])
+              for m in media.values() for f in m['MediaFiles']}
+    assert places == {('EXHIBIT 1\\app.db', 'contacts.photo row 7.png'),
+                      ('EXHIBIT 1\\app.db', 'notes.body row 1.jpg')}
+    assert md5(avatar) in media and md5(thumb) in media

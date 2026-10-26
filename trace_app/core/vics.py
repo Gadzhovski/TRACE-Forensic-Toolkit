@@ -271,7 +271,7 @@ def _windows_path(*parts):
 
 def find_media(handler, source_id, scope=None, include_deleted=True,
                carved=(), min_size=0, should_stop=None, progress=None,
-               reader=None, inside=True, carve_inside=False):
+               reader=None, inside=True, carve_inside=False, shadows=False):
     """Every picture and video on `handler` (and in `carved`, rows of a
     carve: name, offset, size, fragments), as candidates for `Package.add`.
     `progress(examined, path)` as files are looked at.
@@ -282,7 +282,10 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
     under its container's path. `carve_inside`: and pictures found by
     their signature inside any file (a program's resources, a document's
     drawings, the page file), as AXIOM and X-Ways do -- every file read
-    whole, so slower.
+    whole, so slower. `shadows`: and the files of each volume's Volume
+    Shadow Copies, under 'Shadow copy N (created ...)' -- a snapshot's
+    copy of a file the live volume holds unchanged (same path, same MD5)
+    is left out (`same_as`, Package.add).
 
     Deleted files come from core/deleted.py, not the walk: the walk passes
     an NTFS name whose link to its MFT entry is gone (most deleted files),
@@ -317,6 +320,24 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
                 continue
             yield from _file_candidates(handler, entry, source_id, volumes,
                                         looking)
+        if shadows:
+            for shadow, live in _shadow_volumes(handler, offsets, volumes):
+                for entry in walk.iter_files(handler, should_stop=stop,
+                                             offsets=[shadow], scope=scope):
+                    examined += 1
+                    if progress is not None:
+                        progress(examined, entry.path)
+                    if entry.deleted or (entry.size < smallest and not (
+                            inside or carve_inside)):
+                        continue
+                    for candidate in _file_candidates(
+                            handler, entry, source_id, volumes, looking):
+                        candidate['same_as'] = _windows_path(
+                            source_id, volumes.get(live, ''),
+                            candidate['file_path'][
+                                len(_windows_path(source_id,
+                                                  volumes[shadow])):])
+                        yield candidate
     except walk.WalkCancelled:
         raise VicsCancelled() from None
     if include_deleted:
@@ -361,6 +382,28 @@ _WHOLE_READ = ('ExFAT', 'Ext3', 'Ext4')
 #: A container is read whole to find what it holds, up to this size; a
 #: mailbox (archives.STREAMED_KINDS) of any size is read as a stream.
 MAX_CONTAINER_BYTES = 256 * 1024 * 1024
+
+
+def _shadow_volumes(handler, offsets, volumes):
+    """(shadow key, live volume offset) for every Volume Shadow Copy of
+    the volumes, oldest first; each named in `volumes` after its volume,
+    'Shadow copy N (created 2021-05-01 17:40 UTC)'."""
+    out = []
+    for offset in offsets:
+        try:
+            copies = handler.shadow_copies(offset)
+        except Exception as exc:
+            logger.debug("No shadow copies on %s: %s", offset, exc)
+            continue
+        for shadow in copies:
+            created = shadow.get('created')
+            label = f"Shadow copy {shadow['index'] + 1}" + (
+                f" (created {created:%Y-%m-%d %H:%M} UTC)" if created
+                else '')
+            volumes[shadow['key']] = _windows_path(volumes.get(offset, ''),
+                                                   label)
+            out.append((shadow['key'], offset))
+    return out
 
 
 def _deleted_records(handler, scope, should_stop, progress):
@@ -741,6 +784,9 @@ class Package:
         self.rows = []                  # manifest rows
         self.problems = []
         self.local_times_omitted = 0
+        #: Files of shadow copies left out: the live volume holds them as
+        #: they were.
+        self.shadow_unchanged = 0
         self.bytes_copied = 0
         os.makedirs(os.path.join(folder, self.files_dir), exist_ok=True)
         self._incoming = os.path.join(folder, self.files_dir, '.incoming')
@@ -772,6 +818,15 @@ class Package:
             return None
         md5 = digests['md5'].upper()
         media = self.media.get(md5)
+        if media is not None and candidate.get('same_as') and any(
+                place['FilePath'] == candidate['same_as'] and
+                place['FileName'] == candidate['name']
+                for place in media['MediaFiles']):
+            # A shadow copy's copy of a file the live volume holds as it
+            # is: the same file, not another place it was found.
+            os.remove(staging)
+            self.shadow_unchanged += 1
+            return media
         if media is None:
             relative = self._place(staging, md5, candidate)
             media = {'MediaID': len(self.media), 'MD5': md5,
@@ -937,6 +992,7 @@ class Package:
                                for m in self.media.values()),
             'bytes': sum(m['MediaSize'] for m in self.media.values()),
             'local_times_omitted': self.local_times_omitted,
+            'shadow_unchanged': self.shadow_unchanged,
             'categorised': sum(1 for md5 in self.media
                                if self.category_of(md5)[0] is not None),
             'commented': sum(1 for marks in self._marks.values()
@@ -961,6 +1017,11 @@ class Package:
         else:
             lines.append(f"JSON: {os.path.basename(summary['json'])} "
                          f"SHA-256 {summary['json_sha256']}")
+        if summary['shadow_unchanged']:
+            lines.append(
+                f"{summary['shadow_unchanged']:,} file(s) in Volume Shadow "
+                "Copies were the live volume's file as it is (same path, "
+                "same MD5) and are not listed again.")
         if summary['local_times_omitted']:
             lines.append(
                 f"{summary['local_times_omitted']:,} file(s) on FAT/exFAT "
@@ -1020,12 +1081,12 @@ def export(sources, folder, case_number='', contact=None,
            model=DEFAULT_MODEL, version='', scope=None,
            include_deleted=True, include_carved=True, min_size=0,
            should_stop=None, progress=None, inside=True,
-           carve_inside=False):
+           carve_inside=False, shadows=False):
     """The whole export. `sources` is [(source id, handler, carved rows,
     marks)] -- `marks` (optional) {'categories': {artifact_ref: 0-4},
     'comments': {artifact_ref: text}} from the case; a file inside another
-    takes neither from its container. `inside` / `carve_inside`: see
-    find_media.
+    takes neither from its container. `inside` / `carve_inside` /
+    `shadows`: see find_media.
     `progress(examined, bytes copied, what)`. Returns Package.finish's
     summary (cancelled=True when stopped: no JSON)."""
     state = {'before': 0, 'examined': 0, 'what': ''}
@@ -1054,7 +1115,8 @@ def export(sources, folder, case_number='', contact=None,
             for candidate in find_media(
                     handler, source_id, scope, include_deleted,
                     carved if include_carved else (), min_size,
-                    should_stop, looked, reader, inside, carve_inside):
+                    should_stop, looked, reader, inside, carve_inside,
+                    shadows):
                 if not candidate.get('member'):
                     candidate['category'] = categories.get(candidate['ref'])
                     candidate['comment'] = comments.get(candidate['ref'], '')
