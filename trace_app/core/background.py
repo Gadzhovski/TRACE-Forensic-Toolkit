@@ -564,7 +564,8 @@ def job_vics(params, progress, item, should_stop):
             params.get('include_deleted', True),
             params.get('include_carved', True),
             int(params.get('min_size') or 0), should_stop,
-            lambda examined, copied, what: progress(examined, copied, what))
+            lambda examined, copied, what: progress(examined, copied, what),
+            params.get('inside', True), params.get('carve_inside', False))
         item(summary)
         return summary['media_files']
     finally:

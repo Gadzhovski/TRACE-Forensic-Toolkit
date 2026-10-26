@@ -121,7 +121,14 @@ _EXTENSIONS = {
     'video/x-matroska': 'mkv', 'video/webm': 'webm', 'video/x-ms-asf': 'wmv',
     'video/x-flv': 'flv', 'video/mpeg': 'mpg', 'video/3gpp': '3gp',
     'video/x-m4v': 'm4v', 'video/ogg': 'ogv',
+    'image/wmf': 'wmf', 'image/emf': 'emf', 'image/x-tga': 'tga',
+    'application/x-shockwave-flash': 'swf',
 }
+
+
+#: What libmagic says of bytes it cannot name: a TGA (no signature) is
+#: looked for there.
+_UNNAMED = ('application/octet-stream', 'data', '')
 
 
 class VicsCancelled(Exception):
@@ -130,25 +137,37 @@ class VicsCancelled(Exception):
 
 # --- what is media ----------------------------------------------------------
 
-def media_type(head, name='', reader=None):
-    """'image/...' or 'video/...' for a file starting with `head`, else
-    None. libmagic decides when it is there; without it, the picture
-    signatures the report uses and a video's name."""
+def media_type(head, name='', reader=None, size=None, read=None):
+    """'image/...' or 'video/...' (or Flash's type) for a file starting
+    with `head`, `size` bytes long, else None. Metafiles, Flash and TGA
+    are judged by their structure (core/media_formats) -- libmagic's
+    answer for them depends on its version, and so on the platform; for
+    the rest libmagic decides when it is there, else the picture
+    signatures the report uses and a video's name. `read(position,
+    length)` lets an RLE TGA be checked whole."""
+    from trace_app.core import media_formats
     from trace_app.core.filetypes import (SIGNATURELESS_MIMES,
                                           VIDEO_EXTENSIONS)
+    size = len(head) if size is None else size
+    own = media_formats.sniff(head, size, read, tga=False)
+    if own is not None:
+        return own
     if reader is not None:
         try:
             mime = (reader.from_buffer(head) or '').lower()
         except Exception:
             mime = ''
-        if mime in SIGNATURELESS_MIMES:
-            return None
+        if mime in SIGNATURELESS_MIMES or mime in _UNNAMED:
+            return media_formats.TGA if media_formats.is_tga(
+                head, size, read) else None
         if mime.startswith(('image/', 'video/')):
             return mime
         return None
     from trace_app.core.report import is_picture
     if is_picture(head):
         return _sniff_picture(head)
+    if media_formats.is_tga(head, size, read):
+        return media_formats.TGA
     extension = name.rpartition('.')[2].lower() if '.' in name else ''
     if extension in VIDEO_EXTENSIONS:
         return {'mov': 'video/quicktime', 'avi': 'video/x-msvideo',
@@ -178,10 +197,12 @@ def _sniff_picture(head):
 def copy_extension(name, mime):
     """The extension a copy is saved with: the file's own when it is one
     for its kind of content, else the content's."""
+    from trace_app.core import media_formats
     from trace_app.core.filetypes import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
     own = name.rpartition('.')[2].lower() if '.' in name else ''
     known = IMAGE_EXTENSIONS if mime.startswith('image/') \
-        else VIDEO_EXTENSIONS
+        else VIDEO_EXTENSIONS if mime.startswith('video/') \
+        else set(media_formats.EXTENSIONS.values())
     if own in known and (own == _EXTENSIONS.get(mime) or
                          mime not in _EXTENSIONS):
         return own
@@ -250,10 +271,18 @@ def _windows_path(*parts):
 
 def find_media(handler, source_id, scope=None, include_deleted=True,
                carved=(), min_size=0, should_stop=None, progress=None,
-               reader=None):
+               reader=None, inside=True, carve_inside=False):
     """Every picture and video on `handler` (and in `carved`, rows of a
     carve: name, offset, size, fragments), as candidates for `Package.add`.
     `progress(examined, path)` as files are looked at.
+
+    `inside`: also the pictures and videos inside files -- archive members,
+    the files documents embed, mailboxes' attachments, Firefox's cache
+    block files (core/media_inside, core/firefox_cache) -- each listed
+    under its container's path. `carve_inside`: and pictures found by
+    their signature inside any file (a program's resources, a document's
+    drawings, the page file), as AXIOM and X-Ways do -- every file read
+    whole, so slower.
 
     Deleted files come from core/deleted.py, not the walk: the walk passes
     an NTFS name whose link to its MFT entry is gone (most deleted files),
@@ -269,6 +298,8 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
     volumes = walk.volume_names(handler, offsets, 'volume @ {offset}')
     stop = should_stop or (lambda: False)
     smallest = max(1, min_size)
+    looking = {'inside': inside, 'carve_inside': carve_inside,
+               'smallest': smallest, 'stop': stop, 'reader': reader}
     examined = 0
     walked_deleted = []
     try:
@@ -277,16 +308,15 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
             examined += 1
             if progress is not None:
                 progress(examined, entry.path)
-            if entry.size < smallest:
+            # Too small to be exported itself: opened only to look inside.
+            if entry.size < smallest and not (inside or carve_inside):
                 continue
             if entry.deleted:
                 if include_deleted:
                     walked_deleted.append(entry)
                 continue
-            candidate = _file_candidate(handler, entry, source_id, volumes,
-                                        reader)
-            if candidate is not None:
-                yield candidate
+            yield from _file_candidates(handler, entry, source_id, volumes,
+                                        looking)
     except walk.WalkCancelled:
         raise VicsCancelled() from None
     if include_deleted:
@@ -297,22 +327,17 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
             if progress is not None and examined % 50 == 0:
                 progress(examined, record.get('path') or '')
             if record.get('is_dir') or record.get('state') not in \
-                    _EXPORTED_DELETED or int(record.get('size') or 0) \
-                    < smallest:
+                    _EXPORTED_DELETED or not int(record.get('size') or 0):
                 continue
-            candidate = _deleted_candidate(handler, record, source_id,
-                                           volumes, reader)
-            if candidate is not None:
-                yield candidate
+            yield from _deleted_candidates(handler, record, source_id,
+                                           volumes, looking)
         for entry in walked_deleted:
             if stop():
                 raise VicsCancelled()
             if entry.ref in listed:
                 continue
-            candidate = _file_candidate(handler, entry, source_id, volumes,
-                                        reader)
-            if candidate is not None:
-                yield candidate
+            yield from _file_candidates(handler, entry, source_id, volumes,
+                                        looking)
     for row in carved or ():
         if stop():
             raise VicsCancelled()
@@ -333,6 +358,9 @@ _EXPORTED_DELETED = ('recoverable', 'resident')
 #: (the cluster chain, core/exfat) and ext3/4 (the journal's copy of the
 #: emptied inode) -- read whole by ImageHandler.get_file_content.
 _WHOLE_READ = ('ExFAT', 'Ext3', 'Ext4')
+#: A container is read whole to find what it holds, up to this size; a
+#: mailbox (archives.STREAMED_KINDS) of any size is read as a stream.
+MAX_CONTAINER_BYTES = 256 * 1024 * 1024
 
 
 def _deleted_records(handler, scope, should_stop, progress):
@@ -348,26 +376,24 @@ def _deleted_records(handler, scope, should_stop, progress):
         raise VicsCancelled() from None
 
 
-def _file_candidate(handler, entry, source_id, volumes, reader):
-    return _candidate(handler, entry.offset, entry.inode, entry.name,
-                      entry.path, entry.ref, bool(entry.deleted), source_id,
-                      volumes, reader, entry.fs)
+def _file_candidates(handler, entry, source_id, volumes, looking):
+    return _candidates(handler, entry.offset, entry.inode, entry.name,
+                       entry.path, entry.ref, bool(entry.deleted), source_id,
+                       volumes, looking, entry.fs)
 
 
-def _deleted_candidate(handler, record, source_id, volumes, reader):
+def _deleted_candidates(handler, record, source_id, volumes, looking):
     inode = record.get('inode')
     if not inode:
-        return None
-    return _candidate(handler, record['volume'], inode, record['name'],
-                      record['path'], record.get('ref') or '', True,
-                      source_id, volumes, reader)
+        return ()
+    return _candidates(handler, record['volume'], inode, record['name'],
+                       record['path'], record.get('ref') or '', True,
+                       source_id, volumes, looking)
 
 
-def _candidate(handler, offset, inode, name, path, ref, deleted, source_id,
-               volumes, reader, fs=None):
-    """A file as Package.add takes it, or None when it is not a picture or
-    video (or cannot be read)."""
-    content = None
+def _open_file(handler, offset, inode, deleted, path, fs=None):
+    """(meta, size, head, read) of a file, or None when it cannot be
+    read."""
     try:
         fs = fs or handler.get_fs_info(offset)
         handle = fs.open_meta(inode=inode)
@@ -377,39 +403,249 @@ def _candidate(handler, offset, inode, name, path, ref, deleted, source_id,
             content, _meta = handler.get_file_content(inode, offset)
             if content is None:
                 return None
-            size = len(content)
-            head = content[:HEAD]
-        else:
-            head = handle.read_random(0, min(HEAD, size)) if size else b''
+
+            def read(position, length):
+                return content[position:position + length]
+            return meta, len(content), content[:HEAD], read
+        head = handle.read_random(0, min(HEAD, size)) if size else b''
     except Exception as exc:
         logger.debug("Not read: %s: %s", path, exc)
         return None
+
+    def read(position, length):
+        return handle.read_random(position, min(length, size - position))
+    return meta, size, head, read
+
+
+def _candidates(handler, offset, inode, name, path, ref, deleted, source_id,
+                volumes, looking, fs=None):
+    """The file as Package.add takes it when it is a picture or video, and
+    (when asked) what is inside it."""
+    opened = _open_file(handler, offset, inode, deleted, path, fs)
+    if opened is None:
+        return
+    meta, size, head, read = opened
     if not size or not head:
+        return
+    reader = looking['reader']
+    folder = path.rpartition('/')[0]
+    file_path = _windows_path(source_id, volumes.get(offset, ''), folder)
+    source_path = (f"{volumes[offset]}" if offset in volumes else '') + path
+    size, read = _cache2_data(path, size, read)
+    if size >= looking['smallest']:
+        mime = media_type(head, name, reader, size, read)
+        if mime is not None:
+            times, local = file_times(handler, offset, meta)
+            try:
+                shown = handler.entry_times_text(offset, meta)
+            except Exception:
+                shown = {}
+            yield {'name': name, 'size': size, 'mime': mime, 'read': read,
+                   'source_id': source_id, 'file_path': file_path,
+                   'source_path': source_path, 'ref': ref,
+                   'deleted': deleted, 'unallocated': False,
+                   'times': times, 'local_times': local, 'shown': shown}
+    if not (looking['inside'] or looking['carve_inside']):
+        return
+    container = {'name': name, 'file_path': _windows_path(file_path, name),
+                 'source_path': source_path, 'ref': ref,
+                 'deleted': deleted, 'source_id': source_id}
+    if looking['inside']:
+        from trace_app.core.firefox_cache import MAP_NAME
+        if not deleted and name.upper() == MAP_NAME:
+            yield from _firefox_cache(handler, offset, folder, container,
+                                      looking)
+        yield from _inside(handler, offset, inode, size, head, read,
+                           container, looking)
+    if looking['carve_inside']:
+        yield from _carved_inside(size, head, read, container, looking)
+
+
+def _member_candidate(container, chain, content, looking, extra=None):
+    """A file found inside `container` (`chain`: the member's names from
+    the container down), as Package.add takes it, or None when it is not
+    a picture or video. Its times are its container's business: a ZIP's
+    are local with no zone, a mailbox's are the message's -- none is
+    written. Categories are never taken from the container's."""
+    if len(content) < looking['smallest']:
         return None
-    mime = media_type(head, name, reader)
+    member = chain[-1].replace('\\', '/').rstrip('/')
+    name = member.rsplit('/', 1)[-1] or 'member'
+
+    def read(position, length):
+        return content[position:position + length]
+    mime = media_type(content[:HEAD], name, looking['reader'],
+                      len(content), read)
     if mime is None:
         return None
-    times, local = file_times(handler, offset, meta)
-    try:
-        shown = handler.entry_times_text(offset, meta)
-    except Exception:
-        shown = {}
-    folder = path.rpartition('/')[0]
+    inner = [part.replace('\\', '/') for part in chain[:-1]]
+    folders = '/'.join(inner + [member.rpartition('/')[0]])
+    candidate = {
+        'name': name, 'size': len(content), 'mime': mime, 'read': read,
+        'source_id': container['source_id'],
+        'file_path': _windows_path(container['file_path'], folders),
+        'source_path': container['source_path'] + ''.join(
+            f'!/{part}' for part in chain),
+        'ref': container['ref'], 'member': True,
+        'deleted': container['deleted'], 'unallocated': False,
+        'times': {}, 'local_times': False}
+    candidate.update(extra or {})
+    return candidate
 
-    if content is not None:
-        def read(position, length):
-            return content[position:position + length]
+
+def _inside(handler, offset, inode, size, head, read, container, looking):
+    """Archive members and documents' embedded files (core/media_inside),
+    to the case's archive nesting depth."""
+    from trace_app.core import archives, media_inside
+    kind = media_inside.kind_of(head)
+    if kind is None:
+        return
+    if kind.partition(':')[2] in archives.STREAMED_KINDS:
+        content = handler.open_file_object(inode, offset)
+    elif size > MAX_CONTAINER_BYTES:
+        logger.info("Not looked inside (%d bytes): %s", size,
+                    container['source_path'])
+        return
     else:
-        def read(position, length):
-            return handle.read_random(position, length)
-    return {'name': name, 'size': size, 'mime': mime, 'read': read,
-            'source_id': source_id,
-            'file_path': _windows_path(source_id, volumes.get(offset, ''),
-                                       folder),
-            'source_path': (f"{volumes[offset]}" if offset in volumes
-                            else '') + path,
-            'ref': ref, 'deleted': deleted, 'unallocated': False,
-            'times': times, 'local_times': local, 'shown': shown}
+        try:
+            content = read(0, size)
+        except Exception as exc:
+            logger.debug("Not read: %s: %s", container['source_path'], exc)
+            return
+    if content is None:
+        return
+    for member in media_inside.members(content,
+                                       should_stop=looking['stop']):
+        if looking['stop']():
+            raise VicsCancelled()
+        candidate = _member_candidate(container, member.chain,
+                                      member.content, looking)
+        if candidate is not None:
+            yield candidate
+
+
+def _firefox_cache(handler, offset, folder, container, looking):
+    """The objects Firefox kept in its cache block files beside this
+    `_CACHE_MAP_`, each under its block file and the URL's file name."""
+    from trace_app.core import firefox_cache
+    parent = container['file_path'].rpartition('\\')[0]
+    cache = firefox_cache.Cache(
+        lambda name: handler.read_path(offset, f"{folder}/{name}"))
+    try:
+        for entry in cache.entries():
+            if looking['stop']():
+                raise VicsCancelled()
+            block = {'file_path': _windows_path(parent, entry['block_file']),
+                     'source_path': container['source_path'].rpartition(
+                         '/')[0] + '/' + entry['block_file'],
+                     'ref': container['ref'], 'deleted': False,
+                     'source_id': container['source_id']}
+            times = {}
+            for key, field in (('Written', 'last_modified'),
+                               ('Accessed', 'last_fetched')):
+                text = iso_time(entry.get(field))
+                if text:
+                    times[key] = text
+            candidate = _member_candidate(
+                block, [entry['name']], entry['content'], looking,
+                {'times': times, 'url': entry['key']})
+            if candidate is not None:
+                yield candidate
+    except firefox_cache.CacheError as exc:
+        logger.debug("Not a Firefox cache: %s: %s", container['source_path'],
+                     exc)
+
+
+def _cache2_data(path, size, read):
+    """(size, read) of a Firefox cache2 entry's data -- the file is the
+    object followed by its metadata, whose offset the last 4 bytes hold
+    (big-endian) -- else what was given."""
+    if '/cache2/entries/' not in path.replace('\\', '/').lower() or size < 8:
+        return size, read
+    try:
+        end = int.from_bytes(read(size - 4, 4), 'big')
+    except Exception:
+        return size, read
+    # The metadata after the data: a hash per 256 KB chunk (4 bytes for
+    # the whole, 2 per chunk), then its own header -- it fits the file.
+    chunks = (end + 262143) // 262144
+    if not 0 < end < size or end + 4 + 2 * chunks + 4 > size:
+        return size, read
+
+    def data(position, length):
+        return read(position, max(0, min(length, end - position)))
+    return end, data
+
+
+# --- pictures carved from inside files --------------------------------------
+
+#: The picture and video formats looked for inside other files, as carving
+#: names them (core/carving.CARVE_CATEGORIES).
+INSIDE_TYPES = ('jpg', 'png', 'gif', 'bmp', 'tiff', 'avi', 'wmv', 'mp4',
+                'mov', 'flv', 'mkv', 'webp', 'psd')
+#: Read for carving inside a file at a time (plus the carvers' overlap).
+INSIDE_PIECE = 16 * 1024 * 1024
+
+
+def _carved_inside(size, head, read, container, looking):
+    """Pictures and videos inside a file, found by carving's signature
+    carvers over its bytes (sized by structure, validated as carving
+    validates): the files a program, a document or the page file keeps
+    whole within itself. The file itself, when it is one, is not found
+    again; a photo's EXIF thumbnail is (AXIOM lists those)."""
+    from trace_app.core import carving, media_formats
+    found = []
+
+    def sink(content, file_type, position, fragments=None):
+        if position == 0 and len(content) == size:
+            return                    # the file itself
+        found.append((position, file_type, content))
+
+    def piece_reader(position, length):
+        return read(position, max(0, min(length, size - position)))
+    carver = carving.Carver(sink, wanted=INSIDE_TYPES, reader=piece_reader,
+                            image_size=size)
+    carver.alignment = 1
+    families = list(dict.fromkeys(
+        carving.EXTENSION_CARVER.get(kind, kind) for kind in INSIDE_TYPES))
+    families = [family for family in families
+                if family in carving.Carver.CARVERS]
+    position = 0
+    while position < size:
+        if looking['stop']():
+            raise VicsCancelled()
+        chunk = piece_reader(position, INSIDE_PIECE + carving.CARVE_OVERLAP)
+        if not chunk:
+            break
+        carver.own_end = min(position + INSIDE_PIECE, size)
+        for family in families:
+            try:
+                carving.Carver.CARVERS[family](carver, chunk, position)
+            except Exception as exc:
+                logger.debug("%s carver failed inside %s: %s", family,
+                             container['source_path'], exc)
+        carver.own_end = None
+        # Metafiles: carving has no carver for them; Office's clip-art and
+        # border files hold them whole (X-Ways lists each).
+        for offset, length, mime in media_formats.metafiles_in(
+                chunk, lambda at, length: piece_reader(position + at,
+                                                       length),
+                size - position):
+            if offset < INSIDE_PIECE and (position + offset, length) != \
+                    (0, size):
+                found.append((position + offset,
+                              media_formats.EXTENSIONS[mime],
+                              piece_reader(position + offset, length)))
+        while found:
+            offset, file_type, content = found.pop(0)
+            chain = [f"{offset:x}.{file_type}"]
+            candidate = _member_candidate(
+                container, chain, content, looking,
+                {'carved_inside': True, 'offset_in_file': offset})
+            if candidate is not None:
+                candidate['file_path'] = container['file_path']
+                yield candidate
+        position += INSIDE_PIECE
 
 
 def _carved_candidate(handler, row, source_id, reader):
@@ -783,10 +1019,13 @@ def export_folder(parent, case_number):
 def export(sources, folder, case_number='', contact=None,
            model=DEFAULT_MODEL, version='', scope=None,
            include_deleted=True, include_carved=True, min_size=0,
-           should_stop=None, progress=None):
+           should_stop=None, progress=None, inside=True,
+           carve_inside=False):
     """The whole export. `sources` is [(source id, handler, carved rows,
     marks)] -- `marks` (optional) {'categories': {artifact_ref: 0-4},
-    'comments': {artifact_ref: text}} from the case.
+    'comments': {artifact_ref: text}} from the case; a file inside another
+    takes neither from its container. `inside` / `carve_inside`: see
+    find_media.
     `progress(examined, bytes copied, what)`. Returns Package.finish's
     summary (cancelled=True when stopped: no JSON)."""
     state = {'before': 0, 'examined': 0, 'what': ''}
@@ -815,9 +1054,10 @@ def export(sources, folder, case_number='', contact=None,
             for candidate in find_media(
                     handler, source_id, scope, include_deleted,
                     carved if include_carved else (), min_size,
-                    should_stop, looked, reader):
-                candidate['category'] = categories.get(candidate['ref'])
-                candidate['comment'] = comments.get(candidate['ref'], '')
+                    should_stop, looked, reader, inside, carve_inside):
+                if not candidate.get('member'):
+                    candidate['category'] = categories.get(candidate['ref'])
+                    candidate['comment'] = comments.get(candidate['ref'], '')
                 package.add(candidate)
     except VicsCancelled:
         return package.finish(cancelled=True)

@@ -104,6 +104,24 @@ class VicsExportDialog(QDialog):
         self.carved_box.setToolTip("Pictures and videos carving found; "
                                    "marked Unallocated, with their offset")
         layout.addWidget(self.carved_box)
+        self.inside_box = QCheckBox(
+            "Include files inside archives, documents and browser caches")
+        self.inside_box.setChecked(True)
+        self.inside_box.setToolTip(
+            "Pictures and videos in ZIP, CAB, 7z and other archives, "
+            "mailboxes and messages, Office and PDF documents, Thumbs.db "
+            "and Firefox's cache block files -- each listed under the file "
+            "it was found in")
+        layout.addWidget(self.inside_box)
+        self.carve_inside_box = QCheckBox(
+            "Carve pictures from inside other files (slower)")
+        self.carve_inside_box.setChecked(False)
+        self.carve_inside_box.setToolTip(
+            "Pictures and videos found by their signature inside any file "
+            "-- a program's resources, a theme, the page file, a photo's "
+            "embedded preview -- as AXIOM and X-Ways do. Every file is read "
+            "whole.")
+        layout.addWidget(self.carve_inside_box)
 
         notes = ["Each picture is copied once, named by its MD5; every place "
                  "it was found is listed under it.",
@@ -157,6 +175,8 @@ class VicsExportDialog(QDialog):
                 'model': self.model_combo.currentData(),
                 'include_deleted': self.deleted_box.isChecked(),
                 'include_carved': self.carved_box.isChecked(),
+                'inside': self.inside_box.isChecked(),
+                'carve_inside': self.carve_inside_box.isChecked(),
                 'min_size': self.min_size.value() * 1024}
 
 

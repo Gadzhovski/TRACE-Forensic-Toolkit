@@ -5136,6 +5136,8 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   'version': __version__,
                   'include_deleted': options.get('include_deleted', True),
                   'include_carved': options.get('include_carved', True),
+                  'inside': options.get('inside', True),
+                  'carve_inside': options.get('carve_inside', False),
                   'min_size': options.get('min_size', 0)}
         if self.case is not None:
             params['case_folder'] = self.case.folder
