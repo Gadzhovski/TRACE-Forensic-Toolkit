@@ -122,3 +122,31 @@ def test_the_overview_links_and_lists_what_has_not_run(qapp):
     pump(qapp, 0.05)
     assert asked == [1]
     overview.deleteLater()
+
+
+def test_a_closed_case_is_never_counted(qapp, tmp_path, monkeypatch):
+    """TRACE closed as carving was cancelled: the recount timer fired and
+    a count already reading came back after the case was closed, and both
+    raised ('NoneType' object has no attribute 'execute')."""
+    import sys
+    from tests.conftest import close_window
+    from trace_app.core.case import Case
+    from trace_app.ui.main_window import MainWindow
+    raised = []
+    monkeypatch.setattr(sys, 'excepthook',
+                        lambda *info: raised.append(info))
+    window = MainWindow(case=Case.create(str(tmp_path / 'case'), 'Closing'))
+    try:
+        pump(qapp, 0.5)
+        window._schedule_artifacts()
+        generation = getattr(window, '_artifacts_generation', 0)
+        window.case.close()
+        pump(qapp, 1.0)                     # past the recount's debounce
+        window.refresh_artifacts()
+        window._artifacts_read(generation, {'found': {}, 'states': {},
+                                            'stopped': [], 'span': None})
+        assert raised == []
+    finally:
+        window.case = None                  # closed above, as cleanup would
+        close_window(window)
+    assert raised == []

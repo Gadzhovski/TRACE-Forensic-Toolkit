@@ -305,6 +305,11 @@ class Case:
         first."""
         return self._db is not None
 
+    @property
+    def is_open(self):
+        """False once close() has run."""
+        return self._db is not None
+
     def close(self):
         """Close the database. Safe to call more than once."""
         if self._db is not None:

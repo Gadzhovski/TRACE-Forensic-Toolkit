@@ -9317,10 +9317,19 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.core import artifact_catalogue as catalogue
         return self.run_artifact_scans([e.key for e in catalogue.entries()])
 
+    def _artifacts_live(self):
+        """Whether the navigator may read the case: not while the window
+        closes, nor once the case is closed -- the recount timer and a
+        count already reading used the closed case as TRACE closed
+        ('NoneType' has no attribute 'execute', Oct 2026)."""
+        return not getattr(self, '_closing', False) and \
+            self.case is not None and self.case.is_open and \
+            getattr(self, 'artifact_navigator', None) is not None
+
     def _schedule_artifacts(self, *_args):
         """Count again for the navigator and the Overview, once the burst of
         refreshes that asked has settled."""
-        if self.case is None or                 getattr(self, 'artifact_navigator', None) is None:
+        if not self._artifacts_live():
             return
         timer = getattr(self, '_artifacts_timer', None)
         if timer is None:
@@ -9335,7 +9344,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         results table) and show them in the navigator and the Overview."""
         from trace_app.ui.widgets.case_query import CaseQuery
         from trace_app.ui.widgets.kept_threads import KeptThreads
-        if self.case is None or self.artifact_navigator is None:
+        if not self._artifacts_live():
             return
         rows = self.case.evidence()
         self.artifact_navigator.set_evidence(
@@ -9363,8 +9372,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     @Slot(int, object)
     def _artifacts_read(self, generation, result):
         if generation != getattr(self, '_artifacts_generation', 0) or \
-                result is None or self.case is None or \
-                self.artifact_navigator is None:
+                result is None or not self._artifacts_live():
             return
         runs = [(run['key'], f"{run['tool']} {run['version']} — "
                              f"{run['evidence']}",
@@ -9738,6 +9746,12 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         try:
             if getattr(self, 'job_bar', None) is not None:
                 self.job_bar.close()
+            # The Artifacts recount: no new one, and the one reading ends
+            # before the case closes below (its result is dropped).
+            if getattr(self, '_artifacts_timer', None) is not None:
+                self._artifacts_timer.stop()
+            if getattr(self, '_artifact_reads', None):
+                self._artifact_reads.clear(timeout=30000)
             if getattr(self, 'vt_worker', None) is not None:
                 self.vt_worker.stop()
             from trace_app.ui.process_worker import (CLOSE_WAIT_MS,
