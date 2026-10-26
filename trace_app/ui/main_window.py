@@ -3544,7 +3544,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         def start(job):
             if not resume:
-                self.carved_panel.forget(key)
+                from trace_app.core.carving import replaced_sources
+                self.carved_panel.forget(key, replaced_sources(
+                    source or 'unallocated'))
             self.carved_panel.update_resume(running={evidence_id})
             worker = CarvingWorker(path, file_types,
                                    source in (None, 'unallocated'),
@@ -5258,6 +5260,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return [{'name': r.get('name') or '', 'offset': int(r['offset']),
                  'size': int(r['size']), 'type': r.get('type') or '',
                  'fragments': r.get('fragments') or None,
+                 'source': r.get('source') or 'unallocated',
                  # The ref tags and categories were put on: a rebuilt
                  # carve's spans its pieces, not offset + size.
                  'artifact_ref': r.get('artifact_ref') or ''}

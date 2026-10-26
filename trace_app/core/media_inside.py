@@ -161,6 +161,7 @@ def _database_members(content):
             tables = [row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'table' "
                 "AND name NOT LIKE 'sqlite_%'")]
+            urls = _cfurl_names(connection, tables)
             for table in tables:
                 try:
                     columns = [row[1] for row in connection.execute(
@@ -168,9 +169,36 @@ def _database_members(content):
                 except sqlite3.DatabaseError:
                     continue            # a virtual table's module is absent
                 for column in columns:
-                    yield from _blobs(connection, table, column)
+                    for name, value, modified in _blobs(connection, table,
+                                                        column):
+                        if table == 'cfurl_cache_receiver_data' and urls:
+                            rowid = int(name.split(' row ', 1)[1]
+                                        .split('.', 1)[0])
+                            name = urls.get(rowid, name)
+                        yield name, value, modified
     except sqlite3.DatabaseError as exc:
         logger.debug("Database not read: %s", exc)
+
+
+def _cfurl_names(connection, tables):
+    """Apple's URL cache (Safari's and every app's Cache.db): receiver
+    data row id -> the file name of the URL it was fetched from, from
+    cfurl_cache_response (entry_ID, request_key). A body kept on disk
+    instead (isDataOnFS, fsCachedData/<uuid>) is a file the walk sees."""
+    import sqlite3
+    if not {'cfurl_cache_receiver_data', 'cfurl_cache_response'} <= \
+            set(tables):
+        return {}
+    from trace_app.core.firefox_cache import url_name
+    try:
+        rows = connection.execute(
+            "SELECT d.rowid, r.request_key FROM cfurl_cache_receiver_data d "
+            "JOIN cfurl_cache_response r ON r.entry_ID = d.entry_ID")
+        return {rowid: url_name(str(key or ''), rowid)
+                for rowid, key in rows}
+    except sqlite3.DatabaseError as exc:
+        logger.debug("Cache.db URLs not read: %s", exc)
+        return {}
 
 
 def _blobs(connection, table, column):

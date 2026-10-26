@@ -359,6 +359,7 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
                 continue
             yield from _file_candidates(handler, entry, source_id, volumes,
                                         looking)
+    allocated = None
     for row in carved or ():
         if stop():
             raise VicsCancelled()
@@ -367,10 +368,20 @@ def find_media(handler, source_id, scope=None, include_deleted=True,
         if size < max(1, min_size):
             continue
         candidate = _carved_candidate(handler, row, source_id, reader)
-        if candidate is not None:
-            if progress is not None:
-                progress(examined, candidate['name'])
-            yield candidate
+        if candidate is None:
+            continue
+        if row.get('source') == 'image':
+            # A whole-image carve reads live files too: what lies in
+            # allocated space is not from unallocated space.
+            from trace_app.core.carving import Carver, allocation_map
+            if allocated is None:
+                allocated = allocation_map(handler)
+            if Carver.is_offset_allocated(int(row['offset']), size,
+                                          allocated):
+                candidate['unallocated'] = False
+        if progress is not None:
+            progress(examined, candidate['name'])
+        yield candidate
 
 
 #: Deleted files whose bytes are still their own (core/deleted.py).
@@ -474,7 +485,7 @@ def _candidates(handler, offset, inode, name, path, ref, deleted, source_id,
     folder = path.rpartition('/')[0]
     file_path = _windows_path(source_id, volumes.get(offset, ''), folder)
     source_path = (f"{volumes[offset]}" if offset in volumes else '') + path
-    size, read = _cache2_data(path, size, read)
+    size, read, head = _cache_entry_data(path, head, size, read)
     if size >= looking['smallest']:
         mime = media_type(head, name, reader, size, read)
         if mime is not None:
@@ -494,14 +505,33 @@ def _candidates(handler, offset, inode, name, path, ref, deleted, source_id,
                  'source_path': source_path, 'ref': ref,
                  'deleted': deleted, 'source_id': source_id}
     if looking['inside']:
+        from trace_app.core.chrome_cache import is_index
         from trace_app.core.firefox_cache import MAP_NAME
-        if not deleted and name.upper() == MAP_NAME:
-            yield from _firefox_cache(handler, offset, folder, container,
+        if not deleted and (name.upper() == MAP_NAME or (
+                name == 'index' and is_index(head))):
+            yield from _browser_cache(handler, offset, folder, container,
                                       looking)
         yield from _inside(handler, offset, inode, size, head, read,
                            container, looking)
     if looking['carve_inside']:
-        yield from _carved_inside(size, head, read, container, looking)
+        from trace_app.core import hiberfil
+        if hiberfil.is_hibernation_name(name):
+            yield from _hibernated(size, read, container, looking)
+        else:
+            yield from _carved_inside(size, head, read, container, looking)
+
+
+def _hibernated(size, read, container, looking):
+    """Pictures in a Windows XP-7 hibernation file's memory, carved
+    from each Xpress block decompressed (core/hiberfil); named '<block
+    offset>+<offset in it>.<type>'."""
+    from trace_app.core import hiberfil
+    for at, pages in hiberfil.blocks(read, size, looking['stop']):
+        yield from _carved_inside(
+            len(pages), pages[:HEAD],
+            lambda position, length, pages=pages:
+            pages[position:position + length],
+            container, looking, prefix=f'{at:x}+')
 
 
 def _member_candidate(container, chain, content, looking, extra=None):
@@ -567,15 +597,23 @@ def _inside(handler, offset, inode, size, head, read, container, looking):
             yield candidate
 
 
-def _firefox_cache(handler, offset, folder, container, looking):
-    """The objects Firefox kept in its cache block files beside this
-    `_CACHE_MAP_`, each under its block file and the URL's file name."""
-    from trace_app.core import firefox_cache
+def _browser_cache(handler, offset, folder, container, looking):
+    """The objects a browser kept in its cache's block files beside this
+    `_CACHE_MAP_` (Firefox) or `index` (Chromium's blockfile cache), each
+    under its block file and the URL's file name."""
+    from trace_app.core import chrome_cache, firefox_cache
+
+    def read_file(name):
+        return handler.read_path(offset, f"{folder}/{name}")
+    if container['name'] == 'index':
+        entries = chrome_cache.Cache(read_file).entries()
+        times = (('Created', 'created'),)
+    else:
+        entries = firefox_cache.Cache(read_file).entries()
+        times = (('Written', 'last_modified'), ('Accessed', 'last_fetched'))
     parent = container['file_path'].rpartition('\\')[0]
-    cache = firefox_cache.Cache(
-        lambda name: handler.read_path(offset, f"{folder}/{name}"))
     try:
-        for entry in cache.entries():
+        for entry in entries:
             if looking['stop']():
                 raise VicsCancelled()
             block = {'file_path': _windows_path(parent, entry['block_file']),
@@ -583,41 +621,59 @@ def _firefox_cache(handler, offset, folder, container, looking):
                          '/')[0] + '/' + entry['block_file'],
                      'ref': container['ref'], 'deleted': False,
                      'source_id': container['source_id']}
-            times = {}
-            for key, field in (('Written', 'last_modified'),
-                               ('Accessed', 'last_fetched')):
+            shown = {}
+            for key, field in times:
                 text = iso_time(entry.get(field))
                 if text:
-                    times[key] = text
+                    shown[key] = text
             candidate = _member_candidate(
                 block, [entry['name']], entry['content'], looking,
-                {'times': times, 'url': entry['key']})
+                {'times': shown, 'url': entry['key']})
             if candidate is not None:
                 yield candidate
     except firefox_cache.CacheError as exc:
-        logger.debug("Not a Firefox cache: %s: %s", container['source_path'],
-                     exc)
+        logger.debug("Not a browser cache: %s: %s",
+                     container['source_path'], exc)
 
 
-def _cache2_data(path, size, read):
-    """(size, read) of a Firefox cache2 entry's data -- the file is the
-    object followed by its metadata, whose offset the last 4 bytes hold
-    (big-endian) -- else what was given."""
+def _cache_entry_data(path, head, size, read):
+    """(size, read, head) of the object a browser cache entry file holds
+    when it holds more than the object, else what was given:
+
+    * a Firefox cache2 entry is the object then its metadata, whose offset
+      the last 4 bytes hold (big-endian);
+    * a Chromium simple-cache entry is a header and the URL, the body,
+      then the headers (core/chrome_cache.simple_body)."""
+    from trace_app.core import chrome_cache
+    if chrome_cache.is_simple_entry(head):
+        try:
+            found = chrome_cache.simple_body(read, size)
+        except Exception as exc:
+            logger.debug("Simple cache entry not read: %s: %s", path, exc)
+            found = None
+        if found is None:
+            return size, read, head
+        start, length = found[0], found[1]
+
+        def body(position, count):
+            return read(start + position,
+                        max(0, min(count, length - position)))
+        return length, body, body(0, HEAD)
     if '/cache2/entries/' not in path.replace('\\', '/').lower() or size < 8:
-        return size, read
+        return size, read, head
     try:
         end = int.from_bytes(read(size - 4, 4), 'big')
     except Exception:
-        return size, read
+        return size, read, head
     # The metadata after the data: a hash per 256 KB chunk (4 bytes for
     # the whole, 2 per chunk), then its own header -- it fits the file.
     chunks = (end + 262143) // 262144
     if not 0 < end < size or end + 4 + 2 * chunks + 4 > size:
-        return size, read
+        return size, read, head
 
     def data(position, length):
         return read(position, max(0, min(length, end - position)))
-    return end, data
+    return end, data, head
 
 
 # --- pictures carved from inside files --------------------------------------
@@ -630,12 +686,13 @@ INSIDE_TYPES = ('jpg', 'png', 'gif', 'bmp', 'tiff', 'avi', 'wmv', 'mp4',
 INSIDE_PIECE = 16 * 1024 * 1024
 
 
-def _carved_inside(size, head, read, container, looking):
+def _carved_inside(size, head, read, container, looking, prefix=''):
     """Pictures and videos inside a file, found by carving's signature
     carvers over its bytes (sized by structure, validated as carving
     validates): the files a program, a document or the page file keeps
     whole within itself. The file itself, when it is one, is not found
-    again; a photo's EXIF thumbnail is (AXIOM lists those)."""
+    again; a photo's EXIF thumbnail is (AXIOM lists those). Each is named
+    `prefix` + its offset in hex + its type."""
     from trace_app.core import carving, media_formats
     found = []
 
@@ -681,7 +738,7 @@ def _carved_inside(size, head, read, container, looking):
                               piece_reader(position + offset, length)))
         while found:
             offset, file_type, content = found.pop(0)
-            chain = [f"{offset:x}.{file_type}"]
+            chain = [f"{prefix}{offset:x}.{file_type}"]
             candidate = _member_candidate(
                 container, chain, content, looking,
                 {'carved_inside': True, 'offset_in_file': offset})

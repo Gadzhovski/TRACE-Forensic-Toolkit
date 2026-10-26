@@ -521,3 +521,131 @@ def test_pictures_kept_as_blobs_in_a_database_are_exported(tmp_path):
     assert places == {('EXHIBIT 1\\app.db', 'contacts.photo row 7.png'),
                       ('EXHIBIT 1\\app.db', 'notes.body row 1.jpg')}
     assert md5(avatar) in media and md5(thumb) in media
+
+
+def test_safari_cache_db_bodies_are_named_by_their_url(tmp_path):
+    """Apple's URL cache (Safari's and every app's Cache.db), as its
+    tables are laid out: a body kept inline is named from the URL it was
+    fetched from; one kept on disk (isDataOnFS) is a file of its own."""
+    import sqlite3
+    root = tmp_path / 'evidence' / 'Library' / 'Caches' / 'com.apple.Safari'
+    root.mkdir(parents=True)
+    photo = picture('JPEG', 'orange')
+    connection = sqlite3.connect(str(root / 'Cache.db'))
+    connection.executescript(
+        "CREATE TABLE cfurl_cache_response(entry_ID INTEGER PRIMARY KEY "
+        "AUTOINCREMENT UNIQUE, version INTEGER, hash_value INTEGER, "
+        "storage_policy INTEGER, request_key TEXT UNIQUE, time_stamp NOT "
+        "NULL DEFAULT CURRENT_TIMESTAMP, partition TEXT);"
+        "CREATE TABLE cfurl_cache_receiver_data(entry_ID INTEGER PRIMARY "
+        "KEY, isDataOnFS INTEGER, receiver_data BLOB);")
+    connection.execute("INSERT INTO cfurl_cache_response (entry_ID, "
+                       "request_key) VALUES (3, 'https://news.example/img/"
+                       "front%20page.jpg?w=300')")
+    connection.execute("INSERT INTO cfurl_cache_receiver_data VALUES "
+                       "(3, 0, ?)", (photo,))
+    connection.execute("INSERT INTO cfurl_cache_response (entry_ID, "
+                       "request_key) VALUES (4, 'https://news.example/big')")
+    connection.execute("INSERT INTO cfurl_cache_receiver_data VALUES "
+                       "(4, 1, 'C2A3B1E4-0000-4000-8000-000000000000')")
+    connection.commit()
+    connection.close()
+    media = _export(str(tmp_path / 'evidence'), tmp_path / 'out')
+    place, = media[md5(photo)]['MediaFiles']
+    assert place['FileName'] == 'front page.jpg'
+    assert place['FilePath'].endswith('com.apple.Safari\\Cache.db')
+
+
+# --- Chromium's disk caches -------------------------------------------------------
+
+CHROME_CACHE = ('index', 'data_0', 'data_1', 'data_2', 'data_3')
+
+
+def _chrome_cache_files():
+    from tests.conftest import data_path
+    out = {}
+    for name in CHROME_CACHE:
+        with open(data_path('samples', f'chrome-cache-{name}'), 'rb') as f:
+            out[name] = f.read()
+    return out
+
+
+def test_chrome_blockfile_cache_entries_are_read():
+    """plaso's Chrome cache: every entry the index holds; the bodies kept
+    in block files; each one whose HTTP headers say image/... is a
+    picture, and nothing else is."""
+    from trace_app.core import chrome_cache, vics
+    from trace_app.core.analysis import magic_reader
+    files = _chrome_cache_files()
+    cache = chrome_cache.Cache(files.get)
+    assert sum(1 for _a in cache._entry_addresses()) == 217
+    entries = list(cache.entries())
+    assert len(entries) == 106
+    reader = magic_reader()
+    images = [e for e in entries if e['content_type'].startswith('image/')]
+    assert len(images) == 36
+    for entry in entries:
+        is_picture = vics.media_type(entry['content'][:4096], entry['name'],
+                                     reader, len(entry['content']))
+        assert bool(is_picture) == entry['content_type'].startswith('image/')
+    # Sent gzip'd, stored gzip'd, given decoded.
+    packed = [e for e in entries if e['encoding'] == 'gzip']
+    assert packed and not any(e['content'][:2] == b'\x1f\x8b'
+                              for e in packed)
+
+
+def test_chrome_cache_pictures_are_exported(tmp_path):
+    from trace_app.core import chrome_cache
+    root = tmp_path / 'evidence'
+    cache = root / 'Chrome' / 'Default' / 'Cache'
+    cache.mkdir(parents=True)
+    files = _chrome_cache_files()
+    for name, data in files.items():
+        (cache / name).write_bytes(data)
+    pictures = {md5(e['content']) for e in
+                chrome_cache.Cache(files.get).entries()
+                if e['content_type'].startswith('image/')}
+    media = _export(str(root), tmp_path / 'out')
+    assert pictures <= set(media)
+    places = [f for m in media.values() for f in m['MediaFiles']]
+    assert all(re_block(f['FilePath']) for f in places)
+    assert all('Created' in f for f in places)
+
+
+def re_block(path):
+    import re
+    return re.search(r'\\Cache\\data_[0-3]$', path) is not None
+
+
+def simple_entry(key, body, headers, crc=True):
+    """A Chromium simple-cache entry file (simple_entry_format.h)."""
+    stream0 = (b'\x00' * 8 + b'HTTP/1.1 200 OK\x00' +
+               b'\x00'.join(f'{k}: {v}'.encode() for k, v in
+                            headers.items()) + b'\x00\x00')
+    header = struct.pack('<QIIII', 0xFCFB6D1BA7725C30, 5, len(key), 0, 0)
+    eof1 = struct.pack('<QIIII', 0xF4FA6F45970D41D8, 1 if crc else 0,
+                       zlib.crc32(body) if crc else 0, 0, 0)
+    eof0 = struct.pack('<QIIII', 0xF4FA6F45970D41D8, 0, 0, len(stream0), 0)
+    return header + key + body + eof1 + stream0 + eof0
+
+
+def test_a_simple_cache_entry_is_its_body(tmp_path):
+    """The picture is after the entry's header and URL: the walk sees no
+    picture at the file's start; the body is exported, proved by its
+    CRC-32 -- one whose CRC fails is not taken for one."""
+    root = tmp_path / 'evidence'
+    cache = root / 'Cache_Data'
+    cache.mkdir(parents=True)
+    png = picture('PNG', 'blue')
+    key = b'1/0/_dk_https://a.example https://a.example/logo.png'
+    (cache / '0123456789abcdef_0').write_bytes(
+        simple_entry(key, png, {'Content-Type': 'image/png'}))
+    red = picture('PNG', 'red')
+    bad = bytearray(simple_entry(key, red, {'Content-Type': 'image/png'}))
+    bad[24 + len(key) + 40] ^= 0xFF          # inside the body: CRC fails
+    (cache / 'fedcba9876543210_0').write_bytes(bytes(bad))
+    media = _export(str(root), tmp_path / 'out')
+    place, = media[md5(png)]['MediaFiles']
+    assert place['FileName'] == '0123456789abcdef_0'
+    changed = bytes(bad[24 + len(key):24 + len(key) + len(red)])
+    assert md5(red) not in media and md5(changed) not in media

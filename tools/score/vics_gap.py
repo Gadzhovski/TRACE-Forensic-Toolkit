@@ -7,6 +7,7 @@ at each such sector, finds the picture there, and asks TRACE's own carving
 why it did not keep it:
 
     python tools/score/vics_gap.py IMAGE LISTING.csv [--json OUT]
+                                   [--unaligned]
 
 LISTING.csv: the other tool's rows (columns File Name, MD5, File Size,
 Mime Type) -- a 'missing from TRACE' list, or the whole listing. TRACE's
@@ -66,8 +67,9 @@ def listing(path):
     return out
 
 
-def trace_carves(handler, cache):
-    """{offset: [type, length, md5]} of TRACE's carve of the image."""
+def trace_carves(handler, cache, unaligned=False):
+    """{offset: [type, length, md5]} of TRACE's carve of the image
+    (`unaligned`: as with the case setting carve_unaligned_pictures)."""
     if os.path.exists(cache):
         with open(cache, encoding='utf-8') as handle:
             return {int(k): v for k, v in json.load(handle).items()}
@@ -82,7 +84,9 @@ def trace_carves(handler, cache):
         print(f"\r  carving {position * 100 // max(size, 1):3d}%  "
               f"{count:,} found", end='', file=sys.stderr, flush=True)
     carving.carve_image(handler, sorted(export_readiness.media_carve_types()),
-                        sink, unallocated_only=True, progress=progress)
+                        sink, unallocated_only=True, progress=progress,
+                        unaligned=carving.UNALIGNED_FAMILIES if unaligned
+                        else ())
     print(file=sys.stderr)
     with open(cache, 'w', encoding='utf-8') as handle:
         json.dump(found, handle)
@@ -146,6 +150,9 @@ def main(argv=None):
     parser.add_argument('image')
     parser.add_argument('listing')
     parser.add_argument('--json', help="write each item's diagnosis here")
+    parser.add_argument('--unaligned', action='store_true',
+                        help="carve pictures at any byte, as the case "
+                             "setting carve_unaligned_pictures does")
     args = parser.parse_args(argv)
     from trace_app.core import carving
     from trace_app.core.image_handler import ImageHandler
@@ -154,7 +161,10 @@ def main(argv=None):
         sys.exit(f"Could not open {args.image}")
     items = listing(args.listing)
     print(f"{len(items):,} carved pictures and videos named by sector")
-    carves = trace_carves(handler, args.image + '.trace-carves.json')
+    carves = trace_carves(
+        handler, args.image + ('.trace-carves-unaligned.json'
+                               if args.unaligned else '.trace-carves.json'),
+        args.unaligned)
     traced = {md5 for _type, _length, md5 in carves.values()}
     print(f"TRACE carved {len(carves):,}")
     allocated = carving.allocation_map(handler)

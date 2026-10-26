@@ -210,6 +210,24 @@ SAMPLES = {
     'chrome-Web-Data': (
         _PLASO + 'chrome/Web Data',
         '7779fb8b6dab0d38fd41df3dacfd9f5ca96ec1ee5ecece6b9d276a786bc23812'),
+    # A Chrome blockfile disk cache: the index and its four block files
+    # (tests/test_media_inside.py; the f_ files are left out -- a body in
+    # a file of its own is the file walk's).
+    'chrome-cache-index': (
+        _PLASO + 'chrome_cache/index',
+        '963537b9429c0aefbdd170150971a7df9d2efeb4ce3313623aaa0913885f9c2a'),
+    'chrome-cache-data_0': (
+        _PLASO + 'chrome_cache/data_0',
+        '2a3ff729e2942c362328b1b01989cb06eaba69e376fc1d3dd8299e32cddf5294'),
+    'chrome-cache-data_1': (
+        _PLASO + 'chrome_cache/data_1',
+        'c5140537346778be899f8879812eb263e6acfe8c98e0164c3605e0e691bef9e3'),
+    'chrome-cache-data_2': (
+        _PLASO + 'chrome_cache/data_2',
+        '4b965170b1df4530326d6dcaf5e1b7f95eca6066eed4c68b24375b7c48ff620c'),
+    'chrome-cache-data_3': (
+        _PLASO + 'chrome_cache/data_3',
+        'a2f6c54d3eb0d7b36a830ca8825d7e43d78abae98d99cec3acd5bfcc468c3ade'),
     'chromium-login_db_v43.sql': (
         _CHROMIUM + 'password_manager/login_db_v43.sql',
         'e87a53b058df2db9722c4bc742f4210b5ec807ba37edf25487bd3af5cbc3e445'),

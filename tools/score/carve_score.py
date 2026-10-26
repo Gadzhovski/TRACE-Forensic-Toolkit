@@ -7,6 +7,8 @@ what came back against ground truth transcribed from the test author's own key.
 
     python tools/score/carve_score.py                     # every known image
     python tools/score/carve_score.py 11-carve-fat.dd     # just one
+    python tools/score/carve_score.py --unaligned         # pictures at any
+                                                          # byte as well
 
 Exit status is non-zero if any image scores below its recorded baseline, so
 this can gate a change that would lose a file.
@@ -94,12 +96,14 @@ REBUILT_BASELINE = {
 OFFSET_TOLERANCE = 0
 
 
-def carve_image(path):
+def carve_image(path, unaligned=False):
     """Run every carver over `path`, returning [(type, offset, bytes)].
 
     The whole image, every type, no allocation map: the answer keys list
     files wherever they lie, and the score is of the carvers themselves --
     the same Carver class (trace_app/core/carving.py) an examiner runs.
+    `unaligned`: pictures looked for at every byte, as the case setting
+    carve_unaligned_pictures asks (carving.UNALIGNED_FAMILIES).
     """
     found = []
     with open(path, 'rb') as handle:
@@ -108,6 +112,10 @@ def carve_image(path):
                     found.append((file_type, offset, content, fragments)),
                     reader=lambda offset, length: data[offset:offset + length],
                     image_size=len(data))
+    if unaligned:
+        from trace_app.core.carving import UNALIGNED_FAMILIES
+        carver.family_alignment = {family: 1
+                                   for family in UNALIGNED_FAMILIES}
 
     # As the engine runs them (carving._carve_image): containers first, in
     # its order, and each read owning only its own chunk -- the read-ahead
@@ -242,7 +250,8 @@ def main():
     with open(TRUTH, encoding='utf-8') as handle:
         truth = json.load(handle)
 
-    wanted = sys.argv[1:]
+    wanted = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
+    unaligned = '--unaligned' in sys.argv[1:]
     names = [n for n in truth if not n.startswith('_')]
     if wanted:
         names = [n for n in names if n in wanted]
@@ -259,7 +268,8 @@ def main():
         if not path or not os.path.exists(path):
             print(f"\n=== {name}\n    not present in test_images/ -- skipped")
             continue
-        hits, total, base = score(name, truth[name], carve_image(path))
+        hits, total, base = score(name, truth[name],
+                                  carve_image(path, unaligned))
         if hits < 0 or (base is not None and hits < base):
             regressed = True
 
