@@ -83,9 +83,12 @@ _NAMES = (
                                                     'Contact')),
     # Messages -- not their attachments, users, settings or a database's
     # leftovers (names from iLEAPP 2026.4: 'IMO HD Chat - Key Values',
-    # 'Twitter X - Direct Message Users', 'iOS Message Retention').
+    # 'Twitter X - Direct Message Users', 'iOS Message Retention'), nor a
+    # log's lines (DLEAPP 2026.4.4 on a Mac: 'ASL Messages', 'Diagnostic
+    # Messages (ASL)' -- 9,994 log lines read as chats).
     (r'^(?!.*\b(attachments?|media|missing|strings|rowids?|wal|users?|'
-     r'key ?values?|retention|settings|preferences|config\w*)\b).*'
+     r'key ?values?|retention|settings|preferences|config\w*|asl|'
+     r'syslog|logs?|diagnostics?|console|kernel)\b).*'
      r'\b(messages?|chats?|sms|mms|imessages?)\b',
      _e('communication', 'Message {direction}', '',
         ('message', 'body', 'text', 'content', 'message_body',

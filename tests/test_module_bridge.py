@@ -1076,3 +1076,46 @@ def test_a_time_that_cannot_be_read_stays_a_detail(case):
     row, = case.user_activity(case.phone)
     assert not row['time_utc']
     assert '03/21/20 14:38:54.943217' in row['detail'].values()
+
+
+def test_log_messages_are_not_chats():
+    """DLEAPP 2026.4.4 on the Magnet 2021 Mac: 'ASL Messages' and
+    'Diagnostic Messages (ASL)' are 9,994 Apple System Log lines -- read
+    by the messages name rule as chats until it excluded logs."""
+    for name in ('ASL Messages', 'Diagnostic Messages (ASL)',
+                 'Kernel Log Messages', 'Syslog Messages'):
+        assert routes.route('DLEAPP', {'name': name, 'columns': []}).role \
+            == 'other', name
+    # Chats keep their route.
+    for name in ('Signal Messages', 'Discord - Messages', 'iMessage'):
+        assert routes.route('DLEAPP', {'name': name, 'columns': []}).what \
+            == 'Message {direction}', name
+
+
+def test_a_row_read_from_several_copies_previews_the_one_staged(tmp_path):
+    """DLEAPP 2026.4.4 names every copy of a Mac file a record was read
+    from, a line each ('Users/x/knowledgeC.db' and its
+    'System/Volumes/Update/mnt1/...' twin): the row still finds its
+    evidence file through the staging manifest."""
+    import csv
+    from trace_app.core.modules import stage
+    from trace_app.ui.main_window import MainWindow
+    manifest = tmp_path / stage.MANIFEST
+    with open(manifest, 'w', newline='', encoding='utf-8') as handle:
+        writer = csv.DictWriter(handle, fieldnames=stage.MANIFEST_COLUMNS,
+                                extrasaction='ignore')
+        writer.writeheader()
+        writer.writerow({'staged_path': 'Users/x/knowledgeC.db',
+                         'evidence_id': '3', 'artifact_ref': 'p0:i9:s1',
+                         'source_path': '/Users/x/knowledgeC.db'})
+
+    class Window:
+        pass
+    window = Window()
+    window._module_source = MainWindow._module_source.__get__(window)
+    found = window._module_source(
+        {'manifest': str(manifest), 'input': {}},
+        'System/Volumes/Update/mnt1/Users/x/knowledgeC.db\n'
+        'Users/x/knowledgeC.db')
+    assert found['artifact_ref'] == 'p0:i9:s1'
+    assert found['evidence_id'] == 3

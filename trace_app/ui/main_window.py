@@ -5768,6 +5768,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """The evidence file a staged path came from (the run's staging
         manifest), as a row previews and the Listing take."""
         from trace_app.core.modules import stage
+        # One record read from several copies of a file names them all, a
+        # line each (DLEAPP 2026.4.4 on a Mac: /Users and
+        # /System/Volumes/Data/Users are one file): the first staged one.
+        paths = [part for part in staged_path.splitlines() if part.strip()]
+        if len(paths) > 1:
+            return next((found for found in (
+                self._module_source(run, part) for part in paths)
+                if found), None)
         cache = self.__dict__.setdefault('_module_manifests', {})
         key = run['manifest']
         if key not in cache:
