@@ -2383,6 +2383,38 @@ QLabel#pageHint {
     color: #6c757d;
     font-size: 11px;
 }
+/* Case Overview (ui/viewers/case_overview.py): the page a case opens on;
+   cards as the pages' cards, tiles that open what they count. */
+QScrollArea#caseOverview,
+QWidget#overviewBody {
+    background-color: #FFFFFF;
+    border: none;
+}
+QFrame#overviewTile {
+    background-color: #FAFBFC;
+    border: 1px solid #E9ECEF;
+    border-radius: 6px;
+}
+QFrame#overviewTile:hover {
+    border-color: #0D6EFD;
+}
+QFrame#overviewTile QLabel {
+    background-color: transparent;
+}
+QLabel#overviewNumber {
+    font-size: 26px;
+    font-weight: 600;
+    color: #212529;
+}
+QLabel#overviewWarning {
+    color: #B45309;
+    font-weight: 600;
+}
+/* The Artifacts tab beside the evidence tree (ui/widgets/artifact_navigator). */
+QLabel#artifactHint {
+    color: #6c757d;
+    font-size: 11px;
+}
 /* What an export will lack because a scan has not run
    (ui/widgets/readiness_banner). */
 QFrame#readinessBanner {

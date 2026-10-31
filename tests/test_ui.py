@@ -2912,3 +2912,76 @@ def test_the_tree_and_the_tabs_count_alike(qapp, window):
         for j in range(activity.childCount()):
             child = activity.child(j).text(0)
             assert number(child) == kinds[label(child)], child
+
+
+def _artifacts_read(qapp, window):
+    navigator = window.artifact_navigator
+    navigator._found = {}
+    window.refresh_artifacts()
+    assert pump(qapp, 30, lambda: bool(navigator._found))
+    return navigator
+
+
+def test_the_artifacts_navigator_counts_as_the_tabs(qapp, window):
+    """The navigator and the Overview give the Triage tabs' numbers, for
+    the case and for one image."""
+    import re
+    window.refresh_analysis_views()
+    pump(qapp, 2)
+    navigator = _artifacts_read(qapp, window)
+    triage = window.triage_panel.tabs
+    tabs = {}
+    for i in range(triage.count()):
+        found = re.match(r'(.*?)\s*\(([\d,]+)\)\s*$', triage.tabText(i))
+        if found:
+            tabs[found.group(1)] = int(found.group(2).replace(',', ''))
+    same = {'photos': 'Photos', 'executables': 'Executables',
+            'hidden': 'Hidden data', 'duplicates': 'Duplicates',
+            'mismatch': 'Type mismatches', 'entropy': 'High entropy',
+            'authors': 'Authors', 'carved': 'Carved files',
+            'deleted': 'Deleted files', 'sigma': 'Sigma', 'yara': 'YARA'}
+    compared = 0
+    for key, tab in same.items():
+        if tab in tabs:
+            assert (navigator._found.get(key) or 0) == tabs[tab], key
+            compared += 1
+    assert compared
+    key = max(same, key=lambda k: navigator._found.get(k) or 0)
+    assert navigator._found[key]
+    # One image: never more than the case, and the two images add up.
+    totals = []
+    for evidence_id in (row['id'] for row in window.case.evidence()):
+        navigator.evidence.setCurrentIndex(
+            navigator.evidence.findData(evidence_id))
+        window.refresh_artifacts()
+        assert pump(qapp, 30, lambda: navigator.evidence_id == evidence_id
+                    and window._artifact_reads is not None
+                    and not window._artifact_reads)
+        pump(qapp, 0.3)
+        totals.append(navigator._found[key])
+    navigator.evidence.setCurrentIndex(0)
+    assert sum(totals) == _artifacts_read(qapp, window)._found[key]
+
+
+def test_an_artifact_opens_where_it_is_listed(qapp, window):
+    from trace_app.core import artifact_catalogue as catalogue
+    navigator = _artifacts_read(qapp, window)
+    window.open_artifact('photos')
+    assert window.result_viewer.currentWidget() is window.triage_panel
+    current = window.triage_panel.tabs.currentIndex()
+    assert window.triage_panel._tab_for['photos'] == current
+    window.open_artifact('activity:browser', None)
+    assert window.result_viewer.currentWidget() is window.activity_panel
+    window.open_artifact('registry')
+    assert window.result_viewer.currentWidget() is \
+        window.registry_extractor_widget
+    window.open_artifact('overview')
+    assert window.result_viewer.currentWidget() is window.case_overview
+    # Every Triage target names a sub-tab the panel has.
+    for entry in catalogue.entries():
+        if entry.opens[0] == 'triage':
+            name = entry.opens[1]
+            name = 'hashes' if name.startswith('hash') else \
+                name.split(':')[0]
+            assert name in window.triage_panel._tab_for, entry.key
+    navigator.select('photos')
