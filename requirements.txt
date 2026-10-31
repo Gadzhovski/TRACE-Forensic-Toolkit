@@ -48,9 +48,13 @@ libmsiecf-python>=20260525  # Internet Explorer index.dat history
 
 # --- Evidence parsing ------------------------------------------------------
 python-registry>=1.3.1   # Windows registry hives
-PyMuPDF>=1.24.3          # PDF rendering, validation and metadata; 1.24.3
+PyMuPDF>=1.24.3 ; sys_platform != 'darwin' or platform_machine != 'x86_64'
+                         # PDF rendering, validation and metadata; 1.24.3
                          # introduced the `pymupdf` module name (`fitz` is
                          # deprecated and slated for removal)
+PyMuPDF>=1.24.3,<2 ; sys_platform == 'darwin' and platform_machine == 'x86_64'
+                         # 2.0 has no Intel Mac wheel: pip built it from
+                         # source there and the download of MuPDF timed out
 Pillow>=11.3.0           # image decoding and EXIF; 11.3 is the first whose
                          # wheels decode AVIF, which the Application tab shows
 charset-normalizer>=3.3.0 # text encoding: which code page a file was
@@ -74,9 +78,12 @@ pi-heif>=1.4.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 yara-x>=1.0.0 ; sys_platform != 'win32' or platform_machine != 'ARM64'
 # Sigma rules are YAML. No Windows ARM64 wheel before Python 3.12.
 PyYAML>=6.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.12'
-cryptography>=46.0.3 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11'
+cryptography>=46.0.3 ; (sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11') and (sys_platform != 'darwin' or platform_machine != 'x86_64')
                          # AES for encrypted iPhone backups (password given
                          # by the examiner); Windows on ARM wheels from 3.11
+cryptography>=46.0.3,<49 ; sys_platform == 'darwin' and platform_machine == 'x86_64'
+                         # 49 has no Intel Mac wheel (48.0.1's universal2
+                         # is the last): pip compiled it with Rust there
 msoffcrypto-tool>=5.4.2 ; sys_platform != 'win32' or platform_machine != 'ARM64' or python_version >= '3.11'
                          # password-protected Office documents, decrypted in
                          # memory with the examiner's password (MIT, pure
