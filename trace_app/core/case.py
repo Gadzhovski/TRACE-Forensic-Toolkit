@@ -47,7 +47,7 @@ CASE_SUBDIRS = ('carved', 'exports', 'thumbnails')
 #: Bumped when the schema changes; _migrate() applies steps in order. Existing
 #: cases must keep opening, so this exists from the first release rather than
 #: being retrofitted once there is data to lose.
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 #: Status values recorded against a piece of evidence.
 STATUS_PENDING = 'pending'      # added, not yet hashed
@@ -303,6 +303,11 @@ class Case:
         """Whether the database is still open: a signal arriving after the
         window closed the case (a panel's load finishing) asks this
         first."""
+        return self._db is not None
+
+    @property
+    def is_open(self):
+        """False once close() has run."""
         return self._db is not None
 
     def close(self):
@@ -2674,25 +2679,50 @@ class Case:
                             f"{evidence_id}-{safe}" if safe else
                             str(evidence_id))
 
-    def clear_carved(self, evidence_id):
-        """Forget a previous carve of one piece of evidence.
+    def clear_carved(self, evidence_id, sources=None):
+        """Forget a previous carve of one piece of evidence -- every one,
+        or only the carves of `sources` (carving.SOURCES; a carve recorded
+        before sources were counts as 'unallocated').
 
         The rows only: copies already written or exported stay where they
         are.
         """
-        self._db.execute("DELETE FROM carved_files WHERE evidence_id = ?",
-                         (evidence_id,))
-        # And what the carve's analysis found in them.
-        for table in ('file_analysis', 'file_findings'):
-            self._db.execute(f"DELETE FROM {table} WHERE evidence_id = ? AND "
-                             f"path LIKE '{CARVED_PATHS}'", (evidence_id,))
-        # And the file-system events its MFT and index records gave
-        # (core/carved_artifacts).
         from trace_app.core.carved_artifacts import FS_SOURCES
+        if sources is None:
+            self._db.execute("DELETE FROM carved_files WHERE "
+                             "evidence_id = ?", (evidence_id,))
+            # And what the carve's analysis found in them.
+            for table in ('file_analysis', 'file_findings'):
+                self._db.execute(
+                    f"DELETE FROM {table} WHERE evidence_id = ? AND "
+                    f"path LIKE '{CARVED_PATHS}'", (evidence_id,))
+            # And the file-system events its MFT and index records gave
+            # (core/carved_artifacts).
+            self._db.execute(
+                f"DELETE FROM fs_events WHERE evidence_id = ? AND source IN "
+                f"({','.join('?' * len(FS_SOURCES))})",
+                (evidence_id,) + FS_SOURCES)
+            self._db.commit()
+            return
+        sources = tuple(sources)
+        which = (f"evidence_id = ? AND (source IN "
+                 f"({','.join('?' * len(sources))})"
+                 + (" OR source IS NULL OR source = ''"
+                    if 'unallocated' in sources else '') + ")")
+        refs = f"SELECT artifact_ref FROM carved_files WHERE {which}"
+        values = (evidence_id,) + sources
+        # What the analysis and the carved records gave carry the carve's
+        # span ref: theirs go with it, the other sources' stay.
+        for table in ('file_analysis', 'file_findings'):
+            self._db.execute(
+                f"DELETE FROM {table} WHERE evidence_id = ? AND path LIKE "
+                f"'{CARVED_PATHS}' AND artifact_ref IN ({refs})",
+                (evidence_id,) + values)
         self._db.execute(
             f"DELETE FROM fs_events WHERE evidence_id = ? AND source IN "
-            f"({','.join('?' * len(FS_SOURCES))})",
-            (evidence_id,) + FS_SOURCES)
+            f"({','.join('?' * len(FS_SOURCES))}) AND artifact_ref IN "
+            f"({refs})", (evidence_id,) + FS_SOURCES + values)
+        self._db.execute(f"DELETE FROM carved_files WHERE {which}", values)
         self._db.commit()
 
     def add_carved(self, evidence_id, record):
@@ -2941,6 +2971,56 @@ class Case:
             "SELECT * FROM carving_state WHERE evidence_id = ?",
             (evidence_id,)).fetchone()
         return dict(row) if row else None
+
+    # --- which modules have run (core/export_readiness) ---------------
+
+    def record_module_completion(self, evidence_id, module, status,
+                                 settings=None, last_error=None):
+        """How module job `module` last ended on an evidence item ('done',
+        'cancelled', 'failed') and what it was asked to do."""
+        self._db.execute(
+            "INSERT OR REPLACE INTO module_completions (evidence_id, module, "
+            "status, settings, last_error, finished_utc) VALUES "
+            "(?,?,?,?,?,?)",
+            (evidence_id, module, status,
+             json.dumps(settings) if settings is not None else None,
+             last_error or None, _utc_now()))
+        self._db.commit()
+
+    def module_completions(self, evidence_id):
+        """{module: {'status', 'settings', 'last_error', 'finished_utc'}}
+        for an evidence item."""
+        out = {}
+        for row in self._db.execute(
+                "SELECT * FROM module_completions WHERE evidence_id = ?",
+                (evidence_id,)):
+            row = dict(row)
+            try:
+                row['settings'] = json.loads(row['settings'] or 'null')
+            except ValueError:
+                row['settings'] = None
+            out[row.pop('module')] = row
+        return out
+
+    #: Where a module that keeps no state of its own leaves its rows.
+    _MODULE_ROWS = {
+        'deleted': ("deleted_files", ""),
+        'thumbnails': ("thumbnails", ""),
+        'persistence': ("persistence", ""),
+        'fstimes': ("fs_events", " AND source IN ('FS', 'FS-local')"),
+        'yara': ("file_findings", " AND module = 'yara'"),
+        'sigma': ("file_findings", " AND module = 'sigma'"),
+        'keywords': ("file_findings", " AND module = 'keywords'"),
+        'hashsets': ("hash_matches", ""),
+    }
+
+    def module_left_rows(self, evidence_id, module):
+        """Whether `module` left any rows for an evidence item -- what a
+        case from before module_completions has to go by."""
+        table, condition = self._MODULE_ROWS[module]
+        return self._db.execute(
+            f"SELECT 1 FROM {table} WHERE evidence_id = ?{condition} "
+            "LIMIT 1", (evidence_id,)).fetchone() is not None
 
 
     def analysis_map(self, evidence_id, refs=None):
@@ -3818,6 +3898,20 @@ class Case:
             CREATE INDEX IF NOT EXISTS idx_thumbnails
                 ON thumbnails(evidence_id, cache_ref);
 
+            -- Each module job's last run on an evidence item: how it
+            -- ended and what it was asked to do (core/export_readiness
+            -- reads it so an export can say what has not run).
+            CREATE TABLE IF NOT EXISTS module_completions (
+                evidence_id   INTEGER NOT NULL
+                              REFERENCES evidence(id) ON DELETE CASCADE,
+                module        TEXT NOT NULL,
+                status        TEXT NOT NULL,
+                settings      TEXT,
+                last_error    TEXT,
+                finished_utc  TEXT NOT NULL,
+                PRIMARY KEY (evidence_id, module)
+            );
+
             CREATE TABLE IF NOT EXISTS report_items (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 kind          TEXT NOT NULL,
@@ -4006,6 +4100,9 @@ class Case:
             except sqlite3.OperationalError:
                 pass            # already present (created above at v25)
             self._db.commit()
+
+        # Schema 26: module_completions, created above. Older runs left no
+        # such row; core/export_readiness reads their own state instead.
 
         if version < 19:
             # Tags in use (schema 19): which file, by whom, when -- the

@@ -119,11 +119,12 @@ def test_the_memory_source_carves_only_the_memory_files(volume, tmp_path):
         assert data == volume['in_page']
         assert row['origin']['path'] == '/PAGEFILE.SYS'
         assert 'memory file' in row['origin']['basis']
-        # Free space is another source: there, its own JPEG.
+        # Free space is another source: there, its own JPEG -- kept beside
+        # the memory file's (carving.replaced_sources), not instead of it.
         carve_evidence(handler, case, evidence, ['jpg'], source='unallocated')
-        offsets = {r['offset'] for r in case.carved_files(evidence)}
-        assert volume['free_jpeg_at'] in offsets
-        assert volume['page_at'] + 300_001 not in offsets
+        found = {r['offset']: r['source'] for r in case.carved_files(evidence)}
+        assert found == {volume['free_jpeg_at']: 'unallocated',
+                         volume['page_at'] + 300_001: 'memory'}
     finally:
         handler.close_resources()
         case.close()

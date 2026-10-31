@@ -123,11 +123,17 @@ def releases(spec, session=None):
     return out
 
 
-def preferred(spec, found):
-    """The release to offer: the tested version when published, else the
-    newest."""
-    for release in found:
-        if release['version'] == spec.tested_version:
+def preferred(spec, found, target=None):
+    """The release to offer: the newest published one that has a download
+    for this computer and its SHA256SUMS -- never a pinned one, so a
+    release made after this TRACE is offered too (core/modules/updates).
+    The version TRACE was tested with is only said beside it. A newest
+    release missing this computer's download (its build still running)
+    gives way to the one before; with none complete, the newest."""
+    for release in found or ():
+        assets = release.get('assets') or {}
+        if SUMS in assets and \
+                spec.asset_name(release['version'], target) in assets:
             return release
     return found[0] if found else None
 

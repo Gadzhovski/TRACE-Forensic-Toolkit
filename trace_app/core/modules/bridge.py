@@ -209,7 +209,11 @@ def artifact_rows(connection, media, artifact, route, run_id, tool,
         detail = {}
         for column in columns:
             name = column['name']
-            if name == time_column or _SECRET.search(name):
+            # The time column is the row's time -- unless it could not be
+            # read as one ('03/21/20 14:38:54', 'Dec 20 2019 22:19:18':
+            # iLEAPP 2026.4.5): then it stays a detail, as the tool wrote
+            # it, never dropped.
+            if (name == time_column and when) or _SECRET.search(name):
                 continue
             value = values.get(name)
             if value in (None, ''):

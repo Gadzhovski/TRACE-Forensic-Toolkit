@@ -49,6 +49,11 @@ class ProcessWorker(QThread):
     def stop(self):
         self._stop.set()
 
+    def stop_requested(self):
+        """Whether the job was asked to stop (so ended 'cancelled' when it
+        ended without an error)."""
+        return self._stop.is_set()
+
     def close(self):
         """The window is closing: stop, and end the process if it has not
         finished within CLOSE_GRACE_SECONDS -- the thread must be done

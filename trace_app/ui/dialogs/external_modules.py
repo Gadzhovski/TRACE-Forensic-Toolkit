@@ -2,8 +2,10 @@
 (core/modules).
 
 One row per tool: what it reads, its licence, the version installed, the
-version this TRACE was tested with, and the newest published. Install and
-Update download from the tool's GitHub releases -- only when clicked,
+newest published and the version this TRACE was tested with. Install and
+Update offer the newest published release (install.preferred -- never a
+pinned one, so releases made after this TRACE are offered too) and
+download it from the tool's GitHub releases -- only when clicked,
 never while the case is offline -- checked against the release's
 SHA256SUMS before anything is unpacked. Downloads run on a thread (network
 and disk, not CPU), kept until it has really ended (KeptThreads).
@@ -15,7 +17,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QDialogButtonBox, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout)
 
-from trace_app.core.modules import install, paths
+from trace_app.core.modules import install, paths, updates
 from trace_app.core.modules.spec import TOOLS
 from trace_app.ui import icons
 from trace_app.ui.dialogs import message
@@ -34,7 +36,11 @@ class _Releases(QThread):
 
     def run(self):
         try:
-            self.found.emit(self.spec.id, install.releases(self.spec), '')
+            # Asked afresh (the examiner opened this to see), and kept for
+            # the Modules tab's and Supported Features' notices.
+            self.found.emit(self.spec.id,
+                            updates.releases(self.spec, force=True,
+                                             asked=True), '')
         except install.InstallError as exc:
             self.found.emit(self.spec.id, [], str(exc))
         except Exception as exc:            # reported, never raised here
@@ -179,14 +185,11 @@ class ExternalModulesDialog(PageDialog):
         lines = [f"Installed: {record['version']} (since "
                  f"{record['installed_utc']} UTC)" if record
                  else "Not installed."]
-        lines.append(f"Tested with this TRACE: {spec.tested_version}")
-        if found:
-            newest = found[0]['version']
-            lines.append(f"Newest published: {newest}"
-                         + (" — newer than the version tested with TRACE"
-                            if install.parse_version(newest) >
-                            install.parse_version(spec.tested_version)
-                            else ''))
+        if offered:
+            lines.append(f"Newest published: {offered['version']} "
+                         f"({offered['published']})")
+        lines.append(f"Tested with this release of TRACE: "
+                     f"{spec.tested_version}")
         if note:
             lines.append(note)
         row['state'].setText('\n'.join(lines))

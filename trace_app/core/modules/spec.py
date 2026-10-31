@@ -99,7 +99,7 @@ ILEAPP = ToolSpec(
     description="iOS Logs, Events, And Plists Parser: iPhone and iPad "
                 "extractions and backups -- messages, calls, apps, "
                 "locations, media.",
-    tested_version='2026.4.4', min_version='2026.4.3', suits=('ios',),
+    tested_version='2026.4.5', min_version='2026.4.3', suits=('ios',),
     homepage=LEAPP_HOME)
 
 ALEAPP = ToolSpec(
@@ -108,7 +108,7 @@ ALEAPP = ToolSpec(
     description="Android Logs, Events, And Protobuf Parser: Android "
                 "extractions -- messages, calls, apps, accounts, locations, "
                 "media.",
-    tested_version='2026.4.3', min_version='2026.4.3', suits=('android',),
+    tested_version='2026.4.4', min_version='2026.4.3', suits=('android',),
     homepage=LEAPP_HOME, inputs=('fs', 'zip', 'tar', 'gz', 'file'))
 
 RLEAPP = ToolSpec(
@@ -117,7 +117,7 @@ RLEAPP = ToolSpec(
     description="Returns Logs Events And Properties Parser: what providers "
                 "hand over for a warrant -- Google, Snapchat, Synchronoss, "
                 "Coinbase, Robinhood and more -- as the zips they send.",
-    tested_version='2026.4.3', min_version='2026.4.3', suits=('return',),
+    tested_version='2026.4.4', min_version='2026.4.3', suits=('return',),
     reads='warrant returns', homepage=LEAPP_HOME,
     inputs=('fs', 'zip', 'tar', 'gz', 'raw'))
 
@@ -128,7 +128,7 @@ VLEAPP = ToolSpec(
                 "and telematics extractions -- devices paired, locations, "
                 "speeds, odometer. Reads QNX head units' file systems "
                 "itself.",
-    tested_version='2026.4.3', min_version='2026.4.3', suits=('vehicle',),
+    tested_version='2026.4.4', min_version='2026.4.3', suits=('vehicle',),
     reads='vehicle infotainment extractions', homepage=LEAPP_HOME,
     inputs=('fs', 'zip', 'tar', 'gz', 'file', 'raw', 'iva'))
 
@@ -139,7 +139,7 @@ DLEAPP = ToolSpec(
                 "and Linux computers -- system records, logs and the "
                 "desktop apps on them, Discord, Wire and Signal among them "
                 "(Signal needs its key).",
-    tested_version='2026.4.3', min_version='2026.4.3',
+    tested_version='2026.4.4', min_version='2026.4.3',
     suits=('windows', 'macos', 'linux'),
     reads='Windows, macOS and Linux computers',
     homepage=LEAPP_HOME, inputs=('fs', 'zip', 'tar', 'gz', 'raw'),

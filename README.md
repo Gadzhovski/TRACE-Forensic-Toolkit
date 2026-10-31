@@ -10,7 +10,7 @@ Open disk images read-only, organise them into cases, triage what stands out,<br
 search inside the evidence and recover deleted files — on Windows, macOS and Linux.
 
 <p>
-  <img src="https://img.shields.io/badge/version-2.4.1-4c8eda?style=flat-square" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-2.5.0-4c8eda?style=flat-square" alt="Version"/>
   <img src="https://img.shields.io/badge/python-3.10%2B-4c8eda?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-6e7781?style=flat-square" alt="Platforms"/>
   <img src="https://img.shields.io/badge/license-MIT-3fb950?style=flat-square" alt="License"/>
@@ -33,6 +33,8 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 
 - **Cases** — one investigation, any number of images, with custody details,
   an audit trail, bookmarks, notes, tags and a PDF, HTML or Word report.
+  An Artifacts list and a Case Overview show everything the case holds,
+  and which scans have not run yet.
 - **Integrity** — evidence is never mounted or written to. Every image is
   hashed in full (MD5, SHA-1, SHA-256; a read that fails gives no hash) and
   checked against the hashes it stores, its acquisition log and the case's
@@ -42,7 +44,8 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
 - **Triage** — file types from content, entropy, hidden data, photo GPS,
   document authors, Office macros (VBA source, auto-run and download /
   execute calls flagged), executables with imphash and Rich-header
-  hashes, duplicates and hash sets.
+  hashes, duplicates and hash sets. GPS positions are named offline
+  ("4 km NE of Reading, United Kingdom").
 - **User activity** — programs run, files opened, USB devices, logons, the
   Recycle Bin, browser history, chats and phone backups from Windows, macOS
   (Spotlight, Biome, unified log, saved app state), Linux and ChromeOS, on
@@ -74,7 +77,9 @@ search inside the evidence and recover deleted files — on Windows, macOS and L
   hardware and software RAID, Windows dynamic disks, lost partitions;
   CPIO, LZMA and zlib streams, damaged gzip recovered as far as it reads.
 - **Exports** — Timesketch, plaso and mactime timelines, DFXML, CASE/UCO
-  and Project VICS (with categories) for Griffeye and other review tools.
+  and Project VICS (with categories) for Griffeye and other review tools,
+  including pictures inside archives, documents, browser caches, databases
+  and shadow copies. Each export says which scans it would still lack.
 
 ## Screenshots
 

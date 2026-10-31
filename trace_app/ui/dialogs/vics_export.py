@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
 
 from trace_app.core import vics
 from trace_app.ui.process_worker import ProcessWorker
+from trace_app.ui.widgets.readiness_banner import ReadinessBanner
 
 #: (key in the JSON, label) for the case details the dialog asks.
 CONTACT_FIELDS = (('ContactName', "Contact name"),
@@ -28,11 +29,17 @@ CONTACT_FIELDS = (('ContactName', "Contact name"),
 class VicsExportDialog(QDialog):
     """`evidence` is [{'key', 'name', 'source_id', 'path'}]; `defaults`
     may hold 'folder', 'case_number', 'ContactName', 'ContactOrganization'
-    and 'scope' (a description of the case's analysis scope, or '')."""
+    and 'scope' (a description of the case's analysis scope, or '').
+    `gaps_for(evidence)` (the window's export_gaps for 'vics') says which
+    scans the ticked evidence lacks: shown above, with Run Missing Scans,
+    Then Export beside Export."""
 
-    def __init__(self, evidence, defaults=None, parent=None):
+    def __init__(self, evidence, defaults=None, parent=None, gaps_for=None):
         super().__init__(parent)
         defaults = defaults or {}
+        self._gaps_for = gaps_for
+        #: Set when the examiner chose to run the missing scans first.
+        self.run_first = False
         self.setWindowTitle("Export Project VICS")
         self.setObjectName("vicsExportDialog")
         self.setMinimumWidth(520)
@@ -44,6 +51,8 @@ class VicsExportDialog(QDialog):
         intro.setObjectName("settingsHint")
         intro.setWordWrap(True)
         layout.addWidget(intro)
+        self.readiness = ReadinessBanner('vics')
+        layout.addWidget(self.readiness)
 
         layout.addWidget(QLabel("Evidence"))
         self.evidence_list = QListWidget()
@@ -104,6 +113,32 @@ class VicsExportDialog(QDialog):
         self.carved_box.setToolTip("Pictures and videos carving found; "
                                    "marked Unallocated, with their offset")
         layout.addWidget(self.carved_box)
+        self.inside_box = QCheckBox(
+            "Include files inside archives, documents and browser caches")
+        self.inside_box.setChecked(True)
+        self.inside_box.setToolTip(
+            "Pictures and videos in ZIP, CAB, 7z and other archives, "
+            "mailboxes and messages, Office and PDF documents, Thumbs.db "
+            "and Firefox's cache block files -- each listed under the file "
+            "it was found in")
+        layout.addWidget(self.inside_box)
+        self.carve_inside_box = QCheckBox(
+            "Carve pictures from inside other files (slower)")
+        self.carve_inside_box.setChecked(False)
+        self.carve_inside_box.setToolTip(
+            "Pictures and videos found by their signature inside any file "
+            "-- a program's resources, a theme, the page file, a photo's "
+            "embedded preview -- as AXIOM and X-Ways do. Every file is read "
+            "whole.")
+        layout.addWidget(self.carve_inside_box)
+        self.shadows_box = QCheckBox(
+            "Include Volume Shadow Copies (slower)")
+        self.shadows_box.setChecked(False)
+        self.shadows_box.setToolTip(
+            "Pictures and videos in each volume's shadow copies, listed "
+            "under 'Shadow copy N (created ...)'. A snapshot's copy of a "
+            "file the volume still holds unchanged is not listed again.")
+        layout.addWidget(self.shadows_box)
 
         notes = ["Each picture is copied once, named by its MD5; every place "
                  "it was found is listed under it.",
@@ -121,10 +156,19 @@ class VicsExportDialog(QDialog):
         self.buttons = QDialogButtonBox(QDialogButtonBox.Ok |
                                         QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText("Export")
+        self.run_first_button = self.buttons.addButton(
+            "Run Missing Scans, Then Export", QDialogButtonBox.ActionRole)
+        self.run_first_button.setToolTip(
+            "Queue the scans listed above, then this export after them")
+        self.run_first_button.clicked.connect(self._run_first)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
         self._update_ok()
+
+    def _run_first(self):
+        self.run_first = True
+        self.accept()
 
     def _browse(self):
         chosen = QFileDialog.getExistingDirectory(
@@ -142,10 +186,18 @@ class VicsExportDialog(QDialog):
 
     def _update_ok(self, *_args):
         folder = self.folder_field.text().strip()
-        self.buttons.button(QDialogButtonBox.Ok).setEnabled(
-            bool(self.chosen_evidence()) and bool(folder)
-            and os.path.isdir(folder)
-            and bool(self.case_number.text().strip()))
+        chosen = self.chosen_evidence()
+        ready = bool(chosen) and bool(folder) and os.path.isdir(folder) \
+            and bool(self.case_number.text().strip())
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(ready)
+        if self._gaps_for is not None and \
+                [row['key'] for row in chosen] != getattr(self, '_checked',
+                                                          None):
+            self._checked = [row['key'] for row in chosen]
+            self.readiness.set_gaps(self._gaps_for(chosen) if chosen
+                                    else [])
+        self.run_first_button.setVisible(self.readiness.runnable())
+        self.run_first_button.setEnabled(ready)
 
     @property
     def options(self):
@@ -157,6 +209,10 @@ class VicsExportDialog(QDialog):
                 'model': self.model_combo.currentData(),
                 'include_deleted': self.deleted_box.isChecked(),
                 'include_carved': self.carved_box.isChecked(),
+                'inside': self.inside_box.isChecked(),
+                'carve_inside': self.carve_inside_box.isChecked(),
+                'shadows': self.shadows_box.isChecked(),
+                'run_first': self.run_first,
                 'min_size': self.min_size.value() * 1024}
 
 

@@ -141,10 +141,13 @@ def _linux_root(folder):
       'Synchronoss - Messages (SMS and MMS)': 12}, 'files it reads in'),
     ('vleapp', lambda folder: _zip_in_folder(
         'vleapp-pasdegeo-sync4.zip', folder, 'sync4.zip'),
-     {'Ford - PAS Dev Loc Results': 24328,
-      'Ford - PAS Outside Temperature': 165,
-      'Ford - PAS Transmission Status': 84, 'Ford - PAS Vehicle Info': 1,
-      'Ford - PAS Vehicle Speed': 4}, 'files it reads in'),
+     # VLEAPP 2026.4.4 named these 'PAS Debug Log - ...' (2026.4.3:
+     # 'Ford - PAS ...'); the rows are the same.
+     {'PAS Debug Log - Dev Loc Results': 24328,
+      'PAS Debug Log - Outside Temperature': 165,
+      'PAS Debug Log - Transmission Status': 84,
+      'PAS Debug Log - Vehicle Info': 1,
+      'PAS Debug Log - Vehicle Speed': 4}, 'files it reads in'),
     ('dleapp', _linux_root,
      {'User Accounts (passwd)': 2, 'SSH Server Log': 1,
       'Linux System Information': 5}, 'loose file'),

@@ -546,15 +546,20 @@ class CarvedFilesPanel(QWidget):
                 self.table.setSortingEnabled(sorting)
         self._update_status()
 
-    def forget(self, key):
-        """Drop one image's earlier results as it is carved again.
+    def forget(self, key, sources=None):
+        """Drop one image's earlier results as it is carved again -- all,
+        or those of `sources` (carving.replaced_sources: the carve's own
+        source and a whole-image carve; the others are kept).
 
         From the rows on screen rather than by re-reading the case: the
         worker is clearing that evidence's rows at the same moment.
         """
-        self._session = [r for r in self._session
-                         if r.get('evidence_key') != key]
-        self._rows = [r for r in self._rows if r.get('evidence_key') != key]
+        def replaced(row):
+            return row.get('evidence_key') == key and (
+                sources is None or (row.get('source') or 'unallocated')
+                in sources)
+        self._session = [r for r in self._session if not replaced(r)]
+        self._rows = [r for r in self._rows if not replaced(r)]
         self._show(self._rows)
 
     def _filtered(self, rows):

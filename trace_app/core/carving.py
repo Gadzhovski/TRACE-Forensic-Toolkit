@@ -169,6 +169,9 @@ class Carver:
         #: (see _starts_a_file); 1 for memory, where a picture can start
         #: anywhere in a page.
         self.alignment = SECTOR_SIZE
+        #: Families looked for at another alignment than `alignment`:
+        #: pictures at any byte (UNALIGNED_FAMILIES), when the case asks.
+        self.family_alignment = {}
         #: (begin, end) of each volume carved in its own address range
         #: (ImageHandler.carve_volumes): a read never runs past the end of
         #: the one it starts in.
@@ -433,7 +436,7 @@ class Carver:
         self._carve_sized(chunk, base_offset, (b'RIFF',), formats.measure_riff,
                           aligned=False)
 
-    def _starts_a_file(self, offset):
+    def _starts_a_file(self, offset, family=None):
         """Could a file begin at this absolute offset?
 
         A filesystem allocates in sectors, so a file it stored begins on a
@@ -449,9 +452,15 @@ class Carver:
         one.
 
         Memory (core/memory_files) is not a file system: there `alignment`
-        is 1 and any offset can start a file.
+        is 1 and any offset can start a file. And a picture kept whole
+        inside a file since deleted -- a program's icon, a cached image in
+        a browser's block file -- starts anywhere: `family_alignment` lets
+        the case look for pictures at every byte (carve_unaligned_pictures;
+        AXIOM carved 586 such on the M57 'Jean' image, each byte-identical
+        on disk).
         """
-        return offset % self.alignment == 0
+        return offset % self.family_alignment.get(family, self.alignment) \
+            == 0
 
     #: Tags that a real page has and a quoted fragment in a mail body usually
     #: does not. Requiring some structure is what separates a document from
@@ -498,7 +507,9 @@ class Carver:
                     (base_offset + start_index, None) in self._seen:
                 cursor = start_index + len(header)
                 continue
-            if not self._starts_a_file(base_offset + start_index):
+            if not self._starts_a_file(
+                    base_offset + start_index,
+                    EXTENSION_CARVER.get(file_type, file_type)):
                 # Mid-sector: embedded in something else, not a file of its
                 # own. See _starts_a_file.
                 cursor = start_index + len(header)
@@ -1055,7 +1066,8 @@ class Carver:
         source = formats.Source(chunk, base_offset, self._reader,
                                 self._end(base_offset))
         family = self._family(measure)
-        step = self.alignment if aligned else 1
+        step = self.family_alignment.get(family, self.alignment) \
+            if aligned else 1
         for signature in signatures:
             if step > 1:
                 # Only a sector start can begin a file: look there, rather
@@ -1079,7 +1091,7 @@ class Carver:
                 if start < 0:
                     continue
                 offset = base_offset + start
-                if aligned and not self._starts_a_file(offset):
+                if aligned and not self._starts_a_file(offset, family):
                     continue
                 self._try_carve(source, offset, measure, args, family)
 
@@ -1423,10 +1435,31 @@ REGION_SOURCES = ('slack', 'memory')
 #: interrupted run resumes close to where it stopped.
 CHECKPOINT_SECONDS = 20
 
+def replaced_sources(source):
+    """The earlier carves a carve of `source` replaces: its own source's,
+    and a whole-image carve's (which covered this region too); a
+    whole-image carve replaces every one (None). Unallocated space, slack
+    and memory files do not overlap, so their carves are kept together --
+    a carve of slack once threw away the unallocated space's."""
+    return None if source == 'image' else (source, 'image')
+
+
+#: The families carve_unaligned_pictures looks for at every byte: the
+#: picture formats whose structure sizes and proves a carve (JPEG and PNG
+#: end markers, GIF's block walk, BMP's header), so a signature inside
+#: other data is refused unless a whole picture follows.
+UNALIGNED_FAMILIES = ('jpg', 'png', 'gif', 'bmp')
+#: The check a carve starting inside a sector carries: what it was part of
+#: is gone, so it is a picture kept inside a file since deleted, not a
+#: deleted file of its own.
+MID_SECTOR_NOTE = ("Starts inside a sector: a picture kept whole inside "
+                   "another file's remains, not a file of its own")
+
 
 def carve_image(image_handler, file_types, sink, unallocated_only=True,
                 progress=None, should_stop=None, stats=None, ranges=None,
-                start_offset=0, seen=(), alignment=SECTOR_SIZE):
+                start_offset=0, seen=(), alignment=SECTOR_SIZE,
+                unaligned=()):
     """Carve `file_types` out of the image; returns how many were found.
 
     `progress(position, size, found)` is called once per chunk, and
@@ -1440,6 +1473,9 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     their ends; `alignment` is where a file may begin (1 for memory).
     `start_offset` resumes a carve: everything before it is skipped, and
     `seen` -- (offset, type) pairs already carved -- is not carved again.
+    `unaligned`: families looked for at every byte, not only where
+    `alignment` allows (UNALIGNED_FAMILIES: pictures kept whole inside
+    files since deleted).
     """
     global _STATS
     run = {'candidates': {}, 'rejected': {}, 'bytes_scanned': 0,
@@ -1448,7 +1484,8 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
     try:
         return _carve_image(image_handler, file_types, sink,
                             unallocated_only, progress, should_stop, run,
-                            ranges, start_offset, seen, alignment)
+                            ranges, start_offset, seen, alignment,
+                            unaligned)
     finally:
         _STATS = None
         if stats is not None:
@@ -1457,7 +1494,7 @@ def carve_image(image_handler, file_types, sink, unallocated_only=True,
 
 def _carve_image(image_handler, file_types, sink, unallocated_only,
                  progress, should_stop, run, ranges=None, start_offset=0,
-                 seen=(), alignment=SECTOR_SIZE):
+                 seen=(), alignment=SECTOR_SIZE, unaligned=()):
     wanted = {t.lower() for t in file_types if t.lower() in EXTENSION_CARVER}
     families = {EXTENSION_CARVER[t] for t in wanted}
     if 'tar' in families:
@@ -1475,9 +1512,10 @@ def _carve_image(image_handler, file_types, sink, unallocated_only,
     if ranges is not None:
         return _carve_ranges(image_handler, ranges, families, wanted, sink,
                              progress, should_stop, run, start_offset, seen,
-                             size, alignment)
+                             size, alignment, unaligned)
     carver = Carver(sink, wanted=wanted, reader=image_handler.read,
                     image_size=size)
+    carver.family_alignment = {family: 1 for family in unaligned}
     carver._seen.update(seen)
     # The image, then each volume carved in its own address range (an
     # unlocked encrypted volume, LVM's logical volumes, a RAID array):
@@ -1609,11 +1647,12 @@ def _carve_span(image_handler, carver, families, allocated, run, begin_span,
 
 def _carve_ranges(image_handler, ranges, families, wanted, sink, progress,
                   should_stop, run, start_offset, seen, size,
-                  alignment=SECTOR_SIZE):
+                  alignment=SECTOR_SIZE, unaligned=()):
     """Carve inside each region alone: no reader past it, so a carve
     cannot run on into the live file in the next cluster."""
     carver = Carver(sink, wanted=wanted, reader=None, image_size=size)
     carver.alignment = alignment
+    carver.family_alignment = {family: 1 for family in unaligned}
     carver._seen.update(seen)
     for index, (begin, length) in enumerate(ranges):
         if begin + length <= start_offset or length < 16:
@@ -2093,7 +2132,7 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
         already = len(rows)
     else:
         resume = False
-        case.clear_carved(evidence_id)
+        case.clear_carved(evidence_id, replaced_sources(source))
     case.set_carving_state(evidence_id, 'running', types=','.join(types),
                            unallocated_only=source == 'unallocated',
                            bytes_done=start_offset, bytes_total=size,
@@ -2141,6 +2180,11 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
     chosen = case_settings.for_case(case)
     smallest = int(chosen['carve_min_kb']) * 1024
     analyse_carves = bool(chosen['analyse_carves'])
+    # Pictures at any byte, where the case asks (unallocated space and
+    # slack: the image's live files are the carve-inside export's).
+    unaligned = UNALIGNED_FAMILIES if chosen.get(
+        'carve_unaligned_pictures') and source in ('unallocated', 'slack') \
+        else ()
     # References by default; copies too only when the case asks for them.
     folder = case.carved_dir_for(evidence_id) \
         if chosen['carve_write_copies'] else None
@@ -2177,6 +2221,9 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
         else:
             record = describe_carved(content, file_type, offset, fragments,
                                      source=source, origin=origin)
+        if offset % SECTOR_SIZE and source not in REGION_SOURCES:
+            record['checks'].append(
+                [None, MID_SECTOR_NOTE])
         case.add_carved(evidence_id, record)
         if file_type in carved_artifacts.FS_TYPES:
             # An MFT or index record: the names and times it holds, as
@@ -2217,6 +2264,7 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
                        named=tally['named'], wal_pairs=paired,
                        too_small=tally.get('too_small', 0),
                        settings={'min_kb': chosen['carve_min_kb'],
+                                 'unaligned_pictures': bool(unaligned),
                                  'analysed': analyse_carves,
                                  'copies_written': bool(folder)},
                        duplicates=sum(len(v) - 1 for v in
@@ -2240,7 +2288,8 @@ def carve_evidence(image_handler, case, evidence_id, file_types,
         carve_image(image_handler, types, sink, source == 'unallocated',
                     progress=report, should_stop=should_stop, stats=stats,
                     ranges=ranges, start_offset=start_offset, seen=seen,
-                    alignment=1 if source == 'memory' else SECTOR_SIZE)
+                    alignment=1 if source == 'memory' else SECTOR_SIZE,
+                    unaligned=unaligned)
     except CarvingCancelled:
         finish('cancelled')
         case.set_carving_state(evidence_id, 'cancelled', found=found[0],

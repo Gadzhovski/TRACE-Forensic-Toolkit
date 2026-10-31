@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QPushButton,
                                QSizePolicy, QToolBar, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
+from trace_app.core import geocode
 from trace_app.core.case import (REPORTED_FINDING_GRADES, REPORTED_MISMATCHES,
                                  SIGMA_SHOWN)
 from trace_app.infra.utils import FileSystemUtils
@@ -176,7 +177,10 @@ class TriagePanel(QWidget):
                          "Hidden data", group='files')
 
         self.photo_table = self._make_table(
-            ['Name', 'Taken', 'Camera', 'Location', 'Software', 'Path'])
+            ['Name', 'Taken', 'Camera', 'Location', 'Near (approx.)',
+             'Software', 'Path'])
+        self.photo_table.horizontalHeaderItem(5).setToolTip(
+            geocode.source())
         self.tabs.addTab(self.photo_table, icons.icon(icons.FINDING_PHOTO),
                          "Photos", group='media')
 
@@ -208,7 +212,7 @@ class TriagePanel(QWidget):
         #: pushed every column after it off the screen.
         self._column_caps = {
             id(self.hidden_table): {3: 520},
-            id(self.photo_table): {3: 220, 5: 200},
+            id(self.photo_table): {3: 220, 5: 240, 6: 200},
             id(self.author_table): {2: 260, 3: 180, 4: 180, 5: 220},
             id(self.yara_table): {2: 220, 5: 420},
             id(self.executable_table): {6: 240, 7: 420},
@@ -620,6 +624,8 @@ class TriagePanel(QWidget):
                     else ''),
                 camera,
                 location,
+                geocode.describe(facts['latitude'], facts['longitude'])
+                if location else '',
                 facts.get('software') or '',
                 row.get('path') or '',
             ]

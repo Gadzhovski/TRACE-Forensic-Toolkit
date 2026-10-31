@@ -33,8 +33,10 @@ from dataclasses import dataclass, field
 #: 4: the tools' maps (resources/leapp_maps, core/modules/maps) -- typed
 #: fields under TRACE's own keys. 5: how each was sorted is kept
 #: (module_artifacts.sorted_by, the run's accounting). 6: iLEAPP's map
-#: replaces the table that was here.
-ROUTES_VERSION = 6
+#: replaces the table that was here. 7: aLEAPP 2026.4.4 / iLEAPP 2026.4.5
+#: renamed columns -- maps name both releases' columns, a time may be a
+#: list.
+ROUTES_VERSION = 7
 EVIDENCE, TELEMETRY, OTHER = 'evidence', 'telemetry', 'other'
 ROLES = (EVIDENCE, TELEMETRY, OTHER)
 
@@ -81,9 +83,12 @@ _NAMES = (
                                                     'Contact')),
     # Messages -- not their attachments, users, settings or a database's
     # leftovers (names from iLEAPP 2026.4: 'IMO HD Chat - Key Values',
-    # 'Twitter X - Direct Message Users', 'iOS Message Retention').
+    # 'Twitter X - Direct Message Users', 'iOS Message Retention'), nor a
+    # log's lines (DLEAPP 2026.4.4 on a Mac: 'ASL Messages', 'Diagnostic
+    # Messages (ASL)' -- 9,994 log lines read as chats).
     (r'^(?!.*\b(attachments?|media|missing|strings|rowids?|wal|users?|'
-     r'key ?values?|retention|settings|preferences|config\w*)\b).*'
+     r'key ?values?|retention|settings|preferences|config\w*|asl|'
+     r'syslog|logs?|diagnostics?|console|kernel)\b).*'
      r'\b(messages?|chats?|sms|mms|imessages?)\b',
      _e('communication', 'Message {direction}', '',
         ('message', 'body', 'text', 'content', 'message_body',
@@ -135,7 +140,8 @@ def default(tool, artifact):
                          why=f"{tool}'s map ({kind}), read through its "
                              f"conversation view", mapping=mapped,
                          sorted_by='map')
-        return Route(EVIDENCE, category, what, mapped.get('time') or '',
+        return Route(EVIDENCE, category, what,
+                     maps.time_column(mapped, columns),
                      why=f"{tool}'s map: {kind}", mapping=mapped,
                      sorted_by='map')
     if role == TELEMETRY:

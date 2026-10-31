@@ -6,7 +6,7 @@ unavailable here (YARA on Windows on ARM, say) is greyed out where it would
 be used, with the same reason as its tooltip.
 """
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QDialogButtonBox,
                                QHeaderView, QTreeWidgetItem)
@@ -53,9 +53,11 @@ class SupportedFeaturesDialog(PageDialog):
         self.tree.setWordWrap(True)
         header = self.tree.header()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for column, width in ((1, 112), (2, 160), (3, 84)):
+        for column, width in ((1, 140), (2, 160), (3, 84)):
             header.setSectionResizeMode(column, QHeaderView.Interactive)
             self.tree.setColumnWidth(column, width)
+        #: External tools' rows, to say when a newer release is out.
+        self._tool_items = {}
         for group in capabilities.GROUPS:
             parent = QTreeWidgetItem([group])
             font = parent.font(0)
@@ -78,6 +80,7 @@ class SupportedFeaturesDialog(PageDialog):
                 item.setToolTip(0, capability.feature)
                 if on_request:
                     item.setIcon(0, icons.module_logo(capability.key))
+                    self._tool_items[capability.key] = item
                 item.setIcon(1, icons.icon(
                     icons.VERIFY_OK if ok else
                     icons.MODULES if on_request else icons.FINDINGS))
@@ -102,3 +105,42 @@ class SupportedFeaturesDialog(PageDialog):
         close = buttons.addButton(QDialogButtonBox.Close)
         close.clicked.connect(self.accept)
         self.add_button(buttons)
+        self._check_tool_updates()
+
+    # --- newer releases of the installed tools (core/modules/updates) ----
+
+    def _check_tool_updates(self):
+        from trace_app.ui.widgets.kept_threads import KeptThreads
+        from trace_app.ui.widgets.module_updates import ReleaseCheck
+        self._checks = KeptThreads(self)
+        check = ReleaseCheck(parent=self)
+        check.checked.connect(self._tool_updates)
+        self._checks[0] = check
+        check.start()
+
+    @Slot(int, object)
+    def _tool_updates(self, _generation, result):
+        from trace_app.core.modules import updates
+        from trace_app.core.modules.spec import TOOLS
+        for tool_id, old, new in updates.pending(result):
+            item = self._tool_items.get(tool_id)
+            if item is None:
+                continue
+            item.setText(1, "Update available")
+            item.setIcon(1, icons.icon(icons.MODULES))
+            item.setForeground(1, verdict_brush('unknown'))
+            text = (f"{TOOLS[tool_id].name} {new} is published (this "
+                    f"computer has {old}): Tools ▸ External Modules "
+                    f"downloads it.")
+            item.setToolTip(1, text)
+            note = QTreeWidgetItem(item, [text])
+            note.setFirstColumnSpanned(True)
+            note.setForeground(0, verdict_brush('unknown'))
+            item.setExpanded(True)
+            self.tree.setRootIsDecorated(True)
+
+    def done(self, result):
+        # The check holds no evidence: waited for, never left running
+        # without a reference (Qt aborts).
+        self._checks.clear(timeout=35000)
+        super().done(result)

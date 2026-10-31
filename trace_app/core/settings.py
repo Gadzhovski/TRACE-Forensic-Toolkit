@@ -127,6 +127,13 @@ CASE = {
     'carve_min_kb': (0, "Smallest carved file kept (KB)",
                      "Carves below this are not kept; 0 keeps every size "
                      "a format allows."),
+    'carve_unaligned_pictures': (
+        False, "Carve pictures that start inside a sector",
+        "JPEG, PNG, GIF and BMP looked for at every byte of unallocated "
+        "space and slack, not only where a file system starts a file: "
+        "pictures kept whole inside files since deleted (a program's "
+        "icons, a browser cache's block files), as AXIOM and X-Ways carve "
+        "them. Each is marked as found inside a sector. Slower."),
     'analyse_carves': (True, "Analyse carved files",
                        "Type, entropy, hidden data, photo metadata, authors "
                        "and executables for every carve."),

@@ -2374,6 +2374,56 @@ QLabel#pageHint {
     color: #9aa4b0;
     font-size: 11px;
 }
+/* Case Overview (ui/viewers/case_overview.py): the page a case opens on;
+   cards as the pages' cards, tiles that open what they count. */
+QScrollArea#caseOverview,
+QWidget#overviewBody {
+    background-color: #2E2E2E;
+    border: none;
+}
+QFrame#overviewTile {
+    background-color: #333333;
+    border: 1px solid #454545;
+    border-radius: 6px;
+}
+QFrame#overviewTile:hover {
+    border-color: #6CB4FF;
+}
+QFrame#overviewTile QLabel {
+    background-color: transparent;
+}
+QLabel#overviewNumber {
+    font-size: 26px;
+    font-weight: 600;
+    color: #E0E0E0;
+}
+QLabel#overviewWarning {
+    color: #E3A008;
+    font-weight: 600;
+}
+/* The Artifacts tab beside the evidence tree (ui/widgets/artifact_navigator). */
+QLabel#artifactHint {
+    color: #9aa4b0;
+    font-size: 11px;
+}
+/* What an export will lack because a scan has not run
+   (ui/widgets/readiness_banner). */
+QFrame#readinessBanner {
+    background-color: #3A3426;
+    border: 1px solid #E3A008;
+    border-radius: 6px;
+}
+QFrame#readinessBanner QLabel {
+    background-color: transparent;
+    color: #E0E0E0;
+}
+QFrame#readinessBanner QLabel#readinessTitle {
+    font-weight: 600;
+    color: #E3A008;
+}
+QFrame#readinessBanner QLabel#readinessIntro {
+    color: #B0B0B0;
+}
 QLabel#pageNote {
     color: #9aa4b0;
     background-color: #353535;
@@ -2888,4 +2938,15 @@ QLabel#thumbnailVerdict[tone="warn"] {
 QLabel#embeddedThumbnail {
     border: 1px solid #5A5A5A;
     padding: 4px;
+}
+
+/* Modules tab: newer releases of installed tools (core/modules/updates) */
+QFrame#modulesUpdateNotice {
+    background-color: #1F2D40;
+    border: none;
+    border-bottom: 1px solid #3B6EA8;
+}
+QFrame#modulesUpdateNotice QLabel {
+    background-color: transparent;
+    color: #D6E4F5;
 }

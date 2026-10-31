@@ -282,12 +282,16 @@ def _run(report, images, sandbox):
         assert len(offline.get('places') or ()) > 5000 and \
             offline.get('land', {}).get('2'), \
             "the Map tab's offline map (Natural Earth) is missing"
+        from trace_app.core import geocode
+        near = geocode.describe(-29.3151, 27.4869)
+        assert near.endswith('Lesotho'), \
+            f"offline place names (geocoder.json.gz) are wrong: {near!r}"
         from trace_app.core.modules import maps
         for tool in ('aleapp', 'ileapp'):
             mapped = maps.load(tool)
             assert len(mapped['artifacts']) > 50 and                 not maps.problems(mapped), f"the {tool} map is missing"
         return ("logo, both themes, SVG icons, the map's world outline and "
-                "offline map, the LEAPP maps")
+                "offline map, offline place names, the LEAPP maps")
 
     @check('image formats')
     def _():

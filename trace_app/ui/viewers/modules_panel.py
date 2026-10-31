@@ -15,7 +15,7 @@ import os
 
 from PySide6.QtCore import (QAbstractTableModel, QModelIndex, Qt, Signal)
 from PySide6.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox,
-                               QHeaderView,
+                               QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QMenu, QPushButton, QSizePolicy,
                                QSplitter, QStackedWidget, QTableView,
                                QTextBrowser, QToolBar,
@@ -255,6 +255,23 @@ class ModulesPanel(QWidget):
                        self.manage_action):
             self.toolbar.addAction(action)
         outer.addWidget(self.toolbar)
+        # Newer releases of the installed tools (core/modules/updates):
+        # said here, installed only from External Modules.
+        self.update_notice = QFrame()
+        self.update_notice.setObjectName("modulesUpdateNotice")
+        notice = QHBoxLayout(self.update_notice)
+        notice.setContentsMargins(10, 6, 10, 6)
+        notice.setSpacing(10)
+        self.update_label = QLabel()
+        self.update_label.setWordWrap(True)
+        notice.addWidget(self.update_label, 1)
+        self.update_button = QPushButton("Update…")
+        self.update_button.setToolTip("Open External Modules to download "
+                                      "the newer releases")
+        self.update_button.clicked.connect(self.manage_requested)
+        notice.addWidget(self.update_button)
+        self.update_notice.setVisible(False)
+        outer.addWidget(self.update_notice)
 
         split = QSplitter(Qt.Horizontal)
         left = QWidget()
@@ -327,6 +344,17 @@ class ModulesPanel(QWidget):
         self.shown.emit()
 
     # --- the window's side ---------------------------------------------
+
+    def set_updates(self, pending):
+        """[(tool name, installed version, newer version)] -- newer
+        releases of installed tools; none hides the notice."""
+        if pending:
+            listed = ', '.join(f"{name} {new} (you have {old})"
+                               for name, old, new in pending)
+            lead = "A newer release is" if len(pending) == 1 else \
+                "Newer releases are"
+            self.update_label.setText(f"{lead} published: {listed}.")
+        self.update_notice.setVisible(bool(pending))
 
     def set_targets(self, targets, tools):
         """targets: [(key, label, systems[, icon])] -- icon as the tree

@@ -98,7 +98,8 @@ def objects(data, pictures=True):
     `pictures` False leaves out a PDF's images: they hold no text, and
     the index has no use for them (the Listing shows them)."""
     kind = kind_of(data)
-    readers = {'pdf': lambda raw: _pdf(raw, pictures), 'ole': _ole,
+    readers = {'pdf': lambda raw: _pdf(raw, pictures),
+               'ole': lambda raw: _ole(raw, pictures),
                'rtf': _rtf, 'office': _office, 'exif': _exif}
     if kind is None:
         return []
@@ -170,10 +171,16 @@ def _pdf(data, pictures=True):
 
 # --- OLE ---------------------------------------------------------------------------
 
-def _ole(data):
+def _ole(data, pictures=True):
+    """Packaged files (Ole10Native, Package, CONTENTS) and, with
+    `pictures`, the pictures a Word, Excel or PowerPoint 97-2003 document
+    keeps (core/officeart)."""
     import olefile
     out = []
     with olefile.OleFileIO(io.BytesIO(data)) as ole:
+        if pictures:
+            from trace_app.core import officeart
+            out += officeart.pictures_in_ole(ole)
         for path in ole.listdir(streams=True, storages=False):
             leaf = path[-1]
             if leaf == '\x01Ole10Native':
@@ -246,7 +253,7 @@ def _office(data):
             content = archive.read(info)
             if content.startswith(OLE_MAGIC):
                 # An OLE object: the file packed in it, where there is one.
-                inner = _ole(content)
+                inner = _ole(content, pictures=False)
                 if inner:
                     out += inner
                     continue
@@ -278,7 +285,7 @@ def _rtf(data):
                 out.append(packaged)
                 continue
         if native.startswith(OLE_MAGIC):
-            inner = _ole(native)
+            inner = _ole(native, pictures=False)
             if inner:
                 out += inner
                 continue

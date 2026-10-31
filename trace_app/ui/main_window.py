@@ -136,6 +136,39 @@ def _unwrapped(row):
 
 #: Files listed under each tag in the tree; the rest are in Triage > Tags.
 TREE_TAGGED_SHOWN = 200
+#: The Artifacts navigator counts again this long after the last refresh
+#: that asked (a finished job refreshes several views at once).
+ARTIFACTS_DEBOUNCE_MS = 300
+
+
+def _artifact_query(folder, evidence_ids, evidence_id, ruled, similar):
+    """The navigator's and Overview's read (core/artifact_catalogue), for a
+    CaseQuery thread: counts for `evidence_id` (None = the case), states
+    over `evidence_ids`, stopped analyses and the time span."""
+    def query(connection):
+        import sqlite3
+        from trace_app.core import artifact_catalogue as catalogue
+        from trace_app.core.case import Case
+        from trace_app.core.search_index import SEARCH_DB_NAME, SearchIndex
+        connection.row_factory = sqlite3.Row
+        case = Case(folder, connection)
+        index = None
+        if os.path.exists(os.path.join(folder, SEARCH_DB_NAME)):
+            try:
+                index = SearchIndex(folder)
+            except Exception as exc:
+                logger.warning("Artifacts: no search index: %s", exc)
+        try:
+            found = catalogue.counts(case, evidence_id, index, similar)
+            return {'found': found,
+                    'states': catalogue.states(case, evidence_ids, found,
+                                               index, ruled),
+                    'stopped': catalogue.stopped_analyses(case),
+                    'span': catalogue.time_span(case, evidence_id)}
+        finally:
+            if index is not None:
+                index.close()
+    return query
 #: Files read (4 KB each) to tell whether they are pictures or videos
 #: before a Project VIC category is given; past it the name decides.
 MEDIA_HEADS_READ = 2000
@@ -335,6 +368,10 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         #: image even after another one became active.
         self._listing_image = None
         self._evidence_profiles = {}
+        #: Quick triage's record of the scans run this session (a case
+        #: keeps it in module_completions): evidence path -> {module:
+        #: {'state', 'settings'}}, for core/export_readiness.
+        self._session_completions = {}
         #: (evidence path, backup path on it) -> an encrypted backup's
         #: password, for external modules: this session only, never stored.
         self._backup_passwords = {}
@@ -1082,6 +1119,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def refresh_tags_tree(self):
         """The Tags node: a group per tag with its files, absent when no
         file is tagged (like Bookmarks and Findings)."""
+        self._schedule_artifacts()
         if not hasattr(self, 'tree_viewer'):
             return
         from trace_app.ui.viewers.tags_panel import tag_icon
@@ -1618,6 +1656,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         from trace_app.ui.dialogs.about import UpdateCheck
         if updates.start_refusal():         # a case set offline meanwhile
             return
+        # The installed external tools too: a newer release is named in
+        # the Modules tab (only installed tools are asked about).
+        self.check_module_updates()
         worker = UpdateCheck(self)
         worker.answered.connect(self._update_answered)
         self._retain_worker(worker)
@@ -2204,6 +2245,20 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.tree_tabs.setObjectName('treeTabs')
         self.tree_tabs.addTab(self.tree_viewer, icons.icon(icons.TAB_TREE),
                               "Tree View")
+        # Every kind of artifact in one list beside the evidence, with
+        # counts and the scans not run (ui/widgets/artifact_navigator) --
+        # a case's: quick triage keeps no results to list.
+        self.artifact_navigator = None
+        if self.case is not None:
+            from trace_app.ui.widgets.artifact_navigator import (
+                ArtifactNavigator)
+            navigator = self.artifact_navigator = ArtifactNavigator()
+            navigator.open_requested.connect(self.open_artifact)
+            navigator.run_requested.connect(self.run_artifact_scans)
+            navigator.module_run_requested.connect(self._open_module_run)
+            navigator.evidence_changed.connect(self._schedule_artifacts)
+            self.tree_tabs.addTab(navigator, icons.icon(icons.FINDINGS),
+                                  "Artifacts")
         tree_dock.setWidget(self.tree_tabs)
         dock_header.head_with_tabs(tree_dock, self.tree_tabs,
                                    "the Tree View")
@@ -2426,6 +2481,17 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         header = self.listing_table.horizontalHeader()
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
+        # The page a case opens on: its evidence, what it holds, what is
+        # worth a look and the scans not finished (first, so in front).
+        self.case_overview = None
+        if self.case is not None:
+            from trace_app.ui.viewers.case_overview import CaseOverview
+            self.case_overview = CaseOverview()
+            self.case_overview.open_requested.connect(self.open_artifact)
+            self.case_overview.run_missing_requested.connect(
+                self.run_every_missing_scan)
+            self.result_viewer.addTab(self.case_overview, 'Overview',
+                                      icons.CASE)
         self.result_viewer.addTab(self.listing_widget, 'Listing',
                                   icons.SEARCH_BROWSER)
 
@@ -2628,6 +2694,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         # Shown: the tools installed now (another window or session may have
         # installed one) and the images open now.
         self.modules_panel.shown.connect(self.refresh_modules)
+        # ...and whether newer releases of the installed tools are out
+        # (kept 12 h, so showing the tab rarely asks GitHub).
+        self.modules_panel.shown.connect(self.check_module_updates)
         self.result_viewer.addTab(self.modules_panel, 'Modules',
                                   icons.MODULES)
 
@@ -2640,6 +2709,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         self.timeline_panel.report_requested.connect(
             self.add_timeline_to_report)
         self.timeline_panel.exported.connect(self._timeline_exported)
+        self.timeline_panel.before_export = self._timeline_before_export
         self.timeline_panel.menu_extender = self._timeline_menu_extras
         self.timeline_panel.detail_extender = self._timeline_detail
         self.timeline_panel.set_case(self.case)
@@ -3539,7 +3609,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
 
         def start(job):
             if not resume:
-                self.carved_panel.forget(key)
+                from trace_app.core.carving import replaced_sources
+                self.carved_panel.forget(key, replaced_sources(
+                    source or 'unallocated'))
             self.carved_panel.update_resume(running={evidence_id})
             worker = CarvingWorker(path, file_types,
                                    source in (None, 'unallocated'),
@@ -3551,6 +3623,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 lambda done, total, found: self.job_bar.report(
                     done, total, f"{found:,} file(s) found"))
             worker.file_carved.connect(self.carved_panel.add_record)
+            if self.case is None:
+                # A case records how the carve ended itself
+                # (module_completions); quick triage keeps it here.
+                settings = {'types': list(file_types),
+                            'source': source or 'unallocated'}
+                worker.finished_carving.connect(
+                    lambda _count, error, worker=worker:
+                    self._note_session_scan(path, 'carve', worker, error,
+                                            settings))
             worker.finished_carving.connect(
                 lambda count, error: self._carving_finished(label, count,
                                                             error))
@@ -5028,11 +5109,187 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
             self.case_panel.refresh()
 
     def export_for_tools(self, kind):
-        """Case > Export for Other Tools: DFXML or CASE/UCO."""
+        """Case > Export for Other Tools: DFXML or CASE/UCO -- after saying
+        which scans it draws on have not run, if any."""
         if self.case is None:
             return None
-        from trace_app.ui.dialogs.interchange_export import export_for_tools
-        return export_for_tools(self, self.case, kind)
+        from trace_app.ui.dialogs.interchange_export import (
+            KINDS, ask_path, choose_evidence, export_for_tools)
+        from trace_app.ui.widgets.readiness_banner import RUN_FIRST
+        evidence = None
+        if kind == 'dfxml':
+            evidence = choose_evidence(self, self.case)
+            if evidence is None:
+                return None
+        rows = [evidence] if evidence is not None else self.case.evidence()
+        choice, gaps = self._ask_export_readiness(kind, rows)
+        if choice is None:
+            return None
+        if choice == RUN_FIRST:
+            path = ask_path(self, self.case, kind, evidence)
+            if not path:
+                return None
+            self.run_missing_scans(kind, gaps)
+            self._queue_after_scans(
+                f'export:{kind}', KINDS[kind][1],
+                lambda: export_for_tools(self, self.case, kind, path,
+                                         evidence))
+            return None
+        return export_for_tools(self, self.case, kind, evidence=evidence)
+
+    # --- before an export: the scans it draws on --------------------------
+
+    def _readiness_items(self, rows):
+        """Case evidence rows as export_gaps takes them."""
+        return [{'key': row['id'], 'path': row['path'],
+                 'name': row.get('display_name') or evidence_name(
+                     row['path'])} for row in rows]
+
+    def export_gaps(self, kind, evidence):
+        """What export `kind` will lack on `evidence` ([{'key', 'name',
+        'path'}]: a case's ids, or quick triage's paths) because a scan
+        it draws on has not run (core/export_readiness)."""
+        from trace_app.core import export_readiness
+        index = None
+        if self.case is not None and kind == 'report':
+            from trace_app.core.search_index import SearchIndex
+            try:
+                index = SearchIndex(self.case.folder)
+            except Exception as exc:
+                logger.debug("Search index not read: %s", exc)
+        states, ruled_out, pairs = {}, {}, []
+        try:
+            for item in evidence:
+                key = item['key']
+                pairs.append((key, item['name']))
+                ruled_out[key] = self._not_applicable(
+                    self.evidence_profile({'path': item['path']}))
+                if self.case is not None:
+                    states[key] = export_readiness.module_states(
+                        self.case, key, index)
+                else:
+                    states[key] = self._session_completions.get(
+                        os.path.normpath(item['path']), {})
+        finally:
+            if index is not None:
+                index.close()
+        return export_readiness.gaps(kind, pairs, states, ruled_out)
+
+    def ask_export_readiness(self, kind, gaps):
+        """RUN_FIRST, EXPORT_NOW or None (cancelled). Replaced in tests."""
+        from trace_app.ui.widgets.readiness_banner import ReadinessDialog
+        dialog = ReadinessDialog(kind, gaps, self)
+        dialog.exec()
+        return dialog.choice
+
+    def _ask_export_readiness(self, kind, rows):
+        """(choice, gaps) for case evidence `rows`: EXPORT_NOW at once when
+        nothing is missing."""
+        from trace_app.ui.widgets.readiness_banner import EXPORT_NOW
+        gaps = self.export_gaps(kind, self._readiness_items(rows))
+        if not gaps:
+            return EXPORT_NOW, gaps
+        return self.ask_export_readiness(kind, gaps), gaps
+
+    def run_missing_scans(self, kind, gaps):
+        """Queue the scans `gaps` lack, each image its own choice: the file
+        modules it had run again with the missing ones (an analysis run
+        replaces its rows), carving with the types it had plus what the
+        export wants. Returns how many images got scans."""
+        from trace_app.core import export_readiness as readiness
+        from trace_app.core.analysis import MODULES
+        from trace_app.core.carving import CARVABLE_TYPES
+        from trace_app.ui.dialogs.analysis_modules import JOB_MODULES
+        missing = readiness.missing_modules(gaps)
+        if not missing:
+            return 0
+        wanted_types = readiness.media_carve_types() if kind == 'vics' \
+            else {t.lower() for t in CARVABLE_TYPES}
+
+        def carve_choice(state):
+            settings = (state or {}).get('settings') or {}
+            types = {t.lower() for t in settings.get('types') or ()}
+            return sorted(types | wanted_types), \
+                settings.get('source') or 'unallocated'
+
+        if self.case is None:
+            for path, modules in missing.items():
+                if readiness.CARVE in modules:
+                    state = self._session_completions.get(
+                        os.path.normpath(path), {}).get(readiness.CARVE)
+                    types, source = carve_choice(state)
+                    self.start_carving([path], types, source)
+            return len(missing)
+        rows = [row for row in self.case.evidence() if row['id'] in missing]
+        per_evidence = {}
+        for row in rows:
+            modules = missing[row['id']]
+            states = readiness.module_states(self.case, row['id'])
+            choice = {key: key in modules for key in JOB_MODULES}
+            choice.update({'modules': [], 'carve_types': [],
+                           'unallocated_only': True})
+            if any(module in MODULES for module in modules):
+                choice['modules'] = [
+                    module for module in MODULES if module in modules or
+                    (states.get(module) or {}).get('state') == readiness.DONE]
+            if readiness.CARVE in modules:
+                choice['carve_types'], choice['unallocated_only'] = \
+                    carve_choice(states.get(readiness.CARVE))
+            per_evidence[row['id']] = choice
+        # Not the examiner's choice: the Analysis Modules dialog keeps
+        # offering what they chose last.
+        last = getattr(self, '_last_choice', None)
+        self.queue_choice(rows, {'modules': [], 'carve_types': [],
+                                 'unallocated_only': True,
+                                 'per_evidence': per_evidence})
+        self._last_choice = last
+        return len(rows)
+
+    def _queue_after_scans(self, key, title, call):
+        """`call` as a job on the main lane: it runs once the scans queued
+        before it have ended."""
+        def start(job):
+            def run():
+                error = None
+                try:
+                    call()
+                except Exception as exc:
+                    logger.exception("%s failed", title)
+                    error = str(exc)
+                self.job_bar.job_finished(error=error)
+            QTimer.singleShot(0, run)
+            return None
+        return self.job_bar.submit(Job(key=key, title=title, start=start))
+
+    def _note_session_scan(self, path, module, worker, error, settings):
+        """Quick triage: how a scan of `path` ended, for export_gaps."""
+        from trace_app.core import export_readiness as readiness
+        state = readiness.FAILED if error else readiness.CANCELLED \
+            if worker.stop_requested() else readiness.DONE
+        self._session_completions.setdefault(
+            os.path.normpath(path), {})[module] = {'state': state,
+                                                   'settings': settings}
+
+    def _timeline_before_export(self, fmt):
+        """The Timeline's Export: whether to export now (False when it was
+        cancelled, or queued after the scans it lacks)."""
+        from trace_app.ui.widgets.readiness_banner import RUN_FIRST
+        if self.case is None:
+            return True
+        choice, gaps = self._ask_export_readiness('timeline',
+                                                  self.case.evidence())
+        if choice is None:
+            return False
+        if choice != RUN_FIRST:
+            return True
+        path = self.timeline_panel.ask_export_path(fmt)
+        if not path:
+            return False
+        self.run_missing_scans('timeline', gaps)
+        self._queue_after_scans(
+            'export:timeline', "Exporting the timeline",
+            lambda: self.timeline_panel.export_csv(path, fmt))
+        return False
 
     # --- Project VICS -----------------------------------------------------
 
@@ -5068,6 +5325,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         return [{'name': r.get('name') or '', 'offset': int(r['offset']),
                  'size': int(r['size']), 'type': r.get('type') or '',
                  'fragments': r.get('fragments') or None,
+                 'source': r.get('source') or 'unallocated',
                  # The ref tags and categories were put on: a rebuilt
                  # carve's spans its pieces, not offset + size.
                  'artifact_ref': r.get('artifact_ref') or ''}
@@ -5110,10 +5368,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                 scope = scope_module.setting_value(self.case)
                 if not scope.everything:
                     defaults['scope'] = scope.describe(short=True)
-            dialog = VicsExportDialog(evidence, defaults, self)
+            dialog = VicsExportDialog(
+                evidence, defaults, self,
+                gaps_for=lambda chosen: self.export_gaps('vics', chosen))
             if dialog.exec() != QDialog.Accepted:
                 return None
             options = dialog.options
+        if options.get('run_first') and self.run_missing_scans(
+                'vics', self.export_gaps('vics', options['evidence'])):
+            # The carves are read when the export starts: after the scans.
+            return self._queue_after_scans(
+                'vics:after-scans', "Exporting Project VICS",
+                lambda: self.queue_vics(options))
         return self.queue_vics(options)
 
     def queue_vics(self, options):
@@ -5136,6 +5402,9 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                   'version': __version__,
                   'include_deleted': options.get('include_deleted', True),
                   'include_carved': options.get('include_carved', True),
+                  'inside': options.get('inside', True),
+                  'carve_inside': options.get('carve_inside', False),
+                  'shadows': options.get('shadows', False),
                   'min_size': options.get('min_size', 0)}
         if self.case is not None:
             params['case_folder'] = self.case.folder
@@ -5220,6 +5489,37 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         dialog.exec()
         if dialog.changed:
             self.refresh_modules()
+        # It read GitHub afresh: the Modules tab's notice follows.
+        self.check_module_updates()
+
+    def check_module_updates(self, force=False):
+        """Whether newer releases of the installed external tools are
+        published (core/modules/updates; refused, from what is kept only,
+        when checking is turned off or the case is offline), said in the
+        Modules tab's notice."""
+        from trace_app.ui.widgets.kept_threads import KeptThreads
+        from trace_app.ui.widgets.module_updates import ReleaseCheck
+        if getattr(self, 'modules_panel', None) is None:
+            return
+        if getattr(self, '_module_release_checks', None) is None:
+            self._module_release_checks = KeptThreads(self)
+        self._module_release_generation = generation = \
+            getattr(self, '_module_release_generation', 0) + 1
+        check = ReleaseCheck(generation, force, self)
+        check.checked.connect(self._module_updates_checked)
+        self._module_release_checks[generation] = check
+        check.start()
+
+    @Slot(int, object)
+    def _module_updates_checked(self, generation, result):
+        from trace_app.ui.widgets.module_updates import pending_names
+        if generation != getattr(self, '_module_release_generation', 0):
+            return
+        pending = pending_names(result)
+        for name, old, new in pending:
+            logger.info("External module update: %s %s is published "
+                        "(installed %s)", name, new, old)
+        self.modules_panel.set_updates(pending)
 
     def _module_targets(self):
         """[(key, label, systems, icon)] the Modules tab can run on: the
@@ -5527,6 +5827,14 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """The evidence file a staged path came from (the run's staging
         manifest), as a row previews and the Listing take."""
         from trace_app.core.modules import stage
+        # One record read from several copies of a file names them all, a
+        # line each (DLEAPP 2026.4.4 on a Mac: /Users and
+        # /System/Volumes/Data/Users are one file): the first staged one.
+        paths = [part for part in staged_path.splitlines() if part.strip()]
+        if len(paths) > 1:
+            return next((found for found in (
+                self._module_source(run, part) for part in paths)
+                if found), None)
         cache = self.__dict__.setdefault('_module_manifests', {})
         key = run['manifest']
         if key not in cache:
@@ -6003,6 +6311,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def refresh_modules_tree(self, runs=None):
         """'Extractions from Modules': run > category > artifact, absent
         when nothing ran -- the same counts as the Modules tab."""
+        self._schedule_artifacts()
         if not hasattr(self, 'tree_viewer'):
             return
         for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
@@ -6825,9 +7134,18 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
                                 "A report is made from a case.")
             return False
         from trace_app.ui.dialogs.report import ReportDialog
+        from trace_app.ui.widgets.readiness_banner import RUN_FIRST
+        choice, gaps = self._ask_export_readiness('report',
+                                                  self.case.evidence())
+        if choice is None:
+            return False
         dialog = ReportDialog(self.case, self)
         if dialog.exec() != QDialog.Accepted:
             return False
+        if choice == RUN_FIRST:
+            # The report is a job too: queued after the scans, it reads
+            # what they found.
+            self.run_missing_scans('report', gaps)
         return self.queue_report(dialog.options)
 
     def queue_report(self, options):
@@ -7615,6 +7933,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         Absent until there is something in it, like Findings and Bookmarks.
         A category opens the Activity tab on it.
         """
+        self._schedule_artifacts()
         from trace_app.core.activity import CATEGORIES
         for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
             data = self.tree_viewer.topLevelItem(index).data(
@@ -7655,6 +7974,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         """Similar pictures counted its groups: shown in the tree when it
         counted the whole case's groups (not one image, not the matches of
         a reference picture)."""
+        self._schedule_artifacts()
         panel = self.similar_panel
         if getattr(panel, '_mode', 'groups') == 'reference' or \
                 self.triage_panel.evidence_id is not None:
@@ -7683,6 +8003,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         until there is something in it -- an empty node is a permanent
         advertisement for a feature rather than a way into anything.
         """
+        self._schedule_artifacts()
         for index in range(self.tree_viewer.topLevelItemCount() - 1, -1, -1):
             item = self.tree_viewer.topLevelItem(index)
             data = item.data(0, Qt.UserRole) or {}
@@ -8966,6 +9287,170 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         if group:
             self.triage_panel.show_group(group)
 
+    # --- the Artifacts navigator and the Case Overview -------------------
+
+    def open_artifact(self, key, evidence_id=None):
+        """Open an artifact type (core/artifact_catalogue) where it is
+        listed: Triage's sub-tab, Activity's category, a panel -- narrowed
+        to one image when `evidence_id` is given."""
+        from trace_app.core import artifact_catalogue as catalogue
+        if key == 'overview':
+            if self.case_overview is not None:
+                self.result_viewer.setCurrentWidget(self.case_overview)
+            return
+        entry = catalogue.entry(key)
+        if entry is None:
+            return
+        kind, *target = entry.opens
+        if kind == 'triage':
+            self.show_triage(target[0], evidence_id)
+        elif kind == 'activity':
+            self.result_viewer.setCurrentWidget(self.activity_panel)
+            self.activity_panel.set_evidence_filter(evidence_id)
+            self.activity_panel.show_category(target[0])
+        elif target[0] == 'notes':
+            self.viewer_dock.show()
+            self.viewer_tab.setCurrentWidget(self.notes_panel)
+        else:
+            self.result_viewer.setCurrentWidget({
+                'registry': self.registry_extractor_widget,
+                'listing': self.listing_widget,
+                'timeline': self.timeline_panel,
+                'search': self.search_panel}[target[0]])
+        if self.artifact_navigator is not None:
+            self.artifact_navigator.select(key)
+
+    def _open_module_run(self, run_key):
+        self.show_module_node({'is_modules_run': True, 'run_key': run_key})
+
+    def run_artifact_scans(self, keys, evidence_id=None):
+        """Queue the scans that produce artifact types `keys` and have not
+        finished, on every image (or one) where they can find anything --
+        through run_missing_scans, as the exports' notice does."""
+        from trace_app.core import artifact_catalogue as catalogue
+        from trace_app.core import export_readiness as readiness
+        if self.case is None:
+            return 0
+        index = getattr(getattr(self, 'indicators_panel', None), 'index',
+                        None)
+        gaps = []
+        for row in self.case.evidence():
+            if evidence_id is not None and row['id'] != evidence_id:
+                continue
+            ruled = self._not_applicable(self.evidence_profile(row))
+            states = readiness.module_states(self.case, row['id'], index)
+            name = row.get('display_name') or evidence_name(row['path'])
+            for key in keys:
+                entry = catalogue.entry(key)
+                for module in entry.modules if entry else ():
+                    state = (states.get(module) or {}).get('state')
+                    if module in ruled or state in (readiness.DONE,
+                                                    readiness.RUNNING):
+                        continue
+                    gaps.append(readiness.Gap(name, row['id'], module,
+                                              state or readiness.NOT_RUN,
+                                              ''))
+        queued = self.run_missing_scans('report', gaps) if gaps else 0
+        self.set_status(f"Queued the missing scans on {queued} image(s)"
+                        if queued else "Nothing to run: those scans have "
+                        "run, or cannot find anything in this evidence")
+        return queued
+
+    def run_every_missing_scan(self):
+        """The Overview's Run Missing Scans: every artifact type whose scan
+        has not run or stopped, on every image."""
+        from trace_app.core import artifact_catalogue as catalogue
+        return self.run_artifact_scans([e.key for e in catalogue.entries()])
+
+    def _artifacts_live(self):
+        """Whether the navigator may read the case: not while the window
+        closes, nor once the case is closed -- the recount timer and a
+        count already reading used the closed case as TRACE closed
+        ('NoneType' has no attribute 'execute', Oct 2026)."""
+        return not getattr(self, '_closing', False) and \
+            self.case is not None and self.case.is_open and \
+            getattr(self, 'artifact_navigator', None) is not None
+
+    def _schedule_artifacts(self, *_args):
+        """Count again for the navigator and the Overview, once the burst of
+        refreshes that asked has settled."""
+        if not self._artifacts_live():
+            return
+        timer = getattr(self, '_artifacts_timer', None)
+        if timer is None:
+            timer = self._artifacts_timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(ARTIFACTS_DEBOUNCE_MS)
+            timer.timeout.connect(self.refresh_artifacts)
+        timer.start()
+
+    def refresh_artifacts(self):
+        """Read the counts and scan states on a thread (they read every
+        results table) and show them in the navigator and the Overview."""
+        from trace_app.ui.widgets.case_query import CaseQuery
+        from trace_app.ui.widgets.kept_threads import KeptThreads
+        if not self._artifacts_live():
+            return
+        rows = self.case.evidence()
+        self.artifact_navigator.set_evidence(
+            [(row['id'], row.get('display_name') or evidence_name(
+                row['path'])) for row in rows])
+        evidence_id = self.artifact_navigator.evidence_id
+        ruled = {row['id']: self._not_applicable(self.evidence_profile(row))
+                 for row in rows}
+        ids = [row['id'] for row in rows
+               if evidence_id is None or row['id'] == evidence_id]
+        similar = getattr(self, '_similar_groups', 0) \
+            if evidence_id is None else None
+        self._artifacts_generation = generation = \
+            getattr(self, '_artifacts_generation', 0) + 1
+        if getattr(self, '_artifact_reads', None) is None:
+            self._artifact_reads = KeptThreads(self)
+        read = CaseQuery(self.case.folder, generation,
+                         _artifact_query(self.case.folder, ids, evidence_id,
+                                         ruled, similar),
+                         None, 'artifact counts', self)
+        read.loaded.connect(self._artifacts_read)
+        self._artifact_reads[generation] = read
+        read.start()
+
+    @Slot(int, object)
+    def _artifacts_read(self, generation, result):
+        if generation != getattr(self, '_artifacts_generation', 0) or \
+                result is None or not self._artifacts_live():
+            return
+        runs = [(run['key'], f"{run['tool']} {run['version']} — "
+                             f"{run['evidence']}",
+                 sum(a.get('record_count') or 0 for a in run['artifacts']),
+                 run['tool'])
+                for run in (self._module_runs() or [])]
+        self.artifact_navigator.set_data(result['found'], result['states'],
+                                         runs)
+        if self.case_overview is not None:
+            self.case_overview.show_data(dict(
+                result, case={'name': self.case.name,
+                              'number': self.case.number,
+                              'examiner': self.case.examiner},
+                evidence=self._overview_evidence()))
+
+    def _overview_evidence(self):
+        """The Overview's evidence cards: name, system and its logo, kind,
+        size, verification status."""
+        systems = self.case.systems()
+        out = []
+        for row in self.case.evidence():
+            first = (systems.get(row['id']) or [{}])[0]
+            folder = os.path.isdir(row['path'])
+            size = '' if folder or not row.get('size') else \
+                FileSystemUtils.get_readable_size(row['size'])
+            out.append({'name': row.get('display_name') or
+                        evidence_name(row['path']),
+                        'system': first.get('name') or '',
+                        'logo': first.get('logo') or '',
+                        'kind': 'Folder' if folder else 'Disk image',
+                        'size': size, 'status': row.get('status')})
+        return out
+
     def show_listing_for_artifact(self, data):
         """List the directory holding `data`, and select the file in it.
 
@@ -9306,6 +9791,15 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
         try:
             if getattr(self, 'job_bar', None) is not None:
                 self.job_bar.close()
+            # A release check is a few HTTP requests with a 30 s timeout.
+            if getattr(self, '_module_release_checks', None):
+                self._module_release_checks.clear(timeout=35000)
+            # The Artifacts recount: no new one, and the one reading ends
+            # before the case closes below (its result is dropped).
+            if getattr(self, '_artifacts_timer', None) is not None:
+                self._artifacts_timer.stop()
+            if getattr(self, '_artifact_reads', None):
+                self._artifact_reads.clear(timeout=30000)
             if getattr(self, 'vt_worker', None) is not None:
                 self.vt_worker.stop()
             from trace_app.ui.process_worker import (CLOSE_WAIT_MS,
@@ -9764,6 +10258,7 @@ class MainWindow(VolumeInfoMixin, QMainWindow):
     def _refresh_registry_evidence(self):
         """Tell the Registry tab which evidence is open: it reads the one
         the examiner picks there, not the active image."""
+        self._schedule_artifacts()
         widget = getattr(self, 'registry_extractor_widget', None)
         if widget is None:
             return
