@@ -153,6 +153,18 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then PY=venv/Scripts/python; else PY=venv/bin/python; fi
+          # pip names each wheel it built; one that is not pure Python
+          # (py*-none-any) was compiled. The runners have compilers and
+          # Rust, so a package dropping this platform's wheels still
+          # installs here -- and fails for an examiner without them
+          # (cryptography 49 and PyMuPDF 2.0 on Intel Macs did).
+          built=$(grep -o 'Created wheel for [^:]*: filename=[^ ]*' install.log \
+                  | grep -v -- '-none-any\.whl$' || true)
+          if [ -n "$built" ]; then
+            echo "::error::Compiled during install (no wheel for this platform):"
+            echo "$built"
+            exit 1
+          fi
           "$PY" - <<'EOF'
           import trace_app   # before magic: on macOS it selects the bundled libmagic
           import sys, pytsk3, pyewf, PySide6, magic, py7zr, pymupdf, PIL
